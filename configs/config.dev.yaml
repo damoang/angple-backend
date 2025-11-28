@@ -1,0 +1,25 @@
+server:
+  port: 8081
+  mode: development
+
+database:
+  host: 127.0.0.1  # Docker MySQL (da_mysql)
+  port: 3306
+  user: root
+  password: root123
+  dbname: damoang
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600  # 1 hour
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 100
+
+jwt:
+  secret: your-development-secret-key
+  expires_in: 900      # 15 minutes
+  refresh_in: 604800   # 7 days

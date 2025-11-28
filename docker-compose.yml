@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # API 서버
+  api:
+    build:
+      context: .
+      dockerfile: deployments/docker/api.Dockerfile
+    container_name: angple-api
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=host.docker.internal  # Mac에서 호스트 MySQL 접근
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=secret
+      - DB_NAME=damoang
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=your-dev-secret
+      - API_PORT=8081
+    depends_on:
+      - redis
+    networks:
+      - angple-network
+    volumes:
+      - .:/app
+    command: go run cmd/api/main.go
+
+  # API Gateway
+  gateway:
+    build:
+      context: .
+      dockerfile: deployments/docker/gateway.Dockerfile
+    container_name: angple-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - LARAVEL_BACKEND_URL=http://host.docker.internal:80  # 기존 Laravel
+      - GO_API_URL=http://api:8081
+      - GATEWAY_PORT=8080
+    depends_on:
+      - api
+    networks:
+      - angple-network
+    volumes:
+      - .:/app
+    command: go run cmd/gateway/main.go
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: angple-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - angple-network
+    volumes:
+      - redis-data:/data
+
+networks:
+  angple-network:
+    driver: bridge
+
+volumes:
+  redis-data:
