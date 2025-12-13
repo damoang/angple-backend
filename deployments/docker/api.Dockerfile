@@ -24,6 +24,6 @@ WORKDIR /root/
 COPY --from=builder /app/api .
 COPY --from=builder /app/configs ./configs
 
-EXPOSE 8081
+EXPOSE 8082
 
 CMD ["./api"]

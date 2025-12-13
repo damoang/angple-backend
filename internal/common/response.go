@@ -6,7 +6,7 @@ import (
 
 // APIResponse standard API response structure
 type APIResponse struct {
-	Data  interface{} `json:"data,omitempty"`
+	Data  interface{} `json:"data"`
 	Meta  *Meta       `json:"meta,omitempty"`
 	Error *ErrorInfo  `json:"error,omitempty"`
 }

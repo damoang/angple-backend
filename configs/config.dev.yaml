@@ -1,5 +1,5 @@
 server:
-  port: 8081
+  port: 8082
   mode: development
 
 database:
@@ -23,3 +23,4 @@ jwt:
   secret: your-development-secret-key
   expires_in: 900      # 15 minutes
   refresh_in: 604800   # 7 days
+  damoang_secret: ""   # Set via DAMOANG_JWT_SECRET env var

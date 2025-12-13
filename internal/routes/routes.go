@@ -14,13 +14,19 @@ func Setup(
 	commentHandler *handler.CommentHandler,
 	authHandler *handler.AuthHandler,
 	jwtManager *jwt.Manager,
+	damoangJWT *jwt.DamoangManager,
+	recommendedHandler *handler.RecommendedHandler,
 ) {
-	api := app.Group("/api/v2")
+	// Global middleware for damoang_jwt cookie authentication
+	api := app.Group("/api/v2", middleware.DamoangCookieAuth(damoangJWT))
 
 	// Authentication endpoints (no auth required)
 	auth := api.Group("/auth")
 	auth.Post("/login", authHandler.Login)
 	auth.Post("/refresh", authHandler.RefreshToken)
+
+	// Current user endpoint (uses damoang_jwt cookie)
+	auth.Get("/me", authHandler.GetCurrentUser)
 
 	// Profile endpoint (auth required)
 	auth.Get("/profile", middleware.JWTAuth(jwtManager), authHandler.GetProfile)
@@ -44,4 +50,8 @@ func Setup(
 	boards.Post("/:board_id/posts/:post_id/comments", middleware.JWTAuth(jwtManager), commentHandler.CreateComment)
 	boards.Put("/:board_id/posts/:post_id/comments/:id", middleware.JWTAuth(jwtManager), commentHandler.UpdateComment)
 	boards.Delete("/:board_id/posts/:post_id/comments/:id", middleware.JWTAuth(jwtManager), commentHandler.DeleteComment)
+
+	// Recommended Posts (공개 API - 인증 불필요)
+	recommended := api.Group("/recommended")
+	recommended.Get("/:period", recommendedHandler.GetRecommended)
 }

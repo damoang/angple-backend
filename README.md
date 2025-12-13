@@ -142,7 +142,7 @@ go run cmd/api/main.go
 #### 4. API 서버 접속 확인
 
 ```bash
-curl http://localhost:8081/health
+curl http://localhost:8082/health
 # {"status":"ok","time":1732766000}
 ```
 
@@ -205,7 +205,7 @@ DELETE /api/v2/boards/{board_id}/posts/{post_id}/comments/{id}   # 삭제 (JWT)
 
 ```bash
 # 1. 로그인
-curl -X POST http://localhost:8081/api/v2/auth/login \
+curl -X POST http://localhost:8082/api/v2/auth/login \
   -H "Content-Type: application/json" \
   -d '{"user_id":"user1","password":"password123"}'
 
@@ -219,13 +219,13 @@ curl -X POST http://localhost:8081/api/v2/auth/login \
 # }
 
 # 2. 게시글 작성
-curl -X POST http://localhost:8081/api/v2/boards/free/posts \
+curl -X POST http://localhost:8082/api/v2/boards/free/posts \
   -H "Authorization: Bearer {access_token}" \
   -H "Content-Type: application/json" \
   -d '{"title":"제목","content":"내용","author":"user1"}'
 
 # 3. 댓글 작성
-curl -X POST http://localhost:8081/api/v2/boards/free/posts/1/comments \
+curl -X POST http://localhost:8082/api/v2/boards/free/posts/1/comments \
   -H "Authorization: Bearer {access_token}" \
   -H "Content-Type: application/json" \
   -d '{"content":"댓글 내용","author":"user1"}'

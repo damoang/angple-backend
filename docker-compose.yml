@@ -9,22 +9,27 @@ services:
     container_name: angple-api
     ports:
       - "8081:8081"
+    env_file:
+      - .env
     environment:
       - DB_HOST=host.docker.internal  # Mac에서 호스트 MySQL 접근
       - DB_PORT=3306
-      - DB_USER=root
-      - DB_PASSWORD=secret
-      - DB_NAME=damoang
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      - DB_NAME=${DB_NAME:-damoang}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - JWT_SECRET=your-dev-secret
+      - JWT_SECRET=${JWT_SECRET}
+      - DAMOANG_JWT_SECRET=${DAMOANG_JWT_SECRET}
       - API_PORT=8081
+      - RECOMMENDED_DATA_PATH=/home/damoang/www/data/cache/recommended
     depends_on:
       - redis
     networks:
       - angple-network
     volumes:
       - .:/app
+      - /home/damoang/www/data/cache/recommended:/home/damoang/www/data/cache/recommended:ro
     command: go run cmd/api/main.go
 
   # API Gateway

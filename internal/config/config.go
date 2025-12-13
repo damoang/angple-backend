@@ -9,10 +9,16 @@ import (
 
 // Config 애플리케이션 설정 구조체
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	JWT      JWTConfig      `yaml:"jwt"`
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Redis     RedisConfig     `yaml:"redis"`
+	JWT       JWTConfig       `yaml:"jwt"`
+	DataPaths DataPathsConfig `yaml:"data_paths"`
+}
+
+// DataPathsConfig 데이터 경로 설정
+type DataPathsConfig struct {
+	RecommendedPath string `yaml:"recommended_path"`
 }
 
 // ServerConfig 서버 설정
@@ -44,9 +50,10 @@ type RedisConfig struct {
 
 // JWTConfig JWT 설정
 type JWTConfig struct {
-	Secret     string `yaml:"secret"`
-	ExpiresIn  int    `yaml:"expires_in"`  // seconds (access token)
-	RefreshIn  int    `yaml:"refresh_in"`  // seconds (refresh token)
+	Secret        string `yaml:"secret"`
+	ExpiresIn     int    `yaml:"expires_in"`      // seconds (access token)
+	RefreshIn     int    `yaml:"refresh_in"`      // seconds (refresh token)
+	DamoangSecret string `yaml:"damoang_secret"`  // damoang.net JWT secret
 }
 
 // Load 설정 파일 로드
@@ -100,10 +107,18 @@ func overrideFromEnv(cfg *Config) {
 	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		cfg.JWT.Secret = secret
 	}
+	if damoangSecret := os.Getenv("DAMOANG_JWT_SECRET"); damoangSecret != "" {
+		cfg.JWT.DamoangSecret = damoangSecret
+	}
 
 	// 서버 설정
 	if port := os.Getenv("API_PORT"); port != "" {
 		fmt.Sscanf(port, "%d", &cfg.Server.Port)
+	}
+
+	// 데이터 경로 설정
+	if recommendedPath := os.Getenv("RECOMMENDED_DATA_PATH"); recommendedPath != "" {
+		cfg.DataPaths.RecommendedPath = recommendedPath
 	}
 }
 

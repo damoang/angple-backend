@@ -82,3 +82,24 @@ func (h *AuthHandler) GetProfile(c *fiber.Ctx) error {
 		},
 	})
 }
+
+// GetCurrentUser handles GET /api/v2/auth/me
+// Returns current user info from damoang_jwt cookie (no JWT required)
+func (h *AuthHandler) GetCurrentUser(c *fiber.Ctx) error {
+	// Check if user is authenticated via damoang_jwt cookie
+	if !middleware.IsDamoangAuthenticated(c) {
+		return c.JSON(common.APIResponse{
+			Data: nil,
+		})
+	}
+
+	// Return user info from damoang_jwt cookie
+	return c.JSON(common.APIResponse{
+		Data: fiber.Map{
+			"mb_id":    middleware.GetDamoangUserID(c),
+			"mb_name":  middleware.GetDamoangUserName(c),
+			"mb_level": middleware.GetDamoangUserLevel(c),
+			"mb_email": middleware.GetDamoangUserEmail(c),
+		},
+	})
+}

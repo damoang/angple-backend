@@ -17,12 +17,16 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
 func main() {
+	// .env 파일 로드 (없어도 에러 무시)
+	_ = godotenv.Load()
+
 	// 로거 초기화
 	pkglogger.Init()
 	pkglogger.Info("Starting Angple API Server...")
@@ -62,6 +66,13 @@ func main() {
 		cfg.JWT.RefreshIn,
 	)
 
+	// Damoang JWT Manager (for damoang_jwt cookie verification)
+	damoangSecret := cfg.JWT.DamoangSecret
+	if damoangSecret == "" {
+		log.Fatal("DAMOANG_JWT_SECRET environment variable is required")
+	}
+	damoangJWT := jwt.NewDamoangManager(damoangSecret)
+
 	// Repositories
 	memberRepo := repository.NewMemberRepository(db)
 	postRepo := repository.NewPostRepository(db)
@@ -77,6 +88,13 @@ func main() {
 	postHandler := handler.NewPostHandler(postService)
 	commentHandler := handler.NewCommentHandler(commentService)
 
+	// Recommended Handler (파일 직접 읽기)
+	recommendedPath := cfg.DataPaths.RecommendedPath
+	if recommendedPath == "" {
+		recommendedPath = "/home/damoang/www/data/cache/recommended"
+	}
+	recommendedHandler := handler.NewRecommendedHandler(recommendedPath)
+
 	// Fiber 앱 생성
 	app := fiber.New(fiber.Config{
 		Prefork:       false, // 개발 환경에서는 false
@@ -90,8 +108,9 @@ func main() {
 	app.Use(recover.New())
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowOrigins:     "https://web.damoang.net, https://damoang.net, http://localhost:5173",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowCredentials: true,
 	}))
 
 	// Health Check
@@ -103,7 +122,7 @@ func main() {
 	})
 
 	// API v2 라우트
-	routes.Setup(app, postHandler, commentHandler, authHandler, jwtManager)
+	routes.Setup(app, postHandler, commentHandler, authHandler, jwtManager, damoangJWT, recommendedHandler)
 
 	// 서버 시작
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
