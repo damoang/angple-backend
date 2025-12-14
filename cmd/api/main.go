@@ -77,16 +77,19 @@ func main() {
 	memberRepo := repository.NewMemberRepository(db)
 	postRepo := repository.NewPostRepository(db)
 	commentRepo := repository.NewCommentRepository(db)
+	menuRepo := repository.NewMenuRepository(db)
 
 	// Services
 	authService := service.NewAuthService(memberRepo, jwtManager)
 	postService := service.NewPostService(postRepo)
 	commentService := service.NewCommentService(commentRepo)
+	menuService := service.NewMenuService(menuRepo)
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authService)
 	postHandler := handler.NewPostHandler(postService)
 	commentHandler := handler.NewCommentHandler(commentService)
+	menuHandler := handler.NewMenuHandler(menuService)
 
 	// Recommended Handler (파일 직접 읽기)
 	recommendedPath := cfg.DataPaths.RecommendedPath
@@ -107,8 +110,15 @@ func main() {
 	// 미들웨어
 	app.Use(recover.New())
 	app.Use(logger.New())
+
+	// CORS 설정 (config에서 읽어오거나 운영 기본값 사용)
+	allowOrigins := cfg.CORS.AllowOrigins
+	if allowOrigins == "" {
+		// 운영 환경 기본값: 운영 도메인만 허용
+		allowOrigins = "https://web.damoang.net, https://damoang.net"
+	}
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "https://web.damoang.net, https://damoang.net, http://localhost:5173",
+		AllowOrigins:     allowOrigins,
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowCredentials: true,
 	}))
@@ -122,7 +132,7 @@ func main() {
 	})
 
 	// API v2 라우트
-	routes.Setup(app, postHandler, commentHandler, authHandler, jwtManager, damoangJWT, recommendedHandler)
+	routes.Setup(app, postHandler, commentHandler, authHandler, menuHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
 
 	// 서버 시작
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

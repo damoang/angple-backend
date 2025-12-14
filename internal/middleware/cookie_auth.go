@@ -1,14 +1,27 @@
 package middleware
 
 import (
+	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	"github.com/gofiber/fiber/v2"
 )
 
 // DamoangCookieAuth - damoang_jwt 쿠키에서 인증 정보 추출
 // 인증 실패해도 요청을 계속 진행 (optional auth)
-func DamoangCookieAuth(damoangJWT *jwt.DamoangManager) fiber.Handler {
+// 개발 환경에서는 Mock 사용자를 자동으로 설정
+func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, cfg *config.Config) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// 개발 환경: Mock 사용자 사용
+		if cfg.IsDevelopment() {
+			c.Locals("damoang_user_id", "dev_user")
+			c.Locals("damoang_user_name", "개발자")
+			c.Locals("damoang_user_level", 10)
+			c.Locals("damoang_user_email", "dev@localhost")
+			c.Locals("damoang_authenticated", true)
+			return c.Next()
+		}
+
+		// 운영 환경: 실제 JWT 쿠키 검증
 		// 1. damoang_jwt 쿠키 읽기
 		tokenString := c.Cookies("damoang_jwt")
 		if tokenString == "" {
