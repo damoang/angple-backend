@@ -8,7 +8,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write  # reviewdog가 PR에 코멘트를 달기 위해 필요
+  checks: write         # Check run 생성을 위해 필요
 
 jobs:
   golangci:
@@ -29,6 +30,8 @@ jobs:
       with:
         version: latest
         args: --timeout=5m
+        only-new-issues: true  # 변경된 파일의 새로운 이슈만 리포트
+        skip-cache: true       # PR에서 정확한 결과를 위해 캐시 스킵
 
   format:
     name: Format Check
