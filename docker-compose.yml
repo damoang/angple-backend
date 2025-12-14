@@ -1,6 +1,29 @@
 version: '3.8'
 
 services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: angple-mysql
+    ports:
+      - "3307:3306"  # 현세대(3306)와 포트 충돌 방지
+    environment:
+      MYSQL_ROOT_PASSWORD: angple_root_2024
+      MYSQL_DATABASE: angple_db
+      MYSQL_USER: angple_user
+      MYSQL_PASSWORD: angple_pass_2024
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./.docker/mysql/init:/docker-entrypoint-initdb.d
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    networks:
+      - angple-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uangple_user", "-pangple_pass_2024"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # API 서버
   api:
     build:
@@ -12,11 +35,11 @@ services:
     env_file:
       - .env
     environment:
-      - DB_HOST=host.docker.internal  # Mac에서 호스트 MySQL 접근
-      - DB_PORT=3306
-      - DB_USER=${DB_USER:-root}
-      - DB_PASSWORD=${DB_PASSWORD:-secret}
-      - DB_NAME=${DB_NAME:-damoang}
+      - DB_HOST=${DB_HOST:-mysql}  # 로컬: mysql 컨테이너, 운영: 외부 DB
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-angple_user}
+      - DB_PASSWORD=${DB_PASSWORD:-angple_pass_2024}
+      - DB_NAME=${DB_NAME:-angple_db}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - JWT_SECRET=${JWT_SECRET}
@@ -24,7 +47,10 @@ services:
       - API_PORT=8081
       - RECOMMENDED_DATA_PATH=/home/damoang/www/data/cache/recommended
     depends_on:
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - angple-network
     volumes:
@@ -57,7 +83,7 @@ services:
     image: redis:7-alpine
     container_name: angple-redis
     ports:
-      - "6379:6379"
+      - "6381:6379"  # 6379는 현세대(ang-gnu)가 사용중
     networks:
       - angple-network
     volumes:
@@ -68,4 +94,5 @@ networks:
     driver: bridge
 
 volumes:
+  mysql-data:
   redis-data:
