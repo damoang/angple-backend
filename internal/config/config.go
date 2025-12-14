@@ -14,6 +14,7 @@ type Config struct {
 	Redis     RedisConfig     `yaml:"redis"`
 	JWT       JWTConfig       `yaml:"jwt"`
 	DataPaths DataPathsConfig `yaml:"data_paths"`
+	CORS      CORSConfig      `yaml:"cors"`
 }
 
 // DataPathsConfig 데이터 경로 설정
@@ -24,7 +25,8 @@ type DataPathsConfig struct {
 // ServerConfig 서버 설정
 type ServerConfig struct {
 	Port int    `yaml:"port"`
-	Mode string `yaml:"mode"` // development, production
+	Mode string `yaml:"mode"` // development, staging, production
+	Env  string `yaml:"env"`  // local, dev, staging, prod
 }
 
 // DatabaseConfig 데이터베이스 설정
@@ -54,6 +56,11 @@ type JWTConfig struct {
 	ExpiresIn     int    `yaml:"expires_in"`      // seconds (access token)
 	RefreshIn     int    `yaml:"refresh_in"`      // seconds (refresh token)
 	DamoangSecret string `yaml:"damoang_secret"`  // damoang.net JWT secret
+}
+
+// CORSConfig CORS 설정
+type CORSConfig struct {
+	AllowOrigins string `yaml:"allow_origins"`  // Comma-separated list
 }
 
 // Load 설정 파일 로드
@@ -137,4 +144,14 @@ func (c *DatabaseConfig) GetDSN() string {
 // GetRedisAddr Redis 주소 문자열 생성
 func (c *RedisConfig) GetRedisAddr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
+}
+
+// IsDevelopment 개발 환경 여부 확인
+func (c *Config) IsDevelopment() bool {
+	return c.Server.Env == "local" || c.Server.Env == "dev"
+}
+
+// IsProduction 운영 환경 여부 확인
+func (c *Config) IsProduction() bool {
+	return c.Server.Env == "prod" || c.Server.Env == "production"
 }

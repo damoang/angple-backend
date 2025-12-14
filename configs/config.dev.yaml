@@ -1,6 +1,7 @@
 server:
   port: 8082
   mode: development
+  env: local  # local, dev, staging, prod
 
 database:
   host: 127.0.0.1  # Docker MySQL (da_mysql)
@@ -24,3 +25,6 @@ jwt:
   expires_in: 900      # 15 minutes
   refresh_in: 604800   # 7 days
   damoang_secret: ""   # Set via DAMOANG_JWT_SECRET env var
+
+cors:
+  allow_origins: "http://localhost:5173, http://localhost:5174"  # Development only

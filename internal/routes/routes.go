@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/handler"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -13,12 +14,14 @@ func Setup(
 	postHandler *handler.PostHandler,
 	commentHandler *handler.CommentHandler,
 	authHandler *handler.AuthHandler,
+	menuHandler *handler.MenuHandler,
 	jwtManager *jwt.Manager,
 	damoangJWT *jwt.DamoangManager,
 	recommendedHandler *handler.RecommendedHandler,
+	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
-	api := app.Group("/api/v2", middleware.DamoangCookieAuth(damoangJWT))
+	api := app.Group("/api/v2", middleware.DamoangCookieAuth(damoangJWT, cfg))
 
 	// Authentication endpoints (no auth required)
 	auth := api.Group("/auth")
@@ -54,4 +57,10 @@ func Setup(
 	// Recommended Posts (공개 API - 인증 불필요)
 	recommended := api.Group("/recommended")
 	recommended.Get("/:period", recommendedHandler.GetRecommended)
+
+	// Menus (공개 API - 인증 불필요)
+	menus := api.Group("/menus")
+	menus.Get("", menuHandler.GetMenus)
+	menus.Get("/sidebar", menuHandler.GetSidebarMenus)
+	menus.Get("/header", menuHandler.GetHeaderMenus)
 }

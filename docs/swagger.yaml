@@ -32,14 +32,16 @@ servers:
 tags:
   - name: auth
     description: 인증 관련 API
+  - name: menus
+    description: 메뉴 관리 API
+  - name: recommended
+    description: 추천 게시물 API
   - name: posts
     description: 게시글 관련 API
   - name: comments
     description: 댓글 관련 API
   - name: members
     description: 회원 관련 API
-  - name: recommendations
-    description: 추천/비추천 API
   - name: files
     description: 파일 업로드/다운로드 API
   - name: scraps
@@ -147,6 +149,39 @@ components:
           type: string
           format: date-time
 
+    Menu:
+      type: object
+      properties:
+        id:
+          type: integer
+        parent_id:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        url:
+          type: string
+        icon:
+          type: string
+        shortcut:
+          type: string
+        description:
+          type: string
+        depth:
+          type: integer
+        order_num:
+          type: integer
+        target:
+          type: string
+        show_in_header:
+          type: boolean
+        show_in_sidebar:
+          type: boolean
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Menu'
+
 paths:
   /auth/login:
     post:
@@ -231,7 +266,7 @@ paths:
     get:
       tags:
         - auth
-      summary: 내 프로필 조회
+      summary: 내 프로필 조회 (JWT)
       security:
         - bearerAuth: []
       responses:
@@ -251,6 +286,119 @@ paths:
                         type: string
                       level:
                         type: integer
+
+  /auth/me:
+    get:
+      tags:
+        - auth
+      summary: 현재 사용자 정보 (Cookie SSO)
+      description: damoang_jwt 쿠키로 현재 로그인한 사용자 정보 조회
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_id:
+                        type: string
+                      user_name:
+                        type: string
+                      user_level:
+                        type: integer
+        '401':
+          description: 인증 실패 (쿠키 없음)
+
+  /menus:
+    get:
+      tags:
+        - menus
+      summary: 전체 메뉴 조회
+      description: 계층 구조의 전체 메뉴 목록 조회
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Menu'
+
+  /menus/sidebar:
+    get:
+      tags:
+        - menus
+      summary: 사이드바 메뉴 조회
+      description: 사이드바에 표시할 메뉴 목록 (show_in_sidebar = true)
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Menu'
+
+  /menus/header:
+    get:
+      tags:
+        - menus
+      summary: 헤더 메뉴 조회
+      description: 헤더에 표시할 메뉴 목록 (show_in_header = true)
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Menu'
+
+  /recommended/{period}:
+    get:
+      tags:
+        - recommended
+      summary: 추천 게시물 조회
+      description: 기간별 추천 게시물 목록 (캐시 파일 기반)
+      parameters:
+        - name: period
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [daily, weekly, monthly]
+          description: 추천 기간 (daily/weekly/monthly)
+          example: daily
+      responses:
+        '200':
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Post'
+        '404':
+          description: 파일 없음
 
   /boards/{board_id}/posts:
     get:
