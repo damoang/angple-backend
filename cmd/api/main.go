@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/config"
@@ -23,6 +24,15 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+// getConfigPath returns config file path based on APP_ENV environment variable
+func getConfigPath() string {
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "local" // 기본값: 로컬 개발 환경
+	}
+	return fmt.Sprintf("configs/config.%s.yaml", env)
+}
+
 func main() {
 	// .env 파일 로드 (없어도 에러 무시)
 	_ = godotenv.Load()
@@ -31,8 +41,10 @@ func main() {
 	pkglogger.Init()
 	pkglogger.Info("Starting Angple API Server...")
 
-	// 설정 로드
-	cfg, err := config.Load("configs/config.dev.yaml")
+	// 설정 로드 (APP_ENV 환경변수로 config 파일 선택)
+	configPath := getConfigPath()
+	pkglogger.Info("Loading config from: %s", configPath)
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}

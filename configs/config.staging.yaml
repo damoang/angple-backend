@@ -1,10 +1,10 @@
-# Development Server Configuration
-# APP_ENV=dev
+# Staging Server Configuration
+# APP_ENV=staging
 
 server:
   port: 8082
-  mode: development
-  env: dev
+  mode: production
+  env: staging
 
 database:
   host: ""  # DB_HOST 환경변수
@@ -33,4 +33,4 @@ data_paths:
   recommended_path: /data/recommended
 
 cors:
-  allow_origins: "https://dev.damoang.net, https://api-dev.damoang.net"
+  allow_origins: "https://staging.damoang.net, https://api-staging.damoang.net"

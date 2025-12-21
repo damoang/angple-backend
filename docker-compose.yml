@@ -33,6 +33,7 @@ services:
     env_file:
       - .env
     environment:
+      - APP_ENV=${APP_ENV:-prod}  # 환경 선택: local, dev, staging, prod
       - DB_HOST=${DB_HOST:-mysql}  # 로컬: mysql 컨테이너, 운영: 외부 DB
       - DB_PORT=${DB_PORT:-3306}
       - DB_USER=${DB_USER:-angple_user}
