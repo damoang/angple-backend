@@ -27,4 +27,4 @@ jwt:
   damoang_secret: ""   # Set via DAMOANG_JWT_SECRET env var
 
 cors:
-  allow_origins: "http://localhost:5173, http://localhost:5174"  # Development only
+  allow_origins: "http://localhost:5173, http://localhost:5174, https://damoang.dev, https://api.damoang.dev"  # Development

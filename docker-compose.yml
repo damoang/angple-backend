@@ -44,6 +44,7 @@ services:
       - DAMOANG_JWT_SECRET=${DAMOANG_JWT_SECRET}
       - API_PORT=8081
       - RECOMMENDED_DATA_PATH=/home/damoang/www/data/cache/recommended
+      - CORS_ALLOW_ORIGINS=https://damoang.dev, https://api.damoang.dev, https://web.damoang.net, https://damoang.net
     depends_on:
       mysql:
         condition: service_healthy

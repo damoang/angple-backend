@@ -127,6 +127,11 @@ func overrideFromEnv(cfg *Config) {
 	if recommendedPath := os.Getenv("RECOMMENDED_DATA_PATH"); recommendedPath != "" {
 		cfg.DataPaths.RecommendedPath = recommendedPath
 	}
+
+	// CORS 설정
+	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
+		cfg.CORS.AllowOrigins = corsOrigins
+	}
 }
 
 // GetDSN MySQL DSN 문자열 생성
