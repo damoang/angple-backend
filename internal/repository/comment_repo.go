@@ -11,16 +11,16 @@ import (
 type CommentRepository interface {
 	// List comments for a post
 	ListByPost(boardID string, postID int) ([]*domain.Comment, error)
-	
+
 	// Find comment by ID
 	FindByID(boardID string, id int) (*domain.Comment, error)
-	
+
 	// Create new comment
 	Create(boardID string, comment *domain.Comment) error
-	
+
 	// Update comment
 	Update(boardID string, id int, comment *domain.Comment) error
-	
+
 	// Delete comment
 	Delete(boardID string, id int) error
 }

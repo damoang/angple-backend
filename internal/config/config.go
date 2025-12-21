@@ -53,14 +53,14 @@ type RedisConfig struct {
 // JWTConfig JWT 설정
 type JWTConfig struct {
 	Secret        string `yaml:"secret"`
-	ExpiresIn     int    `yaml:"expires_in"`      // seconds (access token)
-	RefreshIn     int    `yaml:"refresh_in"`      // seconds (refresh token)
-	DamoangSecret string `yaml:"damoang_secret"`  // damoang.net JWT secret
+	ExpiresIn     int    `yaml:"expires_in"`     // seconds (access token)
+	RefreshIn     int    `yaml:"refresh_in"`     // seconds (refresh token)
+	DamoangSecret string `yaml:"damoang_secret"` // damoang.net JWT secret
 }
 
 // CORSConfig CORS 설정
 type CORSConfig struct {
-	AllowOrigins string `yaml:"allow_origins"`  // Comma-separated list
+	AllowOrigins string `yaml:"allow_origins"` // Comma-separated list
 }
 
 // Load 설정 파일 로드

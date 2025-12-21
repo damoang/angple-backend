@@ -37,13 +37,13 @@ func VerifyGnuboardPassword(plainPassword, hashedPassword string) bool {
 func verifyMySQLPassword(plain, hashed string) bool {
 	// First SHA1
 	sha1Once := sha1.Sum([]byte(plain))
-	
+
 	// Second SHA1
 	sha1Twice := sha1.Sum(sha1Once[:])
-	
+
 	// Format as *HEX
 	generated := "*" + strings.ToUpper(fmt.Sprintf("%x", sha1Twice))
-	
+
 	return generated == hashed
 }
 
@@ -51,6 +51,6 @@ func verifyMySQLPassword(plain, hashed string) bool {
 func verifySHA1(plain, hashed string) bool {
 	sha := sha1.Sum([]byte(plain))
 	generated := fmt.Sprintf("%x", sha)
-	
+
 	return strings.EqualFold(generated, hashed)
 }

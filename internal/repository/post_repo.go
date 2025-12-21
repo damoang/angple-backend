@@ -52,7 +52,7 @@ func (r *postRepository) ListByBoard(boardID string, page, limit int) ([]*domain
 	// Total count
 	query := r.db.Table(tableName).
 		Where("wr_is_comment = ?", 0). // 댓글 제외
-		Where("wr_parent = wr_id")      // 원글만 (답글 제외)
+		Where("wr_parent = wr_id")     // 원글만 (답글 제외)
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -126,8 +126,8 @@ func (r *postRepository) Create(boardID string, post *domain.Post) error {
 
 	// 그누보드 기본값 설정
 	post.CreatedAt = time.Now()
-	post.ParentID = 0      // 원글
-	post.IsComment = 0     // 게시글
+	post.ParentID = 0  // 원글
+	post.IsComment = 0 // 게시글
 	post.Views = 0
 	post.Likes = 0
 	post.CommentCount = 0
