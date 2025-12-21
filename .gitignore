@@ -11,6 +11,11 @@ dist/
 *.test
 *.out
 
+# Test coverage
+coverage.txt
+coverage.out
+*.coverprofile
+
 # Go workspace file
 go.work
 

@@ -1,0 +1,113 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck        # 에러 체크 누락 검사
+    - gosimple        # 코드 간소화 제안
+    - govet           # go vet 실행
+    - ineffassign     # 비효율적인 할당 검사
+    - staticcheck     # 정적 분석
+    - unused          # 사용하지 않는 코드 검사
+    - gofmt           # 포맷팅 체크
+    - goimports       # import 정리
+    - misspell        # 철자 오류
+    - revive          # golint 후속작
+    - gosec           # 보안 이슈 검사
+    - unconvert       # 불필요한 타입 변환
+    - goconst         # 반복되는 상수 검사
+    - gocyclo         # 순환 복잡도 검사
+    - dupl            # 중복 코드 검사
+    - prealloc        # 슬라이스 사전 할당
+    - bodyclose       # HTTP response body close 체크
+    - noctx           # context 누락 검사
+    - rowserrcheck    # database/sql rows.Err 체크
+    - sqlclosecheck   # database/sql close 체크
+    - errorlint       # 에러 처리 best practice
+  disable:
+    - typecheck       # 빌드 오류는 별도로 체크됨
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  govet:
+    enable-all: true
+    disable:
+      - shadow
+
+  gocyclo:
+    min-complexity: 15
+
+  dupl:
+    threshold: 100
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  misspell:
+    locale: US
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  gosec:
+    excludes:
+      - G204  # Subprocess launched with variable (개발 환경에서 필요)
+
+issues:
+  exclude-dirs:
+    - bin
+    - vendor
+  exclude-files:
+    - ".*\\.pb\\.go$"
+  exclude-rules:
+    # 테스트 파일은 일부 규칙 제외
+    - path: _test\.go
+      linters:
+        - dupl
+        - gosec
+        - gocyclo
+
+    # main.go는 일부 규칙 제외
+    - path: cmd/.*main\.go
+      linters:
+        - gocyclo
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true
