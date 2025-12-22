@@ -37,7 +37,7 @@ func main() {
 
 	// CORS 설정 (브라우저 직접 호출 지원)
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "*", // 개발: 모든 origin 허용 (운영: 특정 도메인만)
+		AllowOrigins:     "http://localhost:3010,http://localhost:5173,https://damoang.dev,https://api.damoang.dev,https://web.damoang.net,https://damoang.net",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowCredentials: true,
