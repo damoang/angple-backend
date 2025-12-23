@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/proxy"
 	"github.com/gofiber/fiber/v2/middleware/recover"
@@ -32,6 +33,14 @@ func main() {
 	app.Use(recover.New())
 	app.Use(logger.New(logger.Config{
 		Format: "[${time}] ${status} - ${method} ${path} (${latency})\n",
+	}))
+
+	// CORS 설정 (브라우저 직접 호출 지원)
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     "http://localhost:3010,http://localhost:5173,https://damoang.dev,https://api.damoang.dev,https://web.damoang.net,https://damoang.net",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowCredentials: true,
 	}))
 
 	// Health Check
