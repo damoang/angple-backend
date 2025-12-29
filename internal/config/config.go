@@ -9,12 +9,12 @@ import (
 
 // Config 애플리케이션 설정 구조체
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Redis     RedisConfig     `yaml:"redis"`
 	JWT       JWTConfig       `yaml:"jwt"`
+	Server    ServerConfig    `yaml:"server"`
 	DataPaths DataPathsConfig `yaml:"data_paths"`
 	CORS      CORSConfig      `yaml:"cors"`
+	Redis     RedisConfig     `yaml:"redis"`
+	Database  DatabaseConfig  `yaml:"database"`
 }
 
 // DataPathsConfig 데이터 경로 설정
@@ -24,28 +24,28 @@ type DataPathsConfig struct {
 
 // ServerConfig 서버 설정
 type ServerConfig struct {
+	Mode string `yaml:"mode"`
+	Env  string `yaml:"env"`
 	Port int    `yaml:"port"`
-	Mode string `yaml:"mode"` // development, staging, production
-	Env  string `yaml:"env"`  // local, dev, staging, prod
 }
 
 // DatabaseConfig 데이터베이스 설정
 type DatabaseConfig struct {
 	Host            string `yaml:"host"`
-	Port            int    `yaml:"port"`
 	User            string `yaml:"user"`
 	Password        string `yaml:"password"`
 	DBName          string `yaml:"dbname"`
+	Port            int    `yaml:"port"`
 	MaxIdleConns    int    `yaml:"max_idle_conns"`
 	MaxOpenConns    int    `yaml:"max_open_conns"`
-	ConnMaxLifetime int    `yaml:"conn_max_lifetime"` // seconds
+	ConnMaxLifetime int    `yaml:"conn_max_lifetime"`
 }
 
 // RedisConfig Redis 설정
 type RedisConfig struct {
 	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
 	Password string `yaml:"password"`
+	Port     int    `yaml:"port"`
 	DB       int    `yaml:"db"`
 	PoolSize int    `yaml:"pool_size"`
 }
@@ -53,9 +53,9 @@ type RedisConfig struct {
 // JWTConfig JWT 설정
 type JWTConfig struct {
 	Secret        string `yaml:"secret"`
-	ExpiresIn     int    `yaml:"expires_in"`     // seconds (access token)
-	RefreshIn     int    `yaml:"refresh_in"`     // seconds (refresh token)
-	DamoangSecret string `yaml:"damoang_secret"` // damoang.net JWT secret
+	DamoangSecret string `yaml:"damoang_secret"`
+	ExpiresIn     int    `yaml:"expires_in"`
+	RefreshIn     int    `yaml:"refresh_in"`
 }
 
 // CORSConfig CORS 설정
@@ -84,13 +84,15 @@ func Load(configPath string) (*Config, error) {
 }
 
 // overrideFromEnv 환경 변수로 설정 오버라이드
+//
+//nolint:gocyclo // 환경 변수 오버라이드는 단순 if 문의 연속이므로 복잡도가 높을 수 있음
 func overrideFromEnv(cfg *Config) {
 	// DB 설정
 	if host := os.Getenv("DB_HOST"); host != "" {
 		cfg.Database.Host = host
 	}
 	if port := os.Getenv("DB_PORT"); port != "" {
-		fmt.Sscanf(port, "%d", &cfg.Database.Port)
+		_, _ = fmt.Sscanf(port, "%d", &cfg.Database.Port) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 	if user := os.Getenv("DB_USER"); user != "" {
 		cfg.Database.User = user
@@ -107,7 +109,7 @@ func overrideFromEnv(cfg *Config) {
 		cfg.Redis.Host = host
 	}
 	if port := os.Getenv("REDIS_PORT"); port != "" {
-		fmt.Sscanf(port, "%d", &cfg.Redis.Port)
+		_, _ = fmt.Sscanf(port, "%d", &cfg.Redis.Port) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 
 	// JWT 설정
@@ -120,7 +122,7 @@ func overrideFromEnv(cfg *Config) {
 
 	// 서버 설정
 	if port := os.Getenv("API_PORT"); port != "" {
-		fmt.Sscanf(port, "%d", &cfg.Server.Port)
+		_, _ = fmt.Sscanf(port, "%d", &cfg.Server.Port) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 
 	// 데이터 경로 설정

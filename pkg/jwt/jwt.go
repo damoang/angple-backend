@@ -14,10 +14,10 @@ var (
 
 // Claims JWT claims structure
 type Claims struct {
+	jwt.RegisteredClaims
 	UserID   string `json:"user_id"`
 	Nickname string `json:"nickname"`
 	Level    int    `json:"level"`
-	jwt.RegisteredClaims
 }
 
 // Manager JWT token manager
@@ -69,6 +69,8 @@ func (m *Manager) GenerateRefreshToken(userID string) (string, error) {
 }
 
 // VerifyToken verifies and parses a token
+//
+//nolint:dupl // JWT 검증 로직은 표준 패턴을 따르므로 유사함
 func (m *Manager) VerifyToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		// Validate signing method

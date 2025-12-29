@@ -21,9 +21,9 @@ type authService struct {
 
 // LoginResponse login response
 type LoginResponse struct {
+	User         *domain.MemberResponse `json:"user"`
 	AccessToken  string                 `json:"access_token"`
 	RefreshToken string                 `json:"refresh_token"`
-	User         *domain.MemberResponse `json:"user"`
 }
 
 // TokenPair token pair
