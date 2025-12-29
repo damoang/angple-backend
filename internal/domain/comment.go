@@ -6,6 +6,8 @@ import (
 
 // Comment domain model (uses same table as Post)
 // Differentiated by wr_is_comment = 1
+//
+//nolint:dupl // Comment와 Post는 같은 테이블을 사용하므로 구조가 유사함
 type Comment struct {
 	CreatedAt    time.Time `gorm:"column:wr_datetime" json:"created_at"`
 	Extra2       string    `gorm:"column:wr_2" json:"-"`

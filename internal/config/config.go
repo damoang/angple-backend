@@ -92,7 +92,7 @@ func overrideFromEnv(cfg *Config) {
 		cfg.Database.Host = host
 	}
 	if port := os.Getenv("DB_PORT"); port != "" {
-		_, _ = fmt.Sscanf(port, "%d", &cfg.Database.Port) // 파싱 실패 시 기본값 유지
+		_, _ = fmt.Sscanf(port, "%d", &cfg.Database.Port) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 	if user := os.Getenv("DB_USER"); user != "" {
 		cfg.Database.User = user
@@ -109,7 +109,7 @@ func overrideFromEnv(cfg *Config) {
 		cfg.Redis.Host = host
 	}
 	if port := os.Getenv("REDIS_PORT"); port != "" {
-		_, _ = fmt.Sscanf(port, "%d", &cfg.Redis.Port) // 파싱 실패 시 기본값 유지
+		_, _ = fmt.Sscanf(port, "%d", &cfg.Redis.Port) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 
 	// JWT 설정
@@ -122,7 +122,7 @@ func overrideFromEnv(cfg *Config) {
 
 	// 서버 설정
 	if port := os.Getenv("API_PORT"); port != "" {
-		_, _ = fmt.Sscanf(port, "%d", &cfg.Server.Port) // 파싱 실패 시 기본값 유지
+		_, _ = fmt.Sscanf(port, "%d", &cfg.Server.Port) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 
 	// 데이터 경로 설정
