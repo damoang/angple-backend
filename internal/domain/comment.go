@@ -7,59 +7,55 @@ import (
 // Comment domain model (uses same table as Post)
 // Differentiated by wr_is_comment = 1
 type Comment struct {
-	ID           int       `gorm:"column:wr_id;primaryKey" json:"id"`
-	ParentID     int       `gorm:"column:wr_parent" json:"parent_id"`
-	IsComment    int       `gorm:"column:wr_is_comment" json:"-"`
+	CreatedAt    time.Time `gorm:"column:wr_datetime" json:"created_at"`
+	Extra2       string    `gorm:"column:wr_2" json:"-"`
+	FacebookUser string    `gorm:"column:wr_facebook_user" json:"-"`
 	CommentReply string    `gorm:"column:wr_comment_reply" json:"-"`
 	Content      string    `gorm:"column:wr_content" json:"content"`
 	Author       string    `gorm:"column:wr_name" json:"author"`
 	AuthorID     string    `gorm:"column:mb_id" json:"author_id"`
 	IP           string    `gorm:"column:wr_ip" json:"-"`
-	CreatedAt    time.Time `gorm:"column:wr_datetime" json:"created_at"`
-
-	// Required fields (same as Post)
-	Reply        string `gorm:"column:wr_reply" json:"-"`
-	Option       string `gorm:"column:wr_option" json:"-"`
-	Link1        string `gorm:"column:wr_link1" json:"-"`
-	Link2        string `gorm:"column:wr_link2" json:"-"`
-	Email        string `gorm:"column:wr_email" json:"-"`
-	Password     string `gorm:"column:wr_password" json:"-"`
-	Homepage     string `gorm:"column:wr_homepage" json:"-"`
-	LastUpdated  string `gorm:"column:wr_last" json:"-"`
-	FacebookUser string `gorm:"column:wr_facebook_user" json:"-"`
-	TwitterUser  string `gorm:"column:wr_twitter_user" json:"-"`
-	Extra1       string `gorm:"column:wr_1" json:"-"`
-	Extra2       string `gorm:"column:wr_2" json:"-"`
-	Extra3       string `gorm:"column:wr_3" json:"-"`
-	Extra4       string `gorm:"column:wr_4" json:"-"`
-	Extra5       string `gorm:"column:wr_5" json:"-"`
-	Extra6       string `gorm:"column:wr_6" json:"-"`
-	Extra7       string `gorm:"column:wr_7" json:"-"`
-	Extra8       string `gorm:"column:wr_8" json:"-"`
-	Extra9       string `gorm:"column:wr_9" json:"-"`
-	Extra10      string `gorm:"column:wr_10" json:"-"`
-
-	// Not used for comments but required by table schema
-	Title        string `gorm:"column:wr_subject" json:"-"`
-	Category     string `gorm:"column:ca_name" json:"-"`
-	Views        int    `gorm:"column:wr_hit" json:"-"`
-	Likes        int    `gorm:"column:wr_good" json:"-"`
-	Dislikes     int    `gorm:"column:wr_nogood" json:"-"`
-	CommentCount int    `gorm:"column:wr_comment" json:"-"`
-	Num          int    `gorm:"column:wr_num" json:"-"`
-	HasFile      int    `gorm:"column:wr_file" json:"-"`
-	Link1Hit     int    `gorm:"column:wr_link1_hit" json:"-"`
-	Link2Hit     int    `gorm:"column:wr_link2_hit" json:"-"`
-	SEOTitle     string `gorm:"column:wr_seo_title" json:"-"`
+	SEOTitle     string    `gorm:"column:wr_seo_title" json:"-"`
+	Reply        string    `gorm:"column:wr_reply" json:"-"`
+	Option       string    `gorm:"column:wr_option" json:"-"`
+	Link1        string    `gorm:"column:wr_link1" json:"-"`
+	Link2        string    `gorm:"column:wr_link2" json:"-"`
+	Email        string    `gorm:"column:wr_email" json:"-"`
+	Password     string    `gorm:"column:wr_password" json:"-"`
+	Homepage     string    `gorm:"column:wr_homepage" json:"-"`
+	LastUpdated  string    `gorm:"column:wr_last" json:"-"`
+	Category     string    `gorm:"column:ca_name" json:"-"`
+	TwitterUser  string    `gorm:"column:wr_twitter_user" json:"-"`
+	Title        string    `gorm:"column:wr_subject" json:"-"`
+	Extra1       string    `gorm:"column:wr_1" json:"-"`
+	Extra6       string    `gorm:"column:wr_6" json:"-"`
+	Extra4       string    `gorm:"column:wr_4" json:"-"`
+	Extra5       string    `gorm:"column:wr_5" json:"-"`
+	Extra3       string    `gorm:"column:wr_3" json:"-"`
+	Extra7       string    `gorm:"column:wr_7" json:"-"`
+	Extra8       string    `gorm:"column:wr_8" json:"-"`
+	Extra9       string    `gorm:"column:wr_9" json:"-"`
+	Extra10      string    `gorm:"column:wr_10" json:"-"`
+	IsComment    int       `gorm:"column:wr_is_comment" json:"-"`
+	ID           int       `gorm:"column:wr_id;primaryKey" json:"id"`
+	Views        int       `gorm:"column:wr_hit" json:"-"`
+	Likes        int       `gorm:"column:wr_good" json:"-"`
+	Dislikes     int       `gorm:"column:wr_nogood" json:"-"`
+	CommentCount int       `gorm:"column:wr_comment" json:"-"`
+	Num          int       `gorm:"column:wr_num" json:"-"`
+	HasFile      int       `gorm:"column:wr_file" json:"-"`
+	Link1Hit     int       `gorm:"column:wr_link1_hit" json:"-"`
+	Link2Hit     int       `gorm:"column:wr_link2_hit" json:"-"`
+	ParentID     int       `gorm:"column:wr_parent" json:"parent_id"`
 }
 
 type CommentResponse struct {
-	ID        int       `json:"id"`
-	ParentID  int       `json:"parent_id"`
+	CreatedAt time.Time `json:"created_at"`
 	Content   string    `json:"content"`
 	Author    string    `json:"author"`
 	AuthorID  string    `json:"author_id"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        int       `json:"id"`
+	ParentID  int       `json:"parent_id"`
 }
 
 func (c *Comment) ToResponse() *CommentResponse {

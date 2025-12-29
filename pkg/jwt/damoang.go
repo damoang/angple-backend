@@ -9,15 +9,16 @@ import (
 // DamoangClaims - damoang.net JWT 페이로드 구조
 // damoang.net에서 생성된 JWT는 다른 필드명을 사용함
 type DamoangClaims struct {
+	jwt.RegisteredClaims
 	MbID    string `json:"mb_id"`
-	MbLevel int    `json:"mb_level"`
 	MbName  string `json:"mb_name"`
 	MbEmail string `json:"mb_email"`
-	jwt.RegisteredClaims
+	MbLevel int    `json:"mb_level"`
 }
 
 // VerifyDamoangToken - damoang.net에서 생성된 JWT 토큰 검증
 // damoang_jwt 쿠키에서 읽은 토큰을 검증할 때 사용
+//nolint:dupl // JWT 검증 로직은 표준 패턴을 따르므로 유사함
 func (m *Manager) VerifyDamoangToken(tokenString string) (*DamoangClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &DamoangClaims{}, func(token *jwt.Token) (interface{}, error) {
 		// Validate signing method
@@ -55,6 +56,7 @@ func NewDamoangManager(secret string) *DamoangManager {
 }
 
 // VerifyToken - damoang.net JWT 토큰 검증
+//nolint:dupl // JWT 검증 로직은 표준 패턴을 따르므로 유사함
 func (m *DamoangManager) VerifyToken(tokenString string) (*DamoangClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &DamoangClaims{}, func(token *jwt.Token) (interface{}, error) {
 		// Validate signing method

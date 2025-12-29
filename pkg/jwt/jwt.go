@@ -14,10 +14,10 @@ var (
 
 // Claims JWT claims structure
 type Claims struct {
+	jwt.RegisteredClaims
 	UserID   string `json:"user_id"`
 	Nickname string `json:"nickname"`
 	Level    int    `json:"level"`
-	jwt.RegisteredClaims
 }
 
 // Manager JWT token manager

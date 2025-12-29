@@ -7,9 +7,9 @@ import (
 // Post domain model
 // Uses Gnuboard DB structure (g5_write_*) but with standard Go naming
 type Post struct {
-	ID           int       `gorm:"column:wr_id;primaryKey" json:"id"`
-	Title        string    `gorm:"column:wr_subject" json:"title"`
-	Content      string    `gorm:"column:wr_content" json:"content"`
+	CreatedAt    time.Time `gorm:"column:wr_datetime" json:"created_at"`
+	Extra1       string    `gorm:"column:wr_1" json:"-"`
+	TwitterUser  string    `gorm:"column:wr_twitter_user" json:"-"`
 	Category     string    `gorm:"column:ca_name" json:"category"`
 	Author       string    `gorm:"column:wr_name" json:"author"`
 	AuthorID     string    `gorm:"column:mb_id" json:"author_id"`
@@ -17,36 +17,36 @@ type Post struct {
 	Password     string    `gorm:"column:wr_password" json:"-"`
 	Homepage     string    `gorm:"column:wr_homepage" json:"-"`
 	IP           string    `gorm:"column:wr_ip" json:"-"`
-	Views        int       `gorm:"column:wr_hit" json:"views"`
-	Likes        int       `gorm:"column:wr_good" json:"likes"`
-	Dislikes     int       `gorm:"column:wr_nogood" json:"dislikes"`
-	CommentCount int       `gorm:"column:wr_comment" json:"comments_count"`
-	ParentID     int       `gorm:"column:wr_parent" json:"parent_id"`
-	IsComment    int       `gorm:"column:wr_is_comment" json:"is_comment"`
-	Num          int       `gorm:"column:wr_num" json:"-"`
-	Reply        string    `gorm:"column:wr_reply" json:"-"`
-	CommentReply string    `gorm:"column:wr_comment_reply" json:"-"`
-	HasFile      int       `gorm:"column:wr_file" json:"has_file"`
+	Extra10      string    `gorm:"column:wr_10" json:"-"`
+	Extra9       string    `gorm:"column:wr_9" json:"-"`
+	Extra8       string    `gorm:"column:wr_8" json:"-"`
+	Extra7       string    `gorm:"column:wr_7" json:"-"`
+	Extra6       string    `gorm:"column:wr_6" json:"-"`
+	Extra5       string    `gorm:"column:wr_5" json:"-"`
+	Extra4       string    `gorm:"column:wr_4" json:"-"`
 	Link1        string    `gorm:"column:wr_link1" json:"link1,omitempty"`
-	Link2        string    `gorm:"column:wr_link2" json:"link2,omitempty"`
-	Link1Hit     int       `gorm:"column:wr_link1_hit" json:"-"`
-	Link2Hit     int       `gorm:"column:wr_link2_hit" json:"-"`
+	CommentReply string    `gorm:"column:wr_comment_reply" json:"-"`
+	Content      string    `gorm:"column:wr_content" json:"content"`
+	Reply        string    `gorm:"column:wr_reply" json:"-"`
 	SEOTitle     string    `gorm:"column:wr_seo_title" json:"seo_title"`
+	Extra3       string    `gorm:"column:wr_3" json:"-"`
+	Extra2       string    `gorm:"column:wr_2" json:"-"`
+	Link2        string    `gorm:"column:wr_link2" json:"link2,omitempty"`
 	Option       string    `gorm:"column:wr_option" json:"-"`
-	CreatedAt    time.Time `gorm:"column:wr_datetime" json:"created_at"`
+	Title        string    `gorm:"column:wr_subject" json:"title"`
 	LastUpdated  string    `gorm:"column:wr_last" json:"last_updated"`
 	FacebookUser string    `gorm:"column:wr_facebook_user" json:"-"`
-	TwitterUser  string    `gorm:"column:wr_twitter_user" json:"-"`
-	Extra1       string    `gorm:"column:wr_1" json:"-"`
-	Extra2       string    `gorm:"column:wr_2" json:"-"`
-	Extra3       string    `gorm:"column:wr_3" json:"-"`
-	Extra4       string    `gorm:"column:wr_4" json:"-"`
-	Extra5       string    `gorm:"column:wr_5" json:"-"`
-	Extra6       string    `gorm:"column:wr_6" json:"-"`
-	Extra7       string    `gorm:"column:wr_7" json:"-"`
-	Extra8       string    `gorm:"column:wr_8" json:"-"`
-	Extra9       string    `gorm:"column:wr_9" json:"-"`
-	Extra10      string    `gorm:"column:wr_10" json:"-"`
+	HasFile      int       `gorm:"column:wr_file" json:"has_file"`
+	ID           int       `gorm:"column:wr_id;primaryKey" json:"id"`
+	Link2Hit     int       `gorm:"column:wr_link2_hit" json:"-"`
+	Link1Hit     int       `gorm:"column:wr_link1_hit" json:"-"`
+	Num          int       `gorm:"column:wr_num" json:"-"`
+	IsComment    int       `gorm:"column:wr_is_comment" json:"is_comment"`
+	ParentID     int       `gorm:"column:wr_parent" json:"parent_id"`
+	CommentCount int       `gorm:"column:wr_comment" json:"comments_count"`
+	Dislikes     int       `gorm:"column:wr_nogood" json:"dislikes"`
+	Likes        int       `gorm:"column:wr_good" json:"likes"`
+	Views        int       `gorm:"column:wr_hit" json:"views"`
 }
 
 func (Post) TableName() string {
@@ -54,16 +54,16 @@ func (Post) TableName() string {
 }
 
 type PostResponse struct {
-	ID            int       `json:"id"`
+	CreatedAt     time.Time `json:"created_at"`
 	Title         string    `json:"title"`
 	Content       string    `json:"content"`
 	Category      string    `json:"category,omitempty"`
 	Author        string    `json:"author"`
 	AuthorID      string    `json:"author_id"`
+	ID            int       `json:"id"`
 	Views         int       `json:"views"`
 	Likes         int       `json:"likes"`
 	CommentsCount int       `json:"comments_count"`
-	CreatedAt     time.Time `json:"created_at"`
 	HasFile       bool      `json:"has_file"`
 }
 

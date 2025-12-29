@@ -35,6 +35,7 @@ func (h *CommentHandler) ListComments(c *fiber.Ctx) error {
 }
 
 // GetComment handles GET /api/v2/boards/:board_id/posts/:post_id/comments/:id
+//nolint:dupl // Comment와 Post의 Get 로직은 유사하지만 다른 타입을 다룸
 func (h *CommentHandler) GetComment(c *fiber.Ctx) error {
 	boardID := c.Params("board_id")
 	id, err := c.ParamsInt("id")
@@ -78,6 +79,7 @@ func (h *CommentHandler) CreateComment(c *fiber.Ctx) error {
 }
 
 // UpdateComment handles PUT /api/v2/boards/:board_id/posts/:post_id/comments/:id
+//nolint:dupl // Comment와 Post의 Update/Delete 로직은 유사하지만 다른 타입을 다룸
 func (h *CommentHandler) UpdateComment(c *fiber.Ctx) error {
 	boardID := c.Params("board_id")
 	id, err := c.ParamsInt("id")
