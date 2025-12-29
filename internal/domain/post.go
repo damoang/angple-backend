@@ -6,6 +6,8 @@ import (
 
 // Post domain model
 // Uses Gnuboard DB structure (g5_write_*) but with standard Go naming
+//
+//nolint:dupl // Post와 Comment는 같은 테이블을 사용하므로 구조가 유사함
 type Post struct {
 	CreatedAt    time.Time `gorm:"column:wr_datetime" json:"created_at"`
 	Extra1       string    `gorm:"column:wr_1" json:"-"`

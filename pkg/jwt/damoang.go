@@ -18,6 +18,7 @@ type DamoangClaims struct {
 
 // VerifyDamoangToken - damoang.net에서 생성된 JWT 토큰 검증
 // damoang_jwt 쿠키에서 읽은 토큰을 검증할 때 사용
+//
 //nolint:dupl // JWT 검증 로직은 표준 패턴을 따르므로 유사함
 func (m *Manager) VerifyDamoangToken(tokenString string) (*DamoangClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &DamoangClaims{}, func(token *jwt.Token) (interface{}, error) {
@@ -56,6 +57,7 @@ func NewDamoangManager(secret string) *DamoangManager {
 }
 
 // VerifyToken - damoang.net JWT 토큰 검증
+//
 //nolint:dupl // JWT 검증 로직은 표준 패턴을 따르므로 유사함
 func (m *DamoangManager) VerifyToken(tokenString string) (*DamoangClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &DamoangClaims{}, func(token *jwt.Token) (interface{}, error) {
