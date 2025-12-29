@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -29,7 +28,7 @@ func JWTAuth(jwtManager *jwt.Manager) fiber.Handler {
 		// 3. Verify token
 		claims, err := jwtManager.VerifyToken(tokenString)
 		if err != nil {
-			if errors.Is(err, jwt.ErrExpiredToken) {
+			if err == jwt.ErrExpiredToken {
 				return common.ErrorResponse(c, 401, "Token expired", err)
 			}
 			return common.ErrorResponse(c, 401, "Invalid token", err)

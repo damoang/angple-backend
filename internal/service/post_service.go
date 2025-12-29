@@ -4,7 +4,6 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
-	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 )
 
 // PostService business logic for posts
@@ -67,11 +66,7 @@ func (s *postService) GetPost(boardID string, id int) (*domain.PostResponse, err
 	}
 
 	// Increment view count asynchronously
-	go func() {
-		if err := s.repo.IncrementHit(boardID, id); err != nil {
-			pkglogger.Error("Failed to increment hit count for post %d in board %s: %v", id, boardID, err)
-		}
-	}()
+	go s.repo.IncrementHit(boardID, id)
 
 	return post.ToResponse(), nil
 }
