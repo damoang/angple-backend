@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 - Required for legacy Gnuboard compatibility
 	"fmt"
 	"strings"
 )
@@ -36,10 +36,10 @@ func VerifyGnuboardPassword(plainPassword, hashedPassword string) bool {
 // Format: *<SHA1(SHA1(password))>
 func verifyMySQLPassword(plain, hashed string) bool {
 	// First SHA1
-	sha1Once := sha1.Sum([]byte(plain))
+	sha1Once := sha1.Sum([]byte(plain)) // #nosec G401 - Required for legacy Gnuboard compatibility
 
 	// Second SHA1
-	sha1Twice := sha1.Sum(sha1Once[:])
+	sha1Twice := sha1.Sum(sha1Once[:]) // #nosec G401 - Required for legacy Gnuboard compatibility
 
 	// Format as *HEX
 	generated := "*" + strings.ToUpper(fmt.Sprintf("%x", sha1Twice))
@@ -49,7 +49,7 @@ func verifyMySQLPassword(plain, hashed string) bool {
 
 // verifySHA1 verifies against simple SHA1 hash
 func verifySHA1(plain, hashed string) bool {
-	sha := sha1.Sum([]byte(plain))
+	sha := sha1.Sum([]byte(plain)) // #nosec G401 - Required for legacy Gnuboard compatibility
 	generated := fmt.Sprintf("%x", sha)
 
 	return strings.EqualFold(generated, hashed)

@@ -35,7 +35,9 @@ func getConfigPath() string {
 
 func main() {
 	// .env 파일 로드 (없어도 에러 무시)
-	_ = godotenv.Load()
+	if err := godotenv.Load(); err != nil {
+		log.Println(".env file not found, using environment variables only")
+	}
 
 	// 로거 초기화
 	pkglogger.Init()

@@ -6,6 +6,7 @@ import (
 	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/pkg/auth"
 	"github.com/damoang/angple-backend/pkg/jwt"
+	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 )
 
 // AuthService authentication business logic
@@ -65,7 +66,11 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 	}
 
 	// 4. Update login time (async)
-	go s.memberRepo.UpdateLoginTime(member.UserID)
+	go func() {
+		if err := s.memberRepo.UpdateLoginTime(member.UserID); err != nil {
+			pkglogger.Error("Failed to update login time for user %s: %v", member.UserID, err)
+		}
+	}()
 
 	return &LoginResponse{
 		AccessToken:  accessToken,
