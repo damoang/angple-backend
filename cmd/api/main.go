@@ -35,7 +35,7 @@ func getConfigPath() string {
 
 func main() {
 	// .env 파일 로드 (없어도 에러 무시)
-	_ = godotenv.Load()
+	_ = godotenv.Load() //nolint:errcheck // .env 파일이 없어도 정상 동작
 
 	// 로거 초기화
 	pkglogger.Init()

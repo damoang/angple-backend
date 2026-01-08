@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: Gnuboard 레거시 호환을 위해 SHA1 필요
 	"fmt"
 	"strings"
 )
@@ -34,6 +34,8 @@ func VerifyGnuboardPassword(plainPassword, hashedPassword string) bool {
 
 // verifyMySQLPassword verifies against MySQL PASSWORD() hash
 // Format: *<SHA1(SHA1(password))>
+//
+//nolint:gosec // G401: Gnuboard 레거시 호환을 위해 SHA1 필요
 func verifyMySQLPassword(plain, hashed string) bool {
 	// First SHA1
 	sha1Once := sha1.Sum([]byte(plain))
@@ -48,6 +50,8 @@ func verifyMySQLPassword(plain, hashed string) bool {
 }
 
 // verifySHA1 verifies against simple SHA1 hash
+//
+//nolint:gosec // G401: Gnuboard 레거시 호환을 위해 SHA1 필요
 func verifySHA1(plain, hashed string) bool {
 	sha := sha1.Sum([]byte(plain))
 	generated := fmt.Sprintf("%x", sha)

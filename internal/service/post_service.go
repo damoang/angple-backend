@@ -66,7 +66,7 @@ func (s *postService) GetPost(boardID string, id int) (*domain.PostResponse, err
 	}
 
 	// Increment view count asynchronously
-	go s.repo.IncrementHit(boardID, id)
+	go s.repo.IncrementHit(boardID, id) //nolint:errcheck // 비동기 조회수 증가, 실패해도 무시
 
 	return post.ToResponse(), nil
 }
