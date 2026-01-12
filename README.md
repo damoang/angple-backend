@@ -320,10 +320,9 @@ go build -o bin/api cmd/api/main.go
 ### 레거시 통합
 
 1. **Damoang SSO**: 기존 PHP 시스템의 `damoang_jwt` 쿠키 검증
-2. **그누보드 비밀번호**: 3가지 포맷 호환
-   - MySQL PASSWORD() 함수 (SHA1 of SHA1)
-   - 단순 SHA1 해시
-   - 평문 비밀번호 (매우 오래된 계정)
+2. **그누보드 비밀번호**: 1가지 포맷 호환
+   - 비밀번호는 PBKDF2 기반 SHA256 해시이다. 반복횟수 12000, Salt 24 Byte
+3. 그누보드 ID : 소셜로그인 아이디 adler32(md5(소셜유니크키)) 로 감싸서 거친다.
 
 ### 개발 환경 Mock 인증
 

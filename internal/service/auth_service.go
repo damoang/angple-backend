@@ -65,7 +65,7 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 	}
 
 	// 4. Update login time (async)
-	go s.memberRepo.UpdateLoginTime(member.UserID)
+	go s.memberRepo.UpdateLoginTime(member.UserID) //nolint:errcheck // 비동기 로그인 시간 업데이트, 실패해도 무시
 
 	return &LoginResponse{
 		AccessToken:  accessToken,
