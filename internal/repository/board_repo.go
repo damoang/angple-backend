@@ -26,11 +26,7 @@ func (r *BoardRepository) Create(board *domain.Board) error {
 		}
 
 		// 2. 동적 write 테이블 생성 (g5_write_{board_id})
-		if err := r.createWriteTable(tx, board.BoardID); err != nil {
-			return err
-		}
-
-		return nil
+		return r.createWriteTable(tx, board.BoardID)
 	})
 }
 
@@ -180,11 +176,7 @@ func (r *BoardRepository) Delete(boardID string) error {
 		}
 
 		// 4. g5_board_new 테이블에서 관련 신규 글 정보 삭제
-		if err := tx.Exec("DELETE FROM g5_board_new WHERE bo_table = ?", boardID).Error; err != nil {
-			return err
-		}
-
-		return nil
+		return tx.Exec("DELETE FROM g5_board_new WHERE bo_table = ?", boardID).Error
 	})
 }
 
