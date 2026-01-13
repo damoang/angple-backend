@@ -9,8 +9,8 @@ server:
 database:
   host: 127.0.0.1
   port: 3306
-  user: root
-  password: root123
+  user: damoang_user
+  password: dev_pass_2024
   dbname: damoang
   max_idle_conns: 10
   max_open_conns: 100

@@ -53,3 +53,6 @@ configs/*.secret.yaml
 # Python
 __pycache__/
 *.pyc
+
+# Serena
+.serena/

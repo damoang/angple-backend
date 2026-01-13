@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/damoang/angple-backend/internal/common"
+	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
 	"github.com/gofiber/fiber/v2"
@@ -12,11 +13,15 @@ import (
 // AuthHandler handles authentication requests
 type AuthHandler struct {
 	service service.AuthService
+	config  *config.Config
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(service service.AuthService) *AuthHandler {
-	return &AuthHandler{service: service}
+func NewAuthHandler(service service.AuthService, cfg *config.Config) *AuthHandler {
+	return &AuthHandler{
+		service: service,
+		config:  cfg,
+	}
 }
 
 // LoginRequest login request
@@ -100,6 +105,26 @@ func (h *AuthHandler) GetCurrentUser(c *fiber.Ctx) error {
 			"mb_name":  middleware.GetDamoangUserName(c),
 			"mb_level": middleware.GetDamoangUserLevel(c),
 			"mb_email": middleware.GetDamoangUserEmail(c),
+		},
+	})
+}
+
+// Logout handles POST /api/v2/auth/logout
+// Clears the httpOnly refresh token cookie
+func (h *AuthHandler) Logout(c *fiber.Ctx) error {
+	// Clear the refresh token cookie
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		MaxAge:   -1,
+		HTTPOnly: true,
+		Secure:   true,
+		SameSite: "Strict",
+	})
+
+	return c.JSON(common.APIResponse{
+		Data: fiber.Map{
+			"message": "Logged out successfully",
 		},
 	})
 }

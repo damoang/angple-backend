@@ -90,18 +90,24 @@ func main() {
 	postRepo := repository.NewPostRepository(db)
 	commentRepo := repository.NewCommentRepository(db)
 	menuRepo := repository.NewMenuRepository(db)
+	siteRepo := repository.NewSiteRepository(db)
+	boardRepo := repository.NewBoardRepository(db)
 
 	// Services
 	authService := service.NewAuthService(memberRepo, jwtManager)
 	postService := service.NewPostService(postRepo)
 	commentService := service.NewCommentService(commentRepo)
 	menuService := service.NewMenuService(menuRepo)
+	siteService := service.NewSiteService(siteRepo)
+	boardService := service.NewBoardService(boardRepo)
 
 	// Handlers
-	authHandler := handler.NewAuthHandler(authService)
+	authHandler := handler.NewAuthHandler(authService, cfg)
 	postHandler := handler.NewPostHandler(postService)
 	commentHandler := handler.NewCommentHandler(commentService)
 	menuHandler := handler.NewMenuHandler(menuService)
+	siteHandler := handler.NewSiteHandler(siteService)
+	boardHandler := handler.NewBoardHandler(boardService)
 
 	// Recommended Handler (파일 직접 읽기)
 	recommendedPath := cfg.DataPaths.RecommendedPath
@@ -144,7 +150,7 @@ func main() {
 	})
 
 	// API v2 라우트
-	routes.Setup(app, postHandler, commentHandler, authHandler, menuHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
+	routes.Setup(app, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
 
 	// 서버 시작
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -168,6 +174,11 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 
 	// SQL 모드 비활성화 (STRICT_TRANS_TABLES 제거)
 	db.Exec("SET SESSION sql_mode = ''")
+
+	// UTF-8 인코딩 설정 (한글 깨짐 방지)
+	db.Exec("SET NAMES utf8mb4")
+	db.Exec("SET CHARACTER SET utf8mb4")
+	db.Exec("SET character_set_connection=utf8mb4")
 
 	// Connection Pool 설정
 	sqlDB, err := db.DB()
