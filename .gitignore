@@ -53,3 +53,13 @@ configs/*.secret.yaml
 # Python
 __pycache__/
 *.pyc
+
+# Data files - exclude production data, keep sample/dev files
+data/recommended/*.json
+!data/recommended/index-widgets.json
+!data/recommended/1hour.json
+!data/recommended/3hours.json
+!data/recommended/6hours.json
+!data/recommended/12hours.json
+!data/recommended/24hours.json
+!data/recommended/48hours.json

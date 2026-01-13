@@ -32,8 +32,17 @@ var validPeriods = map[string]bool{
 	"index-widgets": true,
 }
 
-// GetRecommended returns recommended posts for a given period
-// GET /api/v2/recommended/:period
+// GetRecommended godoc
+// @Summary      추천 게시글 조회
+// @Description  특정 기간 동안의 추천 게시글 목록을 조회합니다. 파일이 없는 경우 빈 배열을 반환합니다.
+// @Tags         recommended
+// @Accept       json
+// @Produce      json
+// @Param        period  path      string  true  "기간 (1hour, 3hours, 6hours, 12hours, 24hours, 48hours, index-widgets)"
+// @Success      200     {array}   interface{}  "추천 게시글 목록"
+// @Failure      400     {object}  common.APIResponse
+// @Failure      500     {object}  common.APIResponse
+// @Router       /recommended/{period} [get]
 func (h *RecommendedHandler) GetRecommended(c *fiber.Ctx) error {
 	period := c.Params("period")
 
@@ -57,9 +66,10 @@ func (h *RecommendedHandler) GetRecommended(c *fiber.Ctx) error {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-				"error": "Recommended data not found for period: " + period,
-			})
+			// 파일이 없으면 빈 배열 반환 (개발 환경 대응)
+			c.Set("Content-Type", "application/json")
+			c.Set("Cache-Control", "no-cache")
+			return c.JSON([]interface{}{})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to access recommended data",

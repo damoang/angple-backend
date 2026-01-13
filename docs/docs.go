@@ -733,6 +733,51 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/recommended/{period}": {
+            "get": {
+                "description": "특정 기간 동안의 추천 게시글 목록을 조회합니다. 파일이 없는 경우 빈 배열을 반환합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "recommended"
+                ],
+                "summary": "추천 게시글 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "기간 (1hour, 3hours, 6hours, 12hours, 24hours, 48hours, index-widgets)",
+                        "name": "period",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "추천 게시글 목록",
+                        "schema": {
+                            "type": "array",
+                            "items": {}
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
