@@ -145,55 +145,36 @@ func (s *BoardService) UpdateBoard(boardID string, req *domain.UpdateBoardReques
 
 	// 3. 업데이트할 필드 준비
 	updates := make(map[string]interface{})
-
-	if req.Subject != nil {
-		updates["bo_subject"] = *req.Subject
-	}
-	if req.Admin != nil {
-		updates["bo_admin"] = *req.Admin
-	}
-	if req.Device != nil {
-		updates["bo_device"] = *req.Device
-	}
-	if req.ListLevel != nil {
-		updates["bo_list_level"] = *req.ListLevel
-	}
-	if req.ReadLevel != nil {
-		updates["bo_read_level"] = *req.ReadLevel
-	}
-	if req.WriteLevel != nil {
-		updates["bo_write_level"] = *req.WriteLevel
-	}
-	if req.ReplyLevel != nil {
-		updates["bo_reply_level"] = *req.ReplyLevel
-	}
-	if req.CommentLevel != nil {
-		updates["bo_comment_level"] = *req.CommentLevel
-	}
-	if req.UseCategory != nil {
-		updates["bo_use_category"] = *req.UseCategory
-	}
-	if req.CategoryList != nil {
-		updates["bo_category_list"] = *req.CategoryList
-	}
-	if req.Skin != nil {
-		updates["bo_skin"] = *req.Skin
-	}
-	if req.MobileSkin != nil {
-		updates["bo_mobile_skin"] = *req.MobileSkin
-	}
-	if req.PageRows != nil {
-		updates["bo_page_rows"] = *req.PageRows
-	}
-	if req.UploadCount != nil {
-		updates["bo_upload_count"] = *req.UploadCount
-	}
-	if req.UploadSize != nil {
-		updates["bo_upload_size"] = *req.UploadSize
-	}
+	s.addFieldUpdates(updates, req)
 
 	// 4. 업데이트 실행
 	return s.repo.Update(boardID, updates)
+}
+
+// addFieldUpdates - 필드 업데이트를 위한 헬퍼 메서드 (복잡도 감소)
+func (s *BoardService) addFieldUpdates(updates map[string]interface{}, req *domain.UpdateBoardRequest) {
+	addUpdate(updates, "bo_subject", req.Subject)
+	addUpdate(updates, "bo_admin", req.Admin)
+	addUpdate(updates, "bo_device", req.Device)
+	addUpdate(updates, "bo_list_level", req.ListLevel)
+	addUpdate(updates, "bo_read_level", req.ReadLevel)
+	addUpdate(updates, "bo_write_level", req.WriteLevel)
+	addUpdate(updates, "bo_reply_level", req.ReplyLevel)
+	addUpdate(updates, "bo_comment_level", req.CommentLevel)
+	addUpdate(updates, "bo_use_category", req.UseCategory)
+	addUpdate(updates, "bo_category_list", req.CategoryList)
+	addUpdate(updates, "bo_skin", req.Skin)
+	addUpdate(updates, "bo_mobile_skin", req.MobileSkin)
+	addUpdate(updates, "bo_page_rows", req.PageRows)
+	addUpdate(updates, "bo_upload_count", req.UploadCount)
+	addUpdate(updates, "bo_upload_size", req.UploadSize)
+}
+
+// addUpdate - 제네릭 헬퍼 함수로 nil 체크를 처리
+func addUpdate[T any](updates map[string]interface{}, key string, value *T) {
+	if value != nil {
+		updates[key] = *value
+	}
 }
 
 // DeleteBoard - 게시판 삭제 (관리자만 가능)
