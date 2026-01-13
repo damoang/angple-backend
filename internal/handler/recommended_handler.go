@@ -61,9 +61,10 @@ func (h *RecommendedHandler) GetRecommended(c *fiber.Ctx) error {
 		filename = period + ".json" // 1hour.json, 3hours.json 등 (최신 데이터)
 	}
 	filePath := filepath.Join(h.basePath, filename)
+	filePath = filepath.Clean(filePath) // Sanitize path
 
 	// Check if file exists
-	fileInfo, err := os.Stat(filePath)
+	fileInfo, err := os.Stat(filePath) // #nosec G304 - path is validated via whitelist
 	if err != nil {
 		if os.IsNotExist(err) {
 			// 파일이 없으면 빈 배열 반환 (개발 환경 대응)
@@ -77,7 +78,7 @@ func (h *RecommendedHandler) GetRecommended(c *fiber.Ctx) error {
 	}
 
 	// Read file content
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath) // #nosec G304 - path is validated via whitelist
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to read recommended data",
@@ -135,9 +136,10 @@ func (h *RecommendedHandler) GetRecommendedAI(c *fiber.Ctx) error {
 
 	// AI 분석 파일 경로 (ai_ 접두사 추가)
 	filePath := filepath.Join(h.basePath, "ai_"+fileName+".json")
+	filePath = filepath.Clean(filePath) // Sanitize path
 
 	// Check if file exists
-	fileInfo, err := os.Stat(filePath)
+	fileInfo, err := os.Stat(filePath) // #nosec G304 - path is validated via period mapping
 	if err != nil {
 		if os.IsNotExist(err) {
 			// 파일이 없으면 빈 배열 반환 (개발 환경 대응)
@@ -151,7 +153,7 @@ func (h *RecommendedHandler) GetRecommendedAI(c *fiber.Ctx) error {
 	}
 
 	// Read file content
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath) // #nosec G304 - path is validated via period mapping
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to read AI recommended data",
