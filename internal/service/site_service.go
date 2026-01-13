@@ -13,13 +13,13 @@ import (
 )
 
 var (
-	ErrSiteNotFound           = errors.New("site not found")
-	ErrSubdomainTaken         = errors.New("subdomain already taken")
-	ErrInvalidSubdomain       = errors.New("invalid subdomain format")
-	ErrSiteInactive           = errors.New("site is inactive")
-	ErrSiteSuspended          = errors.New("site is suspended")
-	ErrUnauthorized           = errors.New("unauthorized access")
-	ErrInvalidPlan            = errors.New("invalid plan")
+	ErrSiteNotFound     = errors.New("site not found")
+	ErrSubdomainTaken   = errors.New("subdomain already taken")
+	ErrInvalidSubdomain = errors.New("invalid subdomain format")
+	ErrSiteInactive     = errors.New("site is inactive")
+	ErrSiteSuspended    = errors.New("site is suspended")
+	ErrUnauthorized     = errors.New("unauthorized access")
+	ErrInvalidPlan      = errors.New("invalid plan")
 )
 
 type SiteService struct {
