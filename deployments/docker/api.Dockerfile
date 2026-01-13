@@ -11,19 +11,19 @@ RUN go mod download
 COPY . .
 
 # 빌드
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o api cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/api ./cmd/api
 
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates curl
 
-WORKDIR /root/
+WORKDIR /app
 
 # 바이너리 복사
 COPY --from=builder /app/api .
 COPY --from=builder /app/configs ./configs
 
-EXPOSE 8082
+EXPOSE 8081
 
 CMD ["./api"]
