@@ -72,8 +72,14 @@ func (h *BoardHandler) GetBoard(c *fiber.Ctx) error {
 // ListBoards - 게시판 목록 조회 (GET /api/v2/boards)
 func (h *BoardHandler) ListBoards(c *fiber.Ctx) error {
 	// 쿼리 파라미터 파싱
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
+	page, err := strconv.Atoi(c.Query("page", "1"))
+	if err != nil {
+		page = 1
+	}
+	pageSize, err := strconv.Atoi(c.Query("page_size", "20"))
+	if err != nil {
+		pageSize = 20
+	}
 
 	boards, total, err := h.service.ListBoards(page, pageSize)
 	if err != nil {
