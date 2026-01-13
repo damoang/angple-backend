@@ -1,781 +1,575 @@
-openapi: 3.0.3
+basePath: /api/v2
+definitions:
+  common.APIResponse:
+    properties:
+      data: {}
+      error:
+        $ref: '#/definitions/common.ErrorInfo'
+      meta:
+        $ref: '#/definitions/common.Meta'
+    type: object
+  common.ErrorInfo:
+    properties:
+      code:
+        type: string
+      details:
+        type: string
+      message:
+        type: string
+    type: object
+  common.Meta:
+    properties:
+      board_id:
+        type: string
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    type: object
+  domain.CreatePostRequest:
+    properties:
+      author:
+        maxLength: 50
+        minLength: 1
+        type: string
+      category:
+        type: string
+      content:
+        minLength: 1
+        type: string
+      password:
+        type: string
+      title:
+        maxLength: 200
+        minLength: 1
+        type: string
+    required:
+    - author
+    - content
+    - title
+    type: object
+  domain.Post:
+    properties:
+      author:
+        type: string
+      author_id:
+        type: string
+      category:
+        type: string
+      comments_count:
+        type: integer
+      content:
+        type: string
+      created_at:
+        type: string
+      dislikes:
+        type: integer
+      has_file:
+        type: integer
+      id:
+        type: integer
+      is_comment:
+        type: integer
+      last_updated:
+        type: string
+      likes:
+        type: integer
+      link1:
+        type: string
+      link2:
+        type: string
+      parent_id:
+        type: integer
+      seo_title:
+        type: string
+      title:
+        type: string
+      views:
+        type: integer
+    type: object
+  domain.UpdatePostRequest:
+    properties:
+      category:
+        type: string
+      content:
+        minLength: 1
+        type: string
+      title:
+        maxLength: 200
+        minLength: 1
+        type: string
+    type: object
+  handler.LoginRequest:
+    properties:
+      password:
+        type: string
+      user_id:
+        type: string
+    required:
+    - password
+    - user_id
+    type: object
+host: localhost:8082
 info:
-  title: Angple Backend API v2
-  description: |
-    다모앙(damoang.net) Go 백엔드 API 문서
-
-    ## 인증
-    - JWT Bearer Token 사용
-    - Authorization 헤더: `Bearer {access_token}`
-
-    ## 응답 형식
-    모든 API는 다음 형식으로 응답합니다:
-    ```json
-    {
-      "data": { ... },
-      "meta": { "page": 1, "limit": 20, "total": 100 },
-      "error": { "code": "ERROR_CODE", "message": "에러 메시지" }
-    }
-    ```
-  version: 2.0.0
   contact:
-    name: SDK
     email: sdk@damoang.net
+    name: SDK
+  description: |-
+    다모앙(damoang.net) 커뮤니티 백엔드 API 서버
+    기존 PHP(그누보드) 기반 시스템을 Go로 마이그레이션한 프로젝트
   license:
     name: Proprietary
-servers:
-  - url: http://localhost:8081/api/v2
-    description: 로컬 개발 서버
-  - url: https://api.damoang.net/api/v2
-    description: 프로덕션 서버
-
-tags:
-  - name: auth
-    description: 인증 관련 API
-  - name: menus
-    description: 메뉴 관리 API
-  - name: recommended
-    description: 추천 게시물 API
-  - name: posts
-    description: 게시글 관련 API
-  - name: comments
-    description: 댓글 관련 API
-  - name: members
-    description: 회원 관련 API
-  - name: files
-    description: 파일 업로드/다운로드 API
-  - name: scraps
-    description: 스크랩 API
-  - name: notifications
-    description: 알림 API
-  - name: admin
-    description: 관리자 API
-
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: JWT 액세스 토큰
-
-  schemas:
-    Error:
-      type: object
-      properties:
-        code:
-          type: string
-          example: BAD_REQUEST
-        message:
-          type: string
-          example: 잘못된 요청입니다
-        details:
-          type: string
-          example: Invalid post ID
-
-    Meta:
-      type: object
-      properties:
-        page:
-          type: integer
-          example: 1
-        limit:
-          type: integer
-          example: 20
-        total:
-          type: integer
-          example: 100
-        total_pages:
-          type: integer
-          example: 5
-
-    User:
-      type: object
-      properties:
-        id:
-          type: integer
-        user_id:
-          type: string
-        name:
-          type: string
-        nickname:
-          type: string
-        email:
-          type: string
-        level:
-          type: integer
-        point:
-          type: integer
-        profile:
-          type: string
-
-    Post:
-      type: object
-      properties:
-        id:
-          type: integer
-        title:
-          type: string
-        content:
-          type: string
-        author:
-          type: string
-        author_id:
-          type: string
-        views:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    Comment:
-      type: object
-      properties:
-        id:
-          type: integer
-        parent_id:
-          type: integer
-          description: 게시글 ID
-        content:
-          type: string
-        author:
-          type: string
-        author_id:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-
-    Menu:
-      type: object
-      properties:
-        id:
-          type: integer
-        parent_id:
-          type: integer
-          nullable: true
-        title:
-          type: string
-        url:
-          type: string
-        icon:
-          type: string
-        shortcut:
-          type: string
-        description:
-          type: string
-        depth:
-          type: integer
-        order_num:
-          type: integer
-        target:
-          type: string
-        show_in_header:
-          type: boolean
-        show_in_sidebar:
-          type: boolean
-        children:
-          type: array
-          items:
-            $ref: '#/components/schemas/Menu'
-
+  title: Angple Backend API
+  version: "2.0"
 paths:
   /auth/login:
     post:
-      tags:
-        - auth
+      consumes:
+      - application/json
+      description: 사용자 ID와 비밀번호로 로그인하여 JWT 토큰을 발급받습니다
+      parameters:
+      - description: 로그인 요청
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    access_token:
+                      type: string
+                    expires_in:
+                      type: integer
+                    user:
+                      type: object
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
       summary: 로그인
-      description: 아이디/비밀번호로 로그인하여 JWT 토큰 발급
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - user_id
-                - password
-              properties:
-                user_id:
-                  type: string
-                  example: user1
-                password:
-                  type: string
-                  example: test1234
-      responses:
-        '200':
-          description: 로그인 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      access_token:
-                        type: string
-                      refresh_token:
-                        type: string
-                      user:
-                        $ref: '#/components/schemas/User'
-        '401':
-          description: 인증 실패
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    $ref: '#/components/schemas/Error'
-
-  /auth/refresh:
+      tags:
+      - auth
+  /auth/logout:
     post:
-      tags:
-        - auth
-      summary: 토큰 재발급
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
+      consumes:
+      - application/json
+      description: 로그아웃하여 RefreshToken 쿠키를 삭제합니다
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    message:
+                      type: string
+                  type: object
               type: object
-              required:
-                - refresh_token
-              properties:
-                refresh_token:
-                  type: string
-      responses:
-        '200':
-          description: 토큰 재발급 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      access_token:
-                        type: string
-
-  /auth/profile:
-    get:
+      summary: 로그아웃
       tags:
-        - auth
-      summary: 내 프로필 조회 (JWT)
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: 프로필 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      user_id:
-                        type: string
-                      nickname:
-                        type: string
-                      level:
-                        type: integer
-
+      - auth
   /auth/me:
     get:
-      tags:
-        - auth
-      summary: 현재 사용자 정보 (Cookie SSO)
-      description: damoang_jwt 쿠키로 현재 로그인한 사용자 정보 조회
+      consumes:
+      - application/json
+      description: 다모앙 JWT 쿠키를 통해 현재 로그인한 사용자 정보를 조회합니다 (별도 JWT 토큰 불필요)
+      produces:
+      - application/json
       responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      user_id:
-                        type: string
-                      user_name:
-                        type: string
-                      user_level:
-                        type: integer
-        '401':
-          description: 인증 실패 (쿠키 없음)
-
-  /menus:
-    get:
-      tags:
-        - menus
-      summary: 전체 메뉴 조회
-      description: 계층 구조의 전체 메뉴 목록 조회
-      responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Menu'
-
-  /menus/sidebar:
-    get:
-      tags:
-        - menus
-      summary: 사이드바 메뉴 조회
-      description: 사이드바에 표시할 메뉴 목록 (show_in_sidebar = true)
-      responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Menu'
-
-  /menus/header:
-    get:
-      tags:
-        - menus
-      summary: 헤더 메뉴 조회
-      description: 헤더에 표시할 메뉴 목록 (show_in_header = true)
-      responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Menu'
-
-  /recommended/{period}:
-    get:
-      tags:
-        - recommended
-      summary: 추천 게시물 조회
-      description: 기간별 추천 게시물 목록 (캐시 파일 기반)
-      parameters:
-        - name: period
-          in: path
-          required: true
+        "200":
+          description: OK
           schema:
-            type: string
-            enum: [daily, weekly, monthly]
-          description: 추천 기간 (daily/weekly/monthly)
-          example: daily
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    mb_email:
+                      type: string
+                    mb_id:
+                      type: string
+                    mb_level:
+                      type: integer
+                    mb_name:
+                      type: string
+                  type: object
+              type: object
+      summary: 현재 사용자 정보 조회 (다모앙 쿠키 인증)
+      tags:
+      - auth
+  /auth/profile:
+    get:
+      consumes:
+      - application/json
+      description: JWT 토큰을 사용하여 현재 로그인한 사용자의 프로필 정보를 조회합니다
+      produces:
+      - application/json
       responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Post'
-        '404':
-          description: 파일 없음
-
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    level:
+                      type: integer
+                    nickname:
+                      type: string
+                    user_id:
+                      type: string
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 프로필 조회 (JWT 인증 필요)
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: RefreshToken을 사용하여 새로운 AccessToken을 발급받습니다 (Token Rotation 적용)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    access_token:
+                      type: string
+                    expires_in:
+                      type: integer
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      summary: 토큰 갱신
+      tags:
+      - auth
   /boards/{board_id}/posts:
     get:
-      tags:
-        - posts
-      summary: 게시글 목록 조회
+      consumes:
+      - application/json
+      description: 특정 게시판의 게시글 목록을 페이지네이션하여 조회합니다
       parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-          example: free
-        - name: page
-          in: query
-          schema:
-            type: integer
-            default: 1
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-      responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Post'
-                  meta:
-                    $ref: '#/components/schemas/Meta'
-
-    post:
-      tags:
-        - posts
-      summary: 게시글 작성
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-          example: free
-      requestBody:
+      - description: '게시판 ID (예: free, notice)'
+        in: path
+        name: board_id
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - title
-                - content
-                - author
-              properties:
-                title:
-                  type: string
-                  example: 테스트 게시글
-                content:
-                  type: string
-                  example: 게시글 내용입니다
-                author:
-                  type: string
-                  example: user1
+        type: string
+      - default: 1
+        description: '페이지 번호 (기본값: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: '페이지당 항목 수 (기본값: 20)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
       responses:
-        '201':
-          description: 생성 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/Post'
-
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/domain.Post'
+                  type: array
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      summary: 게시글 목록 조회
+      tags:
+      - posts
+    post:
+      consumes:
+      - application/json
+      description: 특정 게시판에 새 게시글을 작성합니다 (인증 필요)
+      parameters:
+      - description: 게시판 ID
+        in: path
+        name: board_id
+        required: true
+        type: string
+      - description: 게시글 작성 요청
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain.CreatePostRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/domain.Post'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 게시글 작성
+      tags:
+      - posts
+  /boards/{board_id}/posts/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: 특정 게시판의 특정 게시글을 삭제합니다 (작성자 본인만 가능)
+      parameters:
+      - description: 게시판 ID
+        in: path
+        name: board_id
+        required: true
+        type: string
+      - description: 게시글 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 게시글 삭제
+      tags:
+      - posts
+    get:
+      consumes:
+      - application/json
+      description: 특정 게시판의 특정 게시글 상세 정보를 조회합니다
+      parameters:
+      - description: 게시판 ID
+        in: path
+        name: board_id
+        required: true
+        type: string
+      - description: 게시글 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/domain.Post'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      summary: 게시글 상세 조회
+      tags:
+      - posts
+    put:
+      consumes:
+      - application/json
+      description: 특정 게시판의 특정 게시글을 수정합니다 (작성자 본인만 가능)
+      parameters:
+      - description: 게시판 ID
+        in: path
+        name: board_id
+        required: true
+        type: string
+      - description: 게시글 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 게시글 수정 요청
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/domain.UpdatePostRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: 게시글 수정
+      tags:
+      - posts
   /boards/{board_id}/posts/search:
     get:
-      tags:
-        - posts
+      consumes:
+      - application/json
+      description: 특정 게시판에서 키워드로 게시글을 검색합니다
+      parameters:
+      - description: 게시판 ID
+        in: path
+        name: board_id
+        required: true
+        type: string
+      - description: 검색 키워드
+        in: query
+        name: q
+        required: true
+        type: string
+      - default: 1
+        description: '페이지 번호 (기본값: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: '페이지당 항목 수 (기본값: 20)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/domain.Post'
+                  type: array
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
       summary: 게시글 검색
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: keyword
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: page
-          in: query
-          schema:
-            type: integer
-            default: 1
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-      responses:
-        '200':
-          description: 검색 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Post'
-                  meta:
-                    $ref: '#/components/schemas/Meta'
-
-  /boards/{board_id}/posts/{id}:
-    get:
       tags:
-        - posts
-      summary: 게시글 상세 조회
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/Post'
-        '404':
-          description: 게시글 없음
-
-    put:
-      tags:
-        - posts
-      summary: 게시글 수정
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                title:
-                  type: string
-                content:
-                  type: string
-      responses:
-        '204':
-          description: 수정 성공
-        '403':
-          description: 권한 없음 (본인만 수정 가능)
-
-    delete:
-      tags:
-        - posts
-      summary: 게시글 삭제
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '204':
-          description: 삭제 성공
-        '403':
-          description: 권한 없음
-
-  /boards/{board_id}/posts/{post_id}/comments:
-    get:
-      tags:
-        - comments
-      summary: 댓글 목록 조회
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: post_id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Comment'
-
-    post:
-      tags:
-        - comments
-      summary: 댓글 작성
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: post_id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - content
-                - author
-              properties:
-                content:
-                  type: string
-                  example: 댓글 내용
-                author:
-                  type: string
-                  example: user1
-      responses:
-        '201':
-          description: 생성 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/Comment'
-
-  /boards/{board_id}/posts/{post_id}/comments/{id}:
-    get:
-      tags:
-        - comments
-      summary: 댓글 상세 조회
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: post_id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/Comment'
-
-    put:
-      tags:
-        - comments
-      summary: 댓글 수정
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: post_id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - content
-              properties:
-                content:
-                  type: string
-      responses:
-        '204':
-          description: 수정 성공
-        '403':
-          description: 권한 없음
-
-    delete:
-      tags:
-        - comments
-      summary: 댓글 삭제
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: board_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: post_id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '204':
-          description: 삭제 성공
-        '403':
-          description: 권한 없음
+      - posts
+securityDefinitions:
+  BearerAuth:
+    description: 'JWT Authorization header using the Bearer scheme. Example: "Bearer
+      {token}"'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
