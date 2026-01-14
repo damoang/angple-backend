@@ -5,11 +5,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/proxy"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -22,79 +19,36 @@ func main() {
 	log.Printf("Laravel Backend: %s", laravelBackendURL)
 	log.Printf("Go API Backend: %s", goAPIURL)
 
-	// Fiber 앱 생성
-	app := fiber.New(fiber.Config{
-		Prefork:      false,
-		ServerHeader: "Angple Gateway",
-		AppName:      "Angple API Gateway v1.0.0",
-	})
+	// Gin 라우터 생성
+	router := gin.Default()
 
-	// 미들웨어
-	app.Use(recover.New())
-	app.Use(logger.New(logger.Config{
-		Format: "[${time}] ${status} - ${method} ${path} (${latency})\n",
-	}))
-
-	// CORS 설정 (브라우저 직접 호출 지원)
-	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "http://localhost:3010,http://localhost:5173,https://damoang.dev,https://api.damoang.dev,https://web.damoang.net,https://damoang.net",
-		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+	// CORS 설정
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3010", "http://localhost:5173", "https://damoang.dev", "https://api.damoang.dev", "https://web.damoang.net", "https://damoang.net"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		AllowCredentials: true,
 	}))
 
 	// Health Check
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendString("Gateway OK")
+	router.GET("/health", func(c *gin.Context) {
+		c.String(200, "Gateway OK")
 	})
 
-	// API v2 → Go Backend (신규)
-	app.All("/api/v2/*", func(c *fiber.Ctx) error {
-		url := goAPIURL + c.Path()
-		log.Printf("Proxying to Go API: %s", url)
-
-		if err := proxy.Do(c, url); err != nil {
-			return c.Status(502).JSON(fiber.Map{
-				"error": "Failed to proxy request to Go API",
-			})
-		}
-
-		// 응답 헤더 수정
-		c.Response().Header.Set("X-Powered-By", "Angple-Go")
-		return nil
-	})
-
-	// API v1 → Laravel Backend (기존)
-	app.All("/api/v1/*", func(c *fiber.Ctx) error {
-		url := laravelBackendURL + c.Path()
-		log.Printf("Proxying to Laravel: %s", url)
-
-		if err := proxy.Do(c, url); err != nil {
-			return c.Status(502).JSON(fiber.Map{
-				"error": "Failed to proxy request to Laravel",
-			})
-		}
-
-		return nil
-	})
-
-	// 기본 라우트 (Laravel로 전달)
-	app.All("/*", func(c *fiber.Ctx) error {
-		url := laravelBackendURL + c.Path()
-		return proxy.Do(c, url)
-	})
+	// TODO: Proxy routes to be implemented with httputil.ReverseProxy
 
 	// 서버 시작
 	addr := fmt.Sprintf(":%s", gatewayPort)
-	if err := app.Listen(addr); err != nil {
+	log.Printf("Gateway listening on %s", addr)
+	if err := router.Run(addr); err != nil {
 		log.Fatalf("Failed to start gateway: %v", err)
 	}
 }
 
-// getEnv 환경 변수 조회 (기본값 지원)
 func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
 	}
-	return defaultValue
+	return value
 }

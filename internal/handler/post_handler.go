@@ -7,7 +7,8 @@ import (
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
+	"github.com/damoang/angple-backend/pkg/ginutil"
 )
 
 // PostHandler handles HTTP requests for posts
@@ -32,17 +33,17 @@ func NewPostHandler(service service.PostService) *PostHandler {
 // @Success      200  {object}  common.APIResponse{data=[]domain.Post}
 // @Failure      500  {object}  common.APIResponse
 // @Router       /boards/{board_id}/posts [get]
-func (h *PostHandler) ListPosts(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	page := c.QueryInt("page", 1)
-	limit := c.QueryInt("limit", 20)
+func (h *PostHandler) ListPosts(c *gin.Context) {
+	boardID := c.Param("board_id")
+	page := ginutil.QueryInt(c, "page", 1)
+	limit := ginutil.QueryInt(c, "limit", 20)
 
 	data, meta, err := h.service.ListPosts(boardID, page, limit)
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to fetch posts", err)
+		common.ErrorResponse(c, 500, "Failed to fetch posts", err); return
 	}
 
-	return common.SuccessResponse(c, data, meta)
+	common.SuccessResponse(c, data, meta); return
 }
 
 // GetPost godoc
@@ -60,22 +61,22 @@ func (h *PostHandler) ListPosts(c *fiber.Ctx) error {
 // @Router       /boards/{board_id}/posts/{id} [get]
 //
 //nolint:dupl // Post와 Comment의 Get 로직은 유사하지만 다른 타입을 다룸
-func (h *PostHandler) GetPost(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	id, err := c.ParamsInt("id")
+func (h *PostHandler) GetPost(c *gin.Context) {
+	boardID := c.Param("board_id")
+	id, err := ginutil.ParamInt(c, "id")
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid post ID", err)
+		common.ErrorResponse(c, 400, "Invalid post ID", err); return
 	}
 
 	data, err := h.service.GetPost(boardID, id)
 	if errors.Is(err, common.ErrPostNotFound) {
-		return common.ErrorResponse(c, 404, "Post not found", err)
+		common.ErrorResponse(c, 404, "Post not found", err); return
 	}
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to fetch post", err)
+		common.ErrorResponse(c, 500, "Failed to fetch post", err); return
 	}
 
-	return common.SuccessResponse(c, data, nil)
+	common.SuccessResponse(c, data, nil); return
 }
 
 // CreatePost godoc
@@ -92,12 +93,12 @@ func (h *PostHandler) GetPost(c *fiber.Ctx) error {
 // @Failure      401  {object}  common.APIResponse
 // @Failure      500  {object}  common.APIResponse
 // @Router       /boards/{board_id}/posts [post]
-func (h *PostHandler) CreatePost(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
+func (h *PostHandler) CreatePost(c *gin.Context) {
+	boardID := c.Param("board_id")
 
 	var req domain.CreatePostRequest
-	if err := c.BodyParser(&req); err != nil {
-		return common.ErrorResponse(c, 400, "Invalid request body", err)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, 400, "Invalid request body", err); return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -105,10 +106,10 @@ func (h *PostHandler) CreatePost(c *fiber.Ctx) error {
 
 	data, err := h.service.CreatePost(boardID, &req, authorID)
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to create post", err)
+		common.ErrorResponse(c, 500, "Failed to create post", err); return
 	}
 
-	return c.Status(201).JSON(common.APIResponse{Data: data})
+	c.JSON(201, common.APIResponse{Data: data})
 }
 
 // UpdatePost godoc
@@ -130,16 +131,16 @@ func (h *PostHandler) CreatePost(c *fiber.Ctx) error {
 // @Router       /boards/{board_id}/posts/{id} [put]
 //
 //nolint:dupl // Post와 Comment의 Update/Delete 로직은 유사하지만 다른 타입을 다룸
-func (h *PostHandler) UpdatePost(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	id, err := c.ParamsInt("id")
+func (h *PostHandler) UpdatePost(c *gin.Context) {
+	boardID := c.Param("board_id")
+	id, err := ginutil.ParamInt(c, "id")
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid post ID", err)
+		common.ErrorResponse(c, 400, "Invalid post ID", err); return
 	}
 
 	var req domain.UpdatePostRequest
-	if err := c.BodyParser(&req); err != nil {
-		return common.ErrorResponse(c, 400, "Invalid request body", err)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, 400, "Invalid request body", err); return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -147,16 +148,16 @@ func (h *PostHandler) UpdatePost(c *fiber.Ctx) error {
 
 	err = h.service.UpdatePost(boardID, id, &req, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		return common.ErrorResponse(c, 404, "Post not found", err)
+		common.ErrorResponse(c, 404, "Post not found", err); return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		return common.ErrorResponse(c, 403, "Unauthorized", err)
+		common.ErrorResponse(c, 403, "Unauthorized", err); return
 	}
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to update post", err)
+		common.ErrorResponse(c, 500, "Failed to update post", err); return
 	}
 
-	return c.Status(204).Send(nil)
+	c.Status(204)
 }
 
 // DeletePost godoc
@@ -175,11 +176,11 @@ func (h *PostHandler) UpdatePost(c *fiber.Ctx) error {
 // @Failure      404  {object}  common.APIResponse
 // @Failure      500  {object}  common.APIResponse
 // @Router       /boards/{board_id}/posts/{id} [delete]
-func (h *PostHandler) DeletePost(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	id, err := c.ParamsInt("id")
+func (h *PostHandler) DeletePost(c *gin.Context) {
+	boardID := c.Param("board_id")
+	id, err := ginutil.ParamInt(c, "id")
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid post ID", err)
+		common.ErrorResponse(c, 400, "Invalid post ID", err); return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -187,16 +188,16 @@ func (h *PostHandler) DeletePost(c *fiber.Ctx) error {
 
 	err = h.service.DeletePost(boardID, id, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		return common.ErrorResponse(c, 404, "Post not found", err)
+		common.ErrorResponse(c, 404, "Post not found", err); return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		return common.ErrorResponse(c, 403, "Unauthorized", err)
+		common.ErrorResponse(c, 403, "Unauthorized", err); return
 	}
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to delete post", err)
+		common.ErrorResponse(c, 500, "Failed to delete post", err); return
 	}
 
-	return c.Status(204).Send(nil)
+	c.Status(204)
 }
 
 // SearchPosts godoc
@@ -213,20 +214,20 @@ func (h *PostHandler) DeletePost(c *fiber.Ctx) error {
 // @Failure      400  {object}  common.APIResponse
 // @Failure      500  {object}  common.APIResponse
 // @Router       /boards/{board_id}/posts/search [get]
-func (h *PostHandler) SearchPosts(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	keyword := c.Query("q", "")
-	page := c.QueryInt("page", 1)
-	limit := c.QueryInt("limit", 20)
+func (h *PostHandler) SearchPosts(c *gin.Context) {
+	boardID := c.Param("board_id")
+	keyword := c.Query("q")
+	page := ginutil.QueryInt(c, "page", 1)
+	limit := ginutil.QueryInt(c, "limit", 20)
 
 	if keyword == "" {
-		return common.ErrorResponse(c, 400, "Search keyword required", nil)
+		common.ErrorResponse(c, 400, "Search keyword required", nil); return
 	}
 
 	data, meta, err := h.service.SearchPosts(boardID, keyword, page, limit)
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to search posts", err)
+		common.ErrorResponse(c, 500, "Failed to search posts", err); return
 	}
 
-	return common.SuccessResponse(c, data, meta)
+	common.SuccessResponse(c, data, meta); return
 }

@@ -2,12 +2,14 @@ package handler
 
 import (
 	"errors"
-	"strconv"
+	"net/http"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
+	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
+	"github.com/damoang/angple-backend/pkg/ginutil"
 )
 
 type BoardHandler struct {
@@ -19,23 +21,24 @@ func NewBoardHandler(service *service.BoardService) *BoardHandler {
 }
 
 // CreateBoard - 게시판 생성 (POST /api/v2/boards)
-func (h *BoardHandler) CreateBoard(c *fiber.Ctx) error {
+func (h *BoardHandler) CreateBoard(c *gin.Context) {
 	// 1. JWT에서 사용자 정보 추출
-	userID, ok := c.Locals("userID").(string)
-	if !ok {
-		return common.ErrorResponse(c, fiber.StatusUnauthorized, "User not authenticated", nil)
-	}
+	userID := middleware.GetUserID(c)
 
 	// 2. 관리자 권한 확인 (레벨 10)
-	memberLevel, ok := c.Locals("level").(int)
-	if !ok || memberLevel < 10 {
-		return common.ErrorResponse(c, fiber.StatusForbidden, "Admin access required", nil)
+	levelVal, exists := c.Get("level")
+	memberLevel := 1
+	if exists {
+		memberLevel, _ = levelVal.(int)
+	}
+	if memberLevel < 10 {
+		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil); return
 	}
 
 	// 3. 요청 바디 파싱
 	var req domain.CreateBoardRequest
-	if err := c.BodyParser(&req); err != nil {
-		return common.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", err)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err); return
 	}
 
 	// 4. 서비스 호출
@@ -43,47 +46,41 @@ func (h *BoardHandler) CreateBoard(c *fiber.Ctx) error {
 	if err != nil {
 		// 중복 체크
 		if err.Error() == "board_id already exists" || err.Error() == "board already exists" {
-			return common.ErrorResponse(c, fiber.StatusConflict, "Board already exists", err)
+			common.ErrorResponse(c, http.StatusConflict, "Board already exists", err); return
 		}
-		return common.ErrorResponse(c, fiber.StatusBadRequest, "Failed to create board", err)
+		common.ErrorResponse(c, http.StatusBadRequest, "Failed to create board", err); return
 	}
 
 	// 5. 응답
-	return c.Status(fiber.StatusCreated).JSON(common.APIResponse{
+	c.JSON(http.StatusCreated, common.APIResponse{
 		Data: board.ToResponse(),
 	})
 }
 
 // GetBoard - 게시판 조회 (GET /api/v2/boards/:board_id)
-func (h *BoardHandler) GetBoard(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
+func (h *BoardHandler) GetBoard(c *gin.Context) {
+	boardID := c.Param("board_id")
 
 	board, err := h.service.GetBoard(boardID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			return common.ErrorResponse(c, fiber.StatusNotFound, "Board not found", err)
+			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err); return
 		}
-		return common.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to fetch board", err)
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch board", err); return
 	}
 
-	return common.SuccessResponse(c, board.ToResponse(), nil)
+	common.SuccessResponse(c, board.ToResponse(), nil)
 }
 
 // ListBoards - 게시판 목록 조회 (GET /api/v2/boards)
-func (h *BoardHandler) ListBoards(c *fiber.Ctx) error {
+func (h *BoardHandler) ListBoards(c *gin.Context) {
 	// 쿼리 파라미터 파싱
-	page, err := strconv.Atoi(c.Query("page", "1"))
-	if err != nil {
-		page = 1
-	}
-	pageSize, err := strconv.Atoi(c.Query("page_size", "20"))
-	if err != nil {
-		pageSize = 20
-	}
+	page := ginutil.QueryInt(c, "page", 1)
+	pageSize := ginutil.QueryInt(c, "page_size", 20)
 
 	boards, total, err := h.service.ListBoards(page, pageSize)
 	if err != nil {
-		return common.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to fetch boards", err)
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch boards", err); return
 	}
 
 	// Response DTO로 변환
@@ -99,16 +96,16 @@ func (h *BoardHandler) ListBoards(c *fiber.Ctx) error {
 		Total: total,
 	}
 
-	return common.SuccessResponse(c, responses, meta)
+	common.SuccessResponse(c, responses, meta)
 }
 
 // ListBoardsByGroup - 그룹별 게시판 목록 (GET /api/v2/groups/:group_id/boards)
-func (h *BoardHandler) ListBoardsByGroup(c *fiber.Ctx) error {
-	groupID := c.Params("group_id")
+func (h *BoardHandler) ListBoardsByGroup(c *gin.Context) {
+	groupID := c.Param("group_id")
 
 	boards, err := h.service.ListBoardsByGroup(groupID)
 	if err != nil {
-		return common.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to fetch boards", err)
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch boards", err); return
 	}
 
 	// Response DTO로 변환
@@ -117,28 +114,26 @@ func (h *BoardHandler) ListBoardsByGroup(c *fiber.Ctx) error {
 		responses[i] = board.ToResponse()
 	}
 
-	return common.SuccessResponse(c, responses, nil)
+	common.SuccessResponse(c, responses, nil)
 }
 
 // UpdateBoard - 게시판 수정 (PUT /api/v2/boards/:board_id)
-func (h *BoardHandler) UpdateBoard(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
+func (h *BoardHandler) UpdateBoard(c *gin.Context) {
+	boardID := c.Param("board_id")
 
 	// JWT에서 사용자 정보 추출
-	userID, ok := c.Locals("userID").(string)
-	if !ok {
-		return common.ErrorResponse(c, fiber.StatusUnauthorized, "User not authenticated", nil)
-	}
+	userID := middleware.GetUserID(c)
 
-	memberLevel, ok := c.Locals("level").(int)
-	if !ok {
-		memberLevel = 1
+	levelVal, exists := c.Get("level")
+	memberLevel := 1
+	if exists {
+		memberLevel, _ = levelVal.(int)
 	}
 
 	// 요청 바디 파싱
 	var req domain.UpdateBoardRequest
-	if err := c.BodyParser(&req); err != nil {
-		return common.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", err)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err); return
 	}
 
 	// 서비스 호출
@@ -146,39 +141,43 @@ func (h *BoardHandler) UpdateBoard(c *fiber.Ctx) error {
 	err := h.service.UpdateBoard(boardID, &req, userID, isAdmin)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			return common.ErrorResponse(c, fiber.StatusNotFound, "Board not found", err)
+			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err); return
 		}
 		if errors.Is(err, common.ErrForbidden) {
-			return common.ErrorResponse(c, fiber.StatusForbidden, "Permission denied", err)
+			common.ErrorResponse(c, http.StatusForbidden, "Permission denied", err); return
 		}
-		return common.ErrorResponse(c, fiber.StatusBadRequest, "Failed to update board", err)
+		common.ErrorResponse(c, http.StatusBadRequest, "Failed to update board", err); return
 	}
 
-	return common.SuccessResponse(c, fiber.Map{
+	common.SuccessResponse(c, gin.H{
 		"message": "Board updated successfully",
 	}, nil)
 }
 
 // DeleteBoard - 게시판 삭제 (DELETE /api/v2/boards/:board_id)
-func (h *BoardHandler) DeleteBoard(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
+func (h *BoardHandler) DeleteBoard(c *gin.Context) {
+	boardID := c.Param("board_id")
 
 	// 관리자 권한 확인
-	memberLevel, ok := c.Locals("level").(int)
-	if !ok || memberLevel < 10 {
-		return common.ErrorResponse(c, fiber.StatusForbidden, "Admin access required", nil)
+	levelVal, exists := c.Get("level")
+	memberLevel := 1
+	if exists {
+		memberLevel, _ = levelVal.(int)
+	}
+	if memberLevel < 10 {
+		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil); return
 	}
 
 	// 서비스 호출
 	err := h.service.DeleteBoard(boardID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			return common.ErrorResponse(c, fiber.StatusNotFound, "Board not found", err)
+			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err); return
 		}
-		return common.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to delete board", err)
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to delete board", err); return
 	}
 
-	return common.SuccessResponse(c, fiber.Map{
+	common.SuccessResponse(c, gin.H{
 		"message": "Board deleted successfully",
 	}, nil)
 }
