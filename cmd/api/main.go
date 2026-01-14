@@ -19,10 +19,52 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/joho/godotenv"
+	fiberSwagger "github.com/swaggo/fiber-swagger"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
+
+	_ "github.com/damoang/angple-backend/docs" // swagger docs
 )
+
+// @title           Angple Backend API
+// @version         2.0
+// @description     다모앙(damoang.net) 커뮤니티 백엔드 API 서버
+// @description     기존 PHP(그누보드) 기반 시스템을 Go로 마이그레이션한 프로젝트
+//
+// @contact.name    SDK
+// @contact.email   sdk@damoang.net
+//
+// @license.name    Proprietary
+//
+// @host            localhost:8082
+// @BasePath        /api/v2
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description JWT Authorization header using the Bearer scheme. Example: "Bearer {token}"
+//
+// @tag.name auth
+// @tag.description 인증 관련 API (로그인, 토큰 관리)
+//
+// @tag.name boards
+// @tag.description 게시판 관리 API
+//
+// @tag.name posts
+// @tag.description 게시글 CRUD API
+//
+// @tag.name comments
+// @tag.description 댓글 CRUD API
+//
+// @tag.name menus
+// @tag.description 메뉴 조회 API
+//
+// @tag.name recommended
+// @tag.description 추천 게시물 API (AI 분석 포함)
+//
+// @tag.name site
+// @tag.description 사이트 설정 API
 
 // getConfigPath returns config file path based on APP_ENV environment variable
 func getConfigPath() string {
@@ -148,6 +190,9 @@ func main() {
 			"time":   time.Now().Unix(),
 		})
 	})
+
+	// Swagger UI
+	app.Get("/swagger/*", fiberSwagger.WrapHandler)
 
 	// API v2 라우트
 	routes.Setup(app, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, jwtManager, damoangJWT, recommendedHandler, cfg)

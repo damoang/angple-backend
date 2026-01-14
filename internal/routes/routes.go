@@ -71,7 +71,8 @@ func Setup(
 
 	// Recommended Posts (공개 API - 인증 불필요)
 	recommended := api.Group("/recommended")
-	recommended.Get("/:period", recommendedHandler.GetRecommended)
+	recommended.Get("/ai/:period", recommendedHandler.GetRecommendedAI) // AI 분석 기반 추천
+	recommended.Get("/:period", recommendedHandler.GetRecommended)      // 일반 추천
 
 	// Menus (공개 API - 인증 불필요)
 	menus := api.Group("/menus")
