@@ -40,18 +40,18 @@ type RefreshRequest struct {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, 400, "Invalid request body", err); return
+		common.ErrorResponse(c, 400, "Invalid request body", err)
 		return
 	}
 
 	// Authenticate
 	response, err := h.service.Login(req.UserID, req.Password)
 	if errors.Is(err, common.ErrInvalidCredentials) {
-		common.ErrorResponse(c, 401, "Invalid credentials", err); return
+		common.ErrorResponse(c, 401, "Invalid credentials", err)
 		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Login failed", err); return
+		common.ErrorResponse(c, 500, "Login failed", err)
 		return
 	}
 
@@ -62,18 +62,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, 400, "Invalid request body", err); return
+		common.ErrorResponse(c, 400, "Invalid request body", err)
 		return
 	}
 
 	// Refresh tokens
 	tokens, err := h.service.RefreshToken(req.RefreshToken)
 	if errors.Is(err, common.ErrInvalidToken) {
-		common.ErrorResponse(c, 401, "Invalid refresh token", err); return
+		common.ErrorResponse(c, 401, "Invalid refresh token", err)
 		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Token refresh failed", err); return
+		common.ErrorResponse(c, 500, "Token refresh failed", err)
 		return
 	}
 
