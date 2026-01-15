@@ -21,10 +21,12 @@ func NewMenuHandler(service service.MenuService) *MenuHandler {
 func (h *MenuHandler) GetMenus(c *gin.Context) {
 	data, err := h.service.GetMenus()
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to fetch menus", err); return
+		common.ErrorResponse(c, 500, "Failed to fetch menus", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, nil); return
+	common.SuccessResponse(c, data, nil)
+	return
 }
 
 // GetSidebarMenus handles GET /api/v2/menus/sidebar
@@ -32,10 +34,12 @@ func (h *MenuHandler) GetMenus(c *gin.Context) {
 func (h *MenuHandler) GetSidebarMenus(c *gin.Context) {
 	data, err := h.service.GetSidebarMenus()
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to fetch sidebar menus", err); return
+		common.ErrorResponse(c, 500, "Failed to fetch sidebar menus", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, nil); return
+	common.SuccessResponse(c, data, nil)
+	return
 }
 
 // GetHeaderMenus handles GET /api/v2/menus/header
@@ -43,8 +47,10 @@ func (h *MenuHandler) GetSidebarMenus(c *gin.Context) {
 func (h *MenuHandler) GetHeaderMenus(c *gin.Context) {
 	data, err := h.service.GetHeaderMenus()
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to fetch header menus", err); return
+		common.ErrorResponse(c, 500, "Failed to fetch header menus", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, nil); return
+	common.SuccessResponse(c, data, nil)
+	return
 }

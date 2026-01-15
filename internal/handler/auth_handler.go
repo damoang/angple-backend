@@ -122,13 +122,13 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	// Clear the refresh token cookie
 	c.SetCookie(
-		"refresh_token",  // name
-		"",               // value
-		-1,               // maxAge
-		"/",              // path
-		"",               // domain
-		true,             // secure
-		true,             // httpOnly
+		"refresh_token", // name
+		"",              // value
+		-1,              // maxAge
+		"/",             // path
+		"",              // domain
+		true,            // secure
+		true,            // httpOnly
 	)
 
 	c.JSON(http.StatusOK, common.APIResponse{

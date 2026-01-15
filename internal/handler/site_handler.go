@@ -7,8 +7,8 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gin-gonic/gin"
 	"github.com/damoang/angple-backend/pkg/ginutil"
+	"github.com/gin-gonic/gin"
 )
 
 type SiteHandler struct {
@@ -27,9 +27,11 @@ func NewSiteHandler(service *service.SiteService) *SiteHandler {
 func (h *SiteHandler) handleSiteRetrieval(c *gin.Context, site *domain.SiteResponse, err error) {
 	if err != nil {
 		if errors.Is(err, service.ErrSiteNotFound) {
-			common.ErrorResponse(c, http.StatusNotFound, "Site not found", err); return
+			common.ErrorResponse(c, http.StatusNotFound, "Site not found", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve site", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve site", err)
+		return
 	}
 
 	common.SuccessResponse(c, map[string]interface{}{
@@ -42,7 +44,8 @@ func (h *SiteHandler) handleSiteRetrieval(c *gin.Context, site *domain.SiteRespo
 func (h *SiteHandler) GetBySubdomain(c *gin.Context) {
 	subdomain := c.Param("subdomain")
 	if subdomain == "" {
-		common.ErrorResponse(c, http.StatusBadRequest, "Subdomain is required", nil); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Subdomain is required", nil)
+		return
 	}
 
 	site, err := h.service.GetBySubdomain(c.Request.Context(), subdomain)
@@ -54,7 +57,8 @@ func (h *SiteHandler) GetBySubdomain(c *gin.Context) {
 func (h *SiteHandler) GetByID(c *gin.Context) {
 	siteID := c.Param("id")
 	if siteID == "" {
-		common.ErrorResponse(c, http.StatusBadRequest, "Site ID is required", nil); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Site ID is required", nil)
+		return
 	}
 
 	site, err := h.service.GetByID(c.Request.Context(), siteID)
@@ -66,7 +70,8 @@ func (h *SiteHandler) GetByID(c *gin.Context) {
 func (h *SiteHandler) Create(c *gin.Context) {
 	var req domain.CreateSiteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err)
+		return
 	}
 
 	// TODO: 향후 validator 적용 필요
@@ -75,13 +80,17 @@ func (h *SiteHandler) Create(c *gin.Context) {
 	site, err := h.service.Create(c.Request.Context(), &req)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidSubdomain) {
-			common.ErrorResponse(c, http.StatusBadRequest, "Invalid subdomain format", err); return
+			common.ErrorResponse(c, http.StatusBadRequest, "Invalid subdomain format", err)
+			return
 		} else if errors.Is(err, service.ErrSubdomainTaken) {
-			common.ErrorResponse(c, http.StatusConflict, "Subdomain already taken", err); return
+			common.ErrorResponse(c, http.StatusConflict, "Subdomain already taken", err)
+			return
 		} else if errors.Is(err, service.ErrInvalidPlan) {
-			common.ErrorResponse(c, http.StatusBadRequest, "Invalid plan", err); return
+			common.ErrorResponse(c, http.StatusBadRequest, "Invalid plan", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to create site", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to create site", err)
+		return
 	}
 
 	c.JSON(http.StatusCreated, common.APIResponse{
@@ -100,15 +109,18 @@ func (h *SiteHandler) Create(c *gin.Context) {
 func (h *SiteHandler) GetSettings(c *gin.Context) {
 	siteID := c.Param("id")
 	if siteID == "" {
-		common.ErrorResponse(c, http.StatusBadRequest, "Site ID is required", nil); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Site ID is required", nil)
+		return
 	}
 
 	settings, err := h.service.GetSettings(c.Request.Context(), siteID)
 	if err != nil {
 		if errors.Is(err, service.ErrSiteNotFound) {
-			common.ErrorResponse(c, http.StatusNotFound, "Site not found", err); return
+			common.ErrorResponse(c, http.StatusNotFound, "Site not found", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve settings", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve settings", err)
+		return
 	}
 
 	common.SuccessResponse(c, map[string]interface{}{
@@ -121,12 +133,14 @@ func (h *SiteHandler) GetSettings(c *gin.Context) {
 func (h *SiteHandler) UpdateSettings(c *gin.Context) {
 	siteID := c.Param("id")
 	if siteID == "" {
-		common.ErrorResponse(c, http.StatusBadRequest, "Site ID is required", nil); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Site ID is required", nil)
+		return
 	}
 
 	var req domain.UpdateSiteSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err)
+		return
 	}
 
 	// TODO: 향후 인증 추가 필요 (site owner/admin만 수정 가능)
@@ -137,9 +151,11 @@ func (h *SiteHandler) UpdateSettings(c *gin.Context) {
 	err := h.service.UpdateSettings(c.Request.Context(), siteID, &req)
 	if err != nil {
 		if errors.Is(err, service.ErrSiteNotFound) {
-			common.ErrorResponse(c, http.StatusNotFound, "Site not found", err); return
+			common.ErrorResponse(c, http.StatusNotFound, "Site not found", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to update settings", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to update settings", err)
+		return
 	}
 
 	common.SuccessResponse(c, map[string]interface{}{
@@ -160,7 +176,8 @@ func (h *SiteHandler) ListActive(c *gin.Context) {
 
 	sites, err := h.service.ListActive(c.Request.Context(), limit, offset)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve sites", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve sites", err)
+		return
 	}
 
 	common.SuccessResponse(c, map[string]interface{}{
@@ -181,7 +198,8 @@ func (h *SiteHandler) ListActive(c *gin.Context) {
 func (h *SiteHandler) CheckSubdomainAvailability(c *gin.Context) {
 	subdomain := c.Param("subdomain")
 	if subdomain == "" {
-		common.ErrorResponse(c, http.StatusBadRequest, "Subdomain is required", nil); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Subdomain is required", nil)
+		return
 	}
 
 	// 먼저 서비스 레이어의 검증 로직 사용
@@ -189,13 +207,15 @@ func (h *SiteHandler) CheckSubdomainAvailability(c *gin.Context) {
 		common.SuccessResponse(c, map[string]interface{}{
 			"available": false,
 			"reason":    "Invalid subdomain format",
-		}, nil); return
+		}, nil)
+		return
 	}
 
 	// DB에서 중복 체크
 	site, err := h.service.GetBySubdomain(c.Request.Context(), subdomain)
 	if err != nil && !errors.Is(err, service.ErrSiteNotFound) {
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to check subdomain", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to check subdomain", err)
+		return
 	}
 
 	available := (site == nil || errors.Is(err, service.ErrSiteNotFound))

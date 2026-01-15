@@ -7,8 +7,8 @@ import (
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gin-gonic/gin"
 	"github.com/damoang/angple-backend/pkg/ginutil"
+	"github.com/gin-gonic/gin"
 )
 
 type CommentHandler struct {
@@ -22,17 +22,20 @@ func NewCommentHandler(service service.CommentService) *CommentHandler {
 // ListComments handles GET /api/v2/boards/:board_id/posts/:id/comments
 func (h *CommentHandler) ListComments(c *gin.Context) {
 	boardID := c.Param("board_id")
-	postID, err := ginutil.ParamInt(c, "id")  // 파라미터 이름 변경: post_id -> id
+	postID, err := ginutil.ParamInt(c, "id") // 파라미터 이름 변경: post_id -> id
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid post ID", err); return
+		common.ErrorResponse(c, 400, "Invalid post ID", err)
+		return
 	}
 
 	data, err := h.service.ListComments(boardID, postID)
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to fetch comments", err); return
+		common.ErrorResponse(c, 500, "Failed to fetch comments", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, nil); return
+	common.SuccessResponse(c, data, nil)
+	return
 }
 
 // GetComment handles GET /api/v2/boards/:board_id/posts/:id/comments/:comment_id
@@ -40,33 +43,39 @@ func (h *CommentHandler) ListComments(c *gin.Context) {
 //nolint:dupl // Comment와 Post의 Get 로직은 유사하지만 다른 타입을 다룸
 func (h *CommentHandler) GetComment(c *gin.Context) {
 	boardID := c.Param("board_id")
-	id, err := ginutil.ParamInt(c, "comment_id")  // 파라미터 이름 변경: id -> comment_id
+	id, err := ginutil.ParamInt(c, "comment_id") // 파라미터 이름 변경: id -> comment_id
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid comment ID", err); return
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
 	}
 
 	data, err := h.service.GetComment(boardID, id)
 	if errors.Is(err, common.ErrPostNotFound) {
-		common.ErrorResponse(c, 404, "Comment not found", err); return
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to fetch comment", err); return
+		common.ErrorResponse(c, 500, "Failed to fetch comment", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, nil); return
+	common.SuccessResponse(c, data, nil)
+	return
 }
 
 // CreateComment handles POST /api/v2/boards/:board_id/posts/:id/comments
 func (h *CommentHandler) CreateComment(c *gin.Context) {
 	boardID := c.Param("board_id")
-	postID, err := ginutil.ParamInt(c, "id")  // 파라미터 이름 변경: post_id -> id
+	postID, err := ginutil.ParamInt(c, "id") // 파라미터 이름 변경: post_id -> id
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid post ID", err); return
+		common.ErrorResponse(c, 400, "Invalid post ID", err)
+		return
 	}
 
 	var req domain.CreateCommentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, 400, "Invalid request body", err); return
+		common.ErrorResponse(c, 400, "Invalid request body", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -74,7 +83,8 @@ func (h *CommentHandler) CreateComment(c *gin.Context) {
 
 	data, err := h.service.CreateComment(boardID, postID, &req, authorID)
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to create comment", err); return
+		common.ErrorResponse(c, 500, "Failed to create comment", err)
+		return
 	}
 
 	c.JSON(201, common.APIResponse{Data: data})
@@ -85,14 +95,16 @@ func (h *CommentHandler) CreateComment(c *gin.Context) {
 //nolint:dupl // Comment와 Post의 Update/Delete 로직은 유사하지만 다른 타입을 다룸
 func (h *CommentHandler) UpdateComment(c *gin.Context) {
 	boardID := c.Param("board_id")
-	id, err := ginutil.ParamInt(c, "comment_id")  // 파라미터 이름 변경: id -> comment_id
+	id, err := ginutil.ParamInt(c, "comment_id") // 파라미터 이름 변경: id -> comment_id
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid comment ID", err); return
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
 	}
 
 	var req domain.UpdateCommentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, 400, "Invalid request body", err); return
+		common.ErrorResponse(c, 400, "Invalid request body", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -100,13 +112,16 @@ func (h *CommentHandler) UpdateComment(c *gin.Context) {
 
 	err = h.service.UpdateComment(boardID, id, &req, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		common.ErrorResponse(c, 404, "Comment not found", err); return
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		common.ErrorResponse(c, 403, "Unauthorized", err); return
+		common.ErrorResponse(c, 403, "Unauthorized", err)
+		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to update comment", err); return
+		common.ErrorResponse(c, 500, "Failed to update comment", err)
+		return
 	}
 
 	c.Status(204)
@@ -117,7 +132,8 @@ func (h *CommentHandler) DeleteComment(c *gin.Context) {
 	boardID := c.Param("board_id")
 	id, err := ginutil.ParamInt(c, "comment_id")
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid comment ID", err); return
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -125,13 +141,16 @@ func (h *CommentHandler) DeleteComment(c *gin.Context) {
 
 	err = h.service.DeleteComment(boardID, id, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		common.ErrorResponse(c, 404, "Comment not found", err); return
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		common.ErrorResponse(c, 403, "Unauthorized", err); return
+		common.ErrorResponse(c, 403, "Unauthorized", err)
+		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to delete comment", err); return
+		common.ErrorResponse(c, 500, "Failed to delete comment", err)
+		return
 	}
 
 	c.Status(204)

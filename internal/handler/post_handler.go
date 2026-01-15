@@ -7,8 +7,8 @@ import (
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gin-gonic/gin"
 	"github.com/damoang/angple-backend/pkg/ginutil"
+	"github.com/gin-gonic/gin"
 )
 
 // PostHandler handles HTTP requests for posts
@@ -40,10 +40,12 @@ func (h *PostHandler) ListPosts(c *gin.Context) {
 
 	data, meta, err := h.service.ListPosts(boardID, page, limit)
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to fetch posts", err); return
+		common.ErrorResponse(c, 500, "Failed to fetch posts", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, meta); return
+	common.SuccessResponse(c, data, meta)
+	return
 }
 
 // GetPost godoc
@@ -65,18 +67,22 @@ func (h *PostHandler) GetPost(c *gin.Context) {
 	boardID := c.Param("board_id")
 	id, err := ginutil.ParamInt(c, "id")
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid post ID", err); return
+		common.ErrorResponse(c, 400, "Invalid post ID", err)
+		return
 	}
 
 	data, err := h.service.GetPost(boardID, id)
 	if errors.Is(err, common.ErrPostNotFound) {
-		common.ErrorResponse(c, 404, "Post not found", err); return
+		common.ErrorResponse(c, 404, "Post not found", err)
+		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to fetch post", err); return
+		common.ErrorResponse(c, 500, "Failed to fetch post", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, nil); return
+	common.SuccessResponse(c, data, nil)
+	return
 }
 
 // CreatePost godoc
@@ -98,7 +104,8 @@ func (h *PostHandler) CreatePost(c *gin.Context) {
 
 	var req domain.CreatePostRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, 400, "Invalid request body", err); return
+		common.ErrorResponse(c, 400, "Invalid request body", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -106,7 +113,8 @@ func (h *PostHandler) CreatePost(c *gin.Context) {
 
 	data, err := h.service.CreatePost(boardID, &req, authorID)
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to create post", err); return
+		common.ErrorResponse(c, 500, "Failed to create post", err)
+		return
 	}
 
 	c.JSON(201, common.APIResponse{Data: data})
@@ -135,12 +143,14 @@ func (h *PostHandler) UpdatePost(c *gin.Context) {
 	boardID := c.Param("board_id")
 	id, err := ginutil.ParamInt(c, "id")
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid post ID", err); return
+		common.ErrorResponse(c, 400, "Invalid post ID", err)
+		return
 	}
 
 	var req domain.UpdatePostRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, 400, "Invalid request body", err); return
+		common.ErrorResponse(c, 400, "Invalid request body", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -148,13 +158,16 @@ func (h *PostHandler) UpdatePost(c *gin.Context) {
 
 	err = h.service.UpdatePost(boardID, id, &req, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		common.ErrorResponse(c, 404, "Post not found", err); return
+		common.ErrorResponse(c, 404, "Post not found", err)
+		return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		common.ErrorResponse(c, 403, "Unauthorized", err); return
+		common.ErrorResponse(c, 403, "Unauthorized", err)
+		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to update post", err); return
+		common.ErrorResponse(c, 500, "Failed to update post", err)
+		return
 	}
 
 	c.Status(204)
@@ -180,7 +193,8 @@ func (h *PostHandler) DeletePost(c *gin.Context) {
 	boardID := c.Param("board_id")
 	id, err := ginutil.ParamInt(c, "id")
 	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid post ID", err); return
+		common.ErrorResponse(c, 400, "Invalid post ID", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -188,13 +202,16 @@ func (h *PostHandler) DeletePost(c *gin.Context) {
 
 	err = h.service.DeletePost(boardID, id, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		common.ErrorResponse(c, 404, "Post not found", err); return
+		common.ErrorResponse(c, 404, "Post not found", err)
+		return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		common.ErrorResponse(c, 403, "Unauthorized", err); return
+		common.ErrorResponse(c, 403, "Unauthorized", err)
+		return
 	}
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to delete post", err); return
+		common.ErrorResponse(c, 500, "Failed to delete post", err)
+		return
 	}
 
 	c.Status(204)
@@ -221,13 +238,16 @@ func (h *PostHandler) SearchPosts(c *gin.Context) {
 	limit := ginutil.QueryInt(c, "limit", 20)
 
 	if keyword == "" {
-		common.ErrorResponse(c, 400, "Search keyword required", nil); return
+		common.ErrorResponse(c, 400, "Search keyword required", nil)
+		return
 	}
 
 	data, meta, err := h.service.SearchPosts(boardID, keyword, page, limit)
 	if err != nil {
-		common.ErrorResponse(c, 500, "Failed to search posts", err); return
+		common.ErrorResponse(c, 500, "Failed to search posts", err)
+		return
 	}
 
-	common.SuccessResponse(c, data, meta); return
+	common.SuccessResponse(c, data, meta)
+	return
 }

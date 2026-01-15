@@ -8,8 +8,8 @@ import (
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gin-gonic/gin"
 	"github.com/damoang/angple-backend/pkg/ginutil"
+	"github.com/gin-gonic/gin"
 )
 
 type BoardHandler struct {
@@ -32,13 +32,15 @@ func (h *BoardHandler) CreateBoard(c *gin.Context) {
 		memberLevel, _ = levelVal.(int)
 	}
 	if memberLevel < 10 {
-		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil); return
+		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil)
+		return
 	}
 
 	// 3. 요청 바디 파싱
 	var req domain.CreateBoardRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err)
+		return
 	}
 
 	// 4. 서비스 호출
@@ -46,9 +48,11 @@ func (h *BoardHandler) CreateBoard(c *gin.Context) {
 	if err != nil {
 		// 중복 체크
 		if err.Error() == "board_id already exists" || err.Error() == "board already exists" {
-			common.ErrorResponse(c, http.StatusConflict, "Board already exists", err); return
+			common.ErrorResponse(c, http.StatusConflict, "Board already exists", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusBadRequest, "Failed to create board", err); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Failed to create board", err)
+		return
 	}
 
 	// 5. 응답
@@ -64,9 +68,11 @@ func (h *BoardHandler) GetBoard(c *gin.Context) {
 	board, err := h.service.GetBoard(boardID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err); return
+			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch board", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch board", err)
+		return
 	}
 
 	common.SuccessResponse(c, board.ToResponse(), nil)
@@ -80,7 +86,8 @@ func (h *BoardHandler) ListBoards(c *gin.Context) {
 
 	boards, total, err := h.service.ListBoards(page, pageSize)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch boards", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch boards", err)
+		return
 	}
 
 	// Response DTO로 변환
@@ -105,7 +112,8 @@ func (h *BoardHandler) ListBoardsByGroup(c *gin.Context) {
 
 	boards, err := h.service.ListBoardsByGroup(groupID)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch boards", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch boards", err)
+		return
 	}
 
 	// Response DTO로 변환
@@ -133,7 +141,8 @@ func (h *BoardHandler) UpdateBoard(c *gin.Context) {
 	// 요청 바디 파싱
 	var req domain.UpdateBoardRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err)
+		return
 	}
 
 	// 서비스 호출
@@ -141,12 +150,15 @@ func (h *BoardHandler) UpdateBoard(c *gin.Context) {
 	err := h.service.UpdateBoard(boardID, &req, userID, isAdmin)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err); return
+			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err)
+			return
 		}
 		if errors.Is(err, common.ErrForbidden) {
-			common.ErrorResponse(c, http.StatusForbidden, "Permission denied", err); return
+			common.ErrorResponse(c, http.StatusForbidden, "Permission denied", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusBadRequest, "Failed to update board", err); return
+		common.ErrorResponse(c, http.StatusBadRequest, "Failed to update board", err)
+		return
 	}
 
 	common.SuccessResponse(c, gin.H{
@@ -165,16 +177,19 @@ func (h *BoardHandler) DeleteBoard(c *gin.Context) {
 		memberLevel, _ = levelVal.(int)
 	}
 	if memberLevel < 10 {
-		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil); return
+		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil)
+		return
 	}
 
 	// 서비스 호출
 	err := h.service.DeleteBoard(boardID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err); return
+			common.ErrorResponse(c, http.StatusNotFound, "Board not found", err)
+			return
 		}
-		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to delete board", err); return
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to delete board", err)
+		return
 	}
 
 	common.SuccessResponse(c, gin.H{
