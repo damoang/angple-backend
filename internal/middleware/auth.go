@@ -6,22 +6,26 @@ import (
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/pkg/jwt"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
 // JWTAuth JWT authentication middleware
-func JWTAuth(jwtManager *jwt.Manager) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		// 1. Extract Authorization header
-		authHeader := c.Get("Authorization")
+		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			return common.ErrorResponse(c, 401, "Missing authorization header", nil)
+			common.ErrorResponse(c, 401, "Missing authorization header", nil)
+			c.Abort()
+			return
 		}
 
 		// 2. Parse Bearer token
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			return common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
+			common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
+			c.Abort()
+			return
 		}
 
 		tokenString := parts[1]
@@ -30,43 +34,55 @@ func JWTAuth(jwtManager *jwt.Manager) fiber.Handler {
 		claims, err := jwtManager.VerifyToken(tokenString)
 		if err != nil {
 			if errors.Is(err, jwt.ErrExpiredToken) {
-				return common.ErrorResponse(c, 401, "Token expired", err)
+				common.ErrorResponse(c, 401, "Token expired", err)
+			} else {
+				common.ErrorResponse(c, 401, "Invalid token", err)
 			}
-			return common.ErrorResponse(c, 401, "Invalid token", err)
+			c.Abort()
+			return
 		}
 
 		// 4. Store user info in context
-		c.Locals("userID", claims.UserID)
-		c.Locals("nickname", claims.Nickname)
-		c.Locals("level", claims.Level)
+		c.Set("userID", claims.UserID)
+		c.Set("nickname", claims.Nickname)
+		c.Set("level", claims.Level)
 
-		return c.Next()
+		c.Next()
 	}
 }
 
 // GetUserID extracts user ID from context
-func GetUserID(c *fiber.Ctx) string {
-	userID, ok := c.Locals("userID").(string)
-	if !ok {
+func GetUserID(c *gin.Context) string {
+	userID, exists := c.Get("userID")
+	if !exists {
 		return ""
 	}
-	return userID
+	if str, ok := userID.(string); ok {
+		return str
+	}
+	return ""
 }
 
 // GetUserLevel extracts user level from context
-func GetUserLevel(c *fiber.Ctx) int {
-	level, ok := c.Locals("level").(int)
-	if !ok {
+func GetUserLevel(c *gin.Context) int {
+	level, exists := c.Get("level")
+	if !exists {
 		return 0
 	}
-	return level
+	if lvl, ok := level.(int); ok {
+		return lvl
+	}
+	return 0
 }
 
 // GetNickname extracts nickname from context
-func GetNickname(c *fiber.Ctx) string {
-	nickname, ok := c.Locals("nickname").(string)
-	if !ok {
+func GetNickname(c *gin.Context) string {
+	nickname, exists := c.Get("nickname")
+	if !exists {
 		return ""
 	}
-	return nickname
+	if str, ok := nickname.(string); ok {
+		return str
+	}
+	return ""
 }

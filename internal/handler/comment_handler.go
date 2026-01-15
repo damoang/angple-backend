@@ -7,7 +7,8 @@ import (
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/damoang/angple-backend/pkg/ginutil"
+	"github.com/gin-gonic/gin"
 )
 
 type CommentHandler struct {
@@ -18,54 +19,61 @@ func NewCommentHandler(service service.CommentService) *CommentHandler {
 	return &CommentHandler{service: service}
 }
 
-// ListComments handles GET /api/v2/boards/:board_id/posts/:post_id/comments
-func (h *CommentHandler) ListComments(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	postID, err := c.ParamsInt("post_id")
+// ListComments handles GET /api/v2/boards/:board_id/posts/:id/comments
+func (h *CommentHandler) ListComments(c *gin.Context) {
+	boardID := c.Param("board_id")
+	postID, err := ginutil.ParamInt(c, "id") // 파라미터 이름 변경: post_id -> id
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid post ID", err)
+		common.ErrorResponse(c, 400, "Invalid post ID", err)
+		return
 	}
 
 	data, err := h.service.ListComments(boardID, postID)
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to fetch comments", err)
+		common.ErrorResponse(c, 500, "Failed to fetch comments", err)
+		return
 	}
 
-	return common.SuccessResponse(c, data, nil)
+	common.SuccessResponse(c, data, nil)
 }
 
-// GetComment handles GET /api/v2/boards/:board_id/posts/:post_id/comments/:id
+// GetComment handles GET /api/v2/boards/:board_id/posts/:id/comments/:comment_id
 //
 //nolint:dupl // Comment와 Post의 Get 로직은 유사하지만 다른 타입을 다룸
-func (h *CommentHandler) GetComment(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	id, err := c.ParamsInt("id")
+func (h *CommentHandler) GetComment(c *gin.Context) {
+	boardID := c.Param("board_id")
+	id, err := ginutil.ParamInt(c, "comment_id") // 파라미터 이름 변경: id -> comment_id
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
 	}
 
 	data, err := h.service.GetComment(boardID, id)
 	if errors.Is(err, common.ErrPostNotFound) {
-		return common.ErrorResponse(c, 404, "Comment not found", err)
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
 	}
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to fetch comment", err)
+		common.ErrorResponse(c, 500, "Failed to fetch comment", err)
+		return
 	}
 
-	return common.SuccessResponse(c, data, nil)
+	common.SuccessResponse(c, data, nil)
 }
 
-// CreateComment handles POST /api/v2/boards/:board_id/posts/:post_id/comments
-func (h *CommentHandler) CreateComment(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	postID, err := c.ParamsInt("post_id")
+// CreateComment handles POST /api/v2/boards/:board_id/posts/:id/comments
+func (h *CommentHandler) CreateComment(c *gin.Context) {
+	boardID := c.Param("board_id")
+	postID, err := ginutil.ParamInt(c, "id") // 파라미터 이름 변경: post_id -> id
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid post ID", err)
+		common.ErrorResponse(c, 400, "Invalid post ID", err)
+		return
 	}
 
 	var req domain.CreateCommentRequest
-	if err := c.BodyParser(&req); err != nil {
-		return common.ErrorResponse(c, 400, "Invalid request body", err)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, 400, "Invalid request body", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -73,25 +81,28 @@ func (h *CommentHandler) CreateComment(c *fiber.Ctx) error {
 
 	data, err := h.service.CreateComment(boardID, postID, &req, authorID)
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to create comment", err)
+		common.ErrorResponse(c, 500, "Failed to create comment", err)
+		return
 	}
 
-	return c.Status(201).JSON(common.APIResponse{Data: data})
+	c.JSON(201, common.APIResponse{Data: data})
 }
 
-// UpdateComment handles PUT /api/v2/boards/:board_id/posts/:post_id/comments/:id
+// UpdateComment handles PUT /api/v2/boards/:board_id/posts/:id/comments/:comment_id
 //
 //nolint:dupl // Comment와 Post의 Update/Delete 로직은 유사하지만 다른 타입을 다룸
-func (h *CommentHandler) UpdateComment(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	id, err := c.ParamsInt("id")
+func (h *CommentHandler) UpdateComment(c *gin.Context) {
+	boardID := c.Param("board_id")
+	id, err := ginutil.ParamInt(c, "comment_id") // 파라미터 이름 변경: id -> comment_id
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
 	}
 
 	var req domain.UpdateCommentRequest
-	if err := c.BodyParser(&req); err != nil {
-		return common.ErrorResponse(c, 400, "Invalid request body", err)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, 400, "Invalid request body", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -99,24 +110,28 @@ func (h *CommentHandler) UpdateComment(c *fiber.Ctx) error {
 
 	err = h.service.UpdateComment(boardID, id, &req, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		return common.ErrorResponse(c, 404, "Comment not found", err)
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		return common.ErrorResponse(c, 403, "Unauthorized", err)
+		common.ErrorResponse(c, 403, "Unauthorized", err)
+		return
 	}
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to update comment", err)
+		common.ErrorResponse(c, 500, "Failed to update comment", err)
+		return
 	}
 
-	return c.Status(204).Send(nil)
+	c.Status(204)
 }
 
-// DeleteComment handles DELETE /api/v2/boards/:board_id/posts/:post_id/comments/:id
-func (h *CommentHandler) DeleteComment(c *fiber.Ctx) error {
-	boardID := c.Params("board_id")
-	id, err := c.ParamsInt("id")
+// DeleteComment handles DELETE /api/v2/boards/:board_id/posts/:id/comments/:comment_id
+func (h *CommentHandler) DeleteComment(c *gin.Context) {
+	boardID := c.Param("board_id")
+	id, err := ginutil.ParamInt(c, "comment_id")
 	if err != nil {
-		return common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
 	}
 
 	// Get authenticated user ID from JWT middleware
@@ -124,14 +139,17 @@ func (h *CommentHandler) DeleteComment(c *fiber.Ctx) error {
 
 	err = h.service.DeleteComment(boardID, id, authorID)
 	if errors.Is(err, common.ErrPostNotFound) {
-		return common.ErrorResponse(c, 404, "Comment not found", err)
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
 	}
 	if errors.Is(err, common.ErrUnauthorized) {
-		return common.ErrorResponse(c, 403, "Unauthorized", err)
+		common.ErrorResponse(c, 403, "Unauthorized", err)
+		return
 	}
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to delete comment", err)
+		common.ErrorResponse(c, 500, "Failed to delete comment", err)
+		return
 	}
 
-	return c.Status(204).Send(nil)
+	c.Status(204)
 }

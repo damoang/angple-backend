@@ -1,12 +1,13 @@
 package handler
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
 // RecommendedHandler handles recommended posts API
@@ -43,14 +44,15 @@ var validPeriods = map[string]bool{
 // @Failure      400     {object}  common.APIResponse
 // @Failure      500     {object}  common.APIResponse
 // @Router       /recommended/{period} [get]
-func (h *RecommendedHandler) GetRecommended(c *fiber.Ctx) error {
-	period := c.Params("period")
+func (h *RecommendedHandler) GetRecommended(c *gin.Context) {
+	period := c.Param("period")
 
 	// Validate period to prevent path traversal
 	if !validPeriods[period] {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid period. Valid values: 1hour, 3hours, 6hours, 12hours, 24hours, 48hours, index-widgets",
 		})
+		return
 	}
 
 	// Construct file path - 최신 데이터 파일 사용 (AI 분석 없어도 됨)
@@ -68,39 +70,43 @@ func (h *RecommendedHandler) GetRecommended(c *fiber.Ctx) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// 파일이 없으면 빈 배열 반환 (개발 환경 대응)
-			c.Set("Content-Type", "application/json")
-			c.Set("Cache-Control", "no-cache")
-			return c.JSON([]interface{}{})
+			c.Header("Content-Type", "application/json")
+			c.Header("Cache-Control", "no-cache")
+			c.JSON(http.StatusOK, []interface{}{})
+			return
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to access recommended data",
 		})
+		return
 	}
 
 	// Read file content
 	content, err := os.ReadFile(filePath) // #nosec G304 - path is validated via whitelist
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to read recommended data",
 		})
+		return
 	}
 
 	// Generate ETag from file modification time and size
 	etag := generateETag(fileInfo)
 
 	// Check If-None-Match header for caching
-	ifNoneMatch := c.Get("If-None-Match")
+	ifNoneMatch := c.GetHeader("If-None-Match")
 	if ifNoneMatch != "" && ifNoneMatch == etag {
-		return c.SendStatus(fiber.StatusNotModified)
+		c.Status(http.StatusNotModified)
+		return
 	}
 
 	// Set cache headers
-	c.Set("Content-Type", "application/json")
-	c.Set("Cache-Control", "public, max-age=300, must-revalidate")
-	c.Set("ETag", etag)
-	c.Set("Last-Modified", fileInfo.ModTime().UTC().Format(time.RFC1123))
+	c.Header("Content-Type", "application/json")
+	c.Header("Cache-Control", "public, max-age=300, must-revalidate")
+	c.Header("ETag", etag)
+	c.Header("Last-Modified", fileInfo.ModTime().UTC().Format(time.RFC1123))
 
-	return c.Send(content)
+	c.Data(http.StatusOK, "application/json", content)
 }
 
 // GetRecommendedAI godoc
@@ -114,8 +120,8 @@ func (h *RecommendedHandler) GetRecommended(c *fiber.Ctx) error {
 // @Failure      400     {object}  common.APIResponse
 // @Failure      500     {object}  common.APIResponse
 // @Router       /recommended/ai/{period} [get]
-func (h *RecommendedHandler) GetRecommendedAI(c *fiber.Ctx) error {
-	period := c.Params("period")
+func (h *RecommendedHandler) GetRecommendedAI(c *gin.Context) {
+	period := c.Param("period")
 
 	// AI 추천용 period 매핑 (1h -> 1hour)
 	periodMap := map[string]string{
@@ -129,9 +135,10 @@ func (h *RecommendedHandler) GetRecommendedAI(c *fiber.Ctx) error {
 
 	fileName, ok := periodMap[period]
 	if !ok {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid period. Valid values: 1h, 3h, 6h, 12h, 24h, 48h",
 		})
+		return
 	}
 
 	// AI 분석 파일 경로 (ai_ 접두사 추가)
@@ -143,39 +150,43 @@ func (h *RecommendedHandler) GetRecommendedAI(c *fiber.Ctx) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// 파일이 없으면 빈 배열 반환 (개발 환경 대응)
-			c.Set("Content-Type", "application/json")
-			c.Set("Cache-Control", "no-cache")
-			return c.JSON([]interface{}{})
+			c.Header("Content-Type", "application/json")
+			c.Header("Cache-Control", "no-cache")
+			c.JSON(http.StatusOK, []interface{}{})
+			return
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to access AI recommended data",
 		})
+		return
 	}
 
 	// Read file content
 	content, err := os.ReadFile(filePath) // #nosec G304 - path is validated via period mapping
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to read AI recommended data",
 		})
+		return
 	}
 
 	// Generate ETag from file modification time and size
 	etag := generateETag(fileInfo)
 
 	// Check If-None-Match header for caching
-	ifNoneMatch := c.Get("If-None-Match")
+	ifNoneMatch := c.GetHeader("If-None-Match")
 	if ifNoneMatch != "" && ifNoneMatch == etag {
-		return c.SendStatus(fiber.StatusNotModified)
+		c.Status(http.StatusNotModified)
+		return
 	}
 
 	// Set cache headers
-	c.Set("Content-Type", "application/json")
-	c.Set("Cache-Control", "public, max-age=300, must-revalidate")
-	c.Set("ETag", etag)
-	c.Set("Last-Modified", fileInfo.ModTime().UTC().Format(time.RFC1123))
+	c.Header("Content-Type", "application/json")
+	c.Header("Cache-Control", "public, max-age=300, must-revalidate")
+	c.Header("ETag", etag)
+	c.Header("Last-Modified", fileInfo.ModTime().UTC().Format(time.RFC1123))
 
-	return c.Send(content)
+	c.Data(http.StatusOK, "application/json", content)
 }
 
 // generateETag creates an ETag from file info

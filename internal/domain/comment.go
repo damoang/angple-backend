@@ -58,6 +58,7 @@ type CommentResponse struct {
 	AuthorID  string    `json:"author_id"`
 	ID        int       `json:"id"`
 	ParentID  int       `json:"parent_id"`
+	Depth     int       `json:"depth"` // 댓글 depth (1=일반 댓글, 2=대댓글, ...)
 }
 
 func (c *Comment) ToResponse() *CommentResponse {
@@ -68,6 +69,7 @@ func (c *Comment) ToResponse() *CommentResponse {
 		Author:    c.Author,
 		AuthorID:  c.AuthorID,
 		CreatedAt: c.CreatedAt,
+		Depth:     c.CommentCount, // wr_comment 컬럼이 depth를 나타냄
 	}
 }
 

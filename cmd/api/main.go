@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
+	_ "github.com/damoang/angple-backend/docs" // swagger docs
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/handler"
 	"github.com/damoang/angple-backend/internal/repository"
@@ -14,17 +16,14 @@ import (
 	"github.com/damoang/angple-backend/pkg/jwt"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	fiberSwagger "github.com/swaggo/fiber-swagger"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
-
-	_ "github.com/damoang/angple-backend/docs" // swagger docs
 )
 
 // @title           Angple Backend API
@@ -94,9 +93,12 @@ func main() {
 	// MySQL 연결
 	db, err := initDB(cfg)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		pkglogger.Info("⚠️  Warning: Failed to connect to database: %v (continuing without DB)", err)
+		pkglogger.Info("⚠️  Health check will work, but API endpoints will fail")
+		db = nil
+	} else {
+		pkglogger.Info("✅ Connected to MySQL")
 	}
-	pkglogger.Info("Connected to MySQL")
 
 	// Redis 연결 (Phase 3에서 캐싱에 사용 예정)
 	_, err = pkgredis.NewClient(
@@ -107,9 +109,10 @@ func main() {
 		cfg.Redis.PoolSize,
 	)
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		pkglogger.Info("⚠️  Warning: Failed to connect to Redis: %v (continuing without Redis)", err)
+	} else {
+		pkglogger.Info("✅ Connected to Redis")
 	}
-	pkglogger.Info("Connected to Redis")
 
 	// DI Container: Repository -> Service -> Handler
 
@@ -127,29 +130,39 @@ func main() {
 	}
 	damoangJWT := jwt.NewDamoangManager(damoangSecret)
 
-	// Repositories
-	memberRepo := repository.NewMemberRepository(db)
-	postRepo := repository.NewPostRepository(db)
-	commentRepo := repository.NewCommentRepository(db)
-	menuRepo := repository.NewMenuRepository(db)
-	siteRepo := repository.NewSiteRepository(db)
-	boardRepo := repository.NewBoardRepository(db)
+	// DI Container (skip if no DB connection)
+	var authHandler *handler.AuthHandler
+	var postHandler *handler.PostHandler
+	var commentHandler *handler.CommentHandler
+	var menuHandler *handler.MenuHandler
+	var siteHandler *handler.SiteHandler
+	var boardHandler *handler.BoardHandler
 
-	// Services
-	authService := service.NewAuthService(memberRepo, jwtManager)
-	postService := service.NewPostService(postRepo)
-	commentService := service.NewCommentService(commentRepo)
-	menuService := service.NewMenuService(menuRepo)
-	siteService := service.NewSiteService(siteRepo)
-	boardService := service.NewBoardService(boardRepo)
+	if db != nil {
+		// Repositories
+		memberRepo := repository.NewMemberRepository(db)
+		postRepo := repository.NewPostRepository(db)
+		commentRepo := repository.NewCommentRepository(db)
+		menuRepo := repository.NewMenuRepository(db)
+		siteRepo := repository.NewSiteRepository(db)
+		boardRepo := repository.NewBoardRepository(db)
 
-	// Handlers
-	authHandler := handler.NewAuthHandler(authService, cfg)
-	postHandler := handler.NewPostHandler(postService)
-	commentHandler := handler.NewCommentHandler(commentService)
-	menuHandler := handler.NewMenuHandler(menuService)
-	siteHandler := handler.NewSiteHandler(siteService)
-	boardHandler := handler.NewBoardHandler(boardService)
+		// Services
+		authService := service.NewAuthService(memberRepo, jwtManager)
+		postService := service.NewPostService(postRepo)
+		commentService := service.NewCommentService(commentRepo)
+		menuService := service.NewMenuService(menuRepo)
+		siteService := service.NewSiteService(siteRepo)
+		boardService := service.NewBoardService(boardRepo)
+
+		// Handlers
+		authHandler = handler.NewAuthHandler(authService, cfg)
+		postHandler = handler.NewPostHandler(postService)
+		commentHandler = handler.NewCommentHandler(commentService)
+		menuHandler = handler.NewMenuHandler(menuService)
+		siteHandler = handler.NewSiteHandler(siteService)
+		boardHandler = handler.NewBoardHandler(boardService)
+	}
 
 	// Recommended Handler (파일 직접 읽기)
 	recommendedPath := cfg.DataPaths.RecommendedPath
@@ -158,18 +171,8 @@ func main() {
 	}
 	recommendedHandler := handler.NewRecommendedHandler(recommendedPath)
 
-	// Fiber 앱 생성
-	app := fiber.New(fiber.Config{
-		Prefork:       false, // 개발 환경에서는 false
-		CaseSensitive: true,
-		StrictRouting: false,
-		ServerHeader:  "Angple API",
-		AppName:       "Angple Backend v1.0.0",
-	})
-
-	// 미들웨어
-	app.Use(recover.New())
-	app.Use(logger.New())
+	// Gin 라우터 생성
+	router := gin.Default() // Recovery와 Logger 미들웨어 포함
 
 	// CORS 설정 (config에서 읽어오거나 운영 기본값 사용)
 	allowOrigins := cfg.CORS.AllowOrigins
@@ -177,32 +180,88 @@ func main() {
 		// 운영 환경 기본값: 운영 도메인만 허용
 		allowOrigins = "https://web.damoang.net, https://damoang.net"
 	}
-	app.Use(cors.New(cors.Config{
-		AllowOrigins:     allowOrigins,
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+
+	corsConfig := cors.Config{
+		AllowOrigins:     []string{allowOrigins},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		AllowCredentials: true,
-	}))
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+	}
+	// CORS가 단일 origin 문자열인 경우 처리
+	if len(corsConfig.AllowOrigins) == 1 && corsConfig.AllowOrigins[0] != "" {
+		// 쉼표로 구분된 여러 origin 처리
+		corsConfig.AllowOrigins = splitAndTrim(allowOrigins, ",")
+	}
+	router.Use(cors.New(corsConfig))
 
 	// Health Check
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 			"time":   time.Now().Unix(),
 		})
 	})
 
 	// Swagger UI
-	app.Get("/swagger/*", fiberSwagger.WrapHandler)
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// API v2 라우트
-	routes.Setup(app, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
+	// API v2 라우트 (only if DB is connected)
+	if db != nil {
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
+	} else {
+		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
+	}
 
 	// 서버 시작
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	pkglogger.Info("Server listening on %s", addr)
-	if err := app.Listen(addr); err != nil {
+	if err := router.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+// splitAndTrim splits a string by delimiter and trims spaces
+func splitAndTrim(s string, delimiter string) []string {
+	parts := []string{}
+	for _, part := range splitString(s, delimiter) {
+		trimmed := trimSpace(part)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
+func splitString(s string, delimiter string) []string {
+	result := []string{}
+	current := ""
+	for _, char := range s {
+		if string(char) == delimiter {
+			result = append(result, current)
+			current = ""
+		} else {
+			current += string(char)
+		}
+	}
+	if current != "" {
+		result = append(result, current)
+	}
+	return result
+}
+
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n') {
+		start++
+	}
+
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n') {
+		end--
+	}
+
+	return s[start:end]
 }
 
 // initDB MySQL 연결 초기화

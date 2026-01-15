@@ -3,7 +3,7 @@ package handler
 import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
 // MenuHandler handles HTTP requests for menus
@@ -18,33 +18,36 @@ func NewMenuHandler(service service.MenuService) *MenuHandler {
 
 // GetMenus handles GET /api/v2/menus
 // Returns both sidebar and header menus
-func (h *MenuHandler) GetMenus(c *fiber.Ctx) error {
+func (h *MenuHandler) GetMenus(c *gin.Context) {
 	data, err := h.service.GetMenus()
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to fetch menus", err)
+		common.ErrorResponse(c, 500, "Failed to fetch menus", err)
+		return
 	}
 
-	return common.SuccessResponse(c, data, nil)
+	common.SuccessResponse(c, data, nil)
 }
 
 // GetSidebarMenus handles GET /api/v2/menus/sidebar
 // Returns only sidebar menus
-func (h *MenuHandler) GetSidebarMenus(c *fiber.Ctx) error {
+func (h *MenuHandler) GetSidebarMenus(c *gin.Context) {
 	data, err := h.service.GetSidebarMenus()
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to fetch sidebar menus", err)
+		common.ErrorResponse(c, 500, "Failed to fetch sidebar menus", err)
+		return
 	}
 
-	return common.SuccessResponse(c, data, nil)
+	common.SuccessResponse(c, data, nil)
 }
 
 // GetHeaderMenus handles GET /api/v2/menus/header
 // Returns only header menus
-func (h *MenuHandler) GetHeaderMenus(c *fiber.Ctx) error {
+func (h *MenuHandler) GetHeaderMenus(c *gin.Context) {
 	data, err := h.service.GetHeaderMenus()
 	if err != nil {
-		return common.ErrorResponse(c, 500, "Failed to fetch header menus", err)
+		common.ErrorResponse(c, 500, "Failed to fetch header menus", err)
+		return
 	}
 
-	return common.SuccessResponse(c, data, nil)
+	common.SuccessResponse(c, data, nil)
 }

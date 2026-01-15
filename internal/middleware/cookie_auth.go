@@ -3,30 +3,32 @@ package middleware
 import (
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/pkg/jwt"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
 // DamoangCookieAuth - damoang_jwt 쿠키에서 인증 정보 추출
 // 인증 실패해도 요청을 계속 진행 (optional auth)
 // 개발 환경에서는 Mock 사용자를 자동으로 설정
-func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, cfg *config.Config) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		// 개발 환경: Mock 사용자 사용
 		if cfg.IsDevelopment() {
-			c.Locals("damoang_user_id", "dev_user")
-			c.Locals("damoang_user_name", "개발자")
-			c.Locals("damoang_user_level", 10)
-			c.Locals("damoang_user_email", "dev@localhost")
-			c.Locals("damoang_authenticated", true)
-			return c.Next()
+			c.Set("damoang_user_id", "dev_user")
+			c.Set("damoang_user_name", "개발자")
+			c.Set("damoang_user_level", 10)
+			c.Set("damoang_user_email", "dev@localhost")
+			c.Set("damoang_authenticated", true)
+			c.Next()
+			return
 		}
 
 		// 운영 환경: 실제 JWT 쿠키 검증
 		// 1. damoang_jwt 쿠키 읽기
-		tokenString := c.Cookies("damoang_jwt")
-		if tokenString == "" {
+		tokenString, err := c.Cookie("damoang_jwt")
+		if err != nil || tokenString == "" {
 			// 쿠키가 없으면 비로그인 상태로 진행
-			return c.Next()
+			c.Next()
+			return
 		}
 
 		// 2. JWT 검증
@@ -34,61 +36,77 @@ func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, cfg *config.Config) fiber
 		if err != nil {
 			// 토큰이 유효하지 않으면 비로그인 상태로 진행
 			// 에러 로깅은 필요시 추가
-			return c.Next()
+			c.Next()
+			return
 		}
 
-		// 3. c.Locals()에 사용자 정보 저장
-		c.Locals("damoang_user_id", claims.MbID)
-		c.Locals("damoang_user_name", claims.MbName)
-		c.Locals("damoang_user_level", claims.MbLevel)
-		c.Locals("damoang_user_email", claims.MbEmail)
-		c.Locals("damoang_authenticated", true)
+		// 3. context에 사용자 정보 저장
+		c.Set("damoang_user_id", claims.MbID)
+		c.Set("damoang_user_name", claims.MbName)
+		c.Set("damoang_user_level", claims.MbLevel)
+		c.Set("damoang_user_email", claims.MbEmail)
+		c.Set("damoang_authenticated", true)
 
-		return c.Next()
+		c.Next()
 	}
 }
 
 // GetDamoangUserID extracts damoang user ID from context
-func GetDamoangUserID(c *fiber.Ctx) string {
-	userID, ok := c.Locals("damoang_user_id").(string)
-	if !ok {
+func GetDamoangUserID(c *gin.Context) string {
+	userID, exists := c.Get("damoang_user_id")
+	if !exists {
 		return ""
 	}
-	return userID
+	if str, ok := userID.(string); ok {
+		return str
+	}
+	return ""
 }
 
 // GetDamoangUserName extracts damoang user name from context
-func GetDamoangUserName(c *fiber.Ctx) string {
-	userName, ok := c.Locals("damoang_user_name").(string)
-	if !ok {
+func GetDamoangUserName(c *gin.Context) string {
+	userName, exists := c.Get("damoang_user_name")
+	if !exists {
 		return ""
 	}
-	return userName
+	if str, ok := userName.(string); ok {
+		return str
+	}
+	return ""
 }
 
 // GetDamoangUserLevel extracts damoang user level from context
-func GetDamoangUserLevel(c *fiber.Ctx) int {
-	level, ok := c.Locals("damoang_user_level").(int)
-	if !ok {
+func GetDamoangUserLevel(c *gin.Context) int {
+	level, exists := c.Get("damoang_user_level")
+	if !exists {
 		return 0
 	}
-	return level
+	if lvl, ok := level.(int); ok {
+		return lvl
+	}
+	return 0
 }
 
 // GetDamoangUserEmail extracts damoang user email from context
-func GetDamoangUserEmail(c *fiber.Ctx) string {
-	email, ok := c.Locals("damoang_user_email").(string)
-	if !ok {
+func GetDamoangUserEmail(c *gin.Context) string {
+	email, exists := c.Get("damoang_user_email")
+	if !exists {
 		return ""
 	}
-	return email
+	if str, ok := email.(string); ok {
+		return str
+	}
+	return ""
 }
 
 // IsDamoangAuthenticated checks if user is authenticated via damoang_jwt
-func IsDamoangAuthenticated(c *fiber.Ctx) bool {
-	authenticated, ok := c.Locals("damoang_authenticated").(bool)
-	if !ok {
+func IsDamoangAuthenticated(c *gin.Context) bool {
+	authenticated, exists := c.Get("damoang_authenticated")
+	if !exists {
 		return false
 	}
-	return authenticated
+	if auth, ok := authenticated.(bool); ok {
+		return auth
+	}
+	return false
 }

@@ -8,17 +8,17 @@ server:
 
 database:
   host: 127.0.0.1
-  port: 3306
-  user: damoang_user
-  password: dev_pass_2024
-  dbname: damoang
+  port: 3307
+  user: angple_user
+  password: angple_pass_2024
+  dbname: angple_db
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 3600
 
 redis:
   host: localhost
-  port: 6379
+  port: 6381
   password: ""
   db: 0
   pool_size: 100

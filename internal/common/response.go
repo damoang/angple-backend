@@ -1,7 +1,9 @@
 package common
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 // APIResponse standard API response structure
@@ -27,15 +29,15 @@ type ErrorInfo struct {
 }
 
 // SuccessResponse returns a successful JSON response
-func SuccessResponse(c *fiber.Ctx, data interface{}, meta *Meta) error {
-	return c.JSON(APIResponse{
+func SuccessResponse(c *gin.Context, data interface{}, meta *Meta) {
+	c.JSON(http.StatusOK, APIResponse{
 		Data: data,
 		Meta: meta,
 	})
 }
 
 // ErrorResponse returns an error JSON response
-func ErrorResponse(c *fiber.Ctx, status int, message string, err error) error {
+func ErrorResponse(c *gin.Context, status int, message string, err error) {
 	errInfo := &ErrorInfo{
 		Code:    getErrorCode(status),
 		Message: message,
@@ -45,7 +47,7 @@ func ErrorResponse(c *fiber.Ctx, status int, message string, err error) error {
 		errInfo.Details = err.Error()
 	}
 
-	return c.Status(status).JSON(APIResponse{
+	c.JSON(status, APIResponse{
 		Error: errInfo,
 	})
 }
