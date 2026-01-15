@@ -29,7 +29,9 @@ func (h *BoardHandler) CreateBoard(c *gin.Context) {
 	levelVal, exists := c.Get("level")
 	memberLevel := 1
 	if exists {
-		memberLevel, _ = levelVal.(int)
+		if level, ok := levelVal.(int); ok {
+			memberLevel = level
+		}
 	}
 	if memberLevel < 10 {
 		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil)
@@ -135,7 +137,9 @@ func (h *BoardHandler) UpdateBoard(c *gin.Context) {
 	levelVal, exists := c.Get("level")
 	memberLevel := 1
 	if exists {
-		memberLevel, _ = levelVal.(int)
+		if level, ok := levelVal.(int); ok {
+			memberLevel = level
+		}
 	}
 
 	// 요청 바디 파싱
@@ -174,7 +178,9 @@ func (h *BoardHandler) DeleteBoard(c *gin.Context) {
 	levelVal, exists := c.Get("level")
 	memberLevel := 1
 	if exists {
-		memberLevel, _ = levelVal.(int)
+		if level, ok := levelVal.(int); ok {
+			memberLevel = level
+		}
 	}
 	if memberLevel < 10 {
 		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil)

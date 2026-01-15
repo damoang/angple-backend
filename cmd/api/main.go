@@ -191,11 +191,7 @@ func main() {
 	// CORS가 단일 origin 문자열인 경우 처리
 	if len(corsConfig.AllowOrigins) == 1 && corsConfig.AllowOrigins[0] != "" {
 		// 쉼표로 구분된 여러 origin 처리
-		origins := []string{}
-		for _, origin := range splitAndTrim(allowOrigins, ",") {
-			origins = append(origins, origin)
-		}
-		corsConfig.AllowOrigins = origins
+		corsConfig.AllowOrigins = splitAndTrim(allowOrigins, ",")
 	}
 	router.Use(cors.New(corsConfig))
 

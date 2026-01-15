@@ -35,7 +35,6 @@ func (h *CommentHandler) ListComments(c *gin.Context) {
 	}
 
 	common.SuccessResponse(c, data, nil)
-	return
 }
 
 // GetComment handles GET /api/v2/boards/:board_id/posts/:id/comments/:comment_id
@@ -60,7 +59,6 @@ func (h *CommentHandler) GetComment(c *gin.Context) {
 	}
 
 	common.SuccessResponse(c, data, nil)
-	return
 }
 
 // CreateComment handles POST /api/v2/boards/:board_id/posts/:id/comments

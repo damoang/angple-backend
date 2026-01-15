@@ -26,7 +26,6 @@ func (h *MenuHandler) GetMenus(c *gin.Context) {
 	}
 
 	common.SuccessResponse(c, data, nil)
-	return
 }
 
 // GetSidebarMenus handles GET /api/v2/menus/sidebar
@@ -39,7 +38,6 @@ func (h *MenuHandler) GetSidebarMenus(c *gin.Context) {
 	}
 
 	common.SuccessResponse(c, data, nil)
-	return
 }
 
 // GetHeaderMenus handles GET /api/v2/menus/header
@@ -52,5 +50,4 @@ func (h *MenuHandler) GetHeaderMenus(c *gin.Context) {
 	}
 
 	common.SuccessResponse(c, data, nil)
-	return
 }
