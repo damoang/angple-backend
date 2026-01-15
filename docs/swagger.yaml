@@ -565,6 +565,66 @@ paths:
       summary: 게시글 검색
       tags:
       - posts
+  /recommended/{period}:
+    get:
+      consumes:
+      - application/json
+      description: 특정 기간 동안의 추천 게시글 목록을 조회합니다. 파일이 없는 경우 빈 배열을 반환합니다.
+      parameters:
+      - description: 기간 (1hour, 3hours, 6hours, 12hours, 24hours, 48hours, index-widgets)
+        in: path
+        name: period
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 추천 게시글 목록
+          schema:
+            items: {}
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      summary: 추천 게시글 조회
+      tags:
+      - recommended
+  /recommended/ai/{period}:
+    get:
+      consumes:
+      - application/json
+      description: AI 분석 기반 특정 기간 동안의 추천 게시글 목록을 조회합니다. 파일이 없는 경우 빈 배열을 반환합니다.
+      parameters:
+      - description: 기간 (1h, 3h, 6h, 12h, 24h, 48h)
+        in: path
+        name: period
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: AI 추천 게시글 목록
+          schema:
+            items: {}
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.APIResponse'
+      summary: AI 추천 게시글 조회
+      tags:
+      - recommended
 securityDefinitions:
   BearerAuth:
     description: 'JWT Authorization header using the Bearer scheme. Example: "Bearer

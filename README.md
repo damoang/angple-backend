@@ -10,14 +10,38 @@
 
 ## 🚀 Quick Start
 
+### 방법 1: Docker All-in-One (권장 ⭐)
+
+MySQL + Redis + API를 한 번에 실행하는 완전한 로컬 개발 환경:
+
 ```bash
-# 1. MySQL + Redis 실행
+# 전체 개발 환경 시작
+make dev-docker
+
+# 로그 확인
+make dev-docker-logs
+
+# 중지
+make dev-docker-down
+```
+
+**자동 실행 항목:**
+- MySQL (포트 3306)
+- Redis (포트 6379)
+- API 서버 (포트 8081)
+
+### 방법 2: 로컬 직접 실행
+
+```bash
+# 1. MySQL + Redis만 실행
 docker-compose up -d
 
 # 2. 환경 설정
 cp .env.example .env
 
 # 3. API 서버 실행
+make dev
+# 또는
 go run cmd/api/main.go
 ```
 
@@ -213,19 +237,72 @@ angple-backend/
 - **Docker & Docker Compose**
 - **Git**
 
-### 설치 및 실행
-
-#### 1. 저장소 클론
+### 저장소 클론
 
 ```bash
 git clone https://github.com/damoang/angple-backend.git
 cd angple-backend
 ```
 
-#### 2. Docker 환경 시작
+---
+
+## 📦 Option 1: Docker All-in-One (권장 ⭐)
+
+로컬 개발을 위한 **완전한 개발 환경**을 Docker로 제공합니다. MySQL, Redis, API 서버가 모두 자동으로 실행됩니다.
+
+### 1단계: 개발 환경 시작
 
 ```bash
-# MySQL + Redis 컨테이너 실행
+make dev-docker
+```
+
+이 명령어는 다음을 자동으로 실행합니다:
+- MySQL 8.0 (포트 3306)
+- Redis 7 (포트 6379)
+- API 서버 (포트 8081)
+
+### 2단계: 서버 확인
+
+```bash
+# Health check
+curl http://localhost:8081/health
+
+# 메뉴 API 테스트
+curl http://localhost:8081/api/v2/menus/sidebar
+```
+
+### 유용한 명령어
+
+```bash
+# 로그 확인
+make dev-docker-logs
+
+# 환경 중지
+make dev-docker-down
+
+# 재빌드 (코드 변경 후)
+make dev-docker-rebuild
+```
+
+### 환경 변수 (선택)
+
+기본 설정(`configs/config.docker.yaml`)으로 바로 실행되지만, 커스터마이징이 필요하면 `docker-compose.dev.yml`의 `environment` 섹션을 수정하세요.
+
+**기본 설정:**
+- Database: `mysql:3306` (Docker 네트워크 내부)
+- JWT Secret: `dev-secret-key-2024-please-change-in-production`
+- CORS: `http://localhost:5173,http://localhost:5174,http://localhost:3000`
+
+---
+
+## 🔧 Option 2: 로컬 직접 실행
+
+API 서버만 로컬에서 실행하고 MySQL/Redis는 Docker로 실행하는 방법입니다.
+
+### 1단계: MySQL + Redis 시작
+
+```bash
+# MySQL + Redis 컨테이너만 실행
 docker-compose up -d
 
 # 컨테이너 상태 확인
@@ -233,10 +310,10 @@ docker-compose ps
 ```
 
 **Docker 구성:**
-- **MySQL 8.0**: 포트 3307 → 3306 (메뉴 시스템 초기화 포함)
+- **MySQL 8.0**: 포트 3307 → 3306
 - **Redis 7**: 포트 6379
 
-#### 3. 환경 설정
+### 2단계: 환경 설정
 
 ```bash
 # .env 파일 생성
@@ -246,7 +323,7 @@ cp .env.example .env
 **.env 주요 설정:**
 ```bash
 # Environment
-APP_ENV=local  # local, dev, staging, prod
+APP_ENV=local
 
 # Database (Docker MySQL)
 DB_HOST=localhost
@@ -255,41 +332,32 @@ DB_USER=angple_user
 DB_PASSWORD=angple_pass_2024
 DB_NAME=angple_db
 
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
 # JWT
 JWT_SECRET=your-development-secret-key
-DAMOANG_JWT_SECRET=your-legacy-sso-secret  # 필수!
+DAMOANG_JWT_SECRET=your-legacy-sso-secret
 
 # API
 API_PORT=8081
 ```
 
-<details>
-<summary><b>환경별 설정 가이드</b></summary>
-
-| 환경 | APP_ENV | Port | DB Host | CORS | Mock Auth |
-|------|---------|------|---------|------|-----------|
-| **로컬** | local | 8081 | localhost:3307 | localhost:* | ✅ 활성화 |
-| **개발** | dev | 8081 | dev-db.damoang.net | dev.damoang.net | ✅ 활성화 |
-| **스테이징** | staging | 8081 | staging-db | staging.damoang.net | ❌ |
-| **운영** | prod | 8081 | db.damoang.net | damoang.net | ❌ |
-
-**Mock 인증:**
-- `local`, `dev` 환경에서는 자동으로 "개발자" 계정으로 로그인
-- 레거시 SSO 쿠키 없이도 API 테스트 가능
-
-</details>
-
-#### 4. 의존성 설치 및 실행
+### 3단계: 의존성 설치 및 실행
 
 ```bash
 # Go 모듈 다운로드
 go mod download
 
 # API 서버 실행
-go run cmd/api/main.go
+make dev
+# 또는
+APP_ENV=local go run cmd/api/main.go
 ```
 
-**실행 확인:**
+### 4단계: 실행 확인
+
 ```bash
 # Health Check
 curl http://localhost:8081/health
@@ -298,14 +366,137 @@ curl http://localhost:8081/health
 curl http://localhost:8081/api/v2/menus/sidebar
 ```
 
-#### 5. 빌드 (선택)
+### 5단계: 빌드 (선택)
 
 ```bash
 # 바이너리 빌드
+make build-api
+# 또는
 go build -o bin/api cmd/api/main.go
 
 # 실행
 ./bin/api
+```
+
+---
+
+## 🌐 환경별 설정 가이드
+
+프로젝트는 환경별로 다른 설정 파일을 사용합니다.
+
+| 환경 | APP_ENV | 설정 파일 | 용도 |
+|------|---------|-----------|------|
+| **Docker 개발** | docker | `configs/config.docker.yaml` | Docker Compose 로컬 개발 |
+| **로컬 개발** | local | `configs/config.local.yaml` | 직접 실행 로컬 개발 |
+| **운영** | prod | `configs/config.prod.yaml` | 프로덕션 환경 |
+
+### Docker 개발 환경 (`config.docker.yaml`)
+
+```yaml
+server:
+  env: docker
+
+database:
+  host: mysql  # Docker 서비스명
+  port: 3306
+  user: damoang_user
+  password: dev_pass_2024
+
+redis:
+  host: redis  # Docker 서비스명
+  port: 6379
+
+cors:
+  allow_origins: "http://localhost:5173, http://localhost:5174"
+```
+
+### 운영 환경 (`config.prod.yaml`)
+
+⚠️ **중요**: 운영 환경에서는 민감한 정보를 **환경 변수로 오버라이드** 해야 합니다.
+
+```yaml
+server:
+  env: prod
+  mode: production
+
+database:
+  host: ""  # 환경 변수: DB_HOST 필수!
+  password: ""  # 환경 변수: DB_PASSWORD 필수!
+
+jwt:
+  secret: ""  # 환경 변수: JWT_SECRET 필수!
+  damoang_secret: ""  # 환경 변수: DAMOANG_JWT_SECRET 필수!
+```
+
+**필수 환경 변수:**
+```bash
+export DB_HOST=your-production-db-host
+export DB_PASSWORD=your-secure-password
+export REDIS_HOST=your-redis-host
+export JWT_SECRET=your-jwt-secret-key
+export DAMOANG_JWT_SECRET=your-damoang-jwt-secret
+export CORS_ALLOW_ORIGINS=https://damoang.net
+```
+
+---
+
+## 🚀 운영 환경 배포
+
+### Docker Compose 사용 (권장)
+
+1. **운영 서버에 코드 배포**
+   ```bash
+   git clone https://github.com/damoang/angple-backend.git
+   cd angple-backend
+   ```
+
+2. **환경 변수 설정**
+   ```bash
+   # .env.prod 파일 생성
+   cat > .env.prod << 'EOF'
+   APP_ENV=prod
+   DB_HOST=your-production-db-host
+   DB_PORT=3306
+   DB_USER=angple_user
+   DB_PASSWORD=your-secure-password
+   DB_NAME=angple_prod
+   REDIS_HOST=your-redis-host
+   REDIS_PORT=6379
+   JWT_SECRET=your-jwt-secret-key
+   DAMOANG_JWT_SECRET=your-damoang-jwt-secret
+   CORS_ALLOW_ORIGINS=https://damoang.net,https://www.damoang.net
+   EOF
+   ```
+
+3. **Docker Compose 실행**
+   ```bash
+   # 운영 환경 실행
+   docker-compose --env-file .env.prod up -d
+
+   # 로그 확인
+   docker-compose logs -f api
+   ```
+
+### 바이너리 직접 실행
+
+```bash
+# 1. 빌드
+make build-api
+
+# 2. 환경 변수 설정
+export APP_ENV=prod
+export DB_HOST=...
+export DB_PASSWORD=...
+# (기타 환경 변수)
+
+# 3. 실행
+./bin/api
+```
+
+### Health Check
+
+```bash
+curl https://api.damoang.net/health
 ```
 
 ---

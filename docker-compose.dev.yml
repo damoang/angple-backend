@@ -1,0 +1,122 @@
+# ======================================
+# Local Development Environment (All-in-One)
+# ======================================
+# 로컬 개발자를 위한 완전한 개발 환경
+# MySQL + Redis + API를 한 번에 실행
+#
+# 사용법:
+#   docker compose -f docker-compose.dev.yml up -d
+#   또는
+#   make dev-docker
+#
+# 중지:
+#   docker compose -f docker-compose.dev.yml down
+#   또는
+#   make dev-docker-down
+# ======================================
+
+services:
+  # MySQL Database (로컬 개발용)
+  mysql:
+    image: mysql:8.0
+    container_name: angple-dev-mysql
+    ports:
+      - "3306:3306"  # 로컬 개발 전용이므로 3306 직접 사용
+    environment:
+      MYSQL_ROOT_PASSWORD: dev_root_2024
+      MYSQL_DATABASE: damoang
+      MYSQL_USER: damoang_user
+      MYSQL_PASSWORD: dev_pass_2024
+    volumes:
+      - mysql-dev-data:/var/lib/mysql
+      - ./.docker/mysql/init:/docker-entrypoint-initdb.d
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --sql-mode=''
+    networks:
+      - angple-dev-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-udamoang_user", "-pdev_pass_2024"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (로컬 개발용)
+  redis:
+    image: redis:7-alpine
+    container_name: angple-dev-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - angple-dev-network
+    volumes:
+      - redis-dev-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # API Server (로컬 개발용)
+  api:
+    build:
+      context: .
+      dockerfile: deployments/docker/api.Dockerfile
+      args:
+        - APP_ENV=docker
+    container_name: angple-dev-api
+    ports:
+      - "8081:8081"
+    environment:
+      # 설정 파일: configs/config.docker.yaml 사용
+      - APP_ENV=docker
+
+      # Database
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=damoang_user
+      - DB_PASSWORD=dev_pass_2024
+      - DB_NAME=damoang
+
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+
+      # JWT
+      - JWT_SECRET=dev-secret-key-2024-please-change-in-production
+      - DAMOANG_JWT_SECRET=.damoang.net-jwt-secret-dev
+
+      # Server
+      - API_PORT=8081
+
+      # CORS (로컬 프론트엔드)
+      - CORS_ALLOW_ORIGINS=http://localhost:5173,http://localhost:5174,http://localhost:3000
+
+      # Data Paths (optional)
+      - RECOMMENDED_DATA_PATH=
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - angple-dev-network
+    volumes:
+      # 설정 파일 마운트 (변경 시 자동 반영)
+      - ./configs:/app/configs:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  angple-dev-network:
+    driver: bridge
+
+volumes:
+  mysql-dev-data:
+    driver: local
+  redis-dev-data:
+    driver: local
