@@ -41,12 +41,6 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24'
-        cache: true
-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -55,25 +49,22 @@ jobs:
     - name: Install locust
       run: pip install -r tests/load/requirements.txt
 
-    - name: Build and start services
-      run: |
-        docker compose up -d mysql redis
-        sleep 10  # Wait for MySQL to be healthy
-        go build -o bin/api cmd/api/main.go
-        ./bin/api &
-        sleep 5  # Wait for API to start
+    - name: Start all services
+      run: docker compose -f docker-compose.dev.yml up -d --build
 
-    - name: Wait for API health
+    - name: Wait for API to be healthy
       run: |
-        for i in {1..30}; do
+        echo "Waiting for all services to be ready..."
+        for i in {1..90}; do
           if curl -s http://localhost:8081/health | grep -q "ok"; then
-            echo "API is healthy"
+            echo "API is healthy!"
             exit 0
           fi
-          echo "Waiting for API... ($i/30)"
+          echo "Waiting for API... ($i/90)"
           sleep 2
         done
-        echo "API failed to start"
+        echo "Services failed to start"
+        docker compose -f docker-compose.dev.yml logs
         exit 1
 
     - name: Run load test
@@ -113,6 +104,4 @@ jobs:
 
     - name: Cleanup
       if: always()
-      run: |
-        pkill -f "./bin/api" || true
-        docker compose down -v || true
+      run: docker compose -f docker-compose.dev.yml down -v || true
