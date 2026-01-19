@@ -251,9 +251,9 @@ func (h *PostHandler) SearchPosts(c *gin.Context) {
 
 // PostPreviewResponse represents the preview response
 type PostPreviewResponse struct {
-	Success bool                   `json:"success"`
-	Message string                 `json:"message,omitempty"`
-	Post    *PostPreviewData       `json:"post,omitempty"`
+	Success bool             `json:"success"`
+	Message string           `json:"message,omitempty"`
+	Post    *PostPreviewData `json:"post,omitempty"`
 }
 
 // PostPreviewData represents post data for preview
@@ -313,8 +313,8 @@ func (h *PostHandler) GetPostPreview(c *gin.Context) {
 		Datetime:     post.CreatedAt.Format("2006-01-02 15:04:05"),
 		Hit:          post.Views,
 		Good:         post.Likes,
-		Nogood:       0, // TODO: Add nogood field to PostResponse
-		IP:           "", // IP is hidden for privacy
+		Nogood:       0,     // TODO: Add nogood field to PostResponse
+		IP:           "",    // IP is hidden for privacy
 		IsComment:    false, // Preview is only for posts, not comments
 		Files:        []string{},
 		Links:        []string{},

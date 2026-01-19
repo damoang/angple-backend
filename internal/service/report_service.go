@@ -16,10 +16,10 @@ const (
 )
 
 var (
-	ErrReportNotFound     = errors.New("신고를 찾을 수 없습니다")
-	ErrInvalidAction      = errors.New("유효하지 않은 액션입니다")
-	ErrAlreadyProcessed   = errors.New("이미 처리된 신고입니다")
-	ErrReportAdminOnly    = errors.New("관리자 권한이 필요합니다")
+	ErrReportNotFound   = errors.New("신고를 찾을 수 없습니다")
+	ErrInvalidAction    = errors.New("유효하지 않은 액션입니다")
+	ErrAlreadyProcessed = errors.New("이미 처리된 신고입니다")
+	ErrReportAdminOnly  = errors.New("관리자 권한이 필요합니다")
 )
 
 // ReportService handles report business logic

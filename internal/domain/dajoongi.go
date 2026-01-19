@@ -10,7 +10,7 @@ type DajoongiItem struct {
 
 // DajoongiResponse represents the response for dajoongi list
 type DajoongiResponse struct {
-	Date  string          `json:"date"`
-	Items []DajoongiItem  `json:"items"`
-	Total int             `json:"total"`
+	Date  string         `json:"date"`
+	Items []DajoongiItem `json:"items"`
+	Total int            `json:"total"`
 }

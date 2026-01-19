@@ -7,10 +7,10 @@ import (
 
 // BoardDisplaySettings represents display options for board list view
 type BoardDisplaySettings struct {
-	ListStyle     string `json:"list_style"`      // compact, card, detailed
-	ShowPreview   bool   `json:"show_preview"`    // 본문 미리보기 표시 여부
-	PreviewLength int    `json:"preview_length"`  // 미리보기 글자 수
-	ShowThumbnail bool   `json:"show_thumbnail"`  // 썸네일 이미지 표시 여부
+	ListStyle     string `json:"list_style"`     // compact, card, detailed
+	ShowPreview   bool   `json:"show_preview"`   // 본문 미리보기 표시 여부
+	PreviewLength int    `json:"preview_length"` // 미리보기 글자 수
+	ShowThumbnail bool   `json:"show_thumbnail"` // 썸네일 이미지 표시 여부
 }
 
 // DefaultBoardDisplaySettings returns default display settings

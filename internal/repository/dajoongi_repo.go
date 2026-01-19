@@ -20,10 +20,10 @@ func NewDajoongiRepository(db *gorm.DB) *DajoongiRepository {
 
 // DajoongiRawResult is the raw query result
 type DajoongiRawResult struct {
-	WrIP      string `gorm:"column:wr_ip"`
-	DupMbIDs  string `gorm:"column:dup_mb_ids"`
-	DupBdNm   string `gorm:"column:dup_bd_nm"`
-	Cnt       int    `gorm:"column:cnt"`
+	WrIP     string `gorm:"column:wr_ip"`
+	DupMbIDs string `gorm:"column:dup_mb_ids"`
+	DupBdNm  string `gorm:"column:dup_bd_nm"`
+	Cnt      int    `gorm:"column:cnt"`
 }
 
 // GetDuplicateAccounts retrieves list of IPs with multiple member IDs in the last N days

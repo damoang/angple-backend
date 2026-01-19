@@ -23,8 +23,8 @@ type ValidationResult struct {
 }
 
 type memberValidationService struct {
-	repo           repository.MemberRepository
-	prohibitedIDs  []string
+	repo              repository.MemberRepository
+	prohibitedIDs     []string
 	prohibitedDomains []string
 }
 

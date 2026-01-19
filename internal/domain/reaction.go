@@ -51,7 +51,7 @@ type ReactionItem struct {
 
 // ReactionResponse represents reaction response
 type ReactionResponse struct {
-	Status  string                   `json:"status"`
-	Message string                   `json:"message,omitempty"`
+	Status  string                    `json:"status"`
+	Message string                    `json:"message,omitempty"`
 	Result  map[string][]ReactionItem `json:"result,omitempty"`
 }

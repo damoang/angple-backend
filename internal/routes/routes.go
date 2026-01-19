@@ -114,22 +114,22 @@ func Setup(
 
 	// Members (회원 검증 API - 공개)
 	members := api.Group("/members")
-	members.POST("/check-id", memberHandler.CheckUserID)           // 회원 ID 중복 확인
-	members.POST("/check-nickname", memberHandler.CheckNickname)   // 닉네임 중복 확인
-	members.POST("/check-email", memberHandler.CheckEmail)         // 이메일 중복 확인
-	members.POST("/check-phone", memberHandler.CheckPhone)         // 휴대폰번호 중복 확인
-	members.GET("/:id/nickname", memberHandler.GetNickname)        // 회원 닉네임 조회
+	members.POST("/check-id", memberHandler.CheckUserID)         // 회원 ID 중복 확인
+	members.POST("/check-nickname", memberHandler.CheckNickname) // 닉네임 중복 확인
+	members.POST("/check-email", memberHandler.CheckEmail)       // 이메일 중복 확인
+	members.POST("/check-phone", memberHandler.CheckPhone)       // 휴대폰번호 중복 확인
+	members.GET("/:id/nickname", memberHandler.GetNickname)      // 회원 닉네임 조회
 
 	// Autosave (자동 저장 API - 로그인 필요)
 	autosave := api.Group("/autosave")
-	autosave.POST("", autosaveHandler.Save)       // 자동 저장
-	autosave.GET("", autosaveHandler.List)        // 목록 조회
-	autosave.GET("/:id", autosaveHandler.Load)    // 불러오기
+	autosave.POST("", autosaveHandler.Save)         // 자동 저장
+	autosave.GET("", autosaveHandler.List)          // 목록 조회
+	autosave.GET("/:id", autosaveHandler.Load)      // 불러오기
 	autosave.DELETE("/:id", autosaveHandler.Delete) // 삭제
 
 	// Filter (금지어 필터 API - 공개)
 	filter := api.Group("/filter")
-	filter.POST("/check", filterHandler.Check)    // 금지어 검사
+	filter.POST("/check", filterHandler.Check) // 금지어 검사
 
 	// Tokens (CSRF 토큰 API - 공개)
 	tokens := api.Group("/tokens")
@@ -150,8 +150,8 @@ func Setup(
 
 	// Reports (신고 API - 관리자 전용)
 	reports := api.Group("/reports")
-	reports.GET("", reportHandler.ListReports)        // 신고 목록
-	reports.GET("/data", reportHandler.GetReportData) // 신고 데이터 조회
+	reports.GET("", reportHandler.ListReports)             // 신고 목록
+	reports.GET("/data", reportHandler.GetReportData)      // 신고 데이터 조회
 	reports.GET("/recent", reportHandler.GetRecentReports) // 최근 신고 목록
 	reports.POST("/process", reportHandler.ProcessReport)  // 신고 처리
 

@@ -35,7 +35,7 @@ type ReportListResponse struct {
 
 // ReportActionRequest represents request for report action
 type ReportActionRequest struct {
-	Action  string   `json:"action"`  // submitOpinion, cancelOpinion, adminApprove, adminDismiss
+	Action  string   `json:"action"` // submitOpinion, cancelOpinion, adminApprove, adminDismiss
 	Table   string   `json:"sg_table"`
 	ID      int      `json:"sg_id"`
 	Parent  int      `json:"sg_parent"`
