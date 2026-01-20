@@ -139,7 +139,10 @@ func (h *TokenHandler) ValidateToken(tokenCase, token, userID string) bool {
 		return false
 	}
 
-	entry := value.(tokenEntry)
+	entry, ok := value.(tokenEntry)
+	if !ok {
+		return false
+	}
 
 	// Check expiration
 	if time.Now().After(entry.ExpiresAt) {
@@ -187,7 +190,10 @@ func (h *TokenHandler) cleanupExpiredTokens() {
 	for range ticker.C {
 		now := time.Now()
 		h.tokens.Range(func(key, value interface{}) bool {
-			entry := value.(tokenEntry)
+			entry, ok := value.(tokenEntry)
+			if !ok {
+				return true
+			}
 			if now.After(entry.ExpiresAt) {
 				h.tokens.Delete(key)
 			}

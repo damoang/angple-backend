@@ -37,6 +37,7 @@ linters-settings:
     enable-all: true
     disable:
       - shadow
+      - fieldalignment
 
   gocyclo:
     min-complexity: 15
@@ -100,6 +101,11 @@ issues:
     - path: cmd/.*main\.go
       linters:
         - gocyclo
+
+    # Repository 패턴의 유사 코드 허용
+    - path: internal/repository/.*\.go
+      linters:
+        - dupl
 
   max-issues-per-linter: 0
   max-same-issues: 0

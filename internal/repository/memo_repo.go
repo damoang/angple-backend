@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain"
@@ -23,7 +24,7 @@ func (r *MemoRepository) GetMemo(memberID, targetMemberID string) (*domain.Membe
 	var memo domain.MemberMemo
 	err := r.db.Where("member_id = ? AND target_member_id = ?", memberID, targetMemberID).First(&memo).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err
