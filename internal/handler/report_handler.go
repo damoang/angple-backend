@@ -50,8 +50,14 @@ func (h *ReportHandler) ListReports(c *gin.Context) {
 
 	// Parse query parameters
 	status := c.Query("status")
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil {
+		page = 1
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil {
+		limit = 20
+	}
 
 	// Get reports
 	reports, total, err := h.service.List(status, page, limit)
@@ -145,7 +151,10 @@ func (h *ReportHandler) GetRecentReports(c *gin.Context) {
 	}
 
 	// Parse query parameter
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if err != nil {
+		limit = 10
+	}
 
 	// Get recent reports
 	reports, err := h.service.GetRecent(limit)
