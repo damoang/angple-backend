@@ -1,0 +1,61 @@
+# Production Docker Compose - GHCR 이미지 사용
+# 사용법: docker compose -f compose.prod.yml up -d
+
+services:
+  # API 서버 (GHCR에서 pull)
+  api:
+    image: ghcr.io/damoang/angple-backend:latest
+    container_name: angple-api
+    ports:
+      - "${API_PORT:-8081}:8081"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=${APP_ENV:-prod}
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - JWT_SECRET=${JWT_SECRET}
+      - DAMOANG_JWT_SECRET=${DAMOANG_JWT_SECRET}
+      - API_PORT=8081
+      - RECOMMENDED_DATA_PATH=/home/damoang/www/data/cache/recommended
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-https://damoang.net}
+    restart: unless-stopped
+    networks:
+      - angple-network
+      - proxy-network
+    volumes:
+      - /home/damoang/www/data/cache/recommended:/home/damoang/www/data/cache/recommended:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Gateway (GHCR에서 pull)
+  gateway:
+    image: ghcr.io/damoang/angple-gateway:latest
+    container_name: angple-gateway
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      - LARAVEL_BACKEND_URL=${LARAVEL_BACKEND_URL:-http://host.docker.internal:80}
+      - GO_API_URL=http://api:8081
+      - GATEWAY_PORT=8080
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - angple-network
+      - proxy-network
+
+networks:
+  angple-network:
+    external: true
+  proxy-network:
+    external: true
