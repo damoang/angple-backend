@@ -24,6 +24,7 @@ services:
 
   # API 서버
   api:
+    image: ${ANGPLE_API_IMAGE:-}
     build:
       context: .
       dockerfile: deployments/docker/api.Dockerfile
@@ -58,6 +59,7 @@ services:
 
   # API Gateway
   gateway:
+    image: ${ANGPLE_GATEWAY_IMAGE:-}
     build:
       context: .
       dockerfile: deployments/docker/gateway.Dockerfile
