@@ -1,22 +1,9 @@
-name: Build and Deploy to GHCR
+name: Build & Deploy
 
 on:
   push:
     branches:
       - main
-      - staging
-      - develop
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: '배포 환경'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
 
 env:
   REGISTRY: ghcr.io
@@ -24,7 +11,7 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and Push to GHCR
+    name: Build & Push
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -42,39 +29,33 @@ jobs:
       - name: Run tests
         run: go test -v ./...
 
-      - name: Log in to GHCR
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push API image
+      - name: Build and push API
         uses: docker/build-push-action@v5
         with:
           context: .
           file: deployments/docker/api.Dockerfile
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ github.ref_name }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:latest
 
-      - name: Build and push Gateway image
+      - name: Build and push Gateway
         uses: docker/build-push-action@v5
         with:
           context: .
           file: deployments/docker/gateway.Dockerfile
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-gateway:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-gateway:${{ github.ref_name }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-gateway:latest
 
-  # 개발서버 배포 (develop 브랜치) - SSH 방식
-  deploy-dev:
+  deploy:
     name: Deploy to Dev Server
+    needs: build-and-push
     runs-on: ubuntu-latest
-    needs: [build-and-push]
-    if: github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
 
     steps:
       - name: Deploy via SSH
@@ -86,83 +67,12 @@ jobs:
           script: |
             cd /home/angple/backend
 
-            echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            docker pull ghcr.io/${{ github.repository }}-api:develop
-            docker pull ghcr.io/${{ github.repository }}-gateway:develop
-
-            export ANGPLE_API_IMAGE=ghcr.io/${{ github.repository }}-api:develop
-            export ANGPLE_GATEWAY_IMAGE=ghcr.io/${{ github.repository }}-gateway:develop
+            docker pull ghcr.io/damoang/angple-backend-api:latest
+            docker pull ghcr.io/damoang/angple-backend-gateway:latest
 
             docker compose up -d api gateway
-            docker network connect proxy-network angple-api 2>/dev/null || true
+            docker image prune -f
 
-            echo "Dev deployed at $(date)"
-
-  # 스테이징서버 배포 (staging 브랜치) - SSM 방식
-  deploy-staging:
-    name: Deploy to Staging Server (SSM)
-    runs-on: ubuntu-latest
-    needs: [build-and-push]
-    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Deploy via SSM
-        run: |
-          aws ssm send-command \
-            --instance-ids "${{ secrets.STAGING_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=[
-              "cd /home/angple/backend",
-              "echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin",
-              "docker pull ghcr.io/${{ github.repository }}-api:staging",
-              "docker pull ghcr.io/${{ github.repository }}-gateway:staging",
-              "export ANGPLE_API_IMAGE=ghcr.io/${{ github.repository }}-api:staging",
-              "export ANGPLE_GATEWAY_IMAGE=ghcr.io/${{ github.repository }}-gateway:staging",
-              "docker compose up -d api gateway",
-              "docker network connect proxy-network angple-api 2>/dev/null || true",
-              "echo Staging deployed at $(date)"
-            ]' \
-            --timeout-seconds 300 \
-            --output text
-
-  # 운영서버 배포 (main 브랜치) - SSM 방식
-  deploy-prod:
-    name: Deploy to Prod Server (SSM)
-    runs-on: ubuntu-latest
-    needs: [build-and-push]
-    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod')
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Deploy via SSM
-        run: |
-          aws ssm send-command \
-            --instance-ids "${{ secrets.PROD_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=[
-              "cd /home/angple/backend",
-              "echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin",
-              "docker pull ghcr.io/${{ github.repository }}-api:main",
-              "docker pull ghcr.io/${{ github.repository }}-gateway:main",
-              "export ANGPLE_API_IMAGE=ghcr.io/${{ github.repository }}-api:main",
-              "export ANGPLE_GATEWAY_IMAGE=ghcr.io/${{ github.repository }}-gateway:main",
-              "docker compose up -d api gateway",
-              "docker network connect proxy-network angple-api 2>/dev/null || true",
-              "echo Prod deployed at $(date)"
-            ]' \
-            --timeout-seconds 300 \
-            --output text
+            echo "Deployed at $(date)"
