@@ -137,6 +137,14 @@ func main() {
 	var menuHandler *handler.MenuHandler
 	var siteHandler *handler.SiteHandler
 	var boardHandler *handler.BoardHandler
+	var memberHandler *handler.MemberHandler
+	var autosaveHandler *handler.AutosaveHandler
+	var filterHandler *handler.FilterHandler
+	var tokenHandler *handler.TokenHandler
+	var memoHandler *handler.MemoHandler
+	var reactionHandler *handler.ReactionHandler
+	var reportHandler *handler.ReportHandler
+	var dajoongiHandler *handler.DajoongiHandler
 
 	if db != nil {
 		// Repositories
@@ -146,6 +154,11 @@ func main() {
 		menuRepo := repository.NewMenuRepository(db)
 		siteRepo := repository.NewSiteRepository(db)
 		boardRepo := repository.NewBoardRepository(db)
+		autosaveRepo := repository.NewAutosaveRepository(db)
+		dajoongiRepo := repository.NewDajoongiRepository(db)
+		memoRepo := repository.NewMemoRepository(db)
+		reactionRepo := repository.NewReactionRepository(db)
+		reportRepo := repository.NewReportRepository(db)
 
 		// Services
 		authService := service.NewAuthService(memberRepo, jwtManager)
@@ -154,6 +167,11 @@ func main() {
 		menuService := service.NewMenuService(menuRepo)
 		siteService := service.NewSiteService(siteRepo)
 		boardService := service.NewBoardService(boardRepo)
+		memberValidationService := service.NewMemberValidationService(memberRepo)
+		autosaveService := service.NewAutosaveService(autosaveRepo)
+		memoService := service.NewMemoService(memoRepo, memberRepo)
+		reactionService := service.NewReactionService(reactionRepo)
+		reportService := service.NewReportService(reportRepo)
 
 		// Handlers
 		authHandler = handler.NewAuthHandler(authService, cfg)
@@ -162,6 +180,14 @@ func main() {
 		menuHandler = handler.NewMenuHandler(menuService)
 		siteHandler = handler.NewSiteHandler(siteService)
 		boardHandler = handler.NewBoardHandler(boardService)
+		memberHandler = handler.NewMemberHandler(memberValidationService)
+		autosaveHandler = handler.NewAutosaveHandler(autosaveService)
+		filterHandler = handler.NewFilterHandler(nil) // TODO: Load filter words from DB
+		tokenHandler = handler.NewTokenHandler()
+		memoHandler = handler.NewMemoHandler(memoService)
+		reactionHandler = handler.NewReactionHandler(reactionService)
+		reportHandler = handler.NewReportHandler(reportService)
+		dajoongiHandler = handler.NewDajoongiHandler(dajoongiRepo)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -207,7 +233,7 @@ func main() {
 
 	// API v2 라우트 (only if DB is connected)
 	if db != nil {
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}

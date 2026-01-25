@@ -248,3 +248,81 @@ func (h *PostHandler) SearchPosts(c *gin.Context) {
 
 	common.SuccessResponse(c, data, meta)
 }
+
+// PostPreviewResponse represents the preview response
+type PostPreviewResponse struct {
+	Success bool             `json:"success"`
+	Message string           `json:"message,omitempty"`
+	Post    *PostPreviewData `json:"post,omitempty"`
+}
+
+// PostPreviewData represents post data for preview
+type PostPreviewData struct {
+	Subject      string   `json:"subject"`
+	Content      string   `json:"content"`
+	Name         string   `json:"name"`
+	Datetime     string   `json:"datetime"`
+	Hit          int      `json:"hit"`
+	Good         int      `json:"good"`
+	Nogood       int      `json:"nogood"`
+	IP           string   `json:"ip"`
+	IsComment    bool     `json:"is_comment"`
+	CommentInfo  string   `json:"comment_info,omitempty"`
+	Files        []string `json:"files"`
+	Links        []string `json:"links"`
+	BoardSubject string   `json:"board_subject"`
+}
+
+// GetPostPreview godoc
+// @Summary      게시글 미리보기
+// @Description  특정 게시글의 미리보기 정보를 조회합니다 (관리자용)
+// @Tags         posts
+// @Accept       json
+// @Produce      json
+// @Param        board_id  path      string  true   "게시판 ID"
+// @Param        id        path      int     true   "게시글 ID"
+// @Success      200  {object}  common.APIResponse{data=PostPreviewResponse}
+// @Failure      400  {object}  common.APIResponse
+// @Failure      404  {object}  common.APIResponse
+// @Router       /boards/{board_id}/posts/{id}/preview [get]
+func (h *PostHandler) GetPostPreview(c *gin.Context) {
+	boardID := c.Param("board_id")
+	id, err := ginutil.ParamInt(c, "id")
+	if err != nil {
+		c.JSON(200, PostPreviewResponse{
+			Success: false,
+			Message: "필수 파라미터가 누락되었습니다.",
+		})
+		return
+	}
+
+	post, err := h.service.GetPost(boardID, id)
+	if err != nil {
+		c.JSON(200, PostPreviewResponse{
+			Success: false,
+			Message: "게시물을 찾을 수 없습니다.",
+		})
+		return
+	}
+
+	// Prepare response
+	previewData := &PostPreviewData{
+		Subject:      post.Title,
+		Content:      post.Content,
+		Name:         post.Author,
+		Datetime:     post.CreatedAt.Format("2006-01-02 15:04:05"),
+		Hit:          post.Views,
+		Good:         post.Likes,
+		Nogood:       0,     // TODO: Add nogood field to PostResponse
+		IP:           "",    // IP is hidden for privacy
+		IsComment:    false, // Preview is only for posts, not comments
+		Files:        []string{},
+		Links:        []string{},
+		BoardSubject: boardID, // TODO: Get board subject from board service
+	}
+
+	c.JSON(200, PostPreviewResponse{
+		Success: true,
+		Post:    previewData,
+	})
+}

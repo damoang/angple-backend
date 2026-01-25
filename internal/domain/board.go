@@ -1,8 +1,27 @@
 package domain
 
 import (
+	"encoding/json"
 	"time"
 )
+
+// BoardDisplaySettings represents display options for board list view
+type BoardDisplaySettings struct {
+	ListStyle     string `json:"list_style"`     // compact, card, detailed
+	ShowPreview   bool   `json:"show_preview"`   // 본문 미리보기 표시 여부
+	PreviewLength int    `json:"preview_length"` // 미리보기 글자 수
+	ShowThumbnail bool   `json:"show_thumbnail"` // 썸네일 이미지 표시 여부
+}
+
+// DefaultBoardDisplaySettings returns default display settings
+func DefaultBoardDisplaySettings() BoardDisplaySettings {
+	return BoardDisplaySettings{
+		ListStyle:     "compact",
+		ShowPreview:   false,
+		PreviewLength: 150,
+		ShowThumbnail: false,
+	}
+}
 
 // Board represents a bulletin board configuration (g5_board table)
 type Board struct {
@@ -117,49 +136,80 @@ type UpdateBoardRequest struct {
 
 // BoardResponse - 게시판 응답 DTO
 type BoardResponse struct {
-	InsertTime   time.Time `json:"insert_time"`
-	MobileSkin   string    `json:"mobile_skin"`
-	BoardID      string    `json:"board_id"`
-	GroupID      string    `json:"group_id"`
-	Subject      string    `json:"subject"`
-	Admin        string    `json:"admin"`
-	Device       string    `json:"device"`
-	CategoryList string    `json:"category_list,omitempty"`
-	Skin         string    `json:"skin"`
-	ListLevel    int       `json:"list_level"`
-	UploadSize   int64     `json:"upload_size"`
-	ReadLevel    int       `json:"read_level"`
-	WriteLevel   int       `json:"write_level"`
-	ReplyLevel   int       `json:"reply_level"`
-	CommentLevel int       `json:"comment_level"`
-	UseCategory  int       `json:"use_category"`
-	PageRows     int       `json:"page_rows"`
-	UploadCount  int       `json:"upload_count"`
-	CountWrite   int       `json:"count_write"`
-	CountComment int       `json:"count_comment"`
+	InsertTime      time.Time            `json:"insert_time"`
+	MobileSkin      string               `json:"mobile_skin"`
+	BoardID         string               `json:"board_id"`
+	GroupID         string               `json:"group_id"`
+	Subject         string               `json:"subject"`
+	Admin           string               `json:"admin"`
+	Device          string               `json:"device"`
+	CategoryList    string               `json:"category_list,omitempty"`
+	Skin            string               `json:"skin"`
+	ListLevel       int                  `json:"list_level"`
+	UploadSize      int64                `json:"upload_size"`
+	ReadLevel       int                  `json:"read_level"`
+	WriteLevel      int                  `json:"write_level"`
+	ReplyLevel      int                  `json:"reply_level"`
+	CommentLevel    int                  `json:"comment_level"`
+	UseCategory     int                  `json:"use_category"`
+	UseGood         int                  `json:"use_good"`   // 추천 사용 여부
+	UseNogood       int                  `json:"use_nogood"` // 비추천 사용 여부
+	PageRows        int                  `json:"page_rows"`
+	UploadCount     int                  `json:"upload_count"`
+	CountWrite      int                  `json:"count_write"`
+	CountComment    int                  `json:"count_comment"`
+	DisplaySettings BoardDisplaySettings `json:"display_settings"` // 게시판 표시 설정
+}
+
+// GetDisplaySettings parses Extra1 field as BoardDisplaySettings
+// If parsing fails or field is empty, returns default settings
+func (b *Board) GetDisplaySettings() BoardDisplaySettings {
+	if b.Extra1 == "" {
+		return DefaultBoardDisplaySettings()
+	}
+
+	var settings BoardDisplaySettings
+	err := json.Unmarshal([]byte(b.Extra1), &settings)
+	if err != nil {
+		// 파싱 실패 시 기본값 반환
+		return DefaultBoardDisplaySettings()
+	}
+
+	// 유효성 검증
+	if settings.ListStyle == "" {
+		settings.ListStyle = "compact"
+	}
+	if settings.PreviewLength <= 0 {
+		settings.PreviewLength = 150
+	}
+
+	return settings
 }
 
 func (b *Board) ToResponse() *BoardResponse {
 	return &BoardResponse{
-		BoardID:      b.BoardID,
-		GroupID:      b.GroupID,
-		Subject:      b.Subject,
-		Admin:        b.Admin,
-		Device:       b.Device,
-		ListLevel:    b.ListLevel,
-		ReadLevel:    b.ReadLevel,
-		WriteLevel:   b.WriteLevel,
-		ReplyLevel:   b.ReplyLevel,
-		CommentLevel: b.CommentLevel,
-		UseCategory:  b.UseCategory,
-		CategoryList: b.CategoryList,
-		Skin:         b.Skin,
-		MobileSkin:   b.MobileSkin,
-		PageRows:     b.PageRows,
-		UploadCount:  b.UploadCount,
-		UploadSize:   b.UploadSize,
-		CountWrite:   b.CountWrite,
-		CountComment: b.CountComment,
-		InsertTime:   b.InsertTime,
+		BoardID:         b.BoardID,
+		GroupID:         b.GroupID,
+		Subject:         b.Subject,
+		Admin:           b.Admin,
+		Device:          b.Device,
+		ListLevel:       b.ListLevel,
+		ReadLevel:       b.ReadLevel,
+		WriteLevel:      b.WriteLevel,
+		ReplyLevel:      b.ReplyLevel,
+		CommentLevel:    b.CommentLevel,
+		UseCategory:     b.UseCategory,
+		UseGood:         b.UseGood,
+		UseNogood:       b.UseNogood,
+		CategoryList:    b.CategoryList,
+		Skin:            b.Skin,
+		MobileSkin:      b.MobileSkin,
+		PageRows:        b.PageRows,
+		UploadCount:     b.UploadCount,
+		UploadSize:      b.UploadSize,
+		CountWrite:      b.CountWrite,
+		CountComment:    b.CountComment,
+		InsertTime:      b.InsertTime,
+		DisplaySettings: b.GetDisplaySettings(), // Extra1에서 파싱
 	}
 }
