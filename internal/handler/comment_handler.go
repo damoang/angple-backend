@@ -155,6 +155,8 @@ func (h *CommentHandler) DeleteComment(c *gin.Context) {
 }
 
 // LikeComment handles POST /api/v2/boards/:board_id/posts/:id/comments/:comment_id/like
+//
+//nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 핸들러
 func (h *CommentHandler) LikeComment(c *gin.Context) {
 	boardID := c.Param("board_id")
 	commentID, err := ginutil.ParamInt(c, "comment_id")

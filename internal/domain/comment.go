@@ -87,9 +87,9 @@ func (c *Comment) ToResponse() *CommentResponse {
 
 // LikeResponse represents response for like/dislike actions
 type CommentLikeResponse struct {
-	Likes       int  `json:"likes"`
-	Dislikes    int  `json:"dislikes"`
-	UserLiked   bool `json:"user_liked"`
+	Likes        int  `json:"likes"`
+	Dislikes     int  `json:"dislikes"`
+	UserLiked    bool `json:"user_liked"`
 	UserDisliked bool `json:"user_disliked"`
 }
 

@@ -5,6 +5,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// Report status constants
+const (
+	ReportStatusPending    = "pending"
+	ReportStatusMonitoring = "monitoring"
+	ReportStatusApproved   = "approved"
+	ReportStatusDismissed  = "dismissed"
+)
+
 // ReportRepository handles report data operations
 type ReportRepository struct {
 	db *gorm.DB
@@ -25,13 +33,13 @@ func (r *ReportRepository) List(status string, page, limit int) ([]domain.Report
 
 	// Filter by status
 	switch status {
-	case "pending":
+	case ReportStatusPending:
 		query = query.Where("processed = 0 AND monitoring_checked = 0")
-	case "monitoring":
+	case ReportStatusMonitoring:
 		query = query.Where("processed = 0 AND monitoring_checked = 1")
-	case "approved":
+	case ReportStatusApproved:
 		query = query.Where("processed = 1 AND admin_approved = 1")
-	case "dismissed":
+	case ReportStatusDismissed:
 		query = query.Where("processed = 1 AND admin_approved = 0")
 	}
 
@@ -91,18 +99,18 @@ func (r *ReportRepository) UpdateStatus(id int, status, processedBy string) erro
 	updates := map[string]interface{}{}
 
 	switch status {
-	case "monitoring":
+	case ReportStatusMonitoring:
 		updates["monitoring_checked"] = true
 		updates["monitoring_datetime"] = gorm.Expr("NOW()")
-	case "pending":
+	case ReportStatusPending:
 		updates["monitoring_checked"] = false
 		updates["monitoring_datetime"] = nil
-	case "approved":
+	case ReportStatusApproved:
 		updates["processed"] = true
 		updates["admin_approved"] = true
 		updates["admin_datetime"] = gorm.Expr("NOW()")
 		updates["processed_datetime"] = gorm.Expr("NOW()")
-	case "dismissed":
+	case ReportStatusDismissed:
 		updates["processed"] = true
 		updates["admin_approved"] = false
 		updates["admin_datetime"] = gorm.Expr("NOW()")
@@ -110,7 +118,7 @@ func (r *ReportRepository) UpdateStatus(id int, status, processedBy string) erro
 	}
 
 	// Add admin user to admin_users field
-	if processedBy != "" && (status == "approved" || status == "dismissed") {
+	if processedBy != "" && (status == ReportStatusApproved || status == ReportStatusDismissed) {
 		updates["admin_users"] = processedBy
 	}
 
@@ -130,13 +138,13 @@ func (r *ReportRepository) CountByStatus(status string) (int64, error) {
 	query := r.db.Model(&domain.Report{})
 
 	switch status {
-	case "pending":
+	case ReportStatusPending:
 		query = query.Where("processed = 0 AND monitoring_checked = 0")
-	case "monitoring":
+	case ReportStatusMonitoring:
 		query = query.Where("processed = 0 AND monitoring_checked = 1")
-	case "approved":
+	case ReportStatusApproved:
 		query = query.Where("processed = 1 AND admin_approved = 1")
-	case "dismissed":
+	case ReportStatusDismissed:
 		query = query.Where("processed = 1 AND admin_approved = 0")
 	}
 

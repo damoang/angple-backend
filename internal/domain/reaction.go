@@ -20,13 +20,13 @@ func (ReactionCount) TableName() string {
 // ReactionChoose represents individual user reaction (g5_da_reaction_choose)
 // Maps to existing table structure: bo_table, wr_id, mb_id, chosen_type, chosen_ip, chosen_datetime
 type ReactionChoose struct {
-	ID             int64      `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	BoardTable     string     `gorm:"column:bo_table" json:"bo_table"`
-	WriteID        int64      `gorm:"column:wr_id" json:"wr_id"`
-	MemberID       string     `gorm:"column:mb_id" json:"member_id"`
-	Reaction       string     `gorm:"column:chosen_type" json:"reaction"` // emoji:thumbsup, etc.
-	ChosenIP       string     `gorm:"column:chosen_ip" json:"chosen_ip,omitempty"`
-	CreatedAt      *time.Time `gorm:"column:chosen_datetime" json:"created_at"`
+	ID         int64      `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	BoardTable string     `gorm:"column:bo_table" json:"bo_table"`
+	WriteID    int64      `gorm:"column:wr_id" json:"wr_id"`
+	MemberID   string     `gorm:"column:mb_id" json:"member_id"`
+	Reaction   string     `gorm:"column:chosen_type" json:"reaction"` // emoji:thumbsup, etc.
+	ChosenIP   string     `gorm:"column:chosen_ip" json:"chosen_ip,omitempty"`
+	CreatedAt  *time.Time `gorm:"column:chosen_datetime" json:"created_at"`
 	// Virtual fields for compatibility with existing code
 	TargetID string `gorm:"-" json:"target_id,omitempty"` // Computed: comment:{bo_table}:{wr_id}
 	ParentID string `gorm:"-" json:"parent_id,omitempty"` // Not stored in this table

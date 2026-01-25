@@ -242,7 +242,7 @@ func (r *commentRepository) GetNextCommentReply(boardID string, postID int, pare
 	// 마지막 2자리를 추출하여 +1
 	suffix := maxReply[len(maxReply)-2:]
 	num := 0
-	fmt.Sscanf(suffix, "%02d", &num)
+	_, _ = fmt.Sscanf(suffix, "%02d", &num)
 	num++
 
 	return fmt.Sprintf("%s%02d", parentCommentReply, num), nil

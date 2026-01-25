@@ -32,11 +32,6 @@ func parseTargetID(targetID string) (boardTable string, wrID int64, err error) {
 	return
 }
 
-// buildTargetID builds target ID from board table and write ID
-func buildTargetID(boardTable string, wrID int64) string {
-	return fmt.Sprintf("comment:%s:%d", boardTable, wrID)
-}
-
 // GetReactions retrieves reactions for target IDs
 func (r *ReactionRepository) GetReactions(targetIDs []string, memberID string) (map[string][]domain.ReactionItem, error) {
 	result := make(map[string][]domain.ReactionItem)

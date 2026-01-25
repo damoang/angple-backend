@@ -89,8 +89,8 @@ func (s *commentService) CreateComment(
 		comment.CommentReply = nextReply
 	} else {
 		// 원댓글 (그누보드 호환: depth 0)
-		comment.CommentCount = 0 // depth 0
-		comment.Num = 0          // 원댓글은 부모 댓글이 없음
+		comment.CommentCount = 0  // depth 0
+		comment.Num = 0           // 원댓글은 부모 댓글이 없음
 		comment.CommentReply = "" // 빈 문자열
 	}
 
@@ -143,6 +143,8 @@ func (s *commentService) DeleteComment(boardID string, id int, authorID string) 
 // LikeComment increments the like count for a comment
 // Note: This is a simple implementation without tracking who liked.
 // For production, consider using a separate table to track user likes.
+//
+//nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 서비스 메서드
 func (s *commentService) LikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error) {
 	// Check if comment exists
 	_, err := s.repo.FindByID(boardID, id)
@@ -162,9 +164,9 @@ func (s *commentService) LikeComment(boardID string, id int, userID string) (*do
 	}
 
 	return &domain.CommentLikeResponse{
-		Likes:       updated.Likes,
-		Dislikes:    updated.Dislikes,
-		UserLiked:   true,
+		Likes:        updated.Likes,
+		Dislikes:     updated.Dislikes,
+		UserLiked:    true,
 		UserDisliked: false,
 	}, nil
 }
@@ -189,9 +191,9 @@ func (s *commentService) DislikeComment(boardID string, id int, userID string) (
 	}
 
 	return &domain.CommentLikeResponse{
-		Likes:       updated.Likes,
-		Dislikes:    updated.Dislikes,
-		UserLiked:   false,
+		Likes:        updated.Likes,
+		Dislikes:     updated.Dislikes,
+		UserLiked:    false,
 		UserDisliked: true,
 	}, nil
 }
