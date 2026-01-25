@@ -152,6 +152,8 @@ type BoardResponse struct {
 	ReplyLevel      int                  `json:"reply_level"`
 	CommentLevel    int                  `json:"comment_level"`
 	UseCategory     int                  `json:"use_category"`
+	UseGood         int                  `json:"use_good"`   // 추천 사용 여부
+	UseNogood       int                  `json:"use_nogood"` // 비추천 사용 여부
 	PageRows        int                  `json:"page_rows"`
 	UploadCount     int                  `json:"upload_count"`
 	CountWrite      int                  `json:"count_write"`
@@ -197,6 +199,8 @@ func (b *Board) ToResponse() *BoardResponse {
 		ReplyLevel:      b.ReplyLevel,
 		CommentLevel:    b.CommentLevel,
 		UseCategory:     b.UseCategory,
+		UseGood:         b.UseGood,
+		UseNogood:       b.UseNogood,
 		CategoryList:    b.CategoryList,
 		Skin:            b.Skin,
 		MobileSkin:      b.MobileSkin,

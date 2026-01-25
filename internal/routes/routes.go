@@ -82,6 +82,8 @@ func Setup(
 			comments.POST("", middleware.JWTAuth(jwtManager), commentHandler.CreateComment)
 			comments.PUT("/:comment_id", middleware.JWTAuth(jwtManager), commentHandler.UpdateComment)
 			comments.DELETE("/:comment_id", middleware.JWTAuth(jwtManager), commentHandler.DeleteComment)
+			comments.POST("/:comment_id/like", middleware.JWTAuth(jwtManager), commentHandler.LikeComment)
+			comments.POST("/:comment_id/dislike", middleware.JWTAuth(jwtManager), commentHandler.DislikeComment)
 		}
 	}
 

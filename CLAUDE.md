@@ -459,6 +459,23 @@ db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 
 ## 중요 참고 문서
 
+### 핵심 스펙 문서 (필독)
+- **플러그인 스펙**: `docs/specs/plugin-spec-v1.0.md` - 플러그인 시스템 설계 및 개발 가이드
+- **API 버전 전략**: `docs/specs/api-versioning.md` - v1(그누보드 DB) / v2(신규 설계) 전략
+
+### 기타 문서
 - API 명세: `docs/swagger.yaml`
 - 로드맵: `docs/api-roadmap.csv`
 - README: `README.md`
+
+## API 버전 전략 요약
+
+| 버전 | 데이터베이스 | 상태 |
+|------|-------------|------|
+| **v1** (`/api/v2/*`) | 그누보드 DB (g5_*) | 현재 개발 중 |
+| **v2** (계획) | 신규 설계 DB | 추후 구현 |
+
+> **참고**: 현재 URL은 `/api/v2`이지만 실제로는 그누보드 DB를 사용하는 v1 역할입니다.
+> 추후 정리 시 `/api/v1`으로 변경 예정.
+
+자세한 내용은 `docs/specs/api-versioning.md` 참고.

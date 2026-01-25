@@ -56,7 +56,7 @@ func (s *ReportService) List(status string, page, limit int) ([]domain.ReportLis
 			ReporterID: report.ReporterID,
 			TargetID:   report.TargetID,
 			Reason:     report.Reason,
-			Status:     report.Status,
+			Status:     report.Status(), // Call Status() method
 			CreatedAt:  report.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 	}
@@ -85,7 +85,7 @@ func (s *ReportService) GetRecent(limit int) ([]domain.ReportListResponse, error
 			ReporterID: report.ReporterID,
 			TargetID:   report.TargetID,
 			Reason:     report.Reason,
-			Status:     report.Status,
+			Status:     report.Status(), // Call Status() method
 			CreatedAt:  report.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 	}
@@ -123,8 +123,9 @@ func (s *ReportService) Process(adminID string, req *domain.ReportActionRequest)
 	}
 
 	// Check if already processed (for admin actions)
+	currentStatus := report.Status()
 	if (req.Action == "adminApprove" || req.Action == "adminDismiss") &&
-		(report.Status == ReportStatusApproved || report.Status == ReportStatusDismissed) {
+		(currentStatus == ReportStatusApproved || currentStatus == ReportStatusDismissed) {
 		return ErrAlreadyProcessed
 	}
 
@@ -146,14 +147,20 @@ func (s *ReportService) Process(adminID string, req *domain.ReportActionRequest)
 
 // Create creates a new report
 func (s *ReportService) Create(reporterID, targetID, table string, parent int, reason string) (*domain.Report, error) {
+	now := time.Now()
 	report := &domain.Report{
-		Table:      table,
-		Parent:     parent,
-		ReporterID: reporterID,
-		TargetID:   targetID,
-		Reason:     reason,
-		Status:     ReportStatusPending,
-		CreatedAt:  time.Now(),
+		Table:             table,
+		Parent:            parent,
+		ReporterID:        reporterID,
+		TargetID:          targetID,
+		Reason:            reason,
+		Flag:              0, // pending
+		Processed:         false,
+		MonitoringChecked: false,
+		AdminApproved:     false,
+		CreatedAt:         now,
+		WriteTime:         now,
+		IP:                "0.0.0.0",
 	}
 
 	if err := s.repo.Create(report); err != nil {

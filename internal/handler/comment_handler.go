@@ -153,3 +153,53 @@ func (h *CommentHandler) DeleteComment(c *gin.Context) {
 
 	c.Status(204)
 }
+
+// LikeComment handles POST /api/v2/boards/:board_id/posts/:id/comments/:comment_id/like
+func (h *CommentHandler) LikeComment(c *gin.Context) {
+	boardID := c.Param("board_id")
+	commentID, err := ginutil.ParamInt(c, "comment_id")
+	if err != nil {
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
+	}
+
+	// Get authenticated user ID from JWT middleware
+	userID := middleware.GetUserID(c)
+
+	result, err := h.service.LikeComment(boardID, commentID, userID)
+	if errors.Is(err, common.ErrPostNotFound) {
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
+	}
+	if err != nil {
+		common.ErrorResponse(c, 500, "Failed to like comment", err)
+		return
+	}
+
+	common.SuccessResponse(c, result, nil)
+}
+
+// DislikeComment handles POST /api/v2/boards/:board_id/posts/:id/comments/:comment_id/dislike
+func (h *CommentHandler) DislikeComment(c *gin.Context) {
+	boardID := c.Param("board_id")
+	commentID, err := ginutil.ParamInt(c, "comment_id")
+	if err != nil {
+		common.ErrorResponse(c, 400, "Invalid comment ID", err)
+		return
+	}
+
+	// Get authenticated user ID from JWT middleware
+	userID := middleware.GetUserID(c)
+
+	result, err := h.service.DislikeComment(boardID, commentID, userID)
+	if errors.Is(err, common.ErrPostNotFound) {
+		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
+	}
+	if err != nil {
+		common.ErrorResponse(c, 500, "Failed to dislike comment", err)
+		return
+	}
+
+	common.SuccessResponse(c, result, nil)
+}

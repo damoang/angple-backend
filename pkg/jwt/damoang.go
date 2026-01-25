@@ -8,12 +8,44 @@ import (
 
 // DamoangClaims - damoang.net JWT 페이로드 구조
 // damoang.net에서 생성된 JWT는 다른 필드명을 사용함
+// 개발 편의를 위해 두 가지 클레임 형식을 모두 지원:
+// - damoang.net 형식: mb_id, mb_name, mb_email, mb_level
+// - angple-backend 형식: user_id, nickname, level
 type DamoangClaims struct {
 	jwt.RegisteredClaims
+	// damoang.net 형식
 	MbID    string `json:"mb_id"`
 	MbName  string `json:"mb_name"`
 	MbEmail string `json:"mb_email"`
 	MbLevel int    `json:"mb_level"`
+	// angple-backend 형식 (개발/테스트용)
+	UserID   string `json:"user_id,omitempty"`
+	Nickname string `json:"nickname,omitempty"`
+	Level    int    `json:"level,omitempty"`
+}
+
+// GetUserID returns the user ID, checking both formats
+func (c *DamoangClaims) GetUserID() string {
+	if c.MbID != "" {
+		return c.MbID
+	}
+	return c.UserID
+}
+
+// GetUserLevel returns the user level, checking both formats
+func (c *DamoangClaims) GetUserLevel() int {
+	if c.MbLevel != 0 {
+		return c.MbLevel
+	}
+	return c.Level
+}
+
+// GetUserName returns the user name, checking both formats
+func (c *DamoangClaims) GetUserName() string {
+	if c.MbName != "" {
+		return c.MbName
+	}
+	return c.Nickname
 }
 
 // VerifyDamoangToken - damoang.net에서 생성된 JWT 토큰 검증

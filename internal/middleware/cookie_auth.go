@@ -8,21 +8,9 @@ import (
 
 // DamoangCookieAuth - damoang_jwt 쿠키에서 인증 정보 추출
 // 인증 실패해도 요청을 계속 진행 (optional auth)
-// 개발 환경에서는 Mock 사용자를 자동으로 설정
-func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, cfg *config.Config) gin.HandlerFunc {
+// 모든 환경에서 실제 JWT 쿠키 검증 수행
+func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, _ *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 개발 환경: Mock 사용자 사용
-		if cfg.IsDevelopment() {
-			c.Set("damoang_user_id", "dev_user")
-			c.Set("damoang_user_name", "개발자")
-			c.Set("damoang_user_level", 10)
-			c.Set("damoang_user_email", "dev@localhost")
-			c.Set("damoang_authenticated", true)
-			c.Next()
-			return
-		}
-
-		// 운영 환경: 실제 JWT 쿠키 검증
 		// 1. damoang_jwt 쿠키 읽기
 		tokenString, err := c.Cookie("damoang_jwt")
 		if err != nil || tokenString == "" {
@@ -35,16 +23,15 @@ func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, cfg *config.Config) gin.H
 		claims, err := damoangJWT.VerifyToken(tokenString)
 		if err != nil {
 			// 토큰이 유효하지 않으면 비로그인 상태로 진행
-			// 에러 로깅은 필요시 추가
 			c.Next()
 			return
 		}
 
-		// 3. context에 사용자 정보 저장
-		c.Set("damoang_user_id", claims.MbID)
-		c.Set("damoang_user_name", claims.MbName)
-		c.Set("damoang_user_level", claims.MbLevel)
-		c.Set("damoang_user_email", claims.MbEmail)
+		// 3. context에 사용자 정보 저장 (두 가지 형식 모두 지원)
+		c.Set("damoang_user_id", claims.GetUserID())
+		c.Set("damoang_user_name", claims.GetUserName())
+		c.Set("damoang_user_level", claims.GetUserLevel())
+		c.Set("damoang_user_email", claims.MbEmail) // 이메일은 damoang 형식만
 		c.Set("damoang_authenticated", true)
 
 		c.Next()

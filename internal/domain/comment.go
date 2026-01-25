@@ -58,24 +58,45 @@ type CommentResponse struct {
 	AuthorID  string    `json:"author_id"`
 	ID        int       `json:"id"`
 	ParentID  int       `json:"parent_id"`
-	Depth     int       `json:"depth"` // 댓글 depth (1=일반 댓글, 2=대댓글, ...)
+	Depth     int       `json:"depth"`    // 댓글 depth (1=일반 댓글, 2=대댓글, ...)
+	Likes     int       `json:"likes"`    // 추천 수
+	Dislikes  int       `json:"dislikes"` // 비추천 수
 }
 
 func (c *Comment) ToResponse() *CommentResponse {
+	// ParentID 결정:
+	// - 대댓글인 경우 (Num > 0): Num에 저장된 부모 댓글 ID 사용
+	// - 원댓글인 경우 (Num == 0): 게시글 ID (ParentID) 사용
+	parentID := c.ParentID
+	if c.Num > 0 {
+		parentID = c.Num
+	}
+
 	return &CommentResponse{
 		ID:        c.ID,
-		ParentID:  c.ParentID,
+		ParentID:  parentID,
 		Content:   c.Content,
 		Author:    c.Author,
 		AuthorID:  c.AuthorID,
 		CreatedAt: c.CreatedAt,
 		Depth:     c.CommentCount, // wr_comment 컬럼이 depth를 나타냄
+		Likes:     c.Likes,
+		Dislikes:  c.Dislikes,
 	}
 }
 
+// LikeResponse represents response for like/dislike actions
+type CommentLikeResponse struct {
+	Likes       int  `json:"likes"`
+	Dislikes    int  `json:"dislikes"`
+	UserLiked   bool `json:"user_liked"`
+	UserDisliked bool `json:"user_disliked"`
+}
+
 type CreateCommentRequest struct {
-	Content string `json:"content" validate:"required,min=1"`
-	Author  string `json:"author" validate:"required,min=1,max=50"`
+	Content         string `json:"content" validate:"required,min=1"`
+	Author          string `json:"author" validate:"required,min=1,max=50"`
+	ParentCommentID int    `json:"parent_id"` // 대댓글일 경우 부모 댓글 ID (0이면 원댓글)
 }
 
 type UpdateCommentRequest struct {
