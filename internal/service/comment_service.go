@@ -145,7 +145,7 @@ func (s *commentService) DeleteComment(boardID string, id int, authorID string) 
 // For production, consider using a separate table to track user likes.
 //
 //nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 서비스 메서드
-func (s *commentService) LikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error) {
+func (s *commentService) LikeComment(boardID string, id int, _ string) (*domain.CommentLikeResponse, error) {
 	// Check if comment exists
 	_, err := s.repo.FindByID(boardID, id)
 	if err != nil {
@@ -172,7 +172,9 @@ func (s *commentService) LikeComment(boardID string, id int, userID string) (*do
 }
 
 // DislikeComment increments the dislike count for a comment
-func (s *commentService) DislikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error) {
+//
+//nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 서비스 메서드
+func (s *commentService) DislikeComment(boardID string, id int, _ string) (*domain.CommentLikeResponse, error) {
 	// Check if comment exists
 	_, err := s.repo.FindByID(boardID, id)
 	if err != nil {
