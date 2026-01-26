@@ -1,0 +1,136 @@
+name: Deploy to Prod (EC2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (default: commit SHA)'
+        required: false
+        type: string
+
+jobs:
+  # Go 테스트는 GitHub Actions에서 (가벼움)
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - run: go test -v ./...
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Set image tag
+        id: set-tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=main-$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+
+            IMAGE_TAG="${{ steps.set-tag.outputs.tag }}"
+            ECR_REGISTRY="891376997084.dkr.ecr.ap-northeast-2.amazonaws.com"
+            REPOSITORY="damoang"
+
+            echo "🚀 Deploying angple-backend with image tag: $IMAGE_TAG"
+
+            cd /home/damoang/angple-backend
+            git fetch origin
+            git checkout main
+            git pull origin main
+
+            # ECR 로그인
+            echo "🔑 Logging into ECR..."
+            aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+            # EC2에서 빌드 & ECR push
+            echo "🔨 Building images on EC2..."
+            docker build -f deployments/docker/api.Dockerfile -t $ECR_REGISTRY/$REPOSITORY:api-$IMAGE_TAG -t $ECR_REGISTRY/$REPOSITORY:api-latest .
+            docker build -f deployments/docker/gateway.Dockerfile -t $ECR_REGISTRY/$REPOSITORY:gateway-$IMAGE_TAG -t $ECR_REGISTRY/$REPOSITORY:gateway-latest .
+
+            echo "📤 Pushing to ECR..."
+            docker push $ECR_REGISTRY/$REPOSITORY:api-$IMAGE_TAG
+            docker push $ECR_REGISTRY/$REPOSITORY:api-latest
+            docker push $ECR_REGISTRY/$REPOSITORY:gateway-$IMAGE_TAG
+            docker push $ECR_REGISTRY/$REPOSITORY:gateway-latest
+
+            # 기존 컨테이너 중지 및 제거
+            echo "🛑 Stopping existing containers..."
+            docker stop angple-api angple-gateway 2>/dev/null || true
+            docker rm angple-api angple-gateway 2>/dev/null || true
+
+            # 환경변수
+            source /home/damoang/angple-backend/.env 2>/dev/null || true
+
+            # 네트워크 생성
+            docker network create angple-network 2>/dev/null || true
+
+            # API 컨테이너
+            echo "🟢 Starting API..."
+            docker run -d \
+              --name angple-api \
+              -p 8081:8081 \
+              --restart unless-stopped \
+              --network angple-network \
+              --memory="1g" \
+              -e APP_ENV=${APP_ENV:-prod} \
+              -e DB_HOST=${DB_HOST:-host.docker.internal} \
+              -e DB_PORT=${DB_PORT:-3306} \
+              -e DB_USER=${DB_USER:-damoang} \
+              -e DB_PASSWORD=${DB_PASSWORD} \
+              -e DB_NAME=${DB_NAME:-damoang} \
+              -e REDIS_HOST=${REDIS_HOST:-host.docker.internal} \
+              -e REDIS_PORT=${REDIS_PORT:-6379} \
+              -e JWT_SECRET=${JWT_SECRET} \
+              -e DAMOANG_JWT_SECRET=${DAMOANG_JWT_SECRET} \
+              -e API_PORT=8081 \
+              -e RECOMMENDED_DATA_PATH=/data/recommended \
+              -e "CORS_ALLOW_ORIGINS=https://damoang.dev,https://api.damoang.dev,https://web.damoang.net,https://damoang.net" \
+              -v /home/damoang/www/data/cache/recommended:/data/recommended:ro \
+              --add-host=host.docker.internal:host-gateway \
+              $ECR_REGISTRY/$REPOSITORY:api-$IMAGE_TAG
+
+            # Gateway 컨테이너
+            echo "🟢 Starting Gateway..."
+            docker run -d \
+              --name angple-gateway \
+              -p 8080:8080 \
+              --restart unless-stopped \
+              --network angple-network \
+              --memory="512m" \
+              -e LARAVEL_BACKEND_URL=http://host.docker.internal:80 \
+              -e GO_API_URL=http://angple-api:8081 \
+              -e GATEWAY_PORT=8080 \
+              --add-host=host.docker.internal:host-gateway \
+              $ECR_REGISTRY/$REPOSITORY:gateway-$IMAGE_TAG
+
+            # proxy-network 연결
+            docker network connect proxy-network angple-api 2>/dev/null || true
+            docker network connect proxy-network angple-gateway 2>/dev/null || true
+
+            # 헬스체크
+            echo "🏥 Health check..."
+            sleep 10
+            docker ps | grep -E "angple-(api|gateway)"
+
+            # 정리
+            docker image prune -f
+
+            echo "✅ Deployed at $(date)"
+            echo "📍 Tag: $IMAGE_TAG"
