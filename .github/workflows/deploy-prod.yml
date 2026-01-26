@@ -64,7 +64,7 @@ jobs:
               "git config --global --add safe.directory /home/damoang/angple-backend",
               "git fetch origin",
               "git checkout main",
-              "git pull origin main",
+              "git reset --hard origin/main",
               "echo Deploying angple-backend with tag: $IMAGE_TAG",
               "aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin $ECR_REGISTRY",
               "docker build -f deployments/docker/api.Dockerfile -t $ECR_REGISTRY/$REPOSITORY:api-$IMAGE_TAG -t $ECR_REGISTRY/$REPOSITORY:api-latest .",
