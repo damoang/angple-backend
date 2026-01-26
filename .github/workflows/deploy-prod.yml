@@ -56,11 +56,12 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
               "set -e",
-              "git config --global --add safe.directory /home/damoang/angple-backend",
+              "export HOME=/home/damoang",
               "export IMAGE_TAG='"$IMAGE_TAG"'",
               "export ECR_REGISTRY=891376997084.dkr.ecr.ap-northeast-2.amazonaws.com",
               "export REPOSITORY=damoang",
               "cd /home/damoang/angple-backend",
+              "git config --global --add safe.directory /home/damoang/angple-backend",
               "git fetch origin",
               "git checkout main",
               "git pull origin main",
