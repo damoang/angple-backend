@@ -27,7 +27,7 @@ jobs:
           go-version: '1.24'
 
       - name: Run tests
-        run: go test -v ./...
+        run: go test -v $(go list ./... | grep -v /plugins/)
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

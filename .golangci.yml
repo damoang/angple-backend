@@ -27,8 +27,6 @@ linters:
     - rowserrcheck    # database/sql rows.Err 체크
     - sqlclosecheck   # database/sql close 체크
     - errorlint       # 에러 처리 best practice
-  disable:
-    - typecheck       # 빌드 오류는 별도로 체크됨
 
 linters-settings:
   errcheck:
