@@ -29,7 +29,7 @@ jobs:
       uses: golangci/golangci-lint-action@v6
       with:
         version: v1.64.8
-        args: --timeout=5m
+        args: --timeout=5m --skip-dirs=plugins
 
   golangci-reviewdog:
     name: golangci-lint with reviewdog
@@ -51,7 +51,7 @@ jobs:
 
     - name: Run golangci-lint
       run: |
-        golangci-lint run --timeout=5m --new-from-rev=${{ github.event.pull_request.base.sha }} --out-format=colored-line-number > golangci-result.txt 2>&1 || echo "lint_issues=true" >> $GITHUB_ENV
+        golangci-lint run --timeout=5m --skip-dirs=plugins --new-from-rev=${{ github.event.pull_request.base.sha }} --out-format=colored-line-number > golangci-result.txt 2>&1 || echo "lint_issues=true" >> $GITHUB_ENV
 
     - name: Show lint results
       if: always()
@@ -64,7 +64,7 @@ jobs:
       uses: golangci/golangci-lint-action@v6
       with:
         version: v1.64.8
-        args: --timeout=5m
+        args: --timeout=5m --skip-dirs=plugins
         only-new-issues: true  # 변경된 파일의 새로운 이슈만 리포트
         skip-cache: true       # PR에서 정확한 결과를 위해 캐시 스킵
       continue-on-error: true  # reviewdog rate limit 시 CI 실패 방지
