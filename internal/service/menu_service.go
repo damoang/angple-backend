@@ -143,6 +143,8 @@ func (s *menuService) CreateMenu(req *domain.CreateMenuRequest) (*domain.AdminMe
 }
 
 // UpdateMenu updates an existing menu
+//
+//nolint:gocyclo // Complexity is due to optional field updates, not control flow
 func (s *menuService) UpdateMenu(id int64, req *domain.UpdateMenuRequest) (*domain.AdminMenuResponse, error) {
 	// Find existing menu
 	menu, err := s.repo.FindByID(id)

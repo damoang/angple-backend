@@ -83,8 +83,8 @@ func (s *promotionService) GetAdvertiserByID(id int64) (*domain.AdvertiserRespon
 // CreateAdvertiser creates a new advertiser
 func (s *promotionService) CreateAdvertiser(req *domain.CreateAdvertiserRequest) (*domain.AdvertiserResponse, error) {
 	// Check if member is already an advertiser
-	existing, _ := s.repo.FindAdvertiserByMemberID(req.MemberID)
-	if existing != nil {
+	existing, err := s.repo.FindAdvertiserByMemberID(req.MemberID)
+	if err == nil && existing != nil {
 		return nil, errors.New("member is already an advertiser")
 	}
 

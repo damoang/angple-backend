@@ -70,8 +70,9 @@ func (h *PromotionHandler) GetPromotionPost(c *gin.Context) {
 		return
 	}
 
-	// Increment views
-	_ = h.service.IncrementViews(id)
+	// Increment views (error is intentionally ignored - view count is not critical)
+	//nolint:errcheck
+	h.service.IncrementViews(id)
 
 	data, err := h.service.GetPromotionPostByID(id)
 	if err != nil {
