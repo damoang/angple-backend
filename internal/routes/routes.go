@@ -25,6 +25,8 @@ func Setup(
 	reactionHandler *handler.ReactionHandler,
 	reportHandler *handler.ReportHandler,
 	dajoongiHandler *handler.DajoongiHandler,
+	promotionHandler *handler.PromotionHandler,
+	bannerHandler *handler.BannerHandler,
 	jwtManager *jwt.Manager,
 	damoangJWT *jwt.DamoangManager,
 	recommendedHandler *handler.RecommendedHandler,
@@ -159,4 +161,39 @@ func Setup(
 
 	// Dajoongi (다중이 탐지 API - 관리자 전용)
 	api.GET("/dajoongi", dajoongiHandler.GetDuplicateAccounts)
+
+	// ============================================
+	// Plugin Routes (/api/plugins/*)
+	// ============================================
+	plugins := router.Group("/api/plugins", middleware.DamoangCookieAuth(damoangJWT, cfg))
+
+	// Promotion Plugin (직홍게 플러그인)
+	promotion := plugins.Group("/promotion")
+	promotion.GET("/posts", promotionHandler.ListPromotionPosts)
+	promotion.GET("/posts/insert", promotionHandler.GetPromotionPostsForInsert)
+	promotion.GET("/posts/:id", promotionHandler.GetPromotionPost)
+	promotion.POST("/posts", middleware.JWTAuth(jwtManager), promotionHandler.CreatePromotionPost)
+	promotion.PUT("/posts/:id", middleware.JWTAuth(jwtManager), promotionHandler.UpdatePromotionPost)
+	promotion.DELETE("/posts/:id", middleware.JWTAuth(jwtManager), promotionHandler.DeletePromotionPost)
+
+	// Promotion Admin API
+	promotionAdmin := promotion.Group("/admin")
+	promotionAdmin.GET("/advertisers", promotionHandler.ListAdvertisers)
+	promotionAdmin.POST("/advertisers", promotionHandler.CreateAdvertiser)
+	promotionAdmin.PUT("/advertisers/:id", promotionHandler.UpdateAdvertiser)
+	promotionAdmin.DELETE("/advertisers/:id", promotionHandler.DeleteAdvertiser)
+
+	// Banner Plugin (배너 플러그인)
+	banner := plugins.Group("/banner")
+	banner.GET("/list", bannerHandler.ListBanners)
+	banner.GET("/:id/click", bannerHandler.TrackClick)
+	banner.POST("/:id/view", bannerHandler.TrackView)
+
+	// Banner Admin API
+	bannerAdmin := banner.Group("/admin")
+	bannerAdmin.GET("/list", bannerHandler.ListAllBanners)
+	bannerAdmin.POST("", bannerHandler.CreateBanner)
+	bannerAdmin.PUT("/:id", bannerHandler.UpdateBanner)
+	bannerAdmin.DELETE("/:id", bannerHandler.DeleteBanner)
+	bannerAdmin.GET("/:id/stats", bannerHandler.GetBannerStats)
 }
