@@ -100,6 +100,16 @@ func Setup(
 	menus.GET("/sidebar", menuHandler.GetSidebarMenus)
 	menus.GET("/header", menuHandler.GetHeaderMenus)
 
+	// Admin Menus (관리자 전용 - 개발 중 인증 비활성화)
+	// TODO: 운영 환경에서는 middleware.JWTAuth(jwtManager) 추가 필요
+	adminMenus := api.Group("/admin/menus")
+	// adminMenus.Use(middleware.JWTAuth(jwtManager))
+	adminMenus.GET("", menuHandler.GetAllMenusForAdmin)
+	adminMenus.POST("", menuHandler.CreateMenu)
+	adminMenus.PUT("/:id", menuHandler.UpdateMenu)
+	adminMenus.DELETE("/:id", menuHandler.DeleteMenu)
+	adminMenus.POST("/reorder", menuHandler.ReorderMenus)
+
 	// Sites (Multi-tenant SaaS)
 	sites := api.Group("/sites")
 

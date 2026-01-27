@@ -81,3 +81,98 @@ type MenuListResponse struct {
 	Sidebar []MenuResponse `json:"sidebar"`
 	Header  []MenuResponse `json:"header"`
 }
+
+// ============================================
+// Admin Menu Management DTOs
+// ============================================
+
+// CreateMenuRequest is the request body for creating a menu
+type CreateMenuRequest struct {
+	ParentID      *int64 `json:"parent_id"`
+	Title         string `json:"title" binding:"required"`
+	URL           string `json:"url" binding:"required"`
+	Icon          string `json:"icon,omitempty"`
+	Shortcut      string `json:"shortcut,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Target        string `json:"target"`
+	ShowInHeader  bool   `json:"show_in_header"`
+	ShowInSidebar bool   `json:"show_in_sidebar"`
+	ViewLevel     int    `json:"view_level"`
+	IsActive      bool   `json:"is_active"`
+}
+
+// UpdateMenuRequest is the request body for updating a menu
+type UpdateMenuRequest struct {
+	ParentID      *int64  `json:"parent_id"`
+	Title         *string `json:"title,omitempty"`
+	URL           *string `json:"url,omitempty"`
+	Icon          *string `json:"icon,omitempty"`
+	Shortcut      *string `json:"shortcut,omitempty"`
+	Description   *string `json:"description,omitempty"`
+	Target        *string `json:"target,omitempty"`
+	ShowInHeader  *bool   `json:"show_in_header,omitempty"`
+	ShowInSidebar *bool   `json:"show_in_sidebar,omitempty"`
+	ViewLevel     *int    `json:"view_level,omitempty"`
+	IsActive      *bool   `json:"is_active,omitempty"`
+}
+
+// ReorderMenusRequest is the request body for reordering menus
+type ReorderMenusRequest struct {
+	Items []ReorderMenuItem `json:"items" binding:"required,min=1"`
+}
+
+// ReorderMenuItem represents a single menu item in a reorder request
+type ReorderMenuItem struct {
+	ID       int64  `json:"id" binding:"required"`
+	ParentID *int64 `json:"parent_id"`
+	OrderNum int    `json:"order_num"`
+}
+
+// AdminMenuResponse is the response format for admin menu list (includes all fields)
+type AdminMenuResponse struct {
+	ID            int64               `json:"id"`
+	ParentID      *int64              `json:"parent_id"`
+	Title         string              `json:"title"`
+	URL           string              `json:"url"`
+	Icon          string              `json:"icon,omitempty"`
+	Shortcut      string              `json:"shortcut,omitempty"`
+	Description   string              `json:"description,omitempty"`
+	Target        string              `json:"target"`
+	Depth         int                 `json:"depth"`
+	OrderNum      int                 `json:"order_num"`
+	ViewLevel     int                 `json:"view_level"`
+	ShowInHeader  bool                `json:"show_in_header"`
+	ShowInSidebar bool                `json:"show_in_sidebar"`
+	IsActive      bool                `json:"is_active"`
+	Children      []AdminMenuResponse `json:"children,omitempty"`
+}
+
+// ToAdminResponse converts Menu to AdminMenuResponse
+func (m *Menu) ToAdminResponse() AdminMenuResponse {
+	resp := AdminMenuResponse{
+		ID:            m.ID,
+		ParentID:      m.ParentID,
+		Title:         m.Title,
+		URL:           m.URL,
+		Icon:          m.Icon,
+		Shortcut:      m.Shortcut,
+		Description:   m.Description,
+		Target:        m.Target,
+		Depth:         m.Depth,
+		OrderNum:      m.OrderNum,
+		ViewLevel:     m.ViewLevel,
+		ShowInHeader:  m.ShowInHeader,
+		ShowInSidebar: m.ShowInSidebar,
+		IsActive:      m.IsActive,
+		Children:      make([]AdminMenuResponse, 0),
+	}
+
+	// Convert children recursively
+	if len(m.Children) > 0 {
+		for _, child := range m.Children {
+			resp.Children = append(resp.Children, child.ToAdminResponse())
+		}
+	}
+
+	return resp
+}
