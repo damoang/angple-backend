@@ -28,7 +28,7 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.63.4
+        version: v1.64.8
         args: --timeout=5m
 
   golangci-reviewdog:
@@ -47,7 +47,7 @@ jobs:
         go-version: '1.24'
 
     - name: Install golangci-lint
-      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
     - name: Run golangci-lint
       run: |
@@ -63,7 +63,7 @@ jobs:
     - name: Report with reviewdog
       uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.63.4
+        version: v1.64.8
         args: --timeout=5m
         only-new-issues: true  # 변경된 파일의 새로운 이슈만 리포트
         skip-cache: true       # PR에서 정확한 결과를 위해 캐시 스킵
