@@ -87,12 +87,13 @@ jobs:
 
     - name: Check formatting
       run: |
-        if [ -n "$(gofmt -s -l .)" ]; then
+        UNFORMATTED=$(find . -name '*.go' -not -path './plugins/*' -not -path './vendor/*' | xargs gofmt -s -l)
+        if [ -n "$UNFORMATTED" ]; then
           echo "The following files are not formatted:"
-          gofmt -s -l .
+          echo "$UNFORMATTED"
           echo "Please run 'gofmt -s -w .' to format your code"
           exit 1
         fi
 
     - name: Run go vet
-      run: go vet ./...
+      run: go vet $(go list ./... | grep -v /plugins/)

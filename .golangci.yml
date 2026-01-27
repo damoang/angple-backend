@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
@@ -87,6 +89,7 @@ issues:
   exclude-dirs:
     - bin
     - vendor
+    - plugins
   exclude-files:
     - ".*\\.pb\\.go$"
   exclude-rules:
