@@ -146,8 +146,8 @@ func (s *menuService) CreateMenu(req *domain.CreateMenuRequest) (*domain.AdminMe
 //
 //nolint:gocyclo // Complexity is due to optional field updates, not control flow
 func (s *menuService) UpdateMenu(id int64, req *domain.UpdateMenuRequest) (*domain.AdminMenuResponse, error) {
-	// Find existing menu
-	menu, err := s.repo.FindByID(id)
+	// Find existing menu (Admin can edit inactive menus too)
+	menu, err := s.repo.FindByIDForAdmin(id)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (s *menuService) UpdateMenu(id int64, req *domain.UpdateMenuRequest) (*doma
 		if req.ParentID == nil {
 			menu.Depth = 0
 		} else {
-			parent, err := s.repo.FindByID(*req.ParentID)
+			parent, err := s.repo.FindByIDForAdmin(*req.ParentID)
 			if err != nil {
 				return nil, err
 			}
@@ -208,8 +208,8 @@ func (s *menuService) UpdateMenu(id int64, req *domain.UpdateMenuRequest) (*doma
 
 // DeleteMenu deletes a menu by ID
 func (s *menuService) DeleteMenu(id int64) error {
-	// Verify menu exists
-	_, err := s.repo.FindByID(id)
+	// Verify menu exists (Admin can delete inactive menus too)
+	_, err := s.repo.FindByIDForAdmin(id)
 	if err != nil {
 		return err
 	}

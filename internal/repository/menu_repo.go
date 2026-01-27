@@ -14,7 +14,8 @@ type MenuRepository interface {
 	FindByID(id int64) (*domain.Menu, error)
 
 	// Admin CRUD
-	GetAllForAdmin() ([]*domain.Menu, error) // includes inactive
+	GetAllForAdmin() ([]*domain.Menu, error)    // includes inactive
+	FindByIDForAdmin(id int64) (*domain.Menu, error) // includes inactive
 	Create(menu *domain.Menu) error
 	Update(menu *domain.Menu) error
 	Delete(id int64) error
@@ -122,6 +123,21 @@ func (r *menuRepository) buildHierarchy(menus []*domain.Menu) []*domain.Menu {
 // ============================================
 // Admin Menu CRUD Operations
 // ============================================
+
+// FindByIDForAdmin ID로 메뉴 조회 (비활성 메뉴 포함, Admin용)
+func (r *menuRepository) FindByIDForAdmin(id int64) (*domain.Menu, error) {
+	var menu domain.Menu
+
+	err := r.db.
+		Where("id = ?", id).
+		First(&menu).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &menu, nil
+}
 
 // GetAllForAdmin 모든 메뉴 조회 (비활성 메뉴 포함, Admin용)
 func (r *menuRepository) GetAllForAdmin() ([]*domain.Menu, error) {
