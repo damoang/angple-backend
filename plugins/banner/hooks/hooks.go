@@ -1,3 +1,5 @@
+//go:build ignore
+
 // 배너 플러그인 Hook 구현
 package hooks
 

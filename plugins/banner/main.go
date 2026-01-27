@@ -1,3 +1,5 @@
+//go:build ignore
+
 // 배너 광고 플러그인
 // Banner Advertising Plugin
 package main

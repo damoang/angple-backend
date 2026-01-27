@@ -1,3 +1,5 @@
+//go:build ignore
+
 // 배너 플러그인 HTTP 핸들러
 package handlers
 
