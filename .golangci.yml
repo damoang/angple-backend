@@ -102,6 +102,11 @@ issues:
       linters:
         - dupl
 
+    # Handler 패턴의 유사 코드 허용 (CRUD 핸들러는 구조가 비슷함)
+    - path: internal/handler/.*\.go
+      linters:
+        - dupl
+
   max-issues-per-linter: 0
   max-same-issues: 0
   uniq-by-line: true
