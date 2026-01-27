@@ -1,6 +1,10 @@
 run:
   timeout: 5m
   tests: true
+  skip-dirs:
+    - plugins
+    - bin
+    - vendor
 
 linters:
   enable:
@@ -82,10 +86,6 @@ linters-settings:
       - G204  # Subprocess launched with variable (개발 환경에서 필요)
 
 issues:
-  exclude-dirs:
-    - bin
-    - vendor
-    - plugins
   exclude-files:
     - ".*\\.pb\\.go$"
   exclude-rules:
