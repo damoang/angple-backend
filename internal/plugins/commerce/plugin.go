@@ -41,6 +41,62 @@ var Manifest = &plugin.PluginManifest{
 	Requires: plugin.Requires{
 		Angple: ">=1.0.0",
 	},
+	// Admin 메뉴 정의 (Phase 9)
+	Menus: []plugin.MenuConfig{
+		{
+			Title:         "Commerce",
+			URL:           "/admin/commerce",
+			Icon:          "shopping-cart",
+			ShowInSidebar: true,
+			OrderNum:      100,
+			ViewLevel:     9, // Admin 전용
+		},
+		{
+			Title:         "상품 관리",
+			URL:           "/admin/commerce/products",
+			Icon:          "package",
+			ParentPath:    "/admin/commerce",
+			ShowInSidebar: true,
+			OrderNum:      1,
+			ViewLevel:     9,
+		},
+		{
+			Title:         "주문 관리",
+			URL:           "/admin/commerce/orders",
+			Icon:          "clipboard-list",
+			ParentPath:    "/admin/commerce",
+			ShowInSidebar: true,
+			OrderNum:      2,
+			ViewLevel:     9,
+		},
+		{
+			Title:         "정산 관리",
+			URL:           "/admin/commerce/settlements",
+			Icon:          "calculator",
+			ParentPath:    "/admin/commerce",
+			ShowInSidebar: true,
+			OrderNum:      3,
+			ViewLevel:     9,
+		},
+		{
+			Title:         "쿠폰 관리",
+			URL:           "/admin/commerce/coupons",
+			Icon:          "ticket",
+			ParentPath:    "/admin/commerce",
+			ShowInSidebar: true,
+			OrderNum:      4,
+			ViewLevel:     9,
+		},
+		{
+			Title:         "리뷰 관리",
+			URL:           "/admin/commerce/reviews",
+			Icon:          "star",
+			ParentPath:    "/admin/commerce",
+			ShowInSidebar: true,
+			OrderNum:      5,
+			ViewLevel:     9,
+		},
+	},
 	Routes: []plugin.RouteConfig{
 		// 상품 관리 API (Phase 2)
 		{Path: "/products", Method: "GET", Handler: "ListProducts", Auth: "required"},

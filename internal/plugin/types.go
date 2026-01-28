@@ -37,6 +37,21 @@ type PluginManifest struct {
 
 	// 권한 정의 (선택)
 	Permissions []Permission `yaml:"permissions"`
+
+	// 메뉴 정의 (선택) - 플러그인이 Admin UI에 메뉴 등록
+	Menus []MenuConfig `yaml:"menus"`
+}
+
+// MenuConfig 플러그인 메뉴 설정
+type MenuConfig struct {
+	Title         string `yaml:"title"`          // 메뉴 제목
+	URL           string `yaml:"url"`            // 메뉴 URL
+	Icon          string `yaml:"icon"`           // Lucide 아이콘 이름
+	ParentPath    string `yaml:"parent_path"`    // 부모 메뉴 URL (없으면 루트)
+	ShowInSidebar bool   `yaml:"show_in_sidebar"` // 사이드바 노출 여부
+	ShowInHeader  bool   `yaml:"show_in_header"`  // 헤더 노출 여부
+	OrderNum      int    `yaml:"order_num"`       // 정렬 순서
+	ViewLevel     int    `yaml:"view_level"`      // 보기 권한 레벨 (기본 1)
 }
 
 // Requires 호환성 요구사항

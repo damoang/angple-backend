@@ -13,6 +13,10 @@ type MenuRepository interface {
 	GetHeaderMenus() ([]*domain.Menu, error)
 	FindByID(id int64) (*domain.Menu, error)
 
+	// 플러그인 필터링된 조회 (활성화된 플러그인의 메뉴만 포함)
+	GetSidebarMenusWithPlugins(enabledPlugins []string) ([]*domain.Menu, error)
+	GetHeaderMenusWithPlugins(enabledPlugins []string) ([]*domain.Menu, error)
+
 	// Admin CRUD
 	GetAllForAdmin() ([]*domain.Menu, error)    // includes inactive
 	FindByIDForAdmin(id int64) (*domain.Menu, error) // includes inactive
@@ -21,6 +25,9 @@ type MenuRepository interface {
 	Delete(id int64) error
 	ReorderBulk(items []domain.ReorderMenuItem) error
 	GetMaxOrderNumByParent(parentID *int64) (int, error)
+
+	// 플러그인 메뉴 관리
+	DeleteByPluginName(pluginName string) error
 }
 
 // menuRepository GORM 구현체
@@ -74,6 +81,54 @@ func (r *menuRepository) GetHeaderMenus() ([]*domain.Menu, error) {
 		Order("depth ASC, order_num ASC").
 		Find(&menus).Error
 
+	if err != nil {
+		return nil, err
+	}
+
+	return r.buildHierarchy(menus), nil
+}
+
+// GetSidebarMenusWithPlugins 사이드바 메뉴 조회 (플러그인 필터링)
+// 코어 메뉴 (plugin_name IS NULL) + 활성화된 플러그인 메뉴만 반환
+func (r *menuRepository) GetSidebarMenusWithPlugins(enabledPlugins []string) ([]*domain.Menu, error) {
+	var menus []*domain.Menu
+
+	query := r.db.
+		Where("is_active = ? AND show_in_sidebar = ?", true, true)
+
+	// plugin_name이 NULL이거나 활성화된 플러그인 목록에 있는 메뉴만 조회
+	if len(enabledPlugins) > 0 {
+		query = query.Where("plugin_name IS NULL OR plugin_name IN ?", enabledPlugins)
+	} else {
+		// 활성화된 플러그인이 없으면 코어 메뉴만
+		query = query.Where("plugin_name IS NULL")
+	}
+
+	err := query.Order("depth ASC, order_num ASC").Find(&menus).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return r.buildHierarchy(menus), nil
+}
+
+// GetHeaderMenusWithPlugins 헤더 메뉴 조회 (플러그인 필터링)
+// 코어 메뉴 (plugin_name IS NULL) + 활성화된 플러그인 메뉴만 반환
+func (r *menuRepository) GetHeaderMenusWithPlugins(enabledPlugins []string) ([]*domain.Menu, error) {
+	var menus []*domain.Menu
+
+	query := r.db.
+		Where("is_active = ? AND show_in_header = ?", true, true)
+
+	// plugin_name이 NULL이거나 활성화된 플러그인 목록에 있는 메뉴만 조회
+	if len(enabledPlugins) > 0 {
+		query = query.Where("plugin_name IS NULL OR plugin_name IN ?", enabledPlugins)
+	} else {
+		// 활성화된 플러그인이 없으면 코어 메뉴만
+		query = query.Where("plugin_name IS NULL")
+	}
+
+	err := query.Order("depth ASC, order_num ASC").Find(&menus).Error
 	if err != nil {
 		return nil, err
 	}
@@ -215,4 +270,9 @@ func (r *menuRepository) GetMaxOrderNumByParent(parentID *int64) (int, error) {
 	}
 
 	return maxOrder, nil
+}
+
+// DeleteByPluginName 특정 플러그인의 모든 메뉴 삭제
+func (r *menuRepository) DeleteByPluginName(pluginName string) error {
+	return r.db.Where("plugin_name = ?", pluginName).Delete(&domain.Menu{}).Error
 }

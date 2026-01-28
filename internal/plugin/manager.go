@@ -114,6 +114,13 @@ func (m *Manager) Enable(name string) error {
 		m.registry.RegisterPlugin(info)
 	}
 
+	// 플러그인 메뉴 등록
+	if info.Manifest != nil && len(info.Manifest.Menus) > 0 {
+		if err := m.registerPluginMenus(name, info.Manifest.Menus); err != nil {
+			m.logger.Warn("Failed to register menus for plugin %s: %v", name, err)
+		}
+	}
+
 	m.mu.Lock()
 	info.Status = StatusEnabled
 	m.mu.Unlock()
@@ -145,6 +152,11 @@ func (m *Manager) Disable(name string) error {
 
 	// 라우트 해제
 	m.registry.UnregisterPlugin(name)
+
+	// 플러그인 메뉴 비활성화
+	if err := m.disablePluginMenus(name); err != nil {
+		m.logger.Warn("Failed to disable menus for plugin %s: %v", name, err)
+	}
 
 	m.mu.Lock()
 	info.Status = StatusDisabled
@@ -242,4 +254,179 @@ func (m *Manager) runBuiltInMigrations(name string) error {
 	// 실제 실행은 외부 마이그레이션 도구 또는 GORM AutoMigrate 사용
 	m.logger.Info("Running built-in migrations for plugin: %s", name)
 	return nil
+}
+
+// ============================================
+// 플러그인 메뉴 관리
+// ============================================
+
+// PluginMenu 플러그인 메뉴 DB 모델 (domain.Menu와 동일한 테이블 사용)
+type PluginMenu struct {
+	ID            int64   `gorm:"column:id;primaryKey"`
+	ParentID      *int64  `gorm:"column:parent_id"`
+	Title         string  `gorm:"column:title"`
+	URL           string  `gorm:"column:url"`
+	Icon          string  `gorm:"column:icon"`
+	Depth         int     `gorm:"column:depth"`
+	OrderNum      int     `gorm:"column:order_num"`
+	IsActive      bool    `gorm:"column:is_active"`
+	Target        string  `gorm:"column:target"`
+	ViewLevel     int     `gorm:"column:view_level"`
+	ShowInHeader  bool    `gorm:"column:show_in_header"`
+	ShowInSidebar bool    `gorm:"column:show_in_sidebar"`
+	PluginName    *string `gorm:"column:plugin_name"`
+}
+
+func (PluginMenu) TableName() string {
+	return "menus"
+}
+
+// registerPluginMenus 플러그인 메뉴 등록
+func (m *Manager) registerPluginMenus(pluginName string, menus []MenuConfig) error {
+	if m.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	// URL -> DB ID 매핑 (부모 메뉴 찾기용)
+	urlToID := make(map[string]int64)
+
+	// 먼저 기존 플러그인 메뉴 확인 (이미 존재하면 활성화만)
+	var existingCount int64
+	m.db.Model(&PluginMenu{}).Where("plugin_name = ?", pluginName).Count(&existingCount)
+
+	if existingCount > 0 {
+		// 이미 존재하면 활성화만
+		if err := m.db.Model(&PluginMenu{}).Where("plugin_name = ?", pluginName).Update("is_active", true).Error; err != nil {
+			return fmt.Errorf("failed to activate plugin menus: %w", err)
+		}
+		m.logger.Info("Activated %d existing menus for plugin: %s", existingCount, pluginName)
+		return nil
+	}
+
+	// 새 메뉴 등록 (2패스: 1. 루트 메뉴, 2. 자식 메뉴)
+	// Pass 1: 부모가 없는 메뉴 (루트) 먼저 등록
+	for _, menuCfg := range menus {
+		if menuCfg.ParentPath != "" {
+			continue // 자식 메뉴는 나중에
+		}
+
+		viewLevel := menuCfg.ViewLevel
+		if viewLevel == 0 {
+			viewLevel = 1 // 기본값
+		}
+
+		menu := &PluginMenu{
+			Title:         menuCfg.Title,
+			URL:           menuCfg.URL,
+			Icon:          menuCfg.Icon,
+			Depth:         0, // 루트 메뉴
+			OrderNum:      menuCfg.OrderNum,
+			IsActive:      true,
+			Target:        "_self",
+			ViewLevel:     viewLevel,
+			ShowInHeader:  menuCfg.ShowInHeader,
+			ShowInSidebar: menuCfg.ShowInSidebar,
+			PluginName:    &pluginName,
+		}
+
+		if err := m.db.Create(menu).Error; err != nil {
+			return fmt.Errorf("failed to create menu %s: %w", menuCfg.Title, err)
+		}
+
+		urlToID[menuCfg.URL] = menu.ID
+		m.logger.Info("Created root menu: %s (ID: %d)", menuCfg.Title, menu.ID)
+	}
+
+	// Pass 2: 자식 메뉴 등록
+	for _, menuCfg := range menus {
+		if menuCfg.ParentPath == "" {
+			continue // 루트 메뉴는 이미 등록됨
+		}
+
+		// 부모 메뉴 ID 찾기
+		var parentID *int64
+		if pid, ok := urlToID[menuCfg.ParentPath]; ok {
+			parentID = &pid
+		} else {
+			// DB에서 부모 메뉴 찾기
+			var parentMenu PluginMenu
+			if err := m.db.Where("url = ?", menuCfg.ParentPath).First(&parentMenu).Error; err == nil {
+				parentID = &parentMenu.ID
+			} else {
+				m.logger.Warn("Parent menu not found for %s (parent: %s)", menuCfg.URL, menuCfg.ParentPath)
+			}
+		}
+
+		viewLevel := menuCfg.ViewLevel
+		if viewLevel == 0 {
+			viewLevel = 1
+		}
+
+		depth := 1
+		if parentID != nil {
+			// 부모의 depth + 1
+			var parentMenu PluginMenu
+			if err := m.db.First(&parentMenu, *parentID).Error; err == nil {
+				depth = parentMenu.Depth + 1
+			}
+		}
+
+		menu := &PluginMenu{
+			ParentID:      parentID,
+			Title:         menuCfg.Title,
+			URL:           menuCfg.URL,
+			Icon:          menuCfg.Icon,
+			Depth:         depth,
+			OrderNum:      menuCfg.OrderNum,
+			IsActive:      true,
+			Target:        "_self",
+			ViewLevel:     viewLevel,
+			ShowInHeader:  menuCfg.ShowInHeader,
+			ShowInSidebar: menuCfg.ShowInSidebar,
+			PluginName:    &pluginName,
+		}
+
+		if err := m.db.Create(menu).Error; err != nil {
+			return fmt.Errorf("failed to create menu %s: %w", menuCfg.Title, err)
+		}
+
+		urlToID[menuCfg.URL] = menu.ID
+		m.logger.Info("Created child menu: %s (ID: %d, ParentID: %v)", menuCfg.Title, menu.ID, parentID)
+	}
+
+	m.logger.Info("Registered %d menus for plugin: %s", len(menus), pluginName)
+	return nil
+}
+
+// disablePluginMenus 플러그인 메뉴 비활성화
+func (m *Manager) disablePluginMenus(pluginName string) error {
+	if m.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	// 플러그인 메뉴를 비활성화 (삭제하지 않음)
+	result := m.db.Model(&PluginMenu{}).
+		Where("plugin_name = ?", pluginName).
+		Update("is_active", false)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to disable plugin menus: %w", result.Error)
+	}
+
+	m.logger.Info("Disabled %d menus for plugin: %s", result.RowsAffected, pluginName)
+	return nil
+}
+
+// GetEnabledPluginNames 활성화된 플러그인 이름 목록 반환
+func (m *Manager) GetEnabledPluginNames() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var names []string
+	for name, info := range m.plugins {
+		if info.Status == StatusEnabled {
+			names = append(names, name)
+		}
+	}
+	return names
 }
