@@ -15,13 +15,13 @@ import (
 
 // KakaoPayConfig 카카오페이 설정
 type KakaoPayConfig struct {
-	CID           string // 가맹점 코드 (테스트: TC0ONETIME)
-	AdminKey      string // Admin 키 (REST API 키)
-	SecretKey     string // Secret 키 (v1 API용, 선택)
-	IsSandbox     bool   // 테스트 모드
-	ApprovalURL   string // 결제 성공 시 리다이렉트 URL
-	CancelURL     string // 결제 취소 시 리다이렉트 URL
-	FailURL       string // 결제 실패 시 리다이렉트 URL
+	CID         string // 가맹점 코드 (테스트: TC0ONETIME)
+	AdminKey    string // Admin 키 (REST API 키)
+	SecretKey   string // Secret 키 (v1 API용, 선택)
+	IsSandbox   bool   // 테스트 모드
+	ApprovalURL string // 결제 성공 시 리다이렉트 URL
+	CancelURL   string // 결제 취소 시 리다이렉트 URL
+	FailURL     string // 결제 실패 시 리다이렉트 URL
 }
 
 // KakaoPayGateway 카카오페이 게이트웨이 구현
@@ -108,12 +108,12 @@ func (g *KakaoPayGateway) Prepare(ctx context.Context, req *PrepareRequest) (*Pr
 		MobileURL:   kakaoResp.NextRedirectMobileURL,
 		AppScheme:   kakaoResp.NextRedirectAppURL,
 		ExtraData: map[string]string{
-			"tid":                       kakaoResp.TID,
-			"next_redirect_pc_url":      kakaoResp.NextRedirectPCURL,
-			"next_redirect_mobile_url":  kakaoResp.NextRedirectMobileURL,
-			"next_redirect_app_url":     kakaoResp.NextRedirectAppURL,
-			"android_app_scheme":        kakaoResp.AndroidAppScheme,
-			"ios_app_scheme":            kakaoResp.IOSAppScheme,
+			"tid":                      kakaoResp.TID,
+			"next_redirect_pc_url":     kakaoResp.NextRedirectPCURL,
+			"next_redirect_mobile_url": kakaoResp.NextRedirectMobileURL,
+			"next_redirect_app_url":    kakaoResp.NextRedirectAppURL,
+			"android_app_scheme":       kakaoResp.AndroidAppScheme,
+			"ios_app_scheme":           kakaoResp.IOSAppScheme,
 		},
 	}, nil
 }
@@ -223,11 +223,11 @@ func (g *KakaoPayGateway) Cancel(ctx context.Context, req *CancelRequest) (*Canc
 	}
 
 	return &CancelResponse{
-		Success:          true,
-		CancelledAmount:  float64(kakaoResp.CanceledAmount.Total),
-		RemainingAmount:  float64(kakaoResp.Amount.Total - kakaoResp.CanceledAmount.Total),
-		CancelledAt:      kakaoResp.CanceledAt,
-		RawResponse:      string(respBody),
+		Success:         true,
+		CancelledAmount: float64(kakaoResp.CanceledAmount.Total),
+		RemainingAmount: float64(kakaoResp.Amount.Total - kakaoResp.CanceledAmount.Total),
+		CancelledAt:     kakaoResp.CanceledAt,
+		RawResponse:     string(respBody),
 	}, nil
 }
 
@@ -340,30 +340,30 @@ func truncateString(s string, maxLen int) string {
 
 // KakaoPayReadyResponse Ready API 응답
 type KakaoPayReadyResponse struct {
-	TID                    string `json:"tid"`
-	NextRedirectAppURL     string `json:"next_redirect_app_url"`
-	NextRedirectMobileURL  string `json:"next_redirect_mobile_url"`
-	NextRedirectPCURL      string `json:"next_redirect_pc_url"`
-	AndroidAppScheme       string `json:"android_app_scheme"`
-	IOSAppScheme           string `json:"ios_app_scheme"`
-	CreatedAt              string `json:"created_at"`
-	PartnerUserID          string `json:"-"` // 저장용
+	TID                   string `json:"tid"`
+	NextRedirectAppURL    string `json:"next_redirect_app_url"`
+	NextRedirectMobileURL string `json:"next_redirect_mobile_url"`
+	NextRedirectPCURL     string `json:"next_redirect_pc_url"`
+	AndroidAppScheme      string `json:"android_app_scheme"`
+	IOSAppScheme          string `json:"ios_app_scheme"`
+	CreatedAt             string `json:"created_at"`
+	PartnerUserID         string `json:"-"` // 저장용
 }
 
 // KakaoPayApproveResponse Approve API 응답
 type KakaoPayApproveResponse struct {
-	AID             string            `json:"aid"`
-	TID             string            `json:"tid"`
-	CID             string            `json:"cid"`
-	PartnerOrderID  string            `json:"partner_order_id"`
-	PartnerUserID   string            `json:"partner_user_id"`
-	PaymentMethodType string          `json:"payment_method_type"`
-	Amount          KakaoPayAmount    `json:"amount"`
-	CardInfo        *KakaoPayCardInfo `json:"card_info,omitempty"`
-	ItemName        string            `json:"item_name"`
-	Quantity        int               `json:"quantity"`
-	CreatedAt       string            `json:"created_at"`
-	ApprovedAt      string            `json:"approved_at"`
+	AID               string            `json:"aid"`
+	TID               string            `json:"tid"`
+	CID               string            `json:"cid"`
+	PartnerOrderID    string            `json:"partner_order_id"`
+	PartnerUserID     string            `json:"partner_user_id"`
+	PaymentMethodType string            `json:"payment_method_type"`
+	Amount            KakaoPayAmount    `json:"amount"`
+	CardInfo          *KakaoPayCardInfo `json:"card_info,omitempty"`
+	ItemName          string            `json:"item_name"`
+	Quantity          int               `json:"quantity"`
+	CreatedAt         string            `json:"created_at"`
+	ApprovedAt        string            `json:"approved_at"`
 }
 
 // KakaoPayAmount 금액 정보
@@ -377,47 +377,47 @@ type KakaoPayAmount struct {
 
 // KakaoPayCardInfo 카드 정보
 type KakaoPayCardInfo struct {
-	KakaoPayPurchaseCorp      string `json:"kakaopay_purchase_corp"`
-	KakaoPayPurchaseCorpCode  string `json:"kakaopay_purchase_corp_code"`
-	KakaoPayIssuerCorp        string `json:"kakaopay_issuer_corp"`
-	KakaoPayIssuerCorpCode    string `json:"kakaopay_issuer_corp_code"`
-	Bin                       string `json:"bin"`
-	CardType                  string `json:"card_type"`
-	InstallMonth              int    `json:"install_month"`
-	ApprovedID                string `json:"approved_id"`
-	CardMid                   string `json:"card_mid"`
-	InterestFreeInstall       string `json:"interest_free_install"`
-	CardItemCode              string `json:"card_item_code"`
+	KakaoPayPurchaseCorp     string `json:"kakaopay_purchase_corp"`
+	KakaoPayPurchaseCorpCode string `json:"kakaopay_purchase_corp_code"`
+	KakaoPayIssuerCorp       string `json:"kakaopay_issuer_corp"`
+	KakaoPayIssuerCorpCode   string `json:"kakaopay_issuer_corp_code"`
+	Bin                      string `json:"bin"`
+	CardType                 string `json:"card_type"`
+	InstallMonth             int    `json:"install_month"`
+	ApprovedID               string `json:"approved_id"`
+	CardMid                  string `json:"card_mid"`
+	InterestFreeInstall      string `json:"interest_free_install"`
+	CardItemCode             string `json:"card_item_code"`
 }
 
 // KakaoPayCancelResponse Cancel API 응답
 type KakaoPayCancelResponse struct {
-	AID            string         `json:"aid"`
-	TID            string         `json:"tid"`
-	CID            string         `json:"cid"`
-	Status         string         `json:"status"`
-	PartnerOrderID string         `json:"partner_order_id"`
-	PartnerUserID  string         `json:"partner_user_id"`
-	Amount         KakaoPayAmount `json:"amount"`
-	CanceledAmount KakaoPayAmount `json:"canceled_amount"`
+	AID                   string         `json:"aid"`
+	TID                   string         `json:"tid"`
+	CID                   string         `json:"cid"`
+	Status                string         `json:"status"`
+	PartnerOrderID        string         `json:"partner_order_id"`
+	PartnerUserID         string         `json:"partner_user_id"`
+	Amount                KakaoPayAmount `json:"amount"`
+	CanceledAmount        KakaoPayAmount `json:"canceled_amount"`
 	CancelAvailableAmount KakaoPayAmount `json:"cancel_available_amount"`
-	CanceledAt     string         `json:"canceled_at"`
+	CanceledAt            string         `json:"canceled_at"`
 }
 
 // KakaoPayOrderResponse Order API 응답
 type KakaoPayOrderResponse struct {
-	TID            string         `json:"tid"`
-	CID            string         `json:"cid"`
-	Status         string         `json:"status"`
-	PartnerOrderID string         `json:"partner_order_id"`
-	PartnerUserID  string         `json:"partner_user_id"`
-	Amount         KakaoPayAmount `json:"amount"`
-	CanceledAmount KakaoPayAmount `json:"canceled_amount"`
+	TID                   string         `json:"tid"`
+	CID                   string         `json:"cid"`
+	Status                string         `json:"status"`
+	PartnerOrderID        string         `json:"partner_order_id"`
+	PartnerUserID         string         `json:"partner_user_id"`
+	Amount                KakaoPayAmount `json:"amount"`
+	CanceledAmount        KakaoPayAmount `json:"canceled_amount"`
 	CancelAvailableAmount KakaoPayAmount `json:"cancel_available_amount"`
-	ItemName       string         `json:"item_name"`
-	CreatedAt      string         `json:"created_at"`
-	ApprovedAt     string         `json:"approved_at"`
-	CanceledAt     string         `json:"canceled_at,omitempty"`
+	ItemName              string         `json:"item_name"`
+	CreatedAt             string         `json:"created_at"`
+	ApprovedAt            string         `json:"approved_at"`
+	CanceledAt            string         `json:"canceled_at,omitempty"`
 }
 
 // KakaoPayErrorResponse 에러 응답

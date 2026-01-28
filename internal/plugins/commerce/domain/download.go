@@ -47,16 +47,16 @@ func (d *Download) IsLimitReached(limit int) bool {
 
 // DownloadResponse 다운로드 정보 응답 DTO
 type DownloadResponse struct {
-	ID             uint64                `json:"id"`
-	OrderItemID    uint64                `json:"order_item_id"`
-	File           *ProductFileResponse  `json:"file"`
-	DownloadToken  string                `json:"download_token"`
-	DownloadCount  int                   `json:"download_count"`
-	DownloadLimit  int                   `json:"download_limit,omitempty"`
-	ExpiresAt      *time.Time            `json:"expires_at,omitempty"`
-	LastDownloadAt *time.Time            `json:"last_download_at,omitempty"`
-	IsExpired      bool                  `json:"is_expired"`
-	CanDownload    bool                  `json:"can_download"`
+	ID             uint64               `json:"id"`
+	OrderItemID    uint64               `json:"order_item_id"`
+	File           *ProductFileResponse `json:"file"`
+	DownloadToken  string               `json:"download_token"`
+	DownloadCount  int                  `json:"download_count"`
+	DownloadLimit  int                  `json:"download_limit,omitempty"`
+	ExpiresAt      *time.Time           `json:"expires_at,omitempty"`
+	LastDownloadAt *time.Time           `json:"last_download_at,omitempty"`
+	IsExpired      bool                 `json:"is_expired"`
+	CanDownload    bool                 `json:"can_download"`
 }
 
 // ToResponse Download를 DownloadResponse로 변환

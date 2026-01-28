@@ -76,7 +76,7 @@ func (r *Registry) RegisterPlugin(info *PluginInfo) {
 
 	// 매니페스트에 정의된 라우트 기록
 	r.mu.Lock()
-	var routes []RegisteredRoute
+	routes := make([]RegisteredRoute, 0, len(info.Manifest.Routes))
 	for _, route := range info.Manifest.Routes {
 		routes = append(routes, RegisteredRoute{
 			Method:  route.Method,

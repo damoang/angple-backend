@@ -18,7 +18,7 @@ type MenuRepository interface {
 	GetHeaderMenusWithPlugins(enabledPlugins []string) ([]*domain.Menu, error)
 
 	// Admin CRUD
-	GetAllForAdmin() ([]*domain.Menu, error)    // includes inactive
+	GetAllForAdmin() ([]*domain.Menu, error)         // includes inactive
 	FindByIDForAdmin(id int64) (*domain.Menu, error) // includes inactive
 	Create(menu *domain.Menu) error
 	Update(menu *domain.Menu) error

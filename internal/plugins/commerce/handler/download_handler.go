@@ -17,9 +17,9 @@ import (
 
 // DownloadHandler 다운로드 HTTP 핸들러
 type DownloadHandler struct {
-	service    service.DownloadService
-	baseURL    string
-	secretKey  string
+	service     service.DownloadService
+	baseURL     string
+	secretKey   string
 	storagePath string
 }
 

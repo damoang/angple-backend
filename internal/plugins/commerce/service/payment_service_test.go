@@ -342,13 +342,13 @@ func TestGetPayment(t *testing.T) {
 			OrderNumber: "ORD-001",
 		}
 		payment := &domain.Payment{
-			ID:        1,
-			OrderID:   1,
-			Amount:    10000,
-			Status:    domain.PaymentStatusPaid,
+			ID:         1,
+			OrderID:    1,
+			Amount:     10000,
+			Status:     domain.PaymentStatusPaid,
 			PGProvider: domain.PGProviderTossPayments,
-			CreatedAt: time.Now(),
-			Order:     order,
+			CreatedAt:  time.Now(),
+			Order:      order,
 		}
 
 		paymentRepo.On("FindByIDWithOrder", uint64(1)).Return(payment, nil)

@@ -251,11 +251,11 @@ func (s *CommerceE2ETestSuite) mockCompletePayment(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"id":        1,
-			"order_id":  1,
-			"amount":    20000,
-			"status":    "paid",
-			"paid_at":   "2024-01-01T12:00:00Z",
+			"id":       1,
+			"order_id": 1,
+			"amount":   20000,
+			"status":   "paid",
+			"paid_at":  "2024-01-01T12:00:00Z",
 		},
 	})
 }

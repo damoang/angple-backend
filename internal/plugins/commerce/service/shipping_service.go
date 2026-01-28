@@ -13,10 +13,10 @@ import (
 
 // 배송 에러 정의
 var (
-	ErrShippingNotAllowed     = errors.New("shipping not allowed for this order")
-	ErrShippingAlreadySet     = errors.New("shipping info already set")
-	ErrInvalidShippingStatus  = errors.New("invalid shipping status for this action")
-	ErrCarrierNotSupported    = errors.New("carrier not supported")
+	ErrShippingNotAllowed    = errors.New("shipping not allowed for this order")
+	ErrShippingAlreadySet    = errors.New("shipping info already set")
+	ErrInvalidShippingStatus = errors.New("invalid shipping status for this action")
+	ErrCarrierNotSupported   = errors.New("carrier not supported")
 )
 
 // ShippingService 배송 서비스 인터페이스

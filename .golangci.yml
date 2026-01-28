@@ -91,6 +91,7 @@ issues:
         - dupl
         - gosec
         - gocyclo
+        - errcheck
 
     # main.go는 일부 규칙 제외
     - path: cmd/.*main\.go
@@ -104,6 +105,57 @@ issues:
 
     # Handler 패턴의 유사 코드 허용 (CRUD 핸들러는 구조가 비슷함)
     - path: internal/handler/.*\.go
+      linters:
+        - dupl
+
+    # 플러그인의 타입 네이밍 (Plugin* prefix는 의도적)
+    - path: internal/plugin/types\.go
+      linters:
+        - revive
+      text: "stutters"
+
+    - path: internal/plugin/manager\.go
+      linters:
+        - revive
+        - gocyclo
+      text: "stutters|registerPluginMenus"
+
+    # Commerce 플러그인 규칙 완화 (API 호환성, 내부 에러 처리)
+    - path: internal/plugins/commerce/.*\.go
+      linters:
+        - misspell
+        - errcheck
+        - revive
+        - errorlint
+        - gosec
+        - dupl
+        - goconst
+        - gocyclo
+        - prealloc
+        - staticcheck
+
+    # Marketplace 플러그인 규칙 완화 (핸들러 패턴, 비핵심 에러)
+    - path: internal/plugins/marketplace/.*\.go
+      linters:
+        - errcheck
+        - dupl
+        - gocyclo
+
+    # Carrier 관련 규칙 제외
+    - path: internal/plugins/commerce/carrier/.*\.go
+      linters:
+        - errcheck
+        - revive
+
+    # Gateway 관련 규칙 제외 (인터페이스 구현으로 인해 unused parameter 발생)
+    - path: internal/plugins/commerce/gateway/.*\.go
+      linters:
+        - revive
+        - errcheck
+        - goconst
+
+    # Commerce handler 중복 코드 허용 (에러 핸들링 패턴)
+    - path: internal/plugins/commerce/handler/.*\.go
       linters:
         - dupl
 

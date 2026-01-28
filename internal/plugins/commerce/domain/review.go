@@ -154,10 +154,10 @@ type ReviewResponse struct {
 
 // ReviewSummary 리뷰 요약 (상품별)
 type ReviewSummary struct {
-	ProductID    uint64             `json:"product_id"`
-	TotalCount   int64              `json:"total_count"`
-	AverageRating float64           `json:"average_rating"`
-	RatingCounts map[uint8]int64    `json:"rating_counts"`
+	ProductID     uint64          `json:"product_id"`
+	TotalCount    int64           `json:"total_count"`
+	AverageRating float64         `json:"average_rating"`
+	RatingCounts  map[uint8]int64 `json:"rating_counts"`
 }
 
 // ToResponse Review를 ReviewResponse로 변환

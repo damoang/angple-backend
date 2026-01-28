@@ -15,9 +15,9 @@ import (
 
 // TossPaymentsConfig 토스페이먼츠 설정
 type TossPaymentsConfig struct {
-	ClientKey  string // 클라이언트 키 (프론트엔드용)
-	SecretKey  string // 시크릿 키 (서버용)
-	IsSandbox  bool   // 테스트 모드
+	ClientKey string // 클라이언트 키 (프론트엔드용)
+	SecretKey string // 시크릿 키 (서버용)
+	IsSandbox bool   // 테스트 모드
 }
 
 // TossPaymentsGateway 토스페이먼츠 게이트웨이 구현
@@ -375,9 +375,9 @@ type TossVirtualAccountInfo struct {
 
 // TossCancelInfo 취소 정보
 type TossCancelInfo struct {
-	CancelAmount  float64 `json:"cancelAmount"`
-	CancelReason  string  `json:"cancelReason"`
-	CanceledAt    string  `json:"canceledAt"`
+	CancelAmount float64 `json:"cancelAmount"`
+	CancelReason string  `json:"cancelReason"`
+	CanceledAt   string  `json:"canceledAt"`
 }
 
 // TossErrorResponse 토스 에러 응답

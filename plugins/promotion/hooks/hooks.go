@@ -80,10 +80,10 @@ func InsertPromotionPosts(ctx context.Context, data *model.PostListData) *model.
 // AddAdminMenu 관리자 메뉴에 직홍게 관리 추가
 func AddAdminMenu(ctx context.Context, menu *model.AdminMenu) *model.AdminMenu {
 	menu.Items = append(menu.Items, model.MenuItem{
-		ID:       "promotion",
-		Label:    "직접홍보 관리",
-		Icon:     "megaphone",
-		Path:     "/admin/plugins/promotion",
+		ID:    "promotion",
+		Label: "직접홍보 관리",
+		Icon:  "megaphone",
+		Path:  "/admin/plugins/promotion",
 		Children: []model.MenuItem{
 			{
 				ID:    "promotion-advertisers",
