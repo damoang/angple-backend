@@ -164,6 +164,43 @@ func (r *SiteRepository) RemoveUserPermission(ctx context.Context, siteID, userI
 // Helper methods
 // ========================================
 
+// FindByCustomDomain retrieves a site by custom domain (from site_settings table)
+func (r *SiteRepository) FindByCustomDomain(ctx context.Context, customDomain string) (interface{}, error) {
+	// First find site_id from settings table
+	var settings domain.SiteSettings
+	err := r.db.WithContext(ctx).
+		Where("custom_domain = ?", customDomain).
+		First(&settings).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("site not found")
+		}
+		return nil, err
+	}
+
+	// Then get the site
+	var site domain.Site
+	err = r.db.WithContext(ctx).
+		Where("id = ?", settings.SiteID).
+		First(&site).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("site not found")
+		}
+		return nil, err
+	}
+
+	// Return as map for compatibility with tenant middleware
+	return map[string]interface{}{
+		"id":          site.ID,
+		"subdomain":   site.Subdomain,
+		"db_strategy": site.DBStrategy,
+		"plan":        site.Plan,
+	}, nil
+}
+
 // CheckSubdomainAvailability checks if subdomain is available
 func (r *SiteRepository) CheckSubdomainAvailability(ctx context.Context, subdomain string) (bool, error) {
 	var count int64

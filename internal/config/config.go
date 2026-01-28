@@ -15,6 +15,17 @@ type Config struct {
 	CORS      CORSConfig      `yaml:"cors"`
 	Redis     RedisConfig     `yaml:"redis"`
 	Database  DatabaseConfig  `yaml:"database"`
+	Plugins   PluginsConfig   `yaml:"plugins"`
+}
+
+// PluginsConfig 플러그인 설정
+type PluginsConfig struct {
+	Commerce CommercePluginConfig `yaml:"commerce"`
+}
+
+// CommercePluginConfig Commerce 플러그인 설정
+type CommercePluginConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // DataPathsConfig 데이터 경로 설정

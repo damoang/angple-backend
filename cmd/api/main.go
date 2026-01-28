@@ -10,6 +10,8 @@ import (
 	_ "github.com/damoang/angple-backend/docs" // swagger docs
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/handler"
+	"github.com/damoang/angple-backend/internal/plugin"
+	"github.com/damoang/angple-backend/internal/plugins/commerce"
 	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/internal/routes"
 	"github.com/damoang/angple-backend/internal/service"
@@ -100,8 +102,8 @@ func main() {
 		pkglogger.Info("✅ Connected to MySQL")
 	}
 
-	// Redis 연결 (Phase 3에서 캐싱에 사용 예정)
-	_, err = pkgredis.NewClient(
+	// Redis 연결
+	redisClient, err := pkgredis.NewClient(
 		cfg.Redis.Host,
 		cfg.Redis.Port,
 		cfg.Redis.Password,
@@ -110,6 +112,7 @@ func main() {
 	)
 	if err != nil {
 		pkglogger.Info("⚠️  Warning: Failed to connect to Redis: %v (continuing without Redis)", err)
+		redisClient = nil
 	} else {
 		pkglogger.Info("✅ Connected to Redis")
 	}
@@ -244,6 +247,27 @@ func main() {
 		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
+	}
+
+	// Plugin System 초기화 (DB 연결 필요)
+	if db != nil {
+		pluginLogger := plugin.NewDefaultLogger("plugin")
+		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger)
+		pluginManager.GetRegistry().SetRouter(router)
+
+		// Commerce 플러그인 등록 및 활성화 (설정 기반)
+		if cfg.Plugins.Commerce.Enabled {
+			commercePlugin := commerce.New()
+			if err := pluginManager.RegisterBuiltIn("commerce", commercePlugin, commerce.Manifest); err != nil {
+				pkglogger.Info("⚠️  Failed to register commerce plugin: %v", err)
+			} else if err := pluginManager.Enable("commerce"); err != nil {
+				pkglogger.Info("⚠️  Failed to enable commerce plugin: %v", err)
+			} else {
+				pkglogger.Info("✅ Commerce plugin enabled")
+			}
+		} else {
+			pkglogger.Info("ℹ️  Commerce plugin disabled by config")
+		}
 	}
 
 	// 서버 시작
