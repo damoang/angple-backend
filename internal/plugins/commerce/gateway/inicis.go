@@ -74,7 +74,7 @@ func (g *InicisGateway) Prepare(ctx context.Context, req *PrepareRequest) (*Prep
 		Signature:   signature,
 		Timestamp:   timestamp,
 		ExtraData: map[string]string{
-			"mKey":       g.generateMKey(),
+			"mKey":        g.generateMKey(),
 			"gopaymethod": g.convertPaymentMethod(req.PaymentMethod),
 		},
 	}, nil
@@ -239,10 +239,10 @@ func formatParams(params map[string]string) string {
 
 // InicisCardInfo 카드 정보 파싱
 type InicisCardInfo struct {
-	CardCode    string
-	CardName    string
-	CardNumber  string
-	CardType    string // 0: 신용, 1: 체크
+	CardCode     string
+	CardName     string
+	CardNumber   string
+	CardType     string // 0: 신용, 1: 체크
 	InstallMonth int
 }
 

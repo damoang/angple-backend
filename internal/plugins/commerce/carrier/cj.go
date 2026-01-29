@@ -170,9 +170,9 @@ func (c *CJCarrier) mockTrackingInfo(trackingNumber string) (*domain.TrackingInf
 
 // SweetTracker API 응답 구조체
 type SweetTrackerResponse struct {
-	Code            string `json:"code"`
-	Message         string `json:"msg"`
-	State           struct {
+	Code    string `json:"code"`
+	Message string `json:"msg"`
+	State   struct {
 		ID   string `json:"id"`
 		Text string `json:"text"`
 	} `json:"state"`

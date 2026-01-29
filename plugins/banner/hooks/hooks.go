@@ -19,22 +19,22 @@ var settings map[string]interface{}
 
 // BannerItem 배너 아이템 모델
 type BannerItem struct {
-	ID         int64     `gorm:"primaryKey" json:"id"`
-	Title      string    `json:"title"`
-	ImageURL   string    `json:"image_url"`
-	LinkURL    string    `json:"link_url"`
-	Position   string    `json:"position"` // header, sidebar, content, footer
+	ID         int64      `gorm:"primaryKey" json:"id"`
+	Title      string     `json:"title"`
+	ImageURL   string     `json:"image_url"`
+	LinkURL    string     `json:"link_url"`
+	Position   string     `json:"position"` // header, sidebar, content, footer
 	StartDate  *time.Time `json:"start_date"`
 	EndDate    *time.Time `json:"end_date"`
-	Priority   int       `json:"priority"`
-	IsActive   bool      `json:"is_active"`
-	ClickCount int       `json:"click_count"`
-	ViewCount  int       `json:"view_count"`
-	AltText    string    `json:"alt_text"`
-	Target     string    `json:"target"` // _self, _blank
-	Memo       string    `json:"memo"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Priority   int        `json:"priority"`
+	IsActive   bool       `json:"is_active"`
+	ClickCount int        `json:"click_count"`
+	ViewCount  int        `json:"view_count"`
+	AltText    string     `json:"alt_text"`
+	Target     string     `json:"target"` // _self, _blank
+	Memo       string     `json:"memo"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 func (BannerItem) TableName() string {

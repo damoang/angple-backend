@@ -9,20 +9,20 @@ type PaymentStatus string
 
 const (
 	PaymentStatusPending          PaymentStatus = "pending"
-	PaymentStatusReady            PaymentStatus = "ready"            // 가상계좌 입금 대기
-	PaymentStatusPaid             PaymentStatus = "paid"             // 결제 완료
-	PaymentStatusCancelled        PaymentStatus = "cancelled"        // 전체 취소
+	PaymentStatusReady            PaymentStatus = "ready"             // 가상계좌 입금 대기
+	PaymentStatusPaid             PaymentStatus = "paid"              // 결제 완료
+	PaymentStatusCancelled        PaymentStatus = "cancelled"         // 전체 취소
 	PaymentStatusPartialCancelled PaymentStatus = "partial_cancelled" // 부분 취소
-	PaymentStatusFailed           PaymentStatus = "failed"           // 실패
+	PaymentStatusFailed           PaymentStatus = "failed"            // 실패
 )
 
 // PGProvider PG사 구분
 type PGProvider string
 
 const (
-	PGProviderInicis      PGProvider = "inicis"      // KG이니시스
+	PGProviderInicis       PGProvider = "inicis"       // KG이니시스
 	PGProviderTossPayments PGProvider = "tosspayments" // 토스페이먼츠
-	PGProviderKakaoPay    PGProvider = "kakaopay"    // 카카오페이 (Phase 8)
+	PGProviderKakaoPay     PGProvider = "kakaopay"     // 카카오페이 (Phase 8)
 )
 
 // PaymentMethod 결제 수단
@@ -102,32 +102,32 @@ type PreparePaymentRequest struct {
 
 // PreparePaymentResponse 결제 준비 응답 DTO
 type PreparePaymentResponse struct {
-	PaymentID   uint64 `json:"payment_id"`
-	OrderNumber string `json:"order_number"`
+	PaymentID   uint64  `json:"payment_id"`
+	OrderNumber string  `json:"order_number"`
 	Amount      float64 `json:"amount"`
-	Currency    string `json:"currency"`
+	Currency    string  `json:"currency"`
 
 	// PG별 응답
-	PGProvider   string `json:"pg_provider"`
-	PGOrderID    string `json:"pg_order_id"`
-	RedirectURL  string `json:"redirect_url,omitempty"`  // 리다이렉트 URL (PC)
-	MobileURL    string `json:"mobile_url,omitempty"`    // 모바일 URL
-	AppScheme    string `json:"app_scheme,omitempty"`    // 앱 스킴
+	PGProvider  string `json:"pg_provider"`
+	PGOrderID   string `json:"pg_order_id"`
+	RedirectURL string `json:"redirect_url,omitempty"` // 리다이렉트 URL (PC)
+	MobileURL   string `json:"mobile_url,omitempty"`   // 모바일 URL
+	AppScheme   string `json:"app_scheme,omitempty"`   // 앱 스킴
 
 	// 추가 데이터
-	MerchantID   string `json:"merchant_id,omitempty"`
-	Signature    string `json:"signature,omitempty"`
-	Timestamp    string `json:"timestamp,omitempty"`
-	ExtraData    map[string]string `json:"extra_data,omitempty"`
+	MerchantID string            `json:"merchant_id,omitempty"`
+	Signature  string            `json:"signature,omitempty"`
+	Timestamp  string            `json:"timestamp,omitempty"`
+	ExtraData  map[string]string `json:"extra_data,omitempty"`
 }
 
 // CompletePaymentRequest 결제 완료 요청 DTO
 type CompletePaymentRequest struct {
-	PaymentID    uint64 `json:"payment_id" binding:"required"`
-	PGProvider   string `json:"pg_provider" binding:"required"`
-	PGTID        string `json:"pg_tid" binding:"required"`
-	PGOrderID    string `json:"pg_order_id" binding:"required"`
-	Amount       float64 `json:"amount" binding:"required"`
+	PaymentID  uint64  `json:"payment_id" binding:"required"`
+	PGProvider string  `json:"pg_provider" binding:"required"`
+	PGTID      string  `json:"pg_tid" binding:"required"`
+	PGOrderID  string  `json:"pg_order_id" binding:"required"`
+	Amount     float64 `json:"amount" binding:"required"`
 
 	// 카드 결제 시
 	CardCompany  string `json:"card_company,omitempty"`
@@ -136,10 +136,10 @@ type CompletePaymentRequest struct {
 	InstallMonth int    `json:"install_month,omitempty"`
 
 	// 가상계좌 결제 시
-	VBankName    string `json:"vbank_name,omitempty"`
-	VBankNumber  string `json:"vbank_number,omitempty"`
-	VBankHolder  string `json:"vbank_holder,omitempty"`
-	VBankDue     string `json:"vbank_due,omitempty"`
+	VBankName   string `json:"vbank_name,omitempty"`
+	VBankNumber string `json:"vbank_number,omitempty"`
+	VBankHolder string `json:"vbank_holder,omitempty"`
+	VBankDue    string `json:"vbank_due,omitempty"`
 }
 
 // CancelPaymentRequest 결제 취소 요청 DTO
@@ -204,11 +204,11 @@ func (p *Payment) ToResponse() *PaymentResponse {
 
 // WebhookPayload PG 웹훅 페이로드
 type WebhookPayload struct {
-	Provider     PGProvider `json:"provider"`
-	EventType    string     `json:"event_type"`
-	PGTID        string     `json:"pg_tid"`
-	PGOrderID    string     `json:"pg_order_id"`
-	Amount       float64    `json:"amount"`
-	Status       string     `json:"status"`
-	RawData      string     `json:"raw_data"`
+	Provider  PGProvider `json:"provider"`
+	EventType string     `json:"event_type"`
+	PGTID     string     `json:"pg_tid"`
+	PGOrderID string     `json:"pg_order_id"`
+	Amount    float64    `json:"amount"`
+	Status    string     `json:"status"`
+	RawData   string     `json:"raw_data"`
 }

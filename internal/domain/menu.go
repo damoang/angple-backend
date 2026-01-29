@@ -16,6 +16,7 @@ type Menu struct {
 	Icon          string    `gorm:"column:icon" json:"icon,omitempty"`
 	Shortcut      string    `gorm:"column:shortcut" json:"shortcut,omitempty"`
 	Description   string    `gorm:"column:description" json:"description,omitempty"`
+	PluginName    *string   `gorm:"column:plugin_name" json:"plugin_name,omitempty"` // 플러그인 이름 (NULL이면 코어 메뉴)
 	Children      []*Menu   `gorm:"-" json:"children,omitempty"`
 	OrderNum      int       `gorm:"column:order_num" json:"order_num"`
 	ViewLevel     int       `gorm:"column:view_level" json:"view_level"`
@@ -40,6 +41,7 @@ type MenuResponse struct {
 	Icon          string         `json:"icon,omitempty"`
 	Shortcut      string         `json:"shortcut,omitempty"`
 	Target        string         `json:"target"`
+	PluginName    *string        `json:"plugin_name,omitempty"`
 	Children      []MenuResponse `json:"children,omitempty"`
 	ID            int64          `json:"id"`
 	Depth         int            `json:"depth"`
@@ -58,6 +60,7 @@ func (m *Menu) ToResponse() MenuResponse {
 		Icon:          m.Icon,
 		Shortcut:      m.Shortcut,
 		Description:   m.Description,
+		PluginName:    m.PluginName,
 		Depth:         m.Depth,
 		OrderNum:      m.OrderNum,
 		Target:        m.Target,
@@ -138,6 +141,7 @@ type AdminMenuResponse struct {
 	Shortcut      string              `json:"shortcut,omitempty"`
 	Description   string              `json:"description,omitempty"`
 	Target        string              `json:"target"`
+	PluginName    *string             `json:"plugin_name,omitempty"`
 	Depth         int                 `json:"depth"`
 	OrderNum      int                 `json:"order_num"`
 	ViewLevel     int                 `json:"view_level"`
@@ -158,6 +162,7 @@ func (m *Menu) ToAdminResponse() AdminMenuResponse {
 		Shortcut:      m.Shortcut,
 		Description:   m.Description,
 		Target:        m.Target,
+		PluginName:    m.PluginName,
 		Depth:         m.Depth,
 		OrderNum:      m.OrderNum,
 		ViewLevel:     m.ViewLevel,

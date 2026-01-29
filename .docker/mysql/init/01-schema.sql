@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS `menus` (
     `is_active` BOOLEAN NOT NULL DEFAULT TRUE COMMENT '활성화 여부',
     `target` ENUM('_self', '_blank') NOT NULL DEFAULT '_self' COMMENT '링크 타겟',
     `view_level` TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '보기 권한 레벨 (1-10)',
+    `plugin_name` VARCHAR(50) DEFAULT NULL COMMENT '플러그인 이름 (NULL이면 코어 메뉴)',
     `show_in_header` BOOLEAN NOT NULL DEFAULT FALSE COMMENT '헤더 메뉴 노출 여부',
     `show_in_sidebar` BOOLEAN NOT NULL DEFAULT TRUE COMMENT '사이드바 메뉴 노출 여부',
     `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '생성 일시',
@@ -31,6 +32,8 @@ CREATE TABLE IF NOT EXISTS `menus` (
     KEY `idx_order` (`depth`, `order_num`),
     KEY `idx_sidebar` (`show_in_sidebar`, `is_active`),
     KEY `idx_header` (`show_in_header`, `is_active`),
+    KEY `idx_plugin_name` (`plugin_name`),
+    KEY `idx_plugin_active` (`plugin_name`, `is_active`),
 
     CONSTRAINT `fk_menus_parent`
         FOREIGN KEY (`parent_id`)

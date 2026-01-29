@@ -11,12 +11,12 @@ import (
 
 // 정산 에러 정의
 var (
-	ErrSettlementNotFound    = errors.New("settlement not found")
-	ErrSettlementForbidden   = errors.New("you are not the owner of this settlement")
-	ErrSettlementNotPending  = errors.New("settlement is not in pending status")
-	ErrSettlementNoOrders    = errors.New("no orders to settle")
-	ErrInvalidPeriod         = errors.New("invalid settlement period")
-	ErrDuplicateSettlement   = errors.New("settlement already exists for this period")
+	ErrSettlementNotFound   = errors.New("settlement not found")
+	ErrSettlementForbidden  = errors.New("you are not the owner of this settlement")
+	ErrSettlementNotPending = errors.New("settlement is not in pending status")
+	ErrSettlementNoOrders   = errors.New("no orders to settle")
+	ErrInvalidPeriod        = errors.New("invalid settlement period")
+	ErrDuplicateSettlement  = errors.New("settlement already exists for this period")
 )
 
 // SettlementService 정산 서비스 인터페이스
@@ -54,8 +54,8 @@ func NewSettlementService(
 	return &settlementService{
 		settlementRepo: settlementRepo,
 		orderRepo:      orderRepo,
-		pgFeeRate:      0.033,  // 3.3%
-		platformRate:   0.05,   // 5%
+		pgFeeRate:      0.033, // 3.3%
+		platformRate:   0.05,  // 5%
 	}
 }
 
@@ -219,8 +219,8 @@ func (s *settlementService) GetPendingOrders(sellerID uint64, periodStart, perio
 
 // SettlementConfig 정산 설정
 type SettlementConfig struct {
-	PGFeeRate     float64 // PG 수수료율
-	PlatformRate  float64 // 플랫폼 수수료율
+	PGFeeRate    float64 // PG 수수료율
+	PlatformRate float64 // 플랫폼 수수료율
 }
 
 // SetConfig 정산 설정 변경

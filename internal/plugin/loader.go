@@ -61,17 +61,17 @@ func (l *Loader) validateManifest(m *PluginManifest) error {
 
 // DiscoverPlugins 플러그인 디렉토리에서 모든 플러그인 검색
 func (l *Loader) DiscoverPlugins() ([]*PluginInfo, error) {
-	var plugins []*PluginInfo
-
 	// 플러그인 디렉토리가 없으면 빈 슬라이스 반환
 	if _, err := os.Stat(l.pluginsDir); os.IsNotExist(err) {
-		return plugins, nil
+		return []*PluginInfo{}, nil
 	}
 
 	entries, err := os.ReadDir(l.pluginsDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read plugins directory: %w", err)
 	}
+
+	plugins := make([]*PluginInfo, 0, len(entries))
 
 	for _, entry := range entries {
 		if !entry.IsDir() {

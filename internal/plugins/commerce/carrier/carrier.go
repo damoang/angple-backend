@@ -10,10 +10,10 @@ import (
 
 // 배송 추적 에러
 var (
-	ErrCarrierNotFound    = errors.New("carrier not found")
-	ErrTrackingNotFound   = errors.New("tracking info not found")
-	ErrInvalidTrackingNo  = errors.New("invalid tracking number")
-	ErrTrackingAPIFailed  = errors.New("tracking API failed")
+	ErrCarrierNotFound   = errors.New("carrier not found")
+	ErrTrackingNotFound  = errors.New("tracking info not found")
+	ErrInvalidTrackingNo = errors.New("invalid tracking number")
+	ErrTrackingAPIFailed = errors.New("tracking API failed")
 )
 
 // ShippingCarrier 배송 추적 인터페이스

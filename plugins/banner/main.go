@@ -35,11 +35,11 @@ func init() {
 			"GetBannerStats":   handlers.GetBannerStats,
 		},
 		HookHandlers: map[string]plugin.HookFunc{
-			"AddHeaderBanner":    hooks.AddHeaderBanner,
-			"AddSidebarBanner":   hooks.AddSidebarBanner,
-			"AddFooterBanner":    hooks.AddFooterBanner,
+			"AddHeaderBanner":     hooks.AddHeaderBanner,
+			"AddSidebarBanner":    hooks.AddSidebarBanner,
+			"AddFooterBanner":     hooks.AddFooterBanner,
 			"InsertContentBanner": hooks.InsertContentBanner,
-			"AddAdminMenu":       hooks.AddAdminMenu,
+			"AddAdminMenu":        hooks.AddAdminMenu,
 		},
 	})
 }

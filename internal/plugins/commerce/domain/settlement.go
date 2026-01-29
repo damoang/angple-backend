@@ -16,8 +16,8 @@ const (
 
 // Settlement 정산 엔티티
 type Settlement struct {
-	ID        uint64 `gorm:"primaryKey" json:"id"`
-	SellerID  uint64 `gorm:"column:seller_id;not null" json:"seller_id"`
+	ID       uint64 `gorm:"primaryKey" json:"id"`
+	SellerID uint64 `gorm:"column:seller_id;not null" json:"seller_id"`
 
 	// 정산 기간
 	PeriodStart time.Time `gorm:"column:period_start;not null" json:"period_start"`
@@ -119,13 +119,13 @@ func (s *Settlement) ToResponse() *SettlementResponse {
 
 // SettlementSummary 정산 요약
 type SettlementSummary struct {
-	TotalSales       float64 `json:"total_sales"`
-	TotalRefunds     float64 `json:"total_refunds"`
-	TotalPGFees      float64 `json:"total_pg_fees"`
+	TotalSales        float64 `json:"total_sales"`
+	TotalRefunds      float64 `json:"total_refunds"`
+	TotalPGFees       float64 `json:"total_pg_fees"`
 	TotalPlatformFees float64 `json:"total_platform_fees"`
-	TotalSettled     float64 `json:"total_settled"`
-	PendingAmount    float64 `json:"pending_amount"`
-	Currency         string  `json:"currency"`
+	TotalSettled      float64 `json:"total_settled"`
+	PendingAmount     float64 `json:"pending_amount"`
+	Currency          string  `json:"currency"`
 }
 
 // SellerBankInfo 판매자 정산 계좌 정보

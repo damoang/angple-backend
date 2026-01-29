@@ -8,13 +8,13 @@ import (
 type ShippingCarrierCode string
 
 const (
-	CarrierCJ       ShippingCarrierCode = "cj"       // CJ대한통운
-	CarrierLotte    ShippingCarrierCode = "lotte"    // 롯데택배
-	CarrierHanjin   ShippingCarrierCode = "hanjin"   // 한진택배
-	CarrierPost     ShippingCarrierCode = "post"     // 우체국택배
-	CarrierLogen    ShippingCarrierCode = "logen"    // 로젠택배
-	CarrierEPost    ShippingCarrierCode = "epost"    // 우체국 EMS
-	CarrierKD       ShippingCarrierCode = "kd"       // 경동택배
+	CarrierCJ        ShippingCarrierCode = "cj"        // CJ대한통운
+	CarrierLotte     ShippingCarrierCode = "lotte"     // 롯데택배
+	CarrierHanjin    ShippingCarrierCode = "hanjin"    // 한진택배
+	CarrierPost      ShippingCarrierCode = "post"      // 우체국택배
+	CarrierLogen     ShippingCarrierCode = "logen"     // 로젠택배
+	CarrierEPost     ShippingCarrierCode = "epost"     // 우체국 EMS
+	CarrierKD        ShippingCarrierCode = "kd"        // 경동택배
 	CarrierGSPostBox ShippingCarrierCode = "gspostbox" // GSPostbox
 )
 
@@ -22,52 +22,52 @@ const (
 type ShippingStatus string
 
 const (
-	ShippingStatusPending     ShippingStatus = "pending"      // 배송 준비 중
-	ShippingStatusPickedUp    ShippingStatus = "picked_up"    // 집화 완료
-	ShippingStatusInTransit   ShippingStatus = "in_transit"   // 배송 중
+	ShippingStatusPending        ShippingStatus = "pending"          // 배송 준비 중
+	ShippingStatusPickedUp       ShippingStatus = "picked_up"        // 집화 완료
+	ShippingStatusInTransit      ShippingStatus = "in_transit"       // 배송 중
 	ShippingStatusOutForDelivery ShippingStatus = "out_for_delivery" // 배송 출발
-	ShippingStatusDelivered   ShippingStatus = "delivered"    // 배송 완료
-	ShippingStatusException   ShippingStatus = "exception"    // 배송 이상
-	ShippingStatusReturned    ShippingStatus = "returned"     // 반송
+	ShippingStatusDelivered      ShippingStatus = "delivered"        // 배송 완료
+	ShippingStatusException      ShippingStatus = "exception"        // 배송 이상
+	ShippingStatusReturned       ShippingStatus = "returned"         // 반송
 )
 
 // ShippingCarrierInfo 배송사 정보
 type ShippingCarrierInfo struct {
-	Code       ShippingCarrierCode `json:"code"`
-	Name       string              `json:"name"`
-	TrackingURL string             `json:"tracking_url"`
+	Code        ShippingCarrierCode `json:"code"`
+	Name        string              `json:"name"`
+	TrackingURL string              `json:"tracking_url"`
 }
 
 // 배송사 목록
 var ShippingCarriers = map[ShippingCarrierCode]*ShippingCarrierInfo{
 	CarrierCJ: {
-		Code:       CarrierCJ,
-		Name:       "CJ대한통운",
+		Code:        CarrierCJ,
+		Name:        "CJ대한통운",
 		TrackingURL: "https://www.cjlogistics.com/ko/tool/parcel/tracking?gnbInvcNo=%s",
 	},
 	CarrierLotte: {
-		Code:       CarrierLotte,
-		Name:       "롯데택배",
+		Code:        CarrierLotte,
+		Name:        "롯데택배",
 		TrackingURL: "https://www.lotteglogis.com/home/reservation/tracking/linkView?InvNo=%s",
 	},
 	CarrierHanjin: {
-		Code:       CarrierHanjin,
-		Name:       "한진택배",
+		Code:        CarrierHanjin,
+		Name:        "한진택배",
 		TrackingURL: "https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mession=13&wblnum=%s",
 	},
 	CarrierPost: {
-		Code:       CarrierPost,
-		Name:       "우체국택배",
+		Code:        CarrierPost,
+		Name:        "우체국택배",
 		TrackingURL: "https://service.epost.go.kr/trace.RetrieveDomRi498.parcel?sid1=%s",
 	},
 	CarrierLogen: {
-		Code:       CarrierLogen,
-		Name:       "로젠택배",
+		Code:        CarrierLogen,
+		Name:        "로젠택배",
 		TrackingURL: "https://www.ilogen.com/web/personal/trace/%s",
 	},
 	CarrierKD: {
-		Code:       CarrierKD,
-		Name:       "경동택배",
+		Code:        CarrierKD,
+		Name:        "경동택배",
 		TrackingURL: "https://kdexp.com/service/delivery/etc/delivery_result.do?barcode=%s",
 	},
 }
@@ -100,10 +100,10 @@ type RegisterShippingRequest struct {
 
 // TrackingResponse 배송 추적 응답
 type TrackingResponse struct {
-	OrderID        uint64        `json:"order_id"`
-	OrderNumber    string        `json:"order_number"`
-	TrackingInfo   *TrackingInfo `json:"tracking_info"`
-	TrackingURL    string        `json:"tracking_url"`
+	OrderID      uint64        `json:"order_id"`
+	OrderNumber  string        `json:"order_number"`
+	TrackingInfo *TrackingInfo `json:"tracking_info"`
+	TrackingURL  string        `json:"tracking_url"`
 }
 
 // ShippingCarrierListResponse 배송사 목록 응답

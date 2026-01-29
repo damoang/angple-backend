@@ -3,9 +3,9 @@
 package main
 
 import (
+	"github.com/angple/core/plugin"
 	"github.com/damoang/angple-backend/plugins/promotion/handlers"
 	"github.com/damoang/angple-backend/plugins/promotion/hooks"
-	"github.com/angple/core/plugin"
 )
 
 func init() {
@@ -35,10 +35,10 @@ func init() {
 			"DeletePost": handlers.DeletePost,
 
 			// 관리자 API
-			"ListAdvertisers":   handlers.ListAdvertisers,
-			"CreateAdvertiser":  handlers.CreateAdvertiser,
-			"UpdateAdvertiser":  handlers.UpdateAdvertiser,
-			"DeleteAdvertiser":  handlers.DeleteAdvertiser,
+			"ListAdvertisers":  handlers.ListAdvertisers,
+			"CreateAdvertiser": handlers.CreateAdvertiser,
+			"UpdateAdvertiser": handlers.UpdateAdvertiser,
+			"DeleteAdvertiser": handlers.DeleteAdvertiser,
 		},
 	})
 }

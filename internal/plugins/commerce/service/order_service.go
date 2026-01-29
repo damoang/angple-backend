@@ -11,13 +11,13 @@ import (
 
 // 주문 에러 정의
 var (
-	ErrOrderNotFound           = errors.New("order not found")
-	ErrOrderForbidden          = errors.New("you are not the owner of this order")
-	ErrOrderCannotBeCancelled  = errors.New("order cannot be cancelled")
-	ErrEmptyCart               = errors.New("cart is empty")
-	ErrShippingInfoRequired    = errors.New("shipping info is required for physical products")
-	ErrOrderItemNotFound       = errors.New("order item not found")
-	ErrInvalidOrderStatus      = errors.New("invalid order status")
+	ErrOrderNotFound          = errors.New("order not found")
+	ErrOrderForbidden         = errors.New("you are not the owner of this order")
+	ErrOrderCannotBeCancelled = errors.New("order cannot be cancelled")
+	ErrEmptyCart              = errors.New("cart is empty")
+	ErrShippingInfoRequired   = errors.New("shipping info is required for physical products")
+	ErrOrderItemNotFound      = errors.New("order item not found")
+	ErrInvalidOrderStatus     = errors.New("invalid order status")
 )
 
 // 플랫폼 수수료율 (기본값 5%)

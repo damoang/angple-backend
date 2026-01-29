@@ -8,22 +8,22 @@ import (
 
 // MockPlugin 테스트용 목 플러그인
 type MockPlugin struct {
-	name          string
-	initialized   bool
-	shutdown      bool
-	routesCount   int
+	name        string
+	initialized bool
+	shutdown    bool
+	routesCount int
 }
 
 func (m *MockPlugin) Name() string {
 	return m.name
 }
 
-func (m *MockPlugin) Initialize(ctx *PluginContext) error {
+func (m *MockPlugin) Initialize(_ *PluginContext) error {
 	m.initialized = true
 	return nil
 }
 
-func (m *MockPlugin) RegisterRoutes(router gin.IRouter) {
+func (m *MockPlugin) RegisterRoutes(_ gin.IRouter) {
 	m.routesCount++
 }
 

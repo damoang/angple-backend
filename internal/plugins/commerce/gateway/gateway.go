@@ -103,24 +103,24 @@ type CancelRequest struct {
 
 // CancelResponse 결제 취소 응답
 type CancelResponse struct {
-	Success          bool
-	CancelledAmount  float64
-	RemainingAmount  float64
-	CancelledAt      string
-	RawResponse      string
+	Success         bool
+	CancelledAmount float64
+	RemainingAmount float64
+	CancelledAt     string
+	RawResponse     string
 }
 
 // WebhookResult 웹훅 처리 결과
 type WebhookResult struct {
-	EventType    string
-	PGTID        string
-	PGOrderID    string
-	Amount       float64
-	Status       domain.PaymentStatus
-	VBankName    string
-	VBankNumber  string
-	VBankHolder  string
-	RawData      string
+	EventType   string
+	PGTID       string
+	PGOrderID   string
+	Amount      float64
+	Status      domain.PaymentStatus
+	VBankName   string
+	VBankNumber string
+	VBankHolder string
+	RawData     string
 }
 
 // Gateway 에러 정의
