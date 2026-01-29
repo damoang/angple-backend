@@ -52,7 +52,7 @@ func NewDownloadHandler(svc service.DownloadService, config *DownloadHandlerConf
 // @Failure      401  {object}  common.APIResponse
 // @Failure      403  {object}  common.APIResponse
 // @Failure      404  {object}  common.APIResponse
-// @Router       /plugins/commerce/orders/{order_item_id}/downloads [get]
+// @Router       /plugins/commerce/order-items/{id}/downloads [get]
 func (h *DownloadHandler) ListDownloads(c *gin.Context) {
 	userID, err := h.getUserID(c)
 	if err != nil {
@@ -60,7 +60,7 @@ func (h *DownloadHandler) ListDownloads(c *gin.Context) {
 		return
 	}
 
-	orderItemID, err := strconv.ParseUint(c.Param("order_item_id"), 10, 64)
+	orderItemID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid order item ID", err)
 		return

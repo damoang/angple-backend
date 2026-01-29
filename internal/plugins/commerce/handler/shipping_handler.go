@@ -55,7 +55,7 @@ func (h *ShippingHandler) RegisterShipping(c *gin.Context) {
 	}
 
 	// 주문 ID 파싱
-	orderID, err := strconv.ParseUint(c.Param("order_id"), 10, 64)
+	orderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "올바르지 않은 주문 ID입니다", err)
 		return
@@ -114,7 +114,7 @@ func (h *ShippingHandler) TrackShipping(c *gin.Context) {
 	}
 
 	// 주문 ID 파싱
-	orderID, err := strconv.ParseUint(c.Param("order_id"), 10, 64)
+	orderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "올바르지 않은 주문 ID입니다", err)
 		return
@@ -161,7 +161,7 @@ func (h *ShippingHandler) MarkDelivered(c *gin.Context) {
 	}
 
 	// 주문 ID 파싱
-	orderID, err := strconv.ParseUint(c.Param("order_id"), 10, 64)
+	orderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "올바르지 않은 주문 ID입니다", err)
 		return

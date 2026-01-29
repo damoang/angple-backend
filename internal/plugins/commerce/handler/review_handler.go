@@ -212,7 +212,7 @@ func (h *ReviewHandler) GetReview(c *gin.Context) {
 // @Success      200  {object}  common.APIResponse{data=[]domain.ReviewResponse}
 // @Router       /plugins/commerce/products/{product_id}/reviews [get]
 func (h *ReviewHandler) ListProductReviews(c *gin.Context) {
-	productID, err := strconv.ParseUint(c.Param("product_id"), 10, 64)
+	productID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid product ID", err)
 		return
@@ -258,7 +258,7 @@ func (h *ReviewHandler) ListProductReviews(c *gin.Context) {
 // @Success      200  {object}  common.APIResponse{data=domain.ReviewSummary}
 // @Router       /plugins/commerce/products/{product_id}/reviews/summary [get]
 func (h *ReviewHandler) GetProductReviewSummary(c *gin.Context) {
-	productID, err := strconv.ParseUint(c.Param("product_id"), 10, 64)
+	productID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid product ID", err)
 		return

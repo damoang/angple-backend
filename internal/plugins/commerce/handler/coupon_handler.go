@@ -379,7 +379,7 @@ func (h *CouponHandler) RemoveCoupon(c *gin.Context) {
 		return
 	}
 
-	orderID, err := strconv.ParseUint(c.Param("order_id"), 10, 64)
+	orderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid order ID", err)
 		return
