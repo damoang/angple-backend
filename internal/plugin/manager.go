@@ -94,8 +94,17 @@ func (m *Manager) Enable(name string) error {
 		return nil // 이미 활성화됨
 	}
 
-	// 플러그인 인스턴스가 있으면 초기화
+	// 플러그인 인스턴스가 있으면 마이그레이션 → 초기화
 	if info.Instance != nil {
+		// 1) 마이그레이션 먼저
+		if err := info.Instance.Migrate(m.db); err != nil {
+			info.Status = StatusError
+			info.Error = err
+			return fmt.Errorf("failed to migrate plugin %s: %w", name, err)
+		}
+		info.MigratedAt = time.Now().Unix()
+
+		// 2) 초기화
 		ctx := &PluginContext{
 			DB:       m.db,
 			Redis:    m.redis,
@@ -110,7 +119,7 @@ func (m *Manager) Enable(name string) error {
 			return fmt.Errorf("failed to initialize plugin %s: %w", name, err)
 		}
 
-		// 라우트 등록
+		// 3) 라우트 등록
 		m.registry.RegisterPlugin(info)
 	}
 
@@ -250,10 +259,16 @@ func (m *Manager) RunMigrations(name string) error {
 
 // runBuiltInMigrations 내장 플러그인 마이그레이션 실행
 func (m *Manager) runBuiltInMigrations(name string) error {
-	// 내장 플러그인 마이그레이션 경로: migration/plugins/{name}/
-	// 실제 실행은 외부 마이그레이션 도구 또는 GORM AutoMigrate 사용
-	m.logger.Info("Running built-in migrations for plugin: %s", name)
-	return nil
+	m.mu.RLock()
+	info, exists := m.plugins[name]
+	m.mu.RUnlock()
+
+	if !exists || info.Instance == nil {
+		return fmt.Errorf("built-in plugin %s not found or has no instance", name)
+	}
+
+	// 플러그인 자체의 Migrate() 호출
+	return info.Instance.Migrate(m.db)
 }
 
 // ============================================

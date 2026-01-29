@@ -3,6 +3,7 @@ package commerce
 import (
 	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/carrier"
+	"github.com/damoang/angple-backend/internal/plugins/commerce/domain"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/gateway"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/handler"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/middleware"
@@ -227,6 +228,24 @@ func New() *CommercePlugin {
 // Name 플러그인 이름 반환
 func (p *CommercePlugin) Name() string {
 	return "commerce"
+}
+
+// Migrate DB 마이그레이션 실행 — 커머스 테이블 생성/업데이트
+func (p *CommercePlugin) Migrate(db *gorm.DB) error {
+	return db.AutoMigrate(
+		&domain.Product{},
+		&domain.Cart{},
+		&domain.Order{},
+		&domain.OrderItem{},
+		&domain.Coupon{},
+		&domain.CouponUsage{},
+		&domain.Payment{},
+		&domain.Review{},
+		&domain.ReviewHelpful{},
+		&domain.ProductFile{},
+		&domain.Download{},
+		&domain.Settlement{},
+	)
 }
 
 // Initialize 플러그인 초기화
