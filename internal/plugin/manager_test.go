@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // MockPlugin 테스트용 목 플러그인
@@ -16,6 +17,10 @@ type MockPlugin struct {
 
 func (m *MockPlugin) Name() string {
 	return m.name
+}
+
+func (m *MockPlugin) Migrate(_ *gorm.DB) error {
+	return nil
 }
 
 func (m *MockPlugin) Initialize(_ *PluginContext) error {
