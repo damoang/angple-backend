@@ -10,6 +10,7 @@ import (
 	_ "github.com/damoang/angple-backend/docs" // swagger docs
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/handler"
+	"github.com/damoang/angple-backend/internal/migration"
 	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/plugins/commerce"
 	"github.com/damoang/angple-backend/internal/repository"
@@ -100,6 +101,9 @@ func main() {
 		db = nil
 	} else {
 		pkglogger.Info("✅ Connected to MySQL")
+		if err := migration.Run(db); err != nil {
+			pkglogger.Info("⚠️  Migration warning: %v", err)
+		}
 	}
 
 	// Redis 연결
