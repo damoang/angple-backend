@@ -153,7 +153,7 @@ func (h *DownloadHandler) GetDownloadURL(c *gin.Context) {
 // @Failure      403  {object}  common.APIResponse
 // @Failure      404  {object}  common.APIResponse
 // @Failure      410  {object}  common.APIResponse
-// @Router       /plugins/commerce/downloads/{token} [get]
+// @Router       /plugins/commerce/downloads/by-token/{token} [get]
 func (h *DownloadHandler) Download(c *gin.Context) {
 	userID, err := h.getUserID(c)
 	if err != nil {

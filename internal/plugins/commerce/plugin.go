@@ -77,7 +77,7 @@ var Manifest = &plugin.PluginManifest{
 		// 다운로드 API (Phase 5)
 		{Path: "/downloads", Method: "GET", Handler: "ListUserDownloads", Auth: "required"},
 		{Path: "/downloads/:order_item_id/:file_id", Method: "GET", Handler: "GetDownloadURL", Auth: "required"},
-		{Path: "/downloads/:token", Method: "GET", Handler: "Download", Auth: "required"},
+		{Path: "/downloads/by-token/:token", Method: "GET", Handler: "Download", Auth: "required"},
 		{Path: "/orders/:order_item_id/downloads", Method: "GET", Handler: "ListDownloads", Auth: "required"},
 
 		// 정산 API (Phase 6)
@@ -357,7 +357,7 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	// ============================================
 	router.GET("/downloads", p.downloadHandler.ListUserDownloads)
 	router.GET("/downloads/:order_item_id/:file_id", p.downloadHandler.GetDownloadURL)
-	router.GET("/downloads/:token", p.downloadHandler.Download)
+	router.GET("/downloads/by-token/:token", p.downloadHandler.Download)
 	router.GET("/orders/:order_item_id/downloads", p.downloadHandler.ListDownloads)
 
 	// ============================================
