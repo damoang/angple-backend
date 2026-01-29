@@ -137,6 +137,9 @@ type Plugin interface {
 	// Name 플러그인 이름 반환
 	Name() string
 
+	// Migrate DB 마이그레이션 실행 (테이블 생성/업데이트)
+	Migrate(db *gorm.DB) error
+
 	// Initialize 플러그인 초기화
 	Initialize(ctx *PluginContext) error
 
