@@ -37,6 +37,8 @@ services:
   api:
     image: ghcr.io/damoang/angple-backend-api:${ANGPLE_VERSION:-latest}
     container_name: angple-api
+    ports:
+      - "${API_PORT:-8081}:8081"
     environment:
       APP_ENV: ${APP_ENV:-prod}
       DB_HOST: mysql
@@ -64,8 +66,12 @@ services:
     environment:
       LARAVEL_BACKEND_URL: ${LARAVEL_BACKEND_URL:-http://host.docker.internal:80}
       GO_API_URL: http://api:8081
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on: [api]
-    networks: [angple]
+    networks:
+      angple:
+        aliases: [gateway-internal]
     restart: unless-stopped
 
   web:
@@ -75,7 +81,8 @@ services:
       - "${WEB_PORT:-3010}:3000"
     environment:
       NODE_ENV: production
-      INTERNAL_API_URL: http://gateway:8080/api/v1
+      INTERNAL_API_URL: http://gateway-internal:8080/api/v2
+      BACKEND_URL: http://gateway-internal:8080
     depends_on: [gateway]
     volumes:
       - web-data:/app/data
