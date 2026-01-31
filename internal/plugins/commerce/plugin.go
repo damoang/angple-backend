@@ -133,22 +133,22 @@ var Manifest = &plugin.PluginManifest{
 		// 다운로드 API (Phase 5)
 		{Path: "/downloads", Method: "GET", Handler: "ListUserDownloads", Auth: "required"},
 		{Path: "/downloads/:order_item_id/:file_id", Method: "GET", Handler: "GetDownloadURL", Auth: "required"},
-		{Path: "/downloads/:token", Method: "GET", Handler: "Download", Auth: "required"},
-		{Path: "/orders/:order_item_id/downloads", Method: "GET", Handler: "ListDownloads", Auth: "required"},
+		{Path: "/downloads/file/:token", Method: "GET", Handler: "Download", Auth: "required"},
+		{Path: "/orders/:id/downloads", Method: "GET", Handler: "ListDownloads", Auth: "required"},
 
 		// 정산 API (Phase 6)
 		{Path: "/settlements", Method: "GET", Handler: "ListSettlements", Auth: "required"},
 		{Path: "/settlements/summary", Method: "GET", Handler: "GetSummary", Auth: "required"},
 		{Path: "/settlements/:id", Method: "GET", Handler: "GetSettlement", Auth: "required"},
 		{Path: "/admin/settlements", Method: "GET", Handler: "ListAllSettlements", Auth: "required"},
-		{Path: "/admin/settlements/:seller_id", Method: "POST", Handler: "CreateSettlement", Auth: "required"},
+		{Path: "/admin/settlements/:id", Method: "POST", Handler: "CreateSettlement", Auth: "required"},
 		{Path: "/admin/settlements/:id/process", Method: "POST", Handler: "ProcessSettlement", Auth: "required"},
 
 		// 쿠폰 API (Phase 8)
 		{Path: "/coupons/public", Method: "GET", Handler: "GetPublicCoupons", Auth: "none"},
 		{Path: "/coupons/validate", Method: "POST", Handler: "ValidateCoupon", Auth: "required"},
 		{Path: "/coupons/apply", Method: "POST", Handler: "ApplyCoupon", Auth: "required"},
-		{Path: "/orders/:order_id/coupon", Method: "DELETE", Handler: "RemoveCoupon", Auth: "required"},
+		{Path: "/orders/:id/coupon", Method: "DELETE", Handler: "RemoveCoupon", Auth: "required"},
 		{Path: "/admin/coupons", Method: "GET", Handler: "ListCoupons", Auth: "required"},
 		{Path: "/admin/coupons", Method: "POST", Handler: "CreateCoupon", Auth: "required"},
 		{Path: "/admin/coupons/:id", Method: "GET", Handler: "GetCoupon", Auth: "required"},
@@ -156,9 +156,9 @@ var Manifest = &plugin.PluginManifest{
 		{Path: "/admin/coupons/:id", Method: "DELETE", Handler: "DeleteCoupon", Auth: "required"},
 
 		// 리뷰 API (Phase 8)
-		{Path: "/products/:product_id/reviews", Method: "GET", Handler: "ListProductReviews", Auth: "none"},
-		{Path: "/products/:product_id/reviews", Method: "POST", Handler: "CreateReview", Auth: "required"},
-		{Path: "/products/:product_id/reviews/summary", Method: "GET", Handler: "GetProductReviewSummary", Auth: "none"},
+		{Path: "/products/:id/reviews", Method: "GET", Handler: "ListProductReviews", Auth: "none"},
+		{Path: "/products/:id/reviews", Method: "POST", Handler: "CreateReview", Auth: "required"},
+		{Path: "/products/:id/reviews/summary", Method: "GET", Handler: "GetProductReviewSummary", Auth: "none"},
 		{Path: "/reviews", Method: "GET", Handler: "ListMyReviews", Auth: "required"},
 		{Path: "/reviews/:id", Method: "GET", Handler: "GetReview", Auth: "none"},
 		{Path: "/reviews/:id", Method: "PUT", Handler: "UpdateReview", Auth: "required"},
@@ -170,7 +170,7 @@ var Manifest = &plugin.PluginManifest{
 		// 배송 추적 API (Phase 8)
 		{Path: "/shipping/carriers", Method: "GET", Handler: "GetCarriers", Auth: "none"},
 		{Path: "/seller/orders/:order_id/shipping", Method: "POST", Handler: "RegisterShipping", Auth: "required"},
-		{Path: "/orders/:order_id/tracking", Method: "GET", Handler: "TrackShipping", Auth: "required"},
+		{Path: "/orders/:id/tracking", Method: "GET", Handler: "TrackShipping", Auth: "required"},
 		{Path: "/seller/orders/:order_id/delivered", Method: "POST", Handler: "MarkDelivered", Auth: "required"},
 	},
 }
@@ -413,8 +413,8 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	// ============================================
 	router.GET("/downloads", p.downloadHandler.ListUserDownloads)
 	router.GET("/downloads/:order_item_id/:file_id", p.downloadHandler.GetDownloadURL)
-	router.GET("/downloads/:token", p.downloadHandler.Download)
-	router.GET("/orders/:order_item_id/downloads", p.downloadHandler.ListDownloads)
+	router.GET("/downloads/file/:token", p.downloadHandler.Download)
+	router.GET("/orders/:id/downloads", p.downloadHandler.ListDownloads)
 
 	// ============================================
 	// 정산 - Phase 6 구현 완료
@@ -426,7 +426,7 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	// 관리자 정산 API
 	admin := router.Group("/admin")
 	admin.GET("/settlements", p.settlementHandler.ListAllSettlements)
-	admin.POST("/settlements/:seller_id", p.settlementHandler.CreateSettlement)
+	admin.POST("/settlements/:id", p.settlementHandler.CreateSettlement)
 	admin.POST("/settlements/:id/process", p.settlementHandler.ProcessSettlement)
 
 	// ============================================
@@ -438,7 +438,7 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	// 사용자 쿠폰 API (인증 필요)
 	router.POST("/coupons/validate", p.couponHandler.ValidateCoupon)
 	router.POST("/coupons/apply", p.couponHandler.ApplyCoupon)
-	router.DELETE("/orders/:order_id/coupon", p.couponHandler.RemoveCoupon)
+	router.DELETE("/orders/:id/coupon", p.couponHandler.RemoveCoupon)
 
 	// 관리자 쿠폰 API
 	admin.GET("/coupons", p.couponHandler.ListCoupons)
@@ -451,9 +451,9 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	// 리뷰 - Phase 8 구현 완료
 	// ============================================
 	// 상품 리뷰 (공개)
-	router.GET("/products/:product_id/reviews", p.reviewHandler.ListProductReviews)
-	router.GET("/products/:product_id/reviews/summary", p.reviewHandler.GetProductReviewSummary)
-	router.POST("/products/:product_id/reviews", p.reviewHandler.CreateReview)
+	router.GET("/products/:id/reviews", p.reviewHandler.ListProductReviews)
+	router.GET("/products/:id/reviews/summary", p.reviewHandler.GetProductReviewSummary)
+	router.POST("/products/:id/reviews", p.reviewHandler.CreateReview)
 
 	// 사용자 리뷰 API
 	router.GET("/reviews", p.reviewHandler.ListMyReviews)
@@ -474,7 +474,7 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	router.GET("/shipping/carriers", p.shippingHandler.GetCarriers)
 
 	// 배송 추적 (구매자용)
-	router.GET("/orders/:order_id/tracking", p.shippingHandler.TrackShipping)
+	router.GET("/orders/:id/tracking", p.shippingHandler.TrackShipping)
 
 	// 판매자 배송 관리
 	seller.POST("/orders/:order_id/shipping", p.shippingHandler.RegisterShipping)

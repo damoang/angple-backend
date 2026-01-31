@@ -104,7 +104,7 @@ func (h *ShippingHandler) RegisterShipping(c *gin.Context) {
 // @Failure 401 {object} common.Response
 // @Failure 403 {object} common.Response
 // @Failure 404 {object} common.Response
-// @Router /orders/{order_id}/tracking [get]
+// @Router /orders/{id}/tracking [get]
 func (h *ShippingHandler) TrackShipping(c *gin.Context) {
 	// 사용자 ID 가져오기
 	userID, exists := c.Get("user_id")
@@ -114,7 +114,7 @@ func (h *ShippingHandler) TrackShipping(c *gin.Context) {
 	}
 
 	// 주문 ID 파싱
-	orderID, err := strconv.ParseUint(c.Param("order_id"), 10, 64)
+	orderID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "올바르지 않은 주문 ID입니다", err)
 		return

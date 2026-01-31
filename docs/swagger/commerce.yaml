@@ -1,0 +1,2300 @@
+openapi: 3.0.3
+info:
+  title: Angple Commerce Plugin API
+  description: |
+    Angple 커머스 플러그인 API 문서.
+    디지털 및 실물 상품 판매를 위한 전자상거래 기능을 제공합니다.
+
+    ## 주요 기능
+    - 상품 관리 (디지털/실물)
+    - 장바구니
+    - 주문 및 결제
+    - 디지털 상품 다운로드
+    - 판매자 정산
+
+    ## 인증
+    대부분의 API는 JWT Bearer 토큰 인증이 필요합니다.
+  version: 1.0.0
+  contact:
+    name: Angple Support
+    email: support@angple.com
+
+servers:
+  - url: /api/plugins/commerce
+    description: Commerce Plugin API
+
+tags:
+  - name: Shop
+    description: 공개 쇼핑 API (인증 불필요)
+  - name: Products
+    description: 상품 관리 API (판매자용)
+  - name: Cart
+    description: 장바구니 API
+  - name: Orders
+    description: 주문 API
+  - name: Payments
+    description: 결제 API
+  - name: Downloads
+    description: 디지털 상품 다운로드 API
+  - name: Settlements
+    description: 정산 API (판매자용)
+  - name: Coupons
+    description: 쿠폰/할인 코드 API
+  - name: Reviews
+    description: 상품 리뷰 API
+
+paths:
+  # ===== Shop (공개) =====
+  /shop/products:
+    get:
+      tags:
+        - Shop
+      summary: 공개 상품 목록 조회
+      description: 퍼블리시된 공개 상품 목록을 조회합니다.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 페이지 번호
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+          description: 페이지당 항목 수
+        - name: product_type
+          in: query
+          schema:
+            type: string
+            enum: [digital, physical]
+          description: 상품 유형 필터
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [created_at, price, sales_count, view_count]
+            default: created_at
+          description: 정렬 기준
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: 정렬 방향
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+
+  /shop/products/{id}:
+    get:
+      tags:
+        - Shop
+      summary: 공개 상품 상세 조회
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 상품 ID
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /shop/products/slug/{slug}:
+    get:
+      tags:
+        - Shop
+      summary: 슬러그로 공개 상품 조회
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 상품 슬러그
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===== Products (판매자용) =====
+  /products:
+    get:
+      tags:
+        - Products
+      summary: 내 상품 목록 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, published, archived]
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - Products
+      summary: 상품 등록
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: 생성됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /products/{id}:
+    get:
+      tags:
+        - Products
+      summary: 내 상품 상세 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - Products
+      summary: 상품 수정
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Products
+      summary: 상품 삭제
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===== Cart =====
+  /cart:
+    get:
+      tags:
+        - Cart
+      summary: 장바구니 조회
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+
+    post:
+      tags:
+        - Cart
+      summary: 장바구니 추가
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddToCartRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItemResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    delete:
+      tags:
+        - Cart
+      summary: 장바구니 비우기
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 성공
+
+  /cart/{id}:
+    put:
+      tags:
+        - Cart
+      summary: 장바구니 수량 변경
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItemResponse'
+
+    delete:
+      tags:
+        - Cart
+      summary: 장바구니 아이템 삭제
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+
+  # ===== Orders =====
+  /orders:
+    get:
+      tags:
+        - Orders
+      summary: 내 주문 목록 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, paid, processing, shipped, delivered, completed, cancelled, refunded]
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+
+    post:
+      tags:
+        - Orders
+      summary: 주문 생성
+      description: 장바구니의 상품들로 주문을 생성합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: 생성됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /orders/{id}:
+    get:
+      tags:
+        - Orders
+      summary: 주문 상세 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{id}/cancel:
+    post:
+      tags:
+        - Orders
+      summary: 주문 취소
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: 성공
+        '400':
+          description: 취소 불가 상태
+
+  # ===== Payments =====
+  /payments/prepare:
+    post:
+      tags:
+        - Payments
+      summary: 결제 준비
+      description: PG사 결제창을 호출하기 전에 결제를 준비합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreparePaymentRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreparePaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /payments/complete:
+    post:
+      tags:
+        - Payments
+      summary: 결제 완료
+      description: PG사 결제창에서 돌아온 후 결제를 완료 처리합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompletePaymentRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /payments/{id}:
+    get:
+      tags:
+        - Payments
+      summary: 결제 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /payments/{id}/cancel:
+    post:
+      tags:
+        - Payments
+      summary: 결제 취소
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelPaymentRequest'
+      responses:
+        '200':
+          description: 성공
+        '400':
+          description: 취소 불가
+
+  # ===== Downloads =====
+  /downloads/{orderItemId}:
+    get:
+      tags:
+        - Downloads
+      summary: 주문 아이템의 다운로드 목록 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderItemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadListResponse'
+
+  /downloads/{orderItemId}/{fileId}/url:
+    get:
+      tags:
+        - Downloads
+      summary: 다운로드 URL 생성
+      description: 서명된 다운로드 URL을 생성합니다. URL은 10분간 유효합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderItemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadURLResponse'
+        '403':
+          description: 다운로드 제한 초과 또는 만료
+
+  /downloads/my:
+    get:
+      tags:
+        - Downloads
+      summary: 내 다운로드 목록 조회
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadListResponse'
+
+  # ===== Settlements =====
+  /settlements:
+    get:
+      tags:
+        - Settlements
+      summary: 정산 내역 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: year
+          in: query
+          schema:
+            type: integer
+        - name: month
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementListResponse'
+
+  /settlements/summary:
+    get:
+      tags:
+        - Settlements
+      summary: 정산 요약 조회
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementSummary'
+
+  /settlements/{id}:
+    get:
+      tags:
+        - Settlements
+      summary: 정산 상세 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===== Coupons =====
+  /coupons/public:
+    get:
+      tags:
+        - Coupons
+      summary: 공개 쿠폰 목록 조회
+      description: 공개된 사용 가능한 쿠폰 목록을 조회합니다.
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CouponListResponse'
+
+  /coupons/validate:
+    post:
+      tags:
+        - Coupons
+      summary: 쿠폰 유효성 검증
+      description: 쿠폰 코드의 유효성을 검증합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: order_amount
+          in: query
+          schema:
+            type: number
+          description: 주문 금액 (최소 주문 금액 검증용)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateCouponRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateCouponResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /coupons/apply:
+    post:
+      tags:
+        - Coupons
+      summary: 주문에 쿠폰 적용
+      description: 결제 대기 중인 주문에 쿠폰을 적용합니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyCouponRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      discount_amount:
+                        type: number
+                      message:
+                        type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 이미 쿠폰이 적용됨
+
+  /orders/{order_id}/coupon:
+    delete:
+      tags:
+        - Coupons
+      summary: 주문에서 쿠폰 제거
+      description: 주문에 적용된 쿠폰을 제거합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/coupons:
+    get:
+      tags:
+        - Coupons
+      summary: 쿠폰 목록 조회 (관리자)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, expired]
+        - name: is_public
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CouponListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - Coupons
+      summary: 쿠폰 생성 (관리자)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCouponRequest'
+      responses:
+        '201':
+          description: 생성됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CouponResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: 쿠폰 코드 중복
+
+  /admin/coupons/{id}:
+    get:
+      tags:
+        - Coupons
+      summary: 쿠폰 상세 조회 (관리자)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CouponResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - Coupons
+      summary: 쿠폰 수정 (관리자)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCouponRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CouponResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Coupons
+      summary: 쿠폰 삭제 (관리자)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: 삭제됨
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===== Reviews (리뷰) =====
+  /products/{product_id}/reviews:
+    get:
+      tags:
+        - Reviews
+      summary: 상품 리뷰 목록 조회
+      description: 특정 상품의 승인된 리뷰 목록을 조회합니다.
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: rating
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+          description: 평점 필터
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [created_at, rating, helpful_count]
+            default: created_at
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewListResponse'
+
+    post:
+      tags:
+        - Reviews
+      summary: 리뷰 작성
+      description: 구매 완료된 주문 아이템에 대해 리뷰를 작성합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewRequest'
+      responses:
+        '201':
+          description: 생성됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 주문 완료 후에만 리뷰 작성 가능
+        '409':
+          description: 이미 리뷰가 존재함
+
+  /products/{product_id}/reviews/summary:
+    get:
+      tags:
+        - Reviews
+      summary: 상품 리뷰 요약 조회
+      description: 상품의 평균 평점, 총 리뷰 수, 평점별 분포를 조회합니다.
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewSummaryResponse'
+
+  /reviews:
+    get:
+      tags:
+        - Reviews
+      summary: 내가 작성한 리뷰 목록 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /reviews/{id}:
+    get:
+      tags:
+        - Reviews
+      summary: 리뷰 상세 조회
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - Reviews
+      summary: 리뷰 수정
+      description: 본인이 작성한 리뷰를 수정합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReviewRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Reviews
+      summary: 리뷰 삭제
+      description: 본인이 작성한 리뷰를 삭제합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: 삭제됨
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /reviews/{id}/helpful:
+    post:
+      tags:
+        - Reviews
+      summary: 리뷰 도움됨 토글
+      description: 리뷰의 "도움됨" 상태를 토글합니다 (클릭 시 추가, 재클릭 시 취소).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      is_helpful:
+                        type: boolean
+                        description: 도움됨 상태 (true면 추가됨, false면 취소됨)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /seller/reviews:
+    get:
+      tags:
+        - Reviews
+      summary: 판매자 상품 리뷰 목록 조회
+      description: 판매자가 자신의 상품에 달린 모든 리뷰를 조회합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [created_at, rating]
+            default: created_at
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /seller/reviews/{id}/reply:
+    post:
+      tags:
+        - Reviews
+      summary: 리뷰에 판매자 답글 작성
+      description: 판매자가 자신의 상품에 달린 리뷰에 답글을 작성합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplyReviewRequest'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 해당 상품의 판매자만 답글 가능
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: 잘못된 요청
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: 인증 필요
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: 리소스를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+        code:
+          type: string
+
+    Meta:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    # Product Schemas
+    CreateProductRequest:
+      type: object
+      required:
+        - name
+        - price
+        - product_type
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+        slug:
+          type: string
+          pattern: '^[a-z0-9가-힣-]+$'
+        description:
+          type: string
+        short_desc:
+          type: string
+          maxLength: 500
+        product_type:
+          type: string
+          enum: [digital, physical]
+        price:
+          type: number
+          minimum: 0
+        original_price:
+          type: number
+        currency:
+          type: string
+          default: KRW
+        stock_quantity:
+          type: integer
+        download_limit:
+          type: integer
+          description: 디지털 상품 다운로드 횟수 제한
+        download_expiry:
+          type: integer
+          description: 디지털 상품 다운로드 유효 기간 (일)
+        status:
+          type: string
+          enum: [draft, published, archived]
+          default: draft
+        visibility:
+          type: string
+          enum: [public, private, password]
+          default: public
+        featured_image:
+          type: string
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        short_desc:
+          type: string
+        price:
+          type: number
+        original_price:
+          type: number
+        stock_quantity:
+          type: integer
+        status:
+          type: string
+          enum: [draft, published, archived]
+        visibility:
+          type: string
+        featured_image:
+          type: string
+
+    ProductResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Product'
+
+    ProductListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+        seller_id:
+          type: integer
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        short_desc:
+          type: string
+        product_type:
+          type: string
+          enum: [digital, physical]
+        price:
+          type: number
+        original_price:
+          type: number
+        currency:
+          type: string
+        stock_quantity:
+          type: integer
+        stock_status:
+          type: string
+          enum: [in_stock, out_of_stock, on_backorder]
+        download_limit:
+          type: integer
+        download_expiry:
+          type: integer
+        status:
+          type: string
+        visibility:
+          type: string
+        featured_image:
+          type: string
+        sales_count:
+          type: integer
+        view_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # Cart Schemas
+    AddToCartRequest:
+      type: object
+      required:
+        - product_id
+        - quantity
+      properties:
+        product_id:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 1
+
+    CartItemResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/CartItem'
+
+    CartResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/CartItem'
+            total:
+              type: number
+            currency:
+              type: string
+
+    CartItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        product:
+          $ref: '#/components/schemas/Product'
+        quantity:
+          type: integer
+        subtotal:
+          type: number
+
+    # Order Schemas
+    CreateOrderRequest:
+      type: object
+      properties:
+        shipping_name:
+          type: string
+          description: 배송지 수령인 (실물 상품 필수)
+        shipping_phone:
+          type: string
+        shipping_address:
+          type: string
+        shipping_postal:
+          type: string
+        shipping_memo:
+          type: string
+
+    OrderResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Order'
+
+    OrderListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: integer
+        order_number:
+          type: string
+        subtotal:
+          type: number
+        discount:
+          type: number
+        shipping_fee:
+          type: number
+        total:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, paid, processing, shipped, delivered, completed, cancelled, refunded]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        shipping_name:
+          type: string
+        shipping_phone:
+          type: string
+        shipping_address:
+          type: string
+        shipping_postal:
+          type: string
+        shipping_carrier:
+          type: string
+        tracking_number:
+          type: string
+        paid_at:
+          type: string
+          format: date-time
+        shipped_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+        product_name:
+          type: string
+        product_type:
+          type: string
+        price:
+          type: number
+        quantity:
+          type: integer
+        subtotal:
+          type: number
+        status:
+          type: string
+
+    # Payment Schemas
+    PreparePaymentRequest:
+      type: object
+      required:
+        - order_id
+        - pg_provider
+        - payment_method
+        - return_url
+      properties:
+        order_id:
+          type: integer
+        pg_provider:
+          type: string
+          enum: [inicis, tosspayments, kakaopay]
+        payment_method:
+          type: string
+          enum: [card, bank, virtual, phone]
+        return_url:
+          type: string
+          format: uri
+        cancel_url:
+          type: string
+          format: uri
+
+    PreparePaymentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            payment_id:
+              type: integer
+            order_number:
+              type: string
+            amount:
+              type: number
+            currency:
+              type: string
+            pg_provider:
+              type: string
+            pg_order_id:
+              type: string
+            redirect_url:
+              type: string
+            mobile_url:
+              type: string
+
+    CompletePaymentRequest:
+      type: object
+      required:
+        - payment_id
+        - pg_provider
+        - pg_tid
+        - pg_order_id
+        - amount
+      properties:
+        payment_id:
+          type: integer
+        pg_provider:
+          type: string
+        pg_tid:
+          type: string
+        pg_order_id:
+          type: string
+        amount:
+          type: number
+        card_company:
+          type: string
+        card_number:
+          type: string
+        install_month:
+          type: integer
+
+    CancelPaymentRequest:
+      type: object
+      required:
+        - cancel_reason
+      properties:
+        cancel_amount:
+          type: number
+          description: 부분 취소 금액 (미지정 시 전액 취소)
+        cancel_reason:
+          type: string
+          maxLength: 255
+
+    PaymentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Payment'
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: integer
+        order_id:
+          type: integer
+        order_number:
+          type: string
+        pg_provider:
+          type: string
+        pg_tid:
+          type: string
+        payment_method:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, ready, paid, cancelled, partial_cancelled, failed]
+        card_company:
+          type: string
+        card_number:
+          type: string
+        install_month:
+          type: integer
+        vbank_name:
+          type: string
+        vbank_number:
+          type: string
+        vbank_holder:
+          type: string
+        vbank_due:
+          type: string
+          format: date-time
+        paid_at:
+          type: string
+          format: date-time
+        cancelled_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    # Download Schemas
+    DownloadListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Download'
+
+    Download:
+      type: object
+      properties:
+        id:
+          type: integer
+        order_item_id:
+          type: integer
+        file:
+          $ref: '#/components/schemas/ProductFile'
+        download_token:
+          type: string
+        download_count:
+          type: integer
+        download_limit:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        last_download_at:
+          type: string
+          format: date-time
+        is_expired:
+          type: boolean
+        can_download:
+          type: boolean
+
+    ProductFile:
+      type: object
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        file_type:
+          type: string
+        display_name:
+          type: string
+
+    DownloadURLResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            download_url:
+              type: string
+              format: uri
+            expires_at:
+              type: string
+              format: date-time
+            file_name:
+              type: string
+            file_size:
+              type: integer
+
+    # Settlement Schemas
+    SettlementListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Settlement'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    SettlementResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Settlement'
+
+    Settlement:
+      type: object
+      properties:
+        id:
+          type: integer
+        seller_id:
+          type: integer
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        total_sales:
+          type: number
+        total_refunds:
+          type: number
+        pg_fees:
+          type: number
+        platform_fees:
+          type: number
+        settlement_amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        bank_name:
+          type: string
+        bank_account:
+          type: string
+        bank_holder:
+          type: string
+        processed_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    SettlementSummary:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            total_sales:
+              type: number
+            total_refunds:
+              type: number
+            total_pg_fees:
+              type: number
+            total_platform_fees:
+              type: number
+            total_settled:
+              type: number
+            pending_amount:
+              type: number
+            currency:
+              type: string
+
+    # Coupon Schemas
+    CreateCouponRequest:
+      type: object
+      required:
+        - code
+        - name
+        - discount_type
+        - discount_value
+      properties:
+        code:
+          type: string
+          minLength: 3
+          maxLength: 50
+          description: 쿠폰 코드 (자동으로 대문자 변환)
+        name:
+          type: string
+          maxLength: 100
+          description: 쿠폰명
+        description:
+          type: string
+          description: 쿠폰 설명
+        discount_type:
+          type: string
+          enum: [fixed, percent, free_shipping]
+          description: "할인 유형 (fixed: 정액, percent: 정률, free_shipping: 무료배송)"
+        discount_value:
+          type: number
+          minimum: 0.01
+          description: 할인 값 (정액일 경우 금액, 정률일 경우 퍼센트)
+        max_discount:
+          type: number
+          description: 최대 할인 금액 (정률 할인 시)
+        min_order_amount:
+          type: number
+          minimum: 0
+          default: 0
+          description: 최소 주문 금액
+        apply_to:
+          type: string
+          enum: [all, product, category, seller]
+          default: all
+          description: 적용 대상
+        apply_ids:
+          type: array
+          items:
+            type: integer
+          description: 적용 대상 ID 배열 (apply_to가 all이 아닐 때)
+        usage_limit:
+          type: integer
+          minimum: 1
+          description: 총 사용 제한 (미지정 시 무제한)
+        usage_per_user:
+          type: integer
+          minimum: 1
+          default: 1
+          description: 사용자당 사용 제한
+        starts_at:
+          type: string
+          format: date-time
+          description: 유효 시작일
+        expires_at:
+          type: string
+          format: date-time
+          description: 유효 종료일
+        is_public:
+          type: boolean
+          default: false
+          description: 공개 쿠폰 여부
+
+    UpdateCouponRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        discount_value:
+          type: number
+        max_discount:
+          type: number
+        min_order_amount:
+          type: number
+        usage_limit:
+          type: integer
+        usage_per_user:
+          type: integer
+        starts_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, inactive]
+        is_public:
+          type: boolean
+
+    ValidateCouponRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          description: 검증할 쿠폰 코드
+
+    ApplyCouponRequest:
+      type: object
+      required:
+        - order_id
+        - code
+      properties:
+        order_id:
+          type: integer
+          description: 주문 ID
+        code:
+          type: string
+          description: 쿠폰 코드
+
+    CouponResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Coupon'
+
+    CouponListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Coupon'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    ValidateCouponResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            valid:
+              type: boolean
+              description: 쿠폰 유효 여부
+            code:
+              type: string
+            name:
+              type: string
+            discount_type:
+              type: string
+            discount_value:
+              type: number
+            max_discount:
+              type: number
+            min_order_amount:
+              type: number
+            message:
+              type: string
+              description: 검증 결과 메시지
+
+    Coupon:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        discount_type:
+          type: string
+          enum: [fixed, percent, free_shipping]
+        discount_value:
+          type: number
+        max_discount:
+          type: number
+        min_order_amount:
+          type: number
+        apply_to:
+          type: string
+          enum: [all, product, category, seller]
+        apply_ids:
+          type: array
+          items:
+            type: integer
+        usage_limit:
+          type: integer
+        usage_per_user:
+          type: integer
+        usage_count:
+          type: integer
+        starts_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, inactive, expired]
+        is_public:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # Review Schemas
+    CreateReviewRequest:
+      type: object
+      required:
+        - order_item_id
+        - rating
+        - content
+      properties:
+        order_item_id:
+          type: integer
+          description: 주문 아이템 ID
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: 평점 (1-5)
+        title:
+          type: string
+          maxLength: 200
+          description: 리뷰 제목
+        content:
+          type: string
+          minLength: 10
+          maxLength: 5000
+          description: 리뷰 내용
+        images:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+          description: 리뷰 이미지 URL 배열 (최대 5개)
+
+    UpdateReviewRequest:
+      type: object
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        title:
+          type: string
+          maxLength: 200
+        content:
+          type: string
+          minLength: 10
+          maxLength: 5000
+        images:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+
+    ReplyReviewRequest:
+      type: object
+      required:
+        - reply
+      properties:
+        reply:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 판매자 답글
+
+    ReviewResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Review'
+
+    ReviewListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Review'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    ReviewSummaryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            product_id:
+              type: integer
+            total_count:
+              type: integer
+              description: 총 리뷰 수
+            average_rating:
+              type: number
+              format: float
+              description: 평균 평점
+            rating_counts:
+              type: object
+              description: 평점별 리뷰 수
+              additionalProperties:
+                type: integer
+
+    Review:
+      type: object
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+        user_id:
+          type: integer
+        user_name:
+          type: string
+          description: 리뷰 작성자 이름 (마스킹 처리)
+        order_item_id:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        title:
+          type: string
+        content:
+          type: string
+        images:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected, hidden]
+        is_verified:
+          type: boolean
+          description: 구매 인증 리뷰 여부
+        helpful_count:
+          type: integer
+          description: 도움됨 수
+        seller_reply:
+          type: string
+          description: 판매자 답글
+        replied_at:
+          type: string
+          format: date-time
+          description: 답글 작성일시
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

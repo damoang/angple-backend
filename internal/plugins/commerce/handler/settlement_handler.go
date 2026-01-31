@@ -166,7 +166,7 @@ type CreateSettlementRequest struct {
 // @Failure      409  {object}  common.APIResponse
 // @Router       /plugins/commerce/admin/settlements/{seller_id} [post]
 func (h *SettlementHandler) CreateSettlement(c *gin.Context) {
-	sellerID, err := strconv.ParseUint(c.Param("seller_id"), 10, 64)
+	sellerID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid seller ID", err)
 		return

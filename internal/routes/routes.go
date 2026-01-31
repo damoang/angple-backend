@@ -29,7 +29,9 @@ func Setup(
 	bannerHandler *handler.BannerHandler,
 	jwtManager *jwt.Manager,
 	damoangJWT *jwt.DamoangManager,
+	goodHandler *handler.GoodHandler,
 	recommendedHandler *handler.RecommendedHandler,
+	notificationHandler *handler.NotificationHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -76,6 +78,17 @@ func Setup(
 		boardPosts.PUT("/:id", middleware.JWTAuth(jwtManager), postHandler.UpdatePost)
 		boardPosts.DELETE("/:id", middleware.JWTAuth(jwtManager), postHandler.DeletePost)
 
+		// 게시글 추천/비추천 (프론트엔드 호환 토글 API)
+		boardPosts.POST("/:id/like", goodHandler.LikePost)
+		boardPosts.POST("/:id/dislike", goodHandler.DislikePost)
+		boardPosts.GET("/:id/like-status", goodHandler.GetLikeStatus)
+
+		// 게시글 추천/비추천 (명시적 API)
+		boardPosts.POST("/:id/recommend", goodHandler.RecommendPost)
+		boardPosts.DELETE("/:id/recommend", goodHandler.CancelRecommendPost)
+		boardPosts.POST("/:id/downvote", goodHandler.DownvotePost)
+		boardPosts.DELETE("/:id/downvote", goodHandler.CancelDownvotePost)
+
 		// 댓글 관련 (파라미터 이름 통일: post_id -> id)
 		comments := boardPosts.Group("/:id/comments")
 		{
@@ -86,6 +99,8 @@ func Setup(
 			comments.DELETE("/:comment_id", middleware.JWTAuth(jwtManager), commentHandler.DeleteComment)
 			comments.POST("/:comment_id/like", middleware.JWTAuth(jwtManager), commentHandler.LikeComment)
 			comments.POST("/:comment_id/dislike", middleware.JWTAuth(jwtManager), commentHandler.DislikeComment)
+			comments.POST("/:comment_id/recommend", goodHandler.RecommendComment)
+			comments.DELETE("/:comment_id/recommend", goodHandler.CancelRecommendComment)
 		}
 	}
 
@@ -171,6 +186,14 @@ func Setup(
 
 	// Dajoongi (다중이 탐지 API - 관리자 전용)
 	api.GET("/dajoongi", dajoongiHandler.GetDuplicateAccounts)
+
+	// Notifications (알림 API - 로그인 필요)
+	notifications := api.Group("/notifications")
+	notifications.GET("/unread-count", notificationHandler.GetUnreadCount)
+	notifications.GET("", notificationHandler.GetList)
+	notifications.POST("/:id/read", notificationHandler.MarkAsRead)
+	notifications.POST("/read-all", notificationHandler.MarkAllAsRead)
+	notifications.DELETE("/:id", notificationHandler.Delete)
 
 	// ============================================
 	// Plugin Routes (/api/plugins/*)
