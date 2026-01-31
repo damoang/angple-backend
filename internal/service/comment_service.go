@@ -17,11 +17,12 @@ type CommentService interface {
 }
 
 type commentService struct {
-	repo repository.CommentRepository
+	repo     repository.CommentRepository
+	goodRepo repository.GoodRepository
 }
 
-func NewCommentService(repo repository.CommentRepository) CommentService {
-	return &commentService{repo: repo}
+func NewCommentService(repo repository.CommentRepository, goodRepo repository.GoodRepository) CommentService {
+	return &commentService{repo: repo, goodRepo: goodRepo}
 }
 
 // ListComments returns all comments for a post
@@ -140,24 +141,44 @@ func (s *commentService) DeleteComment(boardID string, id int, authorID string) 
 	return s.repo.Delete(boardID, id)
 }
 
-// LikeComment increments the like count for a comment
-// Note: This is a simple implementation without tracking who liked.
-// For production, consider using a separate table to track user likes.
+// LikeComment increments the like count for a comment with duplicate check via g5_board_good
+// DB UNIQUE KEY: (bo_table, wr_id, mb_id) — 한 사용자당 하나의 액션만 허용
 //
 //nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 서비스 메서드
-func (s *commentService) LikeComment(boardID string, id int, _ string) (*domain.CommentLikeResponse, error) {
-	// Check if comment exists
+func (s *commentService) LikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error) {
 	_, err := s.repo.FindByID(boardID, id)
 	if err != nil {
 		return nil, common.ErrPostNotFound
 	}
 
-	// Increment likes
-	if err := s.repo.IncrementLikes(boardID, id); err != nil {
-		return nil, err
+	if s.goodRepo != nil && userID != "" {
+		// Check if already liked
+		hasGood, err := s.goodRepo.HasGood(boardID, id, userID, "good")
+		if err != nil {
+			return nil, err
+		}
+		if hasGood {
+			return nil, common.ErrAlreadyRecommended
+		}
+		// Remove existing dislike if present
+		hasNogood, err := s.goodRepo.HasGood(boardID, id, userID, "nogood")
+		if err != nil {
+			return nil, err
+		}
+		if hasNogood {
+			if err := s.goodRepo.RemoveGood(boardID, id, userID, "nogood"); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.goodRepo.AddGood(boardID, id, userID, "good"); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := s.repo.IncrementLikes(boardID, id); err != nil {
+			return nil, err
+		}
 	}
 
-	// Get updated comment
 	updated, err := s.repo.FindByID(boardID, id)
 	if err != nil {
 		return nil, err
@@ -171,22 +192,44 @@ func (s *commentService) LikeComment(boardID string, id int, _ string) (*domain.
 	}, nil
 }
 
-// DislikeComment increments the dislike count for a comment
+// DislikeComment increments the dislike count for a comment with duplicate check via g5_board_good
+// DB UNIQUE KEY: (bo_table, wr_id, mb_id) — 한 사용자당 하나의 액션만 허용
 //
 //nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 서비스 메서드
-func (s *commentService) DislikeComment(boardID string, id int, _ string) (*domain.CommentLikeResponse, error) {
-	// Check if comment exists
+func (s *commentService) DislikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error) {
 	_, err := s.repo.FindByID(boardID, id)
 	if err != nil {
 		return nil, common.ErrPostNotFound
 	}
 
-	// Increment dislikes
-	if err := s.repo.IncrementDislikes(boardID, id); err != nil {
-		return nil, err
+	if s.goodRepo != nil && userID != "" {
+		// Check if already disliked
+		hasNogood, err := s.goodRepo.HasGood(boardID, id, userID, "nogood")
+		if err != nil {
+			return nil, err
+		}
+		if hasNogood {
+			return nil, common.ErrAlreadyRecommended
+		}
+		// Remove existing like if present
+		hasGood, err := s.goodRepo.HasGood(boardID, id, userID, "good")
+		if err != nil {
+			return nil, err
+		}
+		if hasGood {
+			if err := s.goodRepo.RemoveGood(boardID, id, userID, "good"); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.goodRepo.AddGood(boardID, id, userID, "nogood"); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := s.repo.IncrementDislikes(boardID, id); err != nil {
+			return nil, err
+		}
 	}
 
-	// Get updated comment
 	updated, err := s.repo.FindByID(boardID, id)
 	if err != nil {
 		return nil, err

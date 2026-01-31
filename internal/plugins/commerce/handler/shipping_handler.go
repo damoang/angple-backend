@@ -104,7 +104,7 @@ func (h *ShippingHandler) RegisterShipping(c *gin.Context) {
 // @Failure 401 {object} common.Response
 // @Failure 403 {object} common.Response
 // @Failure 404 {object} common.Response
-// @Router /orders/{order_id}/tracking [get]
+// @Router /orders/{id}/tracking [get]
 func (h *ShippingHandler) TrackShipping(c *gin.Context) {
 	// 사용자 ID 가져오기
 	userID, exists := c.Get("user_id")

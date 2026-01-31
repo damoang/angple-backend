@@ -13,6 +13,10 @@ import (
 	"github.com/damoang/angple-backend/internal/migration"
 	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/plugins/commerce"
+	"github.com/damoang/angple-backend/internal/plugins/marketplace"
+	pluginstoreHandler "github.com/damoang/angple-backend/internal/pluginstore/handler"
+	pluginstoreRepo "github.com/damoang/angple-backend/internal/pluginstore/repository"
+	pluginstoreSvc "github.com/damoang/angple-backend/internal/pluginstore/service"
 	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/internal/routes"
 	"github.com/damoang/angple-backend/internal/service"
@@ -154,6 +158,8 @@ func main() {
 	var dajoongiHandler *handler.DajoongiHandler
 	var promotionHandler *handler.PromotionHandler
 	var bannerHandler *handler.BannerHandler
+	var goodHandler *handler.GoodHandler
+	var notificationHandler *handler.NotificationHandler
 
 	if db != nil {
 		// Repositories
@@ -170,11 +176,13 @@ func main() {
 		reportRepo := repository.NewReportRepository(db)
 		promotionRepo := repository.NewPromotionRepository(db)
 		bannerRepo := repository.NewBannerRepository(db)
+		goodRepo := repository.NewGoodRepository(db)
+		notificationRepo := repository.NewNotificationRepository(db)
 
 		// Services
 		authService := service.NewAuthService(memberRepo, jwtManager)
 		postService := service.NewPostService(postRepo)
-		commentService := service.NewCommentService(commentRepo)
+		commentService := service.NewCommentService(commentRepo, goodRepo)
 		menuService := service.NewMenuService(menuRepo)
 		siteService := service.NewSiteService(siteRepo)
 		boardService := service.NewBoardService(boardRepo)
@@ -185,6 +193,8 @@ func main() {
 		reportService := service.NewReportService(reportRepo)
 		promotionService := service.NewPromotionService(promotionRepo)
 		bannerService := service.NewBannerService(bannerRepo)
+		goodService := service.NewGoodService(goodRepo)
+		notificationService := service.NewNotificationService(notificationRepo)
 
 		// Handlers
 		authHandler = handler.NewAuthHandler(authService, cfg)
@@ -203,6 +213,8 @@ func main() {
 		dajoongiHandler = handler.NewDajoongiHandler(dajoongiRepo)
 		promotionHandler = handler.NewPromotionHandler(promotionService)
 		bannerHandler = handler.NewBannerHandler(bannerService)
+		goodHandler = handler.NewGoodHandler(goodService)
+		notificationHandler = handler.NewNotificationHandler(notificationService)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -248,7 +260,7 @@ func main() {
 
 	// API v2 라우트 (only if DB is connected)
 	if db != nil {
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, recommendedHandler, cfg)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, cfg)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
@@ -259,19 +271,54 @@ func main() {
 		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger)
 		pluginManager.GetRegistry().SetRouter(router)
 
-		// Commerce 플러그인 등록 및 활성화 (설정 기반)
-		if cfg.Plugins.Commerce.Enabled {
-			commercePlugin := commerce.New()
-			if err := pluginManager.RegisterBuiltIn("commerce", commercePlugin, commerce.Manifest); err != nil {
-				pkglogger.Info("⚠️  Failed to register commerce plugin: %v", err)
-			} else if err := pluginManager.Enable("commerce"); err != nil {
-				pkglogger.Info("⚠️  Failed to enable commerce plugin: %v", err)
-			} else {
-				pkglogger.Info("✅ Commerce plugin enabled")
-			}
-		} else {
-			pkglogger.Info("ℹ️  Commerce plugin disabled by config")
+		// 내장 플러그인 등록 (바이너리에 컴파일됨, 활성화는 DB 기반)
+		commercePlugin := commerce.New()
+		if err := pluginManager.RegisterBuiltIn("commerce", commercePlugin, commerce.Manifest); err != nil {
+			pkglogger.Info("Failed to register commerce plugin: %v", err)
 		}
+
+		marketplacePlugin := marketplace.New(db, jwtManager)
+		if err := pluginManager.RegisterBuiltIn("marketplace", marketplacePlugin, marketplace.Manifest); err != nil {
+			pkglogger.Info("Failed to register marketplace plugin: %v", err)
+		}
+
+		// Plugin Store 초기화 (DB 기반 플러그인 상태 관리)
+		installRepo := pluginstoreRepo.NewInstallationRepository(db)
+		settingRepo := pluginstoreRepo.NewSettingRepository(db)
+		eventRepo := pluginstoreRepo.NewEventRepository(db)
+
+		catalogSvc := pluginstoreSvc.NewCatalogService(installRepo)
+		catalogSvc.RegisterManifest(commerce.Manifest)
+		catalogSvc.RegisterManifest(marketplace.Manifest)
+
+		storeSvc := pluginstoreSvc.NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, pluginLogger)
+		settingSvc := pluginstoreSvc.NewSettingService(settingRepo, eventRepo, catalogSvc)
+
+		// DB에서 enabled 플러그인 자동 활성화
+		if err := storeSvc.BootEnabledPlugins(pluginManager); err != nil {
+			pkglogger.Info("Failed to boot enabled plugins: %v", err)
+		}
+
+		// Plugin Store Admin API 핸들러
+		storeHandler := pluginstoreHandler.NewStoreHandler(storeSvc, catalogSvc, pluginManager)
+		settingHandler := pluginstoreHandler.NewSettingHandler(settingSvc)
+
+		// Admin Plugin Store 라우트 등록
+		adminPlugins := router.Group("/api/v2/admin/plugins")
+		// TODO: 운영 환경에서는 admin 미들웨어 추가 필요
+		{
+			adminPlugins.GET("", storeHandler.ListPlugins)
+			adminPlugins.GET("/:name", storeHandler.GetPlugin)
+			adminPlugins.POST("/:name/install", storeHandler.InstallPlugin)
+			adminPlugins.POST("/:name/enable", storeHandler.EnablePlugin)
+			adminPlugins.POST("/:name/disable", storeHandler.DisablePlugin)
+			adminPlugins.DELETE("/:name", storeHandler.UninstallPlugin)
+			adminPlugins.GET("/:name/settings", settingHandler.GetSettings)
+			adminPlugins.PUT("/:name/settings", settingHandler.SaveSettings)
+			adminPlugins.GET("/:name/events", storeHandler.GetEvents)
+		}
+
+		pkglogger.Info("Plugin Store initialized")
 	}
 
 	// 서버 시작

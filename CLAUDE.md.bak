@@ -1,0 +1,118 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 프로젝트 개요
+
+Angple Backend는 damoang.net 커뮤니티를 위한 차세대 Go API 서버입니다. 기존 PHP 시스템을 재작성하여 800ms → 50ms 응답 시간 개선을 목표로 합니다.
+
+- **언어**: Go 1.23+
+- **프레임워크**: Fiber v2
+- **ORM**: GORM (MySQL)
+- **인증**: JWT + 다모앙 SSO 쿠키 연동
+
+## 필수 명령어
+
+```bash
+# 로컬 개발 환경 시작
+make docker-up          # MySQL(3307) + Redis(6381) 시작
+make dev                # API 서버 실행 (go run cmd/api/main.go)
+
+# 빌드 및 테스트
+make build              # bin/api, bin/gateway 생성
+make test               # go test ./...
+make test-coverage      # 커버리지 리포트 생성
+make lint               # golangci-lint 실행
+
+# 개별 테스트 실행
+go test -run TestAuthService ./internal/service/
+
+# Docker 관리
+make docker-down        # 컨테이너 중지
+make docker-rebuild     # 컨테이너 재빌드
+make docker-logs        # 로그 확인
+```
+
+## 아키텍처
+
+**Clean Architecture 4계층 구조**:
+
+```
+Handler (internal/handler/)     → HTTP 요청/응답 처리
+    ↓
+Service (internal/service/)     → 비즈니스 로직
+    ↓
+Repository (internal/repository/) → 데이터 접근
+    ↓
+Domain (internal/domain/)       → 엔티티 & DTO
+```
+
+**의존성 주입**: `cmd/api/main.go`에서 수동 와이어링
+```go
+memberRepo := repository.NewMemberRepository(db)
+authService := service.NewAuthService(memberRepo, jwtManager)
+authHandler := handler.NewAuthHandler(authService)
+```
+
+## 핵심 파일
+
+| 파일 | 설명 |
+|------|------|
+| `cmd/api/main.go` | DI 설정 & 서버 초기화 |
+| `internal/routes/routes.go` | 모든 API 라우트 정의 |
+| `internal/config/config.go` | YAML + 환경변수 설정 로드 |
+| `internal/common/response.go` | 표준 API 응답 포맷 |
+| `internal/common/errors.go` | 공유 에러 정의 |
+| `configs/config.dev.yaml` | 개발 환경 설정 |
+
+## 데이터베이스 규칙
+
+- **레거시 Gnuboard 호환 필수**: 기존 `g5_*` 테이블 사용
+- **동적 게시판 테이블**: `g5_write_{board_id}` (예: `g5_write_free`)
+- **댓글**: 게시글 테이블에 `wr_is_comment = 1`로 저장
+- **회원**: `g5_member` 테이블 사용
+- **스키마 변경 시 마이그레이션 필수**
+
+## 인증 시스템
+
+- **JWT**: API 클라이언트용 (15분 액세스, 7일 리프레시)
+- **쿠키 인증**: 레거시 다모앙 SSO 연동
+- **Mock 인증**: `local`/`dev` 환경에서 활성화
+
+## API 패턴
+
+**Base URL**: `/api/v2`
+
+새 엔드포인트 추가 시:
+1. `internal/domain/` - 모델/DTO 정의
+2. `internal/repository/` - 리포지토리 인터페이스 & 구현
+3. `internal/service/` - 서비스 인터페이스 & 구현
+4. `internal/handler/` - 핸들러 구현
+5. `internal/routes/routes.go` - 라우트 등록
+6. `cmd/api/main.go` - DI 와이어링
+
+## 환경 설정
+
+**환경변수** (.env 파일 사용):
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+- `REDIS_HOST`, `REDIS_PORT`
+- `JWT_SECRET`, `DAMOANG_JWT_SECRET` (필수)
+- `API_PORT`
+
+**환경별 동작**:
+- `local`: Mock 인증 활성화
+- `dev`: Mock 인증 활성화
+- `staging`/`prod`: 실제 인증만 허용
+
+## Git 워크플로우
+
+- **브랜치 전략**: `feature/작업명` → PR → `main` 머지
+- **커밋/푸시 전 승인 필수**
+- PR 생성 전 `make test && make lint` 실행
+
+## 코드 스타일
+
+- 인터페이스 기반 설계 (Repository, Service)
+- 파일 크기 1000줄 이하 유지
+- 공유 에러는 `internal/common/errors.go`에 정의
+- 응답 포맷은 `internal/common/response.go` 사용

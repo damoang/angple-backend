@@ -9,10 +9,11 @@ import (
 
 // Registry 플러그인 라우트 레지스트리
 type Registry struct {
-	router         gin.IRouter
-	pluginRouters  map[string]gin.IRouter
-	registeredAPIs map[string][]RegisteredRoute
-	mu             sync.RWMutex
+	router           gin.IRouter
+	pluginRouters    map[string]gin.IRouter
+	registeredAPIs   map[string][]RegisteredRoute
+	routesRegistered map[string]bool // Gin 라우트는 한번 등록하면 제거 불가
+	mu               sync.RWMutex
 }
 
 // RegisteredRoute 등록된 라우트 정보
@@ -26,8 +27,9 @@ type RegisteredRoute struct {
 // NewRegistry 새 레지스트리 생성
 func NewRegistry() *Registry {
 	return &Registry{
-		pluginRouters:  make(map[string]gin.IRouter),
-		registeredAPIs: make(map[string][]RegisteredRoute),
+		pluginRouters:    make(map[string]gin.IRouter),
+		registeredAPIs:   make(map[string][]RegisteredRoute),
+		routesRegistered: make(map[string]bool),
 	}
 }
 
@@ -66,6 +68,14 @@ func (r *Registry) RegisterPlugin(info *PluginInfo) {
 		return
 	}
 
+	// 이미 라우트 등록된 플러그인이면 스킵 (Gin은 라우트 재등록 시 panic)
+	r.mu.RLock()
+	alreadyRegistered := r.routesRegistered[info.Manifest.Name]
+	r.mu.RUnlock()
+	if alreadyRegistered {
+		return
+	}
+
 	pluginRouter := r.GetPluginRouter(info.Manifest.Name)
 	if pluginRouter == nil {
 		return
@@ -76,6 +86,7 @@ func (r *Registry) RegisterPlugin(info *PluginInfo) {
 
 	// 매니페스트에 정의된 라우트 기록
 	r.mu.Lock()
+	r.routesRegistered[info.Manifest.Name] = true
 	routes := make([]RegisteredRoute, 0, len(info.Manifest.Routes))
 	for _, route := range info.Manifest.Routes {
 		routes = append(routes, RegisteredRoute{

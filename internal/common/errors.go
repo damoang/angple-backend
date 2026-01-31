@@ -26,4 +26,9 @@ var (
 	ErrInvalidInput = errors.New("invalid input")
 	ErrInvalidToken = errors.New("invalid token")
 	ErrExpiredToken = errors.New("expired token")
+
+	// Recommend errors
+	ErrAlreadyRecommended = errors.New("already recommended")
+	ErrSelfRecommend      = errors.New("cannot recommend own post")
+	ErrNotRecommended     = errors.New("not recommended")
 )
