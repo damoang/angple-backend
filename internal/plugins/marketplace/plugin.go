@@ -133,6 +133,12 @@ func (p *Plugin) GetManifest() *plugin.PluginManifest {
 	return Manifest
 }
 
+// Migrate DB 마이그레이션 실행
+func (p *Plugin) Migrate(db *gorm.DB) error {
+	// 마이그레이션은 SQL 파일로 처리
+	return nil
+}
+
 // RegisterRoutes 라우트 등록 (plugin.Plugin 인터페이스 구현)
 func (p *Plugin) RegisterRoutes(router gin.IRouter) {
 	rg, ok := router.(*gin.RouterGroup)

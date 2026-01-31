@@ -28,12 +28,12 @@ type NotificationSummaryResponse struct {
 
 // NotificationListResponse represents notification list response
 type NotificationListResponse struct {
-	Items      []NotificationItem `json:"items"`
-	Total      int64              `json:"total"`
-	UnreadCount int64             `json:"unread_count"`
-	Page       int                `json:"page"`
-	Limit      int                `json:"limit"`
-	TotalPages int                `json:"total_pages"`
+	Items       []NotificationItem `json:"items"`
+	Total       int64              `json:"total"`
+	UnreadCount int64              `json:"unread_count"`
+	Page        int                `json:"page"`
+	Limit       int                `json:"limit"`
+	TotalPages  int                `json:"total_pages"`
 }
 
 // NotificationItem represents a single notification in list

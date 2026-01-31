@@ -4,17 +4,17 @@ import "github.com/damoang/angple-backend/internal/plugin"
 
 // CatalogEntry 내장 플러그인 카탈로그 항목
 type CatalogEntry struct {
-	Name         string                `json:"name"`
-	Version      string                `json:"version"`
-	Title        string                `json:"title"`
-	Description  string                `json:"description"`
-	Author       string                `json:"author"`
-	License      string                `json:"license"`
-	Category     string                `json:"category"`
-	Icon         string                `json:"icon"`
-	Tags         []string              `json:"tags"`
-	Dependencies []string              `json:"dependencies"`
-	Conflicts    []string              `json:"conflicts"`
+	Name         string                 `json:"name"`
+	Version      string                 `json:"version"`
+	Title        string                 `json:"title"`
+	Description  string                 `json:"description"`
+	Author       string                 `json:"author"`
+	License      string                 `json:"license"`
+	Category     string                 `json:"category"`
+	Icon         string                 `json:"icon"`
+	Tags         []string               `json:"tags"`
+	Dependencies []string               `json:"dependencies"`
+	Conflicts    []string               `json:"conflicts"`
 	Settings     []plugin.SettingConfig `json:"settings"`
 	// 런타임에 채워지는 필드
 	IsInstalled bool   `json:"is_installed"`
