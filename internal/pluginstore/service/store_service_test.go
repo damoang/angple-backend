@@ -56,6 +56,7 @@ type mockPlugin struct {
 }
 
 func (m *mockPlugin) Name() string                               { return m.name }
+func (m *mockPlugin) Migrate(db *gorm.DB) error                  { return nil }
 func (m *mockPlugin) Initialize(ctx *plugin.PluginContext) error { m.initialized = true; return nil }
 func (m *mockPlugin) RegisterRoutes(router gin.IRouter)          {}
 func (m *mockPlugin) Shutdown() error                            { m.shutdown = true; return nil }
