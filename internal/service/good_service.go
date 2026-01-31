@@ -43,31 +43,90 @@ func (s *goodService) checkAuthorAndReject(boardID string, wrID int, userID stri
 	return nil
 }
 
+// addVote adds a vote, optionally removing the opposite vote first
+func (s *goodService) addVote(boardID string, wrID int, userID, voteType, oppositeType string) error {
+	has, err := s.goodRepo.HasGood(boardID, wrID, userID, voteType)
+	if err != nil {
+		return err
+	}
+	if has {
+		return common.ErrAlreadyRecommended
+	}
+
+	// Remove opposite vote if present
+	hasOpposite, err := s.goodRepo.HasGood(boardID, wrID, userID, oppositeType)
+	if err != nil {
+		return err
+	}
+	if hasOpposite {
+		if err := s.goodRepo.RemoveGood(boardID, wrID, userID, oppositeType); err != nil {
+			return err
+		}
+	}
+
+	return s.goodRepo.AddGood(boardID, wrID, userID, voteType)
+}
+
+// cancelVote removes a vote and returns the updated count
+func (s *goodService) cancelVote(boardID string, wrID int, userID, voteType string) (int, int, error) {
+	has, err := s.goodRepo.HasGood(boardID, wrID, userID, voteType)
+	if err != nil {
+		return 0, 0, err
+	}
+	if !has {
+		return 0, 0, common.ErrNotRecommended
+	}
+
+	if err := s.goodRepo.RemoveGood(boardID, wrID, userID, voteType); err != nil {
+		return 0, 0, err
+	}
+
+	good, nogood, err := s.goodRepo.GetGoodCount(boardID, wrID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return good, nogood, nil
+}
+
+// toggleVote toggles a vote type, removing opposite if needed
+func (s *goodService) toggleVote(boardID string, wrID int, userID, voteType, oppositeType string) (*domain.LikeResponse, error) {
+	if err := s.checkAuthorAndReject(boardID, wrID, userID); err != nil {
+		return nil, err
+	}
+
+	hasVote, err := s.goodRepo.HasGood(boardID, wrID, userID, voteType)
+	if err != nil {
+		return nil, err
+	}
+
+	if hasVote {
+		if err := s.goodRepo.RemoveGood(boardID, wrID, userID, voteType); err != nil {
+			return nil, err
+		}
+	} else {
+		hasOpposite, err := s.goodRepo.HasGood(boardID, wrID, userID, oppositeType)
+		if err != nil {
+			return nil, err
+		}
+		if hasOpposite {
+			if err := s.goodRepo.RemoveGood(boardID, wrID, userID, oppositeType); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.goodRepo.AddGood(boardID, wrID, userID, voteType); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.buildLikeResponse(boardID, wrID, userID)
+}
+
 func (s *goodService) RecommendPost(boardID string, wrID int, userID string) (*domain.RecommendResponse, error) {
 	if err := s.checkAuthorAndReject(boardID, wrID, userID); err != nil {
 		return nil, err
 	}
 
-	has, err := s.goodRepo.HasGood(boardID, wrID, userID, "good")
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return nil, common.ErrAlreadyRecommended
-	}
-
-	// If user has downvoted, remove downvote first
-	hasNogood, err := s.goodRepo.HasGood(boardID, wrID, userID, "nogood")
-	if err != nil {
-		return nil, err
-	}
-	if hasNogood {
-		if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "nogood"); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := s.goodRepo.AddGood(boardID, wrID, userID, "good"); err != nil {
+	if err := s.addVote(boardID, wrID, userID, "good", "nogood"); err != nil {
 		return nil, err
 	}
 
@@ -83,23 +142,10 @@ func (s *goodService) RecommendPost(boardID string, wrID int, userID string) (*d
 }
 
 func (s *goodService) CancelRecommendPost(boardID string, wrID int, userID string) (*domain.RecommendResponse, error) {
-	has, err := s.goodRepo.HasGood(boardID, wrID, userID, "good")
+	good, _, err := s.cancelVote(boardID, wrID, userID, "good")
 	if err != nil {
 		return nil, err
 	}
-	if !has {
-		return nil, common.ErrNotRecommended
-	}
-
-	if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "good"); err != nil {
-		return nil, err
-	}
-
-	good, _, err := s.goodRepo.GetGoodCount(boardID, wrID)
-	if err != nil {
-		return nil, err
-	}
-
 	return &domain.RecommendResponse{
 		RecommendCount:  good,
 		UserRecommended: false,
@@ -111,26 +157,7 @@ func (s *goodService) DownvotePost(boardID string, wrID int, userID string) (*do
 		return nil, err
 	}
 
-	has, err := s.goodRepo.HasGood(boardID, wrID, userID, "nogood")
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return nil, common.ErrAlreadyRecommended
-	}
-
-	// If user has recommended, remove recommend first
-	hasGood, err := s.goodRepo.HasGood(boardID, wrID, userID, "good")
-	if err != nil {
-		return nil, err
-	}
-	if hasGood {
-		if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "good"); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := s.goodRepo.AddGood(boardID, wrID, userID, "nogood"); err != nil {
+	if err := s.addVote(boardID, wrID, userID, "nogood", "good"); err != nil {
 		return nil, err
 	}
 
@@ -146,23 +173,10 @@ func (s *goodService) DownvotePost(boardID string, wrID int, userID string) (*do
 }
 
 func (s *goodService) CancelDownvotePost(boardID string, wrID int, userID string) (*domain.DownvoteResponse, error) {
-	has, err := s.goodRepo.HasGood(boardID, wrID, userID, "nogood")
+	_, nogood, err := s.cancelVote(boardID, wrID, userID, "nogood")
 	if err != nil {
 		return nil, err
 	}
-	if !has {
-		return nil, common.ErrNotRecommended
-	}
-
-	if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "nogood"); err != nil {
-		return nil, err
-	}
-
-	_, nogood, err := s.goodRepo.GetGoodCount(boardID, wrID)
-	if err != nil {
-		return nil, err
-	}
-
 	return &domain.DownvoteResponse{
 		DownvoteCount: nogood,
 		UserDownvoted: false,
@@ -178,15 +192,7 @@ func (s *goodService) RecommendComment(boardID string, wrID int, userID string) 
 		return nil, common.ErrSelfRecommend
 	}
 
-	has, err := s.goodRepo.HasGood(boardID, wrID, userID, "good")
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return nil, common.ErrAlreadyRecommended
-	}
-
-	if err := s.goodRepo.AddGood(boardID, wrID, userID, "good"); err != nil {
+	if err := s.addVote(boardID, wrID, userID, "good", "nogood"); err != nil {
 		return nil, err
 	}
 
@@ -201,76 +207,25 @@ func (s *goodService) RecommendComment(boardID string, wrID int, userID string) 
 	}, nil
 }
 
-// ToggleLike toggles like status for a post (frontend-compatible)
-func (s *goodService) ToggleLike(boardID string, wrID int, userID string) (*domain.LikeResponse, error) {
-	if err := s.checkAuthorAndReject(boardID, wrID, userID); err != nil {
-		return nil, err
-	}
-
-	hasGood, err := s.goodRepo.HasGood(boardID, wrID, userID, "good")
+func (s *goodService) CancelRecommendComment(boardID string, wrID int, userID string) (*domain.RecommendResponse, error) {
+	good, _, err := s.cancelVote(boardID, wrID, userID, "good")
 	if err != nil {
 		return nil, err
 	}
+	return &domain.RecommendResponse{
+		RecommendCount:  good,
+		UserRecommended: false,
+	}, nil
+}
 
-	if hasGood {
-		// Cancel like
-		if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "good"); err != nil {
-			return nil, err
-		}
-	} else {
-		// Remove dislike if present
-		hasNogood, err := s.goodRepo.HasGood(boardID, wrID, userID, "nogood")
-		if err != nil {
-			return nil, err
-		}
-		if hasNogood {
-			if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "nogood"); err != nil {
-				return nil, err
-			}
-		}
-		// Add like
-		if err := s.goodRepo.AddGood(boardID, wrID, userID, "good"); err != nil {
-			return nil, err
-		}
-	}
-
-	return s.buildLikeResponse(boardID, wrID, userID)
+// ToggleLike toggles like status for a post (frontend-compatible)
+func (s *goodService) ToggleLike(boardID string, wrID int, userID string) (*domain.LikeResponse, error) {
+	return s.toggleVote(boardID, wrID, userID, "good", "nogood")
 }
 
 // ToggleDislike toggles dislike status for a post (frontend-compatible)
 func (s *goodService) ToggleDislike(boardID string, wrID int, userID string) (*domain.LikeResponse, error) {
-	if err := s.checkAuthorAndReject(boardID, wrID, userID); err != nil {
-		return nil, err
-	}
-
-	hasNogood, err := s.goodRepo.HasGood(boardID, wrID, userID, "nogood")
-	if err != nil {
-		return nil, err
-	}
-
-	if hasNogood {
-		// Cancel dislike
-		if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "nogood"); err != nil {
-			return nil, err
-		}
-	} else {
-		// Remove like if present
-		hasGood, err := s.goodRepo.HasGood(boardID, wrID, userID, "good")
-		if err != nil {
-			return nil, err
-		}
-		if hasGood {
-			if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "good"); err != nil {
-				return nil, err
-			}
-		}
-		// Add dislike
-		if err := s.goodRepo.AddGood(boardID, wrID, userID, "nogood"); err != nil {
-			return nil, err
-		}
-	}
-
-	return s.buildLikeResponse(boardID, wrID, userID)
+	return s.toggleVote(boardID, wrID, userID, "nogood", "good")
 }
 
 // GetLikeStatus returns the current like/dislike status for a post
@@ -303,29 +258,5 @@ func (s *goodService) buildLikeResponse(boardID string, wrID int, userID string)
 		Dislikes:     nogood,
 		UserLiked:    userLiked,
 		UserDisliked: userDisliked,
-	}, nil
-}
-
-func (s *goodService) CancelRecommendComment(boardID string, wrID int, userID string) (*domain.RecommendResponse, error) {
-	has, err := s.goodRepo.HasGood(boardID, wrID, userID, "good")
-	if err != nil {
-		return nil, err
-	}
-	if !has {
-		return nil, common.ErrNotRecommended
-	}
-
-	if err := s.goodRepo.RemoveGood(boardID, wrID, userID, "good"); err != nil {
-		return nil, err
-	}
-
-	good, _, err := s.goodRepo.GetGoodCount(boardID, wrID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &domain.RecommendResponse{
-		RecommendCount:  good,
-		UserRecommended: false,
 	}, nil
 }
