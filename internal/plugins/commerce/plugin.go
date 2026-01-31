@@ -3,6 +3,7 @@ package commerce
 import (
 	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/carrier"
+	"github.com/damoang/angple-backend/internal/plugins/commerce/domain"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/gateway"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/handler"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/middleware"
@@ -133,15 +134,15 @@ var Manifest = &plugin.PluginManifest{
 		// 다운로드 API (Phase 5)
 		{Path: "/downloads", Method: "GET", Handler: "ListUserDownloads", Auth: "required"},
 		{Path: "/downloads/:order_item_id/:file_id", Method: "GET", Handler: "GetDownloadURL", Auth: "required"},
-		{Path: "/downloads/file/:token", Method: "GET", Handler: "Download", Auth: "required"},
-		{Path: "/orders/:id/downloads", Method: "GET", Handler: "ListDownloads", Auth: "required"},
+		{Path: "/downloads/by-token/:token", Method: "GET", Handler: "Download", Auth: "required"},
+		{Path: "/order-items/:id/downloads", Method: "GET", Handler: "ListDownloads", Auth: "required"},
 
 		// 정산 API (Phase 6)
 		{Path: "/settlements", Method: "GET", Handler: "ListSettlements", Auth: "required"},
 		{Path: "/settlements/summary", Method: "GET", Handler: "GetSummary", Auth: "required"},
 		{Path: "/settlements/:id", Method: "GET", Handler: "GetSettlement", Auth: "required"},
 		{Path: "/admin/settlements", Method: "GET", Handler: "ListAllSettlements", Auth: "required"},
-		{Path: "/admin/settlements/:id", Method: "POST", Handler: "CreateSettlement", Auth: "required"},
+		{Path: "/admin/settlements/seller/:seller_id", Method: "POST", Handler: "CreateSettlement", Auth: "required"},
 		{Path: "/admin/settlements/:id/process", Method: "POST", Handler: "ProcessSettlement", Auth: "required"},
 
 		// 쿠폰 API (Phase 8)
@@ -169,9 +170,9 @@ var Manifest = &plugin.PluginManifest{
 
 		// 배송 추적 API (Phase 8)
 		{Path: "/shipping/carriers", Method: "GET", Handler: "GetCarriers", Auth: "none"},
-		{Path: "/seller/orders/:order_id/shipping", Method: "POST", Handler: "RegisterShipping", Auth: "required"},
+		{Path: "/seller/orders/:id/shipping", Method: "POST", Handler: "RegisterShipping", Auth: "required"},
 		{Path: "/orders/:id/tracking", Method: "GET", Handler: "TrackShipping", Auth: "required"},
-		{Path: "/seller/orders/:order_id/delivered", Method: "POST", Handler: "MarkDelivered", Auth: "required"},
+		{Path: "/seller/orders/:id/delivered", Method: "POST", Handler: "MarkDelivered", Auth: "required"},
 	},
 }
 
@@ -227,6 +228,24 @@ func New() *CommercePlugin {
 // Name 플러그인 이름 반환
 func (p *CommercePlugin) Name() string {
 	return "commerce"
+}
+
+// Migrate DB 마이그레이션 실행 — 커머스 테이블 생성/업데이트
+func (p *CommercePlugin) Migrate(db *gorm.DB) error {
+	return db.AutoMigrate(
+		&domain.Product{},
+		&domain.Cart{},
+		&domain.Order{},
+		&domain.OrderItem{},
+		&domain.Coupon{},
+		&domain.CouponUsage{},
+		&domain.Payment{},
+		&domain.Review{},
+		&domain.ReviewHelpful{},
+		&domain.ProductFile{},
+		&domain.Download{},
+		&domain.Settlement{},
+	)
 }
 
 // Initialize 플러그인 초기화
@@ -413,8 +432,8 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	// ============================================
 	router.GET("/downloads", p.downloadHandler.ListUserDownloads)
 	router.GET("/downloads/:order_item_id/:file_id", p.downloadHandler.GetDownloadURL)
-	router.GET("/downloads/file/:token", p.downloadHandler.Download)
-	router.GET("/orders/:id/downloads", p.downloadHandler.ListDownloads)
+	router.GET("/downloads/by-token/:token", p.downloadHandler.Download)
+	router.GET("/order-items/:id/downloads", p.downloadHandler.ListDownloads)
 
 	// ============================================
 	// 정산 - Phase 6 구현 완료
@@ -426,7 +445,7 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	// 관리자 정산 API
 	admin := router.Group("/admin")
 	admin.GET("/settlements", p.settlementHandler.ListAllSettlements)
-	admin.POST("/settlements/:id", p.settlementHandler.CreateSettlement)
+	admin.POST("/settlements/seller/:seller_id", p.settlementHandler.CreateSettlement)
 	admin.POST("/settlements/:id/process", p.settlementHandler.ProcessSettlement)
 
 	// ============================================
@@ -477,8 +496,8 @@ func (p *CommercePlugin) RegisterRoutes(router gin.IRouter) {
 	router.GET("/orders/:id/tracking", p.shippingHandler.TrackShipping)
 
 	// 판매자 배송 관리
-	seller.POST("/orders/:order_id/shipping", p.shippingHandler.RegisterShipping)
-	seller.POST("/orders/:order_id/delivered", p.shippingHandler.MarkDelivered)
+	seller.POST("/orders/:id/shipping", p.shippingHandler.RegisterShipping)
+	seller.POST("/orders/:id/delivered", p.shippingHandler.MarkDelivered)
 
 	p.logger.Info("Commerce routes registered")
 }

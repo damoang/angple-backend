@@ -196,7 +196,7 @@ func (s *downloadService) GenerateDownloadURL(userID uint64, orderItemID uint64,
 	expiresAt := time.Now().Add(10 * time.Minute)
 	signature := s.generateSignature(download.DownloadToken, secretKey, expiresAt)
 
-	downloadURL := fmt.Sprintf("%s/api/plugins/commerce/downloads/%s?sig=%s&exp=%d",
+	downloadURL := fmt.Sprintf("%s/api/plugins/commerce/downloads/by-token/%s?sig=%s&exp=%d",
 		baseURL,
 		download.DownloadToken,
 		signature,

@@ -21,7 +21,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.24'
 
@@ -42,7 +42,7 @@ jobs:
         fetch-depth: 0  # 전체 히스토리 필요 (base commit 비교용)
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.24'
 
@@ -81,7 +81,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.24'
 

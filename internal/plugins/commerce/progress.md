@@ -109,7 +109,7 @@ Angple 플랫폼 커머스(쇼핑몰) 플러그인 구현 진행 상황
 |--------|------|------|------|
 | GET | /downloads | required | ✅ |
 | GET | /downloads/:order_item_id/:file_id | required | ✅ |
-| GET | /downloads/:token | required | ✅ |
+| GET | /downloads/by-token/:token | required | ✅ |
 | GET | /orders/:order_item_id/downloads | required | ✅ |
 
 ---
