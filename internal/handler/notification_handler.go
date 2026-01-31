@@ -46,8 +46,14 @@ func (h *NotificationHandler) GetList(c *gin.Context) {
 
 	memberID := middleware.GetDamoangUserID(c)
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil {
+		page = 1
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil {
+		limit = 20
+	}
 
 	result, err := h.service.GetList(memberID, page, limit)
 	if err != nil {

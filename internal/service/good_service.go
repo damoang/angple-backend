@@ -288,8 +288,14 @@ func (s *goodService) buildLikeResponse(boardID string, wrID int, userID string)
 	userLiked := false
 	userDisliked := false
 	if userID != "" {
-		userLiked, _ = s.goodRepo.HasGood(boardID, wrID, userID, "good")
-		userDisliked, _ = s.goodRepo.HasGood(boardID, wrID, userID, "nogood")
+		userLiked, err = s.goodRepo.HasGood(boardID, wrID, userID, "good")
+		if err != nil {
+			userLiked = false
+		}
+		userDisliked, err = s.goodRepo.HasGood(boardID, wrID, userID, "nogood")
+		if err != nil {
+			userDisliked = false
+		}
 	}
 
 	return &domain.LikeResponse{

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -233,14 +234,14 @@ func (h *GoodHandler) GetLikeStatus(c *gin.Context) {
 
 // handleGoodError maps service errors to HTTP responses
 func handleGoodError(c *gin.Context, err error) {
-	switch err {
-	case common.ErrPostNotFound, common.ErrCommentNotFound:
+	switch {
+	case errors.Is(err, common.ErrPostNotFound), errors.Is(err, common.ErrCommentNotFound):
 		common.ErrorResponse(c, http.StatusNotFound, err.Error(), err)
-	case common.ErrSelfRecommend:
+	case errors.Is(err, common.ErrSelfRecommend):
 		common.ErrorResponse(c, http.StatusForbidden, "자신의 글은 추천할 수 없습니다", err)
-	case common.ErrAlreadyRecommended:
+	case errors.Is(err, common.ErrAlreadyRecommended):
 		common.ErrorResponse(c, http.StatusConflict, "이미 추천/비추천한 글입니다", err)
-	case common.ErrNotRecommended:
+	case errors.Is(err, common.ErrNotRecommended):
 		common.ErrorResponse(c, http.StatusBadRequest, "추천/비추천하지 않은 글입니다", err)
 	default:
 		common.ErrorResponse(c, http.StatusInternalServerError, "서버 오류가 발생했습니다", err)
