@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/pluginstore/domain"
 	"github.com/damoang/angple-backend/internal/pluginstore/repository"
 )
@@ -85,15 +86,21 @@ func (s *SettingService) SaveSettings(pluginName string, settings map[string]str
 		return fmt.Errorf("plugin %s not found", pluginName)
 	}
 
-	// 유효한 키인지 검증
-	validKeys := make(map[string]bool)
+	// 스키마 맵 생성 (검증용)
+	schemaMap := make(map[string]plugin.SettingConfig)
 	for _, cfg := range manifest.Settings {
-		validKeys[cfg.Key] = true
+		schemaMap[cfg.Key] = cfg
 	}
 
 	for key, value := range settings {
-		if !validKeys[key] {
+		schema, ok := schemaMap[key]
+		if !ok {
 			return fmt.Errorf("unknown setting key: %s", key)
+		}
+
+		// 스키마 기반 검증
+		if err := ValidateSetting(schema, value); err != nil {
+			return err
 		}
 
 		v := value
@@ -122,16 +129,47 @@ func (s *SettingService) SaveSettings(pluginName string, settings map[string]str
 }
 
 // GetSettingsAsMap 설정값을 map[string]interface{}로 반환 (PluginContext.Config 주입용)
+// 기본값 적용 + 타입 변환 포함
 func (s *SettingService) GetSettingsAsMap(pluginName string) (map[string]interface{}, error) {
+	manifest := s.catalogSvc.GetManifest(pluginName)
+
 	saved, err := s.settingRepo.GetAll(pluginName)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make(map[string]interface{})
+	savedMap := make(map[string]string)
 	for _, setting := range saved {
 		if setting.SettingValue != nil {
-			result[setting.SettingKey] = *setting.SettingValue
+			savedMap[setting.SettingKey] = *setting.SettingValue
+		}
+	}
+
+	// 매니페스트가 없으면 string 그대로 반환
+	if manifest == nil {
+		result := make(map[string]interface{}, len(savedMap))
+		for k, v := range savedMap {
+			result[k] = v
+		}
+		return result, nil
+	}
+
+	// 기본값 적용
+	withDefaults := ApplyDefaults(manifest.Settings, savedMap)
+
+	// 스키마 맵 생성
+	schemaMap := make(map[string]plugin.SettingConfig)
+	for _, cfg := range manifest.Settings {
+		schemaMap[cfg.Key] = cfg
+	}
+
+	// 타입 변환
+	result := make(map[string]interface{}, len(withDefaults))
+	for k, v := range withDefaults {
+		if schema, ok := schemaMap[k]; ok {
+			result[k] = ConvertSettingValue(schema, v)
+		} else {
+			result[k] = v
 		}
 	}
 

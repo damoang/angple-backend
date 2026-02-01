@@ -39,7 +39,7 @@ func (m *MockPlugin) Shutdown() error {
 
 func TestManager_RegisterBuiltIn(t *testing.T) {
 	logger := NewDefaultLogger("test")
-	manager := NewManager("/tmp/plugins", nil, nil, logger)
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil)
 
 	mockPlugin := &MockPlugin{name: "test-plugin"}
 	manifest := &PluginManifest{
@@ -73,7 +73,7 @@ func TestManager_EnableDisable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	logger := NewDefaultLogger("test")
-	manager := NewManager("/tmp/plugins", nil, nil, logger)
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil)
 
 	// 테스트용 라우터 설정
 	router := gin.New()
@@ -123,7 +123,7 @@ func TestManager_EnableDisable(t *testing.T) {
 
 func TestManager_GetAllPlugins(t *testing.T) {
 	logger := NewDefaultLogger("test")
-	manager := NewManager("/tmp/plugins", nil, nil, logger)
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil)
 
 	// 여러 플러그인 등록
 	for _, name := range []string{"plugin-a", "plugin-b", "plugin-c"} {
@@ -147,7 +147,7 @@ func TestManager_GetAllPlugins(t *testing.T) {
 
 func TestManager_EnableNonExistent(t *testing.T) {
 	logger := NewDefaultLogger("test")
-	manager := NewManager("/tmp/plugins", nil, nil, logger)
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil)
 
 	err := manager.Enable("non-existent")
 	if err == nil {

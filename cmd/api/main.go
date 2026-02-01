@@ -271,7 +271,20 @@ func main() {
 
 	// Plugin System 초기화 (DB 연결 필요)
 	if db != nil {
-		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger)
+		// Plugin Store 초기화 (DB 기반 플러그인 상태 관리) - Manager보다 먼저 생성
+		installRepo := pluginstoreRepo.NewInstallationRepository(db)
+		settingRepo := pluginstoreRepo.NewSettingRepository(db)
+		eventRepo := pluginstoreRepo.NewEventRepository(db)
+
+		catalogSvc := pluginstoreSvc.NewCatalogService(installRepo)
+		catalogSvc.RegisterManifest(commerce.Manifest)
+		catalogSvc.RegisterManifest(marketplace.Manifest)
+
+		storeSvc := pluginstoreSvc.NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, pluginLogger)
+		settingSvc := pluginstoreSvc.NewSettingService(settingRepo, eventRepo, catalogSvc)
+
+		// Plugin Manager 생성 (settingSvc를 SettingGetter로 전달)
+		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger, settingSvc)
 		pluginManager.GetRegistry().SetRouter(router)
 
 		// 내장 플러그인 등록 (바이너리에 컴파일됨, 활성화는 DB 기반)
@@ -284,18 +297,6 @@ func main() {
 		if err := pluginManager.RegisterBuiltIn("marketplace", marketplacePlugin, marketplace.Manifest); err != nil {
 			pkglogger.Info("Failed to register marketplace plugin: %v", err)
 		}
-
-		// Plugin Store 초기화 (DB 기반 플러그인 상태 관리)
-		installRepo := pluginstoreRepo.NewInstallationRepository(db)
-		settingRepo := pluginstoreRepo.NewSettingRepository(db)
-		eventRepo := pluginstoreRepo.NewEventRepository(db)
-
-		catalogSvc := pluginstoreSvc.NewCatalogService(installRepo)
-		catalogSvc.RegisterManifest(commerce.Manifest)
-		catalogSvc.RegisterManifest(marketplace.Manifest)
-
-		storeSvc := pluginstoreSvc.NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, pluginLogger)
-		settingSvc := pluginstoreSvc.NewSettingService(settingRepo, eventRepo, catalogSvc)
 
 		// DB에서 enabled 플러그인 자동 활성화
 		if err := storeSvc.BootEnabledPlugins(pluginManager); err != nil {

@@ -167,6 +167,11 @@ type Logger interface {
 	Error(msg string, args ...interface{})
 }
 
+// SettingGetter 플러그인 설정 조회 인터페이스 (순환 의존 방지)
+type SettingGetter interface {
+	GetSettingsAsMap(pluginName string) (map[string]interface{}, error)
+}
+
 // HookAware 선택적 인터페이스 - Hook을 등록하고 싶은 플러그인이 구현
 type HookAware interface {
 	RegisterHooks(hm *HookManager)
