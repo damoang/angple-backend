@@ -2,13 +2,14 @@ package migration
 
 import (
 	"github.com/damoang/angple-backend/internal/domain"
+	pluginstoreDomain "github.com/damoang/angple-backend/internal/pluginstore/domain"
 	"gorm.io/gorm"
 )
 
 // Run executes AutoMigrate for the menus table and seeds default data if empty.
 func Run(db *gorm.DB) error {
 	// 1. AutoMigrate - 테이블 없으면 생성, 있으면 skip
-	if err := db.AutoMigrate(&domain.Menu{}); err != nil {
+	if err := db.AutoMigrate(&domain.Menu{}, &pluginstoreDomain.PluginPermission{}); err != nil {
 		return err
 	}
 

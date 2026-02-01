@@ -40,7 +40,7 @@ func setupStoreService(t *testing.T) (*StoreService, *CatalogService, *plugin.Ma
 	logger := plugin.NewDefaultLogger("test")
 	storeSvc := NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, logger)
 
-	manager := plugin.NewManager("", db, nil, logger, nil)
+	manager := plugin.NewManager("", db, nil, logger, nil, nil)
 
 	// 내장 플러그인 등록
 	mockPlugin := &mockPlugin{name: "test-plugin"}
@@ -146,7 +146,7 @@ func TestBootEnabledPlugins(t *testing.T) {
 
 	// 새 매니저로 부팅 시뮬레이션
 	logger := plugin.NewDefaultLogger("test")
-	newManager := plugin.NewManager("", setupTestDB(t), nil, logger, nil)
+	newManager := plugin.NewManager("", setupTestDB(t), nil, logger, nil, nil)
 	mockP := &mockPlugin{name: "test-plugin"}
 	testManifest := &plugin.PluginManifest{Name: "test-plugin", Version: "1.0.0"}
 	newManager.RegisterBuiltIn("test-plugin", mockP, testManifest)
@@ -177,7 +177,7 @@ func TestConflictCheck(t *testing.T) {
 	logger := plugin.NewDefaultLogger("test")
 	storeSvc := NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, logger)
 
-	manager := plugin.NewManager("", db, nil, logger, nil)
+	manager := plugin.NewManager("", db, nil, logger, nil, nil)
 	manager.RegisterBuiltIn("plugin-a", &mockPlugin{name: "plugin-a"}, pluginA)
 	manager.RegisterBuiltIn("plugin-b", &mockPlugin{name: "plugin-b"}, pluginB)
 

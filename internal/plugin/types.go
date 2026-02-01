@@ -172,6 +172,13 @@ type SettingGetter interface {
 	GetSettingsAsMap(pluginName string) (map[string]interface{}, error)
 }
 
+// PermissionSyncer 플러그인 권한 동기화 인터페이스 (순환 의존 방지)
+type PermissionSyncer interface {
+	SyncPermissions(pluginName string, permissions []Permission) error
+	DeletePermissions(pluginName string) error
+	CheckPermission(pluginName, permissionID string, userLevel int) (bool, error)
+}
+
 // HookAware 선택적 인터페이스 - Hook을 등록하고 싶은 플러그인이 구현
 type HookAware interface {
 	RegisterHooks(hm *HookManager)

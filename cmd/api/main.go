@@ -280,11 +280,14 @@ func main() {
 		catalogSvc.RegisterManifest(commerce.Manifest)
 		catalogSvc.RegisterManifest(marketplace.Manifest)
 
+		permRepo := pluginstoreRepo.NewPermissionRepository(db)
+
 		storeSvc := pluginstoreSvc.NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, pluginLogger)
 		settingSvc := pluginstoreSvc.NewSettingService(settingRepo, eventRepo, catalogSvc)
+		permSvc := pluginstoreSvc.NewPermissionService(permRepo, catalogSvc)
 
-		// Plugin Manager 생성 (settingSvc를 SettingGetter로 전달)
-		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger, settingSvc)
+		// Plugin Manager 생성 (settingSvc, permSvc 전달)
+		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger, settingSvc, permSvc)
 		pluginManager.GetRegistry().SetRouter(router)
 
 		// 내장 플러그인 등록 (바이너리에 컴파일됨, 활성화는 DB 기반)
@@ -306,6 +309,7 @@ func main() {
 		// Plugin Store Admin API 핸들러
 		storeHandler := pluginstoreHandler.NewStoreHandler(storeSvc, catalogSvc, pluginManager)
 		settingHandler := pluginstoreHandler.NewSettingHandler(settingSvc)
+		permHandler := pluginstoreHandler.NewPermissionHandler(permSvc)
 
 		// Admin Plugin Store 라우트 등록
 		adminPlugins := router.Group("/api/v2/admin/plugins")
@@ -320,6 +324,8 @@ func main() {
 			adminPlugins.GET("/:name/settings", settingHandler.GetSettings)
 			adminPlugins.PUT("/:name/settings", settingHandler.SaveSettings)
 			adminPlugins.GET("/:name/events", storeHandler.GetEvents)
+			adminPlugins.GET("/:name/permissions", permHandler.GetPermissions)
+			adminPlugins.PUT("/:name/permissions/:permId", permHandler.UpdatePermission)
 		}
 
 		pkglogger.Info("Plugin Store initialized")
