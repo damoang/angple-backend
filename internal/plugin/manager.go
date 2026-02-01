@@ -100,6 +100,13 @@ func (m *Manager) Enable(name string) error {
 		return nil // 이미 활성화됨
 	}
 
+	// 버전 호환성 검증
+	if info.Manifest != nil && info.Manifest.Requires.Angple != "" {
+		if err := CheckVersionRange(CoreVersion, info.Manifest.Requires.Angple); err != nil {
+			return fmt.Errorf("plugin %s is not compatible: %w", name, err)
+		}
+	}
+
 	// 플러그인 인스턴스가 있으면 마이그레이션 → 초기화
 	if info.Instance != nil {
 		// 1) 마이그레이션 먼저

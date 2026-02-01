@@ -56,6 +56,15 @@ func (l *Loader) validateManifest(m *PluginManifest) error {
 	if m.Requires.Angple == "" {
 		return fmt.Errorf("requires.angple version is required")
 	}
+
+	// 버전 문자열 문법 검증
+	if _, err := ParseSemVer(m.Version); err != nil {
+		return fmt.Errorf("invalid plugin version %q: %w", m.Version, err)
+	}
+	if _, err := ParseVersionRange(m.Requires.Angple); err != nil {
+		return fmt.Errorf("invalid requires.angple %q: %w", m.Requires.Angple, err)
+	}
+
 	return nil
 }
 
