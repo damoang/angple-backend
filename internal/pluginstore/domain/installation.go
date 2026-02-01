@@ -50,6 +50,20 @@ func (PluginEvent) TableName() string {
 	return "plugin_events"
 }
 
+// PluginPermission 플러그인 권한 매핑 (권한 → 최소 회원 레벨)
+type PluginPermission struct {
+	ID           int64  `gorm:"primaryKey" json:"id"`
+	PluginName   string `gorm:"size:100;uniqueIndex:uk_plugin_perm" json:"plugin_name"`
+	PermissionID string `gorm:"size:200;uniqueIndex:uk_plugin_perm" json:"permission_id"`
+	Label        string `gorm:"size:200" json:"label"`
+	MinLevel     int    `gorm:"default:1" json:"min_level"` // 최소 회원 레벨 (1=일반, 10=관리자)
+}
+
+// TableName GORM 테이블명
+func (PluginPermission) TableName() string {
+	return "plugin_permissions"
+}
+
 // 이벤트 타입 상수
 const (
 	EventInstalled     = "installed"

@@ -20,10 +20,11 @@ type Manager struct {
 	mu          sync.RWMutex
 	logger      Logger
 	settings    SettingGetter
+	permissions PermissionSyncer
 }
 
 // NewManager 새 매니저 생성
-func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logger Logger, settings SettingGetter) *Manager {
+func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logger Logger, settings SettingGetter, permissions PermissionSyncer) *Manager {
 	return &Manager{
 		loader:      NewLoader(pluginsDir),
 		registry:    NewRegistry(),
@@ -33,6 +34,7 @@ func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logge
 		plugins:     make(map[string]*PluginInfo),
 		logger:      logger,
 		settings:    settings,
+		permissions: permissions,
 	}
 }
 
@@ -140,6 +142,13 @@ func (m *Manager) Enable(name string) error {
 
 		// 4) 라우트 등록
 		m.registry.RegisterPlugin(info)
+	}
+
+	// 5) 권한 동기화
+	if m.permissions != nil && info.Manifest != nil && len(info.Manifest.Permissions) > 0 {
+		if err := m.permissions.SyncPermissions(name, info.Manifest.Permissions); err != nil {
+			m.logger.Warn("Failed to sync permissions for plugin %s: %v", name, err)
+		}
 	}
 
 	// 플러그인 메뉴 등록
@@ -457,6 +466,11 @@ func (m *Manager) disablePluginMenus(pluginName string) error {
 // GetHookManager HookManager 반환
 func (m *Manager) GetHookManager() *HookManager {
 	return m.hookManager
+}
+
+// GetPermissionSyncer PermissionSyncer 반환
+func (m *Manager) GetPermissionSyncer() PermissionSyncer {
+	return m.permissions
 }
 
 // GetEnabledPluginNames 활성화된 플러그인 이름 목록 반환
