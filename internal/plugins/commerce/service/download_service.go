@@ -44,11 +44,18 @@ type DownloadService interface {
 	VerifySignature(token string, signature string, secretKey string, expiresAt time.Time) bool
 }
 
+// DownloadConfig 다운로드 서비스 설정
+type DownloadConfig struct {
+	ExpiryDays    int // 다운로드 만료일 (기본 30)
+	DownloadLimit int // 다운로드 횟수 제한 (기본 5)
+}
+
 // downloadService 구현체
 type downloadService struct {
 	downloadRepo    repository.DownloadRepository
 	orderRepo       repository.OrderRepository
 	productFileRepo repository.ProductFileRepository
+	config          DownloadConfig
 }
 
 // NewDownloadService 생성자
@@ -56,11 +63,22 @@ func NewDownloadService(
 	downloadRepo repository.DownloadRepository,
 	orderRepo repository.OrderRepository,
 	productFileRepo repository.ProductFileRepository,
+	config ...DownloadConfig,
 ) DownloadService {
+	cfg := DownloadConfig{ExpiryDays: 30, DownloadLimit: 5}
+	if len(config) > 0 {
+		if config[0].ExpiryDays > 0 {
+			cfg.ExpiryDays = config[0].ExpiryDays
+		}
+		if config[0].DownloadLimit > 0 {
+			cfg.DownloadLimit = config[0].DownloadLimit
+		}
+	}
 	return &downloadService{
 		downloadRepo:    downloadRepo,
 		orderRepo:       orderRepo,
 		productFileRepo: productFileRepo,
+		config:          cfg,
 	}
 }
 
@@ -109,8 +127,8 @@ func (s *downloadService) CreateDownloadAccess(orderItemID uint64, userID uint64
 			DownloadCount: 0,
 		}
 
-		// 만료일 설정 (기본 30일)
-		expiryDays := 30 // TODO: 설정에서 가져오기
+		// 만료일 설정
+		expiryDays := s.config.ExpiryDays
 		expiresAt := time.Now().AddDate(0, 0, expiryDays)
 		download.ExpiresAt = &expiresAt
 
@@ -181,7 +199,7 @@ func (s *downloadService) GenerateDownloadURL(userID uint64, orderItemID uint64,
 	}
 
 	// 다운로드 횟수 제한 확인
-	downloadLimit := 5 // TODO: 설정에서 가져오기
+	downloadLimit := s.config.DownloadLimit
 	if download.IsLimitReached(downloadLimit) {
 		return nil, ErrDownloadLimitReached
 	}
@@ -233,7 +251,7 @@ func (s *downloadService) ProcessDownload(token string, signature string, userID
 	}
 
 	// 다운로드 횟수 제한 확인
-	downloadLimit := 5 // TODO: 설정에서 가져오기
+	downloadLimit := s.config.DownloadLimit
 	if download.IsLimitReached(downloadLimit) {
 		return nil, ErrDownloadLimitReached
 	}
