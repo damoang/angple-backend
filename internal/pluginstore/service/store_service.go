@@ -229,6 +229,13 @@ func (s *StoreService) checkDependencies(manifest *plugin.PluginManifest) error 
 		if inst.Status != domain.StatusEnabled {
 			return fmt.Errorf("dependency not satisfied: plugin %s requires %s to be enabled", manifest.Name, dep.Name)
 		}
+		// 의존 플러그인 버전 범위 검증
+		if dep.Version != "" {
+			if err := plugin.CheckVersionRange(inst.Version, dep.Version); err != nil {
+				return fmt.Errorf("dependency version not satisfied: plugin %s requires %s %s, installed %s",
+					manifest.Name, dep.Name, dep.Version, inst.Version)
+			}
+		}
 	}
 	return nil
 }
