@@ -19,10 +19,11 @@ type Manager struct {
 	plugins     map[string]*PluginInfo
 	mu          sync.RWMutex
 	logger      Logger
+	settings    SettingGetter
 }
 
 // NewManager 새 매니저 생성
-func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logger Logger) *Manager {
+func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logger Logger, settings SettingGetter) *Manager {
 	return &Manager{
 		loader:      NewLoader(pluginsDir),
 		registry:    NewRegistry(),
@@ -31,6 +32,7 @@ func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logge
 		redis:       redisClient,
 		plugins:     make(map[string]*PluginInfo),
 		logger:      logger,
+		settings:    settings,
 	}
 }
 
@@ -106,11 +108,20 @@ func (m *Manager) Enable(name string) error {
 		}
 		info.MigratedAt = time.Now().Unix()
 
-		// 2) 초기화
+		// 2) 초기화 - 설정 주입
+		pluginConfig := make(map[string]interface{})
+		if m.settings != nil {
+			if cfg, err := m.settings.GetSettingsAsMap(name); err == nil && cfg != nil {
+				pluginConfig = cfg
+			} else if err != nil {
+				m.logger.Warn("Failed to load settings for plugin %s: %v", name, err)
+			}
+		}
+
 		ctx := &PluginContext{
 			DB:       m.db,
 			Redis:    m.redis,
-			Config:   make(map[string]interface{}),
+			Config:   pluginConfig,
 			Logger:   m.logger,
 			BasePath: info.Path,
 		}

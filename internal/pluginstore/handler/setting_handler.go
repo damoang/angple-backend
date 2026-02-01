@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/damoang/angple-backend/internal/pluginstore/service"
@@ -39,12 +40,18 @@ func (h *SettingHandler) SaveSettings(c *gin.Context) {
 	name := c.Param("name")
 	actorID := getActorID(c)
 
-	var req map[string]string
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var raw map[string]interface{}
+	if err := c.ShouldBindJSON(&raw); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": gin.H{"code": "INVALID_REQUEST", "message": "잘못된 요청 형식입니다"},
 		})
 		return
+	}
+
+	// interface{} → string 변환 (validator는 string 기반)
+	req := make(map[string]string, len(raw))
+	for k, v := range raw {
+		req[k] = fmt.Sprintf("%v", v)
 	}
 
 	if err := h.settingSvc.SaveSettings(name, req, actorID); err != nil {
