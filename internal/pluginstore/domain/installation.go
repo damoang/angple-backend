@@ -64,6 +64,19 @@ func (PluginPermission) TableName() string {
 	return "plugin_permissions"
 }
 
+// PluginMigration 플러그인 마이그레이션 실행 이력
+type PluginMigration struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	PluginName string    `gorm:"size:100;uniqueIndex:uk_plugin_migration" json:"plugin_name"`
+	Filename   string    `gorm:"size:255;uniqueIndex:uk_plugin_migration" json:"filename"`
+	ExecutedAt time.Time `gorm:"autoCreateTime" json:"executed_at"`
+}
+
+// TableName GORM 테이블명
+func (PluginMigration) TableName() string {
+	return "plugin_migrations"
+}
+
 // 이벤트 타입 상수
 const (
 	EventInstalled     = "installed"
