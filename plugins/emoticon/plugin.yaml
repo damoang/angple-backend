@@ -1,0 +1,129 @@
+# 이모티콘 플러그인
+# Emoticon Plugin - {emo:filename:width} 코드를 <img> 태그로 변환
+
+name: emoticon
+version: 1.0.0
+title: 이모티콘
+description: 게시글/댓글에서 {emo:filename:width} 코드를 이모티콘 이미지로 변환합니다.
+author: Damoang Team
+license: MIT
+homepage: https://github.com/damoang/angple-backend
+
+# 호환성
+requires:
+  angple: ">=1.0.0 <2.0.0"
+  go: ">=1.21"
+
+# DB 마이그레이션
+migrations:
+  - file: 001_init.up.sql
+    version: 1
+
+# Hook 등록
+hooks:
+  - event: post.content
+    handler: FilterPostContent
+    priority: 5
+    description: 게시글 본문의 이모티콘 코드를 이미지로 변환
+
+  - event: comment.content
+    handler: FilterCommentContent
+    priority: 5
+    description: 댓글 본문의 이모티콘 코드를 이미지로 변환
+
+# API 라우트
+routes:
+  # 공개 API
+  - path: /packs
+    method: GET
+    handler: ListPacks
+    auth: none
+    description: 활성 팩 목록 (피커용)
+
+  - path: /packs/:slug/items
+    method: GET
+    handler: ListPackItems
+    auth: none
+    description: 팩 내 아이템 목록
+
+  - path: /image/:filename
+    method: GET
+    handler: ServeImage
+    auth: none
+    description: 이모티콘 이미지 서빙
+
+  - path: /thumb/:filename
+    method: GET
+    handler: ServeThumb
+    auth: none
+    description: 이모티콘 썸네일 서빙
+
+  # 관리자 API
+  - path: /admin/packs
+    method: GET
+    handler: AdminListPacks
+    auth: required
+    description: 전체 팩 목록 (관리용)
+
+  - path: /admin/packs
+    method: POST
+    handler: CreatePack
+    auth: required
+    description: ZIP 업로드로 팩 생성
+
+  - path: /admin/packs/:id
+    method: PUT
+    handler: UpdatePack
+    auth: required
+    description: 팩 수정
+
+  - path: /admin/packs/:id
+    method: DELETE
+    handler: DeletePack
+    auth: required
+    description: 팩 삭제
+
+  - path: /admin/packs/:id/toggle
+    method: POST
+    handler: TogglePack
+    auth: required
+    description: 팩 활성/비활성 토글
+
+  - path: /admin/import-legacy
+    method: POST
+    handler: ImportLegacy
+    auth: required
+    description: ang-gnu 레거시 이모티콘 일괄 임포트
+
+# 설정 스키마
+settings:
+  - key: default_width
+    type: number
+    default: 50
+    min: 20
+    max: 200
+    label: 기본 너비 (px)
+
+  - key: max_width
+    type: number
+    default: 200
+    min: 50
+    max: 500
+    label: 최대 너비 (px)
+
+  - key: cdn_url
+    type: string
+    default: ""
+    label: CDN URL
+    description: 비워두면 로컬 서빙 사용
+
+  - key: fallback_filename
+    type: string
+    default: "damoang-emo-010.gif"
+    label: 폴백 이모티콘 파일명
+
+# 권한 정의
+permissions:
+  - id: emoticon.manage
+    label: 이모티콘 관리
+    description: 이모티콘 팩 생성/수정/삭제 권한
