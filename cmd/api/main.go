@@ -141,6 +141,10 @@ func main() {
 	}
 	damoangJWT := jwt.NewDamoangManager(damoangSecret)
 
+	// Plugin HookManager (생성만 먼저, 플러그인 활성화는 나중에)
+	pluginLogger := plugin.NewDefaultLogger("plugin")
+	hookManager := plugin.NewHookManager(pluginLogger)
+
 	// DI Container (skip if no DB connection)
 	var authHandler *handler.AuthHandler
 	var postHandler *handler.PostHandler
@@ -181,8 +185,8 @@ func main() {
 
 		// Services
 		authService := service.NewAuthService(memberRepo, jwtManager)
-		postService := service.NewPostService(postRepo)
-		commentService := service.NewCommentService(commentRepo, goodRepo)
+		postService := service.NewPostService(postRepo, hookManager)
+		commentService := service.NewCommentService(commentRepo, goodRepo, hookManager)
 		menuService := service.NewMenuService(menuRepo)
 		siteService := service.NewSiteService(siteRepo)
 		boardService := service.NewBoardService(boardRepo)
@@ -267,7 +271,6 @@ func main() {
 
 	// Plugin System 초기화 (DB 연결 필요)
 	if db != nil {
-		pluginLogger := plugin.NewDefaultLogger("plugin")
 		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger)
 		pluginManager.GetRegistry().SetRouter(router)
 

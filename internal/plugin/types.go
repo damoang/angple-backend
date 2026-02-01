@@ -166,3 +166,8 @@ type Logger interface {
 	Warn(msg string, args ...interface{})
 	Error(msg string, args ...interface{})
 }
+
+// HookAware 선택적 인터페이스 - Hook을 등록하고 싶은 플러그인이 구현
+type HookAware interface {
+	RegisterHooks(hm *HookManager)
+}
