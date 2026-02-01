@@ -98,6 +98,15 @@ var Manifest = &plugin.PluginManifest{
 			ViewLevel:     9,
 		},
 	},
+	Settings: []plugin.SettingConfig{
+		{Key: "download_base_url", Type: "string", Default: "http://localhost:8082", Label: "다운로드 Base URL"},
+		{Key: "download_secret_key", Type: "string", Default: "commerce-download-secret-key", Label: "다운로드 서명 Secret Key"},
+		{Key: "download_storage_path", Type: "string", Default: "./storage/commerce", Label: "다운로드 파일 저장 경로"},
+		{Key: "download_expiry_days", Type: "number", Default: 30, Label: "다운로드 만료일(일)", Min: intPtr(1), Max: intPtr(365)},
+		{Key: "download_limit", Type: "number", Default: 5, Label: "다운로드 횟수 제한", Min: intPtr(1), Max: intPtr(100)},
+		{Key: "fee_pg_rate", Type: "number", Default: 3.3, Label: "PG 수수료율(%)"},
+		{Key: "fee_platform_rate", Type: "number", Default: 5.0, Label: "플랫폼 수수료율(%)"},
+	},
 	Routes: []plugin.RouteConfig{
 		// 상품 관리 API (Phase 2)
 		{Path: "/products", Method: "GET", Handler: "ListProducts", Auth: "required"},
@@ -220,6 +229,38 @@ type PluginConfig struct {
 	} `yaml:"shipping"`
 }
 
+func intPtr(v int) *int { return &v }
+
+// configString ctx.Config에서 string 값 조회 (기본값 포함)
+func configString(cfg map[string]interface{}, key, defaultVal string) string {
+	if v, ok := cfg[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return defaultVal
+}
+
+// configFloat ctx.Config에서 float64 값 조회 (기본값 포함)
+func configFloat(cfg map[string]interface{}, key string, defaultVal float64) float64 {
+	if v, ok := cfg[key]; ok {
+		if f, ok := v.(float64); ok {
+			return f
+		}
+	}
+	return defaultVal
+}
+
+// configInt ctx.Config에서 int 값 조회 (기본값 포함)
+func configInt(cfg map[string]interface{}, key string, defaultVal int) int {
+	if v, ok := cfg[key]; ok {
+		if f, ok := v.(float64); ok {
+			return int(f)
+		}
+	}
+	return defaultVal
+}
+
 // New 새 커머스 플러그인 생성
 func New() *CommercePlugin {
 	return &CommercePlugin{}
@@ -254,11 +295,14 @@ func (p *CommercePlugin) Initialize(ctx *plugin.PluginContext) error {
 	p.redis = ctx.Redis
 	p.logger = ctx.Logger
 
-	// TODO: 설정 파일에서 읽어오기
+	// PluginContext.Config에서 설정 로드 (기본값은 Manifest.Settings에서 적용됨)
+	cfg := ctx.Config
 	config := &PluginConfig{}
-	config.Download.BaseURL = "http://localhost:8082"
-	config.Download.SecretKey = "commerce-download-secret-key"
-	config.Download.StoragePath = "./storage/commerce"
+	config.Download.BaseURL = configString(cfg, "download_base_url", "http://localhost:8082")
+	config.Download.SecretKey = configString(cfg, "download_secret_key", "commerce-download-secret-key")
+	config.Download.StoragePath = configString(cfg, "download_storage_path", "./storage/commerce")
+	config.Fee.PGRate = configFloat(cfg, "fee_pg_rate", 3.3)
+	config.Fee.PlatformRate = configFloat(cfg, "fee_platform_rate", 5.0)
 
 	// ============================================
 	// Rate Limiter 생성 (Phase 7)
@@ -331,7 +375,10 @@ func (p *CommercePlugin) Initialize(ctx *plugin.PluginContext) error {
 	cartService := service.NewCartService(cartRepo, productRepo)
 	orderService := service.NewOrderService(orderRepo, cartRepo, productRepo)
 	paymentService := service.NewPaymentService(paymentRepo, orderRepo, productRepo, gatewayManager)
-	downloadService := service.NewDownloadService(downloadRepo, orderRepo, productFileRepo)
+	downloadService := service.NewDownloadService(downloadRepo, orderRepo, productFileRepo, service.DownloadConfig{
+		ExpiryDays:    configInt(cfg, "download_expiry_days", 30),
+		DownloadLimit: configInt(cfg, "download_limit", 5),
+	})
 	settlementService := service.NewSettlementService(settlementRepo, orderRepo)
 	couponService := service.NewCouponService(couponRepo, couponUsageRepo, orderRepo)
 	reviewService := service.NewReviewService(reviewRepo, reviewHelpfulRepo, orderRepo, productRepo)
