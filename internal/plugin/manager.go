@@ -11,24 +11,26 @@ import (
 
 // Manager 플러그인 매니저 - 플러그인 라이프사이클 관리
 type Manager struct {
-	loader   *Loader
-	registry *Registry
-	db       *gorm.DB
-	redis    *redis.Client
-	plugins  map[string]*PluginInfo
-	mu       sync.RWMutex
-	logger   Logger
+	loader      *Loader
+	registry    *Registry
+	hookManager *HookManager
+	db          *gorm.DB
+	redis       *redis.Client
+	plugins     map[string]*PluginInfo
+	mu          sync.RWMutex
+	logger      Logger
 }
 
 // NewManager 새 매니저 생성
 func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logger Logger) *Manager {
 	return &Manager{
-		loader:   NewLoader(pluginsDir),
-		registry: NewRegistry(),
-		db:       db,
-		redis:    redisClient,
-		plugins:  make(map[string]*PluginInfo),
-		logger:   logger,
+		loader:      NewLoader(pluginsDir),
+		registry:    NewRegistry(),
+		hookManager: NewHookManager(logger),
+		db:          db,
+		redis:       redisClient,
+		plugins:     make(map[string]*PluginInfo),
+		logger:      logger,
 	}
 }
 
@@ -119,7 +121,13 @@ func (m *Manager) Enable(name string) error {
 			return fmt.Errorf("failed to initialize plugin %s: %w", name, err)
 		}
 
-		// 3) 라우트 등록
+		// 3) Hook 등록 (HookAware 구현 시)
+		if ha, ok := info.Instance.(HookAware); ok {
+			ha.RegisterHooks(m.hookManager)
+			m.logger.Info("Registered hooks for plugin: %s", name)
+		}
+
+		// 4) 라우트 등록
 		m.registry.RegisterPlugin(info)
 	}
 
@@ -158,6 +166,9 @@ func (m *Manager) Disable(name string) error {
 			m.logger.Warn("Plugin %s shutdown error: %v", name, err)
 		}
 	}
+
+	// Hook 해제
+	m.hookManager.Unregister(name)
 
 	// 라우트 해제
 	m.registry.UnregisterPlugin(name)
@@ -430,6 +441,11 @@ func (m *Manager) disablePluginMenus(pluginName string) error {
 
 	m.logger.Info("Disabled %d menus for plugin: %s", result.RowsAffected, pluginName)
 	return nil
+}
+
+// GetHookManager HookManager 반환
+func (m *Manager) GetHookManager() *HookManager {
+	return m.hookManager
 }
 
 // GetEnabledPluginNames 활성화된 플러그인 이름 목록 반환
