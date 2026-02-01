@@ -184,6 +184,8 @@ func (s *postService) UpdatePost(boardID string, id int, req *domain.UpdatePostR
 }
 
 // DeletePost deletes a post
+//
+//nolint:dupl // CommentService.DeleteComment과 구조 유사하나 다른 Hook 이벤트 사용
 func (s *postService) DeletePost(boardID string, id int, authorID string) error {
 	// Check if post exists and belongs to author
 	existing, err := s.repo.FindByID(boardID, id)

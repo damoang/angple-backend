@@ -8,10 +8,10 @@ import (
 // testLogger is a no-op logger for tests
 type testLogger struct{}
 
-func (l *testLogger) Debug(msg string, args ...interface{}) {}
-func (l *testLogger) Info(msg string, args ...interface{})  {}
-func (l *testLogger) Warn(msg string, args ...interface{})  {}
-func (l *testLogger) Error(msg string, args ...interface{}) {}
+func (l *testLogger) Debug(_ string, _ ...interface{}) {}
+func (l *testLogger) Info(_ string, _ ...interface{})  {}
+func (l *testLogger) Warn(_ string, _ ...interface{})  {}
+func (l *testLogger) Error(_ string, _ ...interface{}) {}
 
 func newTestHookManager() *HookManager {
 	return NewHookManager(&testLogger{})
@@ -73,17 +73,17 @@ func TestHookPriorityOrder(t *testing.T) {
 
 	var order []string
 
-	hm.Register("test.event", "plugin-c", func(ctx *HookContext) error {
+	hm.Register("test.event", "plugin-c", func(_ *HookContext) error {
 		order = append(order, "C")
 		return nil
 	}, 30)
 
-	hm.Register("test.event", "plugin-a", func(ctx *HookContext) error {
+	hm.Register("test.event", "plugin-a", func(_ *HookContext) error {
 		order = append(order, "A")
 		return nil
 	}, 10)
 
-	hm.Register("test.event", "plugin-b", func(ctx *HookContext) error {
+	hm.Register("test.event", "plugin-b", func(_ *HookContext) error {
 		order = append(order, "B")
 		return nil
 	}, 20)
@@ -100,11 +100,11 @@ func TestHookErrorIsolation(t *testing.T) {
 
 	secondCalled := false
 
-	hm.Register("test.event", "bad-plugin", func(ctx *HookContext) error {
+	hm.Register("test.event", "bad-plugin", func(_ *HookContext) error {
 		return errors.New("something broke")
 	}, 10)
 
-	hm.Register("test.event", "good-plugin", func(ctx *HookContext) error {
+	hm.Register("test.event", "good-plugin", func(_ *HookContext) error {
 		secondCalled = true
 		return nil
 	}, 20)
@@ -143,7 +143,7 @@ func TestHookUnregister(t *testing.T) {
 	hm := newTestHookManager()
 
 	called := false
-	hm.Register("test.event", "removable", func(ctx *HookContext) error {
+	hm.Register("test.event", "removable", func(_ *HookContext) error {
 		called = true
 		return nil
 	}, 10)
@@ -156,7 +156,7 @@ func TestHookUnregister(t *testing.T) {
 	}
 }
 
-func TestHookDoNoHandlers(t *testing.T) {
+func TestHookDoNoHandlers(_ *testing.T) {
 	hm := newTestHookManager()
 	// Should not panic
 	hm.Do("nonexistent.event", map[string]interface{}{"key": "value"})

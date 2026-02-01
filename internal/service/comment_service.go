@@ -191,6 +191,8 @@ func (s *commentService) UpdateComment(
 }
 
 // DeleteComment deletes a comment
+//
+//nolint:dupl // PostService.DeletePost와 구조 유사하나 다른 Hook 이벤트 사용
 func (s *commentService) DeleteComment(boardID string, id int, authorID string) error {
 	// Verify ownership
 	existing, err := s.repo.FindByID(boardID, id)
