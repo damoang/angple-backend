@@ -7,7 +7,7 @@ import (
 
 // Setup configures v2 API routes (new DB schema)
 func Setup(router *gin.Engine, h *v2handler.V2Handler) {
-	api := router.Group("/api/v2-next")
+	api := router.Group("/api/v2")
 
 	// Users
 	users := api.Group("/users")

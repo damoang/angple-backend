@@ -9,7 +9,7 @@
 
 | 항목 | v1 (레거시) | v2 (신규) |
 |------|------------|----------|
-| Base URL | `/api/v2` | `/api/v2-next` (테스트) → 최종 `/api/v2` |
+| Base URL | `/api/v1` (구 `/api/v2`) | `/api/v2` (구 `/api/v2`) |
 | DB | 그누보드 `g5_*` 테이블 | 신규 `v2_*` 테이블 |
 | 게시판 식별 | `board_id` (문자열, e.g. `"free"`) | `slug` (문자열, e.g. `"free"`) |
 | 응답 형식 | `{"data": ..., "meta": {...}}` | `{"success": true, "data": ..., "meta": {...}}` |
@@ -65,18 +65,18 @@
 
 | v1 | v2 | 비고 |
 |----|-----|------|
-| `GET /api/v2/boards` | `GET /api/v2-next/boards` | 응답 필드 변경 |
-| `GET /api/v2/boards/:board_id` | `GET /api/v2-next/boards/:slug` | 파라미터명 변경 |
+| `GET /api/v2/boards` | `GET /api/v2/boards` | 응답 필드 변경 |
+| `GET /api/v2/boards/:board_id` | `GET /api/v2/boards/:slug` | 파라미터명 변경 |
 
 ### 3.2 게시글
 
 | v1 | v2 | 비고 |
 |----|-----|------|
-| `GET /api/v2/boards/:board_id/posts` | `GET /api/v2-next/boards/:slug/posts` | 파라미터명 변경 |
-| `GET /api/v2/boards/:board_id/posts/:id` | `GET /api/v2-next/boards/:slug/posts/:id` | |
-| `POST /api/v2/boards/:board_id/posts` | `POST /api/v2-next/boards/:slug/posts` | |
-| `PUT /api/v2/boards/:board_id/posts/:id` | `PUT /api/v2-next/boards/:slug/posts/:id` | |
-| `DELETE /api/v2/boards/:board_id/posts/:id` | `DELETE /api/v2-next/boards/:slug/posts/:id` | |
+| `GET /api/v2/boards/:board_id/posts` | `GET /api/v2/boards/:slug/posts` | 파라미터명 변경 |
+| `GET /api/v2/boards/:board_id/posts/:id` | `GET /api/v2/boards/:slug/posts/:id` | |
+| `POST /api/v2/boards/:board_id/posts` | `POST /api/v2/boards/:slug/posts` | |
+| `PUT /api/v2/boards/:board_id/posts/:id` | `PUT /api/v2/boards/:slug/posts/:id` | |
+| `DELETE /api/v2/boards/:board_id/posts/:id` | `DELETE /api/v2/boards/:slug/posts/:id` | |
 
 ### 3.3 댓글
 
@@ -90,18 +90,18 @@
 
 | v1 | v2 | 비고 |
 |----|-----|------|
-| (없음) | `GET /api/v2-next/users` | v2 전용 |
-| (없음) | `GET /api/v2-next/users/:id` | v2 전용 |
-| (없음) | `GET /api/v2-next/users/username/:username` | v2 전용 |
+| (없음) | `GET /api/v2/users` | v2 전용 |
+| (없음) | `GET /api/v2/users/:id` | v2 전용 |
+| (없음) | `GET /api/v2/users/username/:username` | v2 전용 |
 
 ### 3.5 v2 미구현 (v1 전용, 레거시 유지)
 
 다음 API는 아직 v2로 전환되지 않았습니다. 전환 완료 전까지 v1 엔드포인트를 계속 사용하세요:
 
-- 인증: `/api/v2/auth/*`
-- 메뉴: `/api/v2/menus/*`
-- 사이트: `/api/v2/sites/*`
-- 회원 검증: `/api/v2/members/check-*`
+- 인증: `/api/v1/auth/*`
+- 메뉴: `/api/v1/menus/*`
+- 사이트: `/api/v1/sites/*`
+- 회원 검증: `/api/v1/members/check-*`
 - 스크랩, 차단, 쪽지, 메모
 - 알림, WebSocket
 - 신고, 이용제한
@@ -162,7 +162,7 @@
 
 ```typescript
 // api-client.ts
-const API_VERSION = process.env.NEXT_PUBLIC_API_VERSION || 'v2'; // 'v2' = legacy, 'v2-next' = new
+const API_VERSION = process.env.NEXT_PUBLIC_API_VERSION || 'v1'; // 'v1' = legacy, 'v2' = new
 
 export const apiBase = `/api/${API_VERSION}`;
 
@@ -185,14 +185,13 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 ### Step 2: 점진적 전환
 
 1. 환경변수로 API 버전 전환 가능하게 구성
-2. 페이지/컴포넌트 단위로 v2-next 테스트
-3. 전체 전환 후 `API_VERSION`을 `v2-next`로 고정
+2. 페이지/컴포넌트 단위로 v2 테스트
+3. 전체 전환 후 `API_VERSION`을 `v2`로 고정
 
-### Step 3: 최종 정리
+### Step 3: 최종 정리 (완료)
 
-프론트엔드가 100% v2-next 사용 확인 후:
-- 백엔드: 레거시 `/api/v2` → `/api/v1`으로 이동
-- 백엔드: `/api/v2-next` → `/api/v2`로 승격
+- ~~백엔드: 레거시 `/api/v2` → `/api/v1`으로 이동~~ ✅ Phase 12에서 완료
+- ~~백엔드: `/api/v2-next` → `/api/v2`로 승격~~ ✅ Phase 12에서 완료
 - 프론트엔드: `API_VERSION`을 `v2`로 변경
 
 ---

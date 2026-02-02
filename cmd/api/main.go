@@ -49,7 +49,7 @@ import (
 // @license.name    Proprietary
 //
 // @host            localhost:8082
-// @BasePath        /api/v2
+// @BasePath        /api/v1
 //
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -319,23 +319,24 @@ func main() {
 	v1UsageTracker := middleware.NewAPIUsageTracker()
 
 	// v1 사용량 모니터링 엔드포인트 (관리자용)
-	router.GET("/api/v2-next/admin/v1-usage", func(c *gin.Context) {
+	router.GET("/api/v2/admin/v1-usage", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"tracking_since": v1UsageTracker.StartedAt(),
 			"total_calls":    v1UsageTracker.TotalCalls(),
 			"endpoints":      v1UsageTracker.GetStats(),
 		})
 	})
-	router.POST("/api/v2-next/admin/v1-usage/reset", func(c *gin.Context) {
+	router.POST("/api/v2/admin/v1-usage/reset", func(c *gin.Context) {
 		v1UsageTracker.Reset()
 		c.JSON(http.StatusOK, gin.H{"message": "사용량 카운터 초기화 완료"})
 	})
 
-	// API v2 라우트 (only if DB is connected)
+	// 라우트 등록 (only if DB is connected)
 	if db != nil {
+		// v1 레거시 API (그누보드 DB 기반) → /api/v1
 		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, adminHandler, v1UsageTracker, cfg)
 
-		// v2 신규 API (v2_ 테이블 기반) — /api/v2-next 에서 테스트, 추후 /api/v2로 전환
+		// v2 API (v2_ 테이블 기반) → /api/v2
 		v2UserRepo := v2repo.NewUserRepository(db)
 		v2PostRepo := v2repo.NewPostRepository(db)
 		v2CommentRepo := v2repo.NewCommentRepository(db)
@@ -401,7 +402,7 @@ func main() {
 		permHandler := pluginstoreHandler.NewPermissionHandler(permSvc)
 
 		// Admin Plugin Store 라우트 등록
-		adminPlugins := router.Group("/api/v2/admin/plugins")
+		adminPlugins := router.Group("/api/v1/admin/plugins")
 		// TODO: 운영 환경에서는 admin 미들웨어 추가 필요
 		{
 			adminPlugins.GET("", storeHandler.ListPlugins)
