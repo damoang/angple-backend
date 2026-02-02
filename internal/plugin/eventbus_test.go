@@ -69,7 +69,7 @@ func TestEventBus_Unsubscribe(t *testing.T) {
 	}
 }
 
-func TestEventBus_NoSubscribers(t *testing.T) {
+func TestEventBus_NoSubscribers(_ *testing.T) {
 	logger := NewDefaultLogger("test")
 	eb := NewEventBus(logger)
 
