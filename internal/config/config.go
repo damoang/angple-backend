@@ -31,6 +31,7 @@ type CommercePluginConfig struct {
 // DataPathsConfig 데이터 경로 설정
 type DataPathsConfig struct {
 	RecommendedPath string `yaml:"recommended_path"`
+	UploadPath      string `yaml:"upload_path"`
 }
 
 // ServerConfig 서버 설정
@@ -139,6 +140,10 @@ func overrideFromEnv(cfg *Config) {
 	// 데이터 경로 설정
 	if recommendedPath := os.Getenv("RECOMMENDED_DATA_PATH"); recommendedPath != "" {
 		cfg.DataPaths.RecommendedPath = recommendedPath
+	}
+
+	if uploadPath := os.Getenv("UPLOAD_PATH"); uploadPath != "" {
+		cfg.DataPaths.UploadPath = uploadPath
 	}
 
 	// CORS 설정
