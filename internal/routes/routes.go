@@ -39,6 +39,7 @@ func Setup(
 	messageHandler *handler.MessageHandler,
 	wsHandler *handler.WSHandler,
 	disciplineHandler *handler.DisciplineHandler,
+	galleryHandler *handler.GalleryHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -222,6 +223,14 @@ func Setup(
 	disciplines.GET("/:id", disciplineHandler.GetDiscipline)     // 이용제한 상세 열람
 	disciplines.POST("/:id/appeal", disciplineHandler.SubmitAppeal) // 소명 글 작성
 	members.GET("/me/disciplines", disciplineHandler.MyDisciplines) // 내 이용제한 내역
+
+	// Gallery (갤러리 API - 공개, Redis 캐시)
+	gallery := api.Group("/gallery")
+	gallery.GET("", galleryHandler.GetGalleryAll)          // 전체 갤러리
+	gallery.GET("/:board_id", galleryHandler.GetGallery)   // 게시판별 갤러리
+
+	// Unified Search (통합 검색 API - 공개, Redis 캐시)
+	api.GET("/search", galleryHandler.UnifiedSearch)
 
 	// Dajoongi (다중이 탐지 API - 관리자 전용)
 	api.GET("/dajoongi", dajoongiHandler.GetDuplicateAccounts)
