@@ -215,6 +215,27 @@ func (h *StoreHandler) EventSubscriptions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": subs})
 }
 
+// PluginOverview 플러그인 전체 현황 조회
+// GET /api/v2/admin/plugins/overview
+func (h *StoreHandler) PluginOverview(c *gin.Context) {
+	overview := h.manager.GetOverview()
+	c.JSON(http.StatusOK, gin.H{"data": overview})
+}
+
+// PluginDetail 플러그인 상세 정보 (capabilities 포함)
+// GET /api/v2/admin/plugins/:name/detail
+func (h *StoreHandler) PluginDetail(c *gin.Context) {
+	name := c.Param("name")
+	detail := h.manager.GetDetail(name)
+	if detail == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": gin.H{"code": "PLUGIN_NOT_FOUND", "message": "플러그인을 찾을 수 없습니다"},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": detail})
+}
+
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
 	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴

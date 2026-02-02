@@ -334,6 +334,7 @@ func main() {
 			adminPlugins.GET("/rate-limits", storeHandler.RateLimitConfigs)
 			adminPlugins.GET("/metrics", storeHandler.PluginMetrics)
 			adminPlugins.GET("/event-subscriptions", storeHandler.EventSubscriptions)
+			adminPlugins.GET("/overview", storeHandler.PluginOverview)
 			adminPlugins.GET("/settings/export", settingHandler.ExportAllSettings)
 			adminPlugins.POST("/settings/import", settingHandler.ImportSettings)
 			adminPlugins.GET("/:name", storeHandler.GetPlugin)
@@ -349,6 +350,7 @@ func main() {
 			adminPlugins.PUT("/:name/permissions/:permId", permHandler.UpdatePermission)
 			adminPlugins.GET("/:name/health", storeHandler.HealthCheckSingle)
 			adminPlugins.GET("/:name/metrics", storeHandler.PluginMetricsSingle)
+			adminPlugins.GET("/:name/detail", storeHandler.PluginDetail)
 		}
 
 		// 플러그인 스케줄러 시작
