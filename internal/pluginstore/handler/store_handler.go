@@ -193,6 +193,21 @@ func (h *StoreHandler) RateLimitConfigs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": configs})
 }
 
+// PluginMetrics 전체 플러그인 메트릭 조회
+// GET /api/v2/admin/plugins/metrics
+func (h *StoreHandler) PluginMetrics(c *gin.Context) {
+	metrics := h.manager.GetAllPluginMetrics()
+	c.JSON(http.StatusOK, gin.H{"data": metrics})
+}
+
+// PluginMetricsSingle 단일 플러그인 메트릭 조회
+// GET /api/v2/admin/plugins/:name/metrics
+func (h *StoreHandler) PluginMetricsSingle(c *gin.Context) {
+	name := c.Param("name")
+	metrics := h.manager.GetPluginMetrics(name)
+	c.JSON(http.StatusOK, gin.H{"data": metrics})
+}
+
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
 	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴
