@@ -18,7 +18,10 @@ import (
 	pluginstoreRepo "github.com/damoang/angple-backend/internal/pluginstore/repository"
 	pluginstoreSvc "github.com/damoang/angple-backend/internal/pluginstore/service"
 	"github.com/damoang/angple-backend/internal/repository"
+	v2handler "github.com/damoang/angple-backend/internal/handler/v2"
+	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/damoang/angple-backend/internal/routes"
+	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
 	"github.com/damoang/angple-backend/internal/ws"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -314,6 +317,14 @@ func main() {
 	// API v2 라우트 (only if DB is connected)
 	if db != nil {
 		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, adminHandler, cfg)
+
+		// v2 신규 API (v2_ 테이블 기반) — /api/v2-next 에서 테스트, 추후 /api/v2로 전환
+		v2UserRepo := v2repo.NewUserRepository(db)
+		v2PostRepo := v2repo.NewPostRepository(db)
+		v2CommentRepo := v2repo.NewCommentRepository(db)
+		v2BoardRepo := v2repo.NewBoardRepository(db)
+		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo)
+		v2routes.Setup(router, v2Handler)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
