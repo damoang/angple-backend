@@ -16,6 +16,12 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+// Migration target constants
+const (
+	targetPosts    = "posts"
+	targetComments = "comments"
+)
+
 func main() {
 	// CLI flags
 	configPath := flag.String("config", "configs/config.dev.yaml", "config file path")
@@ -27,7 +33,9 @@ func main() {
 	verbose := flag.Bool("verbose", false, "verbose SQL logging")
 	flag.Parse()
 
-	_ = godotenv.Load()
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -46,7 +54,10 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	sqlDB, _ := db.DB()
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("Failed to get underlying DB: %v", err)
+	}
 	defer sqlDB.Close()
 
 	// Ensure v2 schema exists
@@ -87,9 +98,9 @@ func runMigration(db *gorm.DB, target string, batchSize int) {
 			err = migrateUsers(db, batchSize)
 		case "boards":
 			err = migrateBoards(db)
-		case "posts":
+		case targetPosts:
 			err = migratePosts(db, batchSize)
-		case "comments":
+		case targetComments:
 			err = migrateComments(db, batchSize)
 		case "files":
 			err = migrateFiles(db, batchSize)
@@ -414,8 +425,8 @@ func runVerify(db *gorm.DB) {
 	pairs := []countPair{
 		{"users", "SELECT COUNT(*) FROM g5_member WHERE mb_id != ''", "SELECT COUNT(*) FROM v2_users"},
 		{"boards", "SELECT COUNT(*) FROM g5_board", "SELECT COUNT(*) FROM v2_boards"},
-		{"posts", "", "SELECT COUNT(*) FROM v2_posts"},
-		{"comments", "", "SELECT COUNT(*) FROM v2_comments"},
+		{targetPosts, "", "SELECT COUNT(*) FROM v2_posts"},
+		{targetComments, "", "SELECT COUNT(*) FROM v2_comments"},
 		{"scraps", "SELECT COUNT(*) FROM g5_scrap", "SELECT COUNT(*) FROM v2_scraps"},
 		{"files", "SELECT COUNT(*) FROM g5_board_file", "SELECT COUNT(*) FROM v2_files"},
 	}
@@ -426,7 +437,11 @@ func runVerify(db *gorm.DB) {
 	}
 
 	// Calculate total v1 posts/comments across dynamic tables
-	boardIDs, _ := getBoardIDs(db)
+	boardIDs, err := getBoardIDs(db)
+	if err != nil {
+		log.Printf("[verify] Warning: failed to get board IDs: %v", err)
+		return
+	}
 	var totalV1Posts, totalV1Comments int64
 	for _, boardID := range boardIDs {
 		tableName := fmt.Sprintf("g5_write_%s", boardID)
@@ -449,9 +464,9 @@ func runVerify(db *gorm.DB) {
 		var v1Count, v2Count int64
 
 		switch p.label {
-		case "posts":
+		case targetPosts:
 			v1Count = totalV1Posts
-		case "comments":
+		case targetComments:
 			v1Count = totalV1Comments
 		default:
 			if p.v1Query != "" {
@@ -475,7 +490,10 @@ func runVerify(db *gorm.DB) {
 
 func runDryRun(db *gorm.DB, target string) {
 	targets := parseTargets(target)
-	boardIDs, _ := getBoardIDs(db)
+	boardIDs, err := getBoardIDs(db)
+	if err != nil {
+		log.Printf("[dry-run] Warning: failed to get board IDs: %v", err)
+	}
 
 	for _, t := range targets {
 		switch t {
@@ -487,7 +505,7 @@ func runDryRun(db *gorm.DB, target string) {
 			var count int64
 			db.Raw("SELECT COUNT(*) FROM g5_board").Scan(&count)
 			log.Printf("[dry-run:boards] %d records to migrate from g5_board", count)
-		case "posts":
+		case targetPosts:
 			var total int64
 			for _, boardID := range boardIDs {
 				tableName := fmt.Sprintf("g5_write_%s", boardID)
@@ -499,7 +517,7 @@ func runDryRun(db *gorm.DB, target string) {
 				total += count
 			}
 			log.Printf("[dry-run:posts] %d records to migrate across %d boards", total, len(boardIDs))
-		case "comments":
+		case targetComments:
 			var total int64
 			for _, boardID := range boardIDs {
 				tableName := fmt.Sprintf("g5_write_%s", boardID)
