@@ -33,6 +33,7 @@ func Setup(
 	recommendedHandler *handler.RecommendedHandler,
 	notificationHandler *handler.NotificationHandler,
 	memberProfileHandler *handler.MemberProfileHandler,
+	fileHandler *handler.FileHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -201,6 +202,15 @@ func Setup(
 	notifications.POST("/:id/read", notificationHandler.MarkAsRead)
 	notifications.POST("/read-all", notificationHandler.MarkAllAsRead)
 	notifications.DELETE("/:id", notificationHandler.Delete)
+
+	// Upload (파일 업로드 API - 로그인 필요)
+	upload := api.Group("/upload")
+	upload.POST("/editor", fileHandler.UploadEditorImage)       // 에디터 이미지 업로드
+	upload.POST("/attachment", fileHandler.UploadAttachment)     // 첨부파일 업로드
+
+	// Files (파일 다운로드 API - 공개)
+	files := api.Group("/files")
+	files.GET("/:board_id/:wr_id/:file_no/download", fileHandler.DownloadFile) // 파일 다운로드
 
 	// ============================================
 	// Plugin Routes (/api/plugins/*)
