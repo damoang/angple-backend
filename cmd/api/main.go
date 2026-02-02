@@ -176,6 +176,7 @@ func main() {
 	var messageHandler *handler.MessageHandler
 	var wsHandler *handler.WSHandler
 	var disciplineHandler *handler.DisciplineHandler
+	var galleryHandler *handler.GalleryHandler
 
 	if db != nil {
 		// Repositories
@@ -200,6 +201,7 @@ func main() {
 		blockRepo := repository.NewBlockRepository(db)
 		messageRepo := repository.NewMessageRepository(db)
 		disciplineRepo := repository.NewDisciplineRepository(db)
+		galleryRepo := repository.NewGalleryRepository(db)
 
 		// Services
 		authService := service.NewAuthService(memberRepo, jwtManager, hookManager)
@@ -223,6 +225,7 @@ func main() {
 		blockService := service.NewBlockService(blockRepo, memberRepo)
 		messageService := service.NewMessageService(messageRepo, memberRepo, blockRepo)
 		disciplineService := service.NewDisciplineService(disciplineRepo)
+		galleryService := service.NewGalleryService(galleryRepo, redisClient)
 
 		// File upload path
 		uploadPath := cfg.DataPaths.UploadPath
@@ -257,6 +260,7 @@ func main() {
 		messageHandler = handler.NewMessageHandler(messageService)
 		wsHandler = handler.NewWSHandler(wsHub)
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
+		galleryHandler = handler.NewGalleryHandler(galleryService)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -302,7 +306,7 @@ func main() {
 
 	// API v2 라우트 (only if DB is connected)
 	if db != nil {
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, cfg)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, cfg)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
