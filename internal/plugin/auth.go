@@ -12,9 +12,9 @@ type JWTVerifier interface {
 	VerifyAndSetContext(c *gin.Context) error
 }
 
-// PluginAuthMiddleware 플러그인 라우트용 인증 미들웨어
+// AuthMiddleware 플러그인 라우트용 인증 미들웨어
 // auth: "required" - 인증 필수, "optional" - 인증 선택 (있으면 컨텍스트 설정), "none" - 인증 불필요
-func PluginAuthMiddleware(authType string, verifier JWTVerifier) gin.HandlerFunc {
+func AuthMiddleware(authType string, verifier JWTVerifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if verifier == nil || authType == "none" || authType == "" {
 			c.Next()

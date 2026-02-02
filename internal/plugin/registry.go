@@ -166,7 +166,7 @@ func (r *Registry) createAuthMiddleware(pluginName string) gin.HandlerFunc {
 			}
 		}
 
-		PluginAuthMiddleware(authType, r.jwtVerifier)(c)
+		AuthMiddleware(authType, r.jwtVerifier)(c)
 	}
 }
 

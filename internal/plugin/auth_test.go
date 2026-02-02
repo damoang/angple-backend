@@ -26,7 +26,7 @@ func newTestVerifier(valid bool) *DefaultJWTVerifier {
 func TestPluginAuth_Required_WithValidToken(t *testing.T) {
 	verifier := newTestVerifier(true)
 	r := gin.New()
-	r.GET("/test", PluginAuthMiddleware("required", verifier), func(c *gin.Context) {
+	r.GET("/test", AuthMiddleware("required", verifier), func(c *gin.Context) {
 		userID, _ := c.Get("userID")
 		c.String(http.StatusOK, userID.(string))
 	})
@@ -47,7 +47,7 @@ func TestPluginAuth_Required_WithValidToken(t *testing.T) {
 func TestPluginAuth_Required_NoToken(t *testing.T) {
 	verifier := newTestVerifier(true)
 	r := gin.New()
-	r.GET("/test", PluginAuthMiddleware("required", verifier), func(c *gin.Context) {
+	r.GET("/test", AuthMiddleware("required", verifier), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 
@@ -63,7 +63,7 @@ func TestPluginAuth_Required_NoToken(t *testing.T) {
 func TestPluginAuth_Required_InvalidToken(t *testing.T) {
 	verifier := newTestVerifier(false)
 	r := gin.New()
-	r.GET("/test", PluginAuthMiddleware("required", verifier), func(c *gin.Context) {
+	r.GET("/test", AuthMiddleware("required", verifier), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 
@@ -80,7 +80,7 @@ func TestPluginAuth_Required_InvalidToken(t *testing.T) {
 func TestPluginAuth_Optional_WithToken(t *testing.T) {
 	verifier := newTestVerifier(true)
 	r := gin.New()
-	r.GET("/test", PluginAuthMiddleware("optional", verifier), func(c *gin.Context) {
+	r.GET("/test", AuthMiddleware("optional", verifier), func(c *gin.Context) {
 		userID, _ := c.Get("userID")
 		c.String(http.StatusOK, userID.(string))
 	})
@@ -98,7 +98,7 @@ func TestPluginAuth_Optional_WithToken(t *testing.T) {
 func TestPluginAuth_Optional_NoToken(t *testing.T) {
 	verifier := newTestVerifier(true)
 	r := gin.New()
-	r.GET("/test", PluginAuthMiddleware("optional", verifier), func(c *gin.Context) {
+	r.GET("/test", AuthMiddleware("optional", verifier), func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 
@@ -113,7 +113,7 @@ func TestPluginAuth_Optional_NoToken(t *testing.T) {
 
 func TestPluginAuth_None(t *testing.T) {
 	r := gin.New()
-	r.GET("/test", PluginAuthMiddleware("none", nil), func(c *gin.Context) {
+	r.GET("/test", AuthMiddleware("none", nil), func(c *gin.Context) {
 		c.String(http.StatusOK, "public")
 	})
 
@@ -128,7 +128,7 @@ func TestPluginAuth_None(t *testing.T) {
 
 func TestPluginAuth_NilVerifier(t *testing.T) {
 	r := gin.New()
-	r.GET("/test", PluginAuthMiddleware("required", nil), func(c *gin.Context) {
+	r.GET("/test", AuthMiddleware("required", nil), func(c *gin.Context) {
 		c.String(http.StatusOK, "pass")
 	})
 
