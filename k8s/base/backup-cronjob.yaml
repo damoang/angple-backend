@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  namespace: angple
+spec:
+  schedule: "0 3 * * *"  # 매일 03:00 UTC (한국시간 12:00)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backupOffLimitSeconds: 600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: mysql:8.0
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+                  BACKUP_FILE="/backup/damoang_${TIMESTAMP}.sql.gz"
+                  echo "[backup] Starting MySQL backup at $(date)"
+                  mysqldump -h ${DB_HOST} -u ${DB_USER} -p${DB_PASSWORD} \
+                    --single-transaction --routines --triggers --events \
+                    ${DB_NAME} | gzip > ${BACKUP_FILE}
+                  if [ $? -eq 0 ]; then
+                    echo "[backup] Backup created: ${BACKUP_FILE} ($(du -h ${BACKUP_FILE} | cut -f1))"
+                    # S3 업로드 (AWS CLI 사용 시)
+                    # aws s3 cp ${BACKUP_FILE} s3://${S3_BUCKET}/mysql-backups/${BACKUP_FILE}
+                    # 7일 이상 된 로컬 백업 삭제
+                    find /backup -name "*.sql.gz" -mtime +7 -delete
+                    echo "[backup] Cleanup done. Remaining backups:"
+                    ls -lh /backup/
+                  else
+                    echo "[backup] FAILED"
+                    exit 1
+                  fi
+              envFrom:
+                - configMapRef:
+                    name: angple-config
+                - secretRef:
+                    name: angple-secrets
+              volumeMounts:
+                - name: backup-volume
+                  mountPath: /backup
+          volumes:
+            - name: backup-volume
+              persistentVolumeClaim:
+                claimName: mysql-backup-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-backup-pvc
+  namespace: angple
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
