@@ -22,6 +22,11 @@ func RunV2Schema(db *gorm.DB) error {
 		&v2.V2Notification{},
 		&v2.V2Session{},
 
+		// Scrap, Memo, Message
+		&v2.V2Scrap{},
+		&v2.V2Memo{},
+		&v2.V2Message{},
+
 		// Meta tables (plugin extensibility)
 		&v2.UserMeta{},
 		&v2.PostMeta{},
