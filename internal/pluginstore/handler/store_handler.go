@@ -179,6 +179,13 @@ func (h *StoreHandler) Dashboard(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": data})
 }
 
+// ScheduledTasks 스케줄 작업 목록 조회
+// GET /api/v2/admin/plugins/schedules
+func (h *StoreHandler) ScheduledTasks(c *gin.Context) {
+	tasks := h.manager.GetScheduledTasks()
+	c.JSON(http.StatusOK, gin.H{"data": tasks})
+}
+
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
 	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴

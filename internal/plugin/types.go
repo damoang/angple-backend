@@ -200,3 +200,8 @@ type PluginHealth struct {
 type HookAware interface {
 	RegisterHooks(hm *HookManager)
 }
+
+// Schedulable 선택적 인터페이스 - 주기적 작업을 등록하고 싶은 플러그인이 구현
+type Schedulable interface {
+	RegisterSchedules(scheduler *Scheduler)
+}

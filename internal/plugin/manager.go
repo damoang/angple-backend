@@ -24,6 +24,7 @@ type Manager struct {
 	logger      Logger
 	settings    SettingGetter
 	permissions PermissionSyncer
+	scheduler   *Scheduler
 }
 
 // NewManager 새 매니저 생성
@@ -38,6 +39,7 @@ func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logge
 		logger:      logger,
 		settings:    settings,
 		permissions: permissions,
+		scheduler:   NewScheduler(logger),
 	}
 }
 
@@ -150,7 +152,13 @@ func (m *Manager) Enable(name string) error {
 			m.logger.Info("Registered hooks for plugin: %s", name)
 		}
 
-		// 4) 라우트 등록
+		// 4) 스케줄 등록 (Schedulable 구현 시)
+		if sc, ok := info.Instance.(Schedulable); ok {
+			sc.RegisterSchedules(m.scheduler)
+			m.logger.Info("Registered schedules for plugin: %s", name)
+		}
+
+		// 5) 라우트 등록
 		m.registry.RegisterPlugin(info)
 	}
 
@@ -200,6 +208,9 @@ func (m *Manager) Disable(name string) error {
 	// Hook 해제
 	m.hookManager.Unregister(name)
 
+	// 스케줄 해제
+	m.scheduler.Unregister(name)
+
 	// 라우트 해제
 	m.registry.UnregisterPlugin(name)
 
@@ -242,6 +253,21 @@ func (m *Manager) ReloadPlugin(name string) error {
 
 	m.logger.Info("Plugin reloaded: %s", name)
 	return nil
+}
+
+// StartScheduler 스케줄러 시작
+func (m *Manager) StartScheduler() {
+	m.scheduler.Start()
+}
+
+// StopScheduler 스케줄러 중지
+func (m *Manager) StopScheduler() {
+	m.scheduler.Stop()
+}
+
+// GetScheduledTasks 등록된 스케줄 작업 목록
+func (m *Manager) GetScheduledTasks() []ScheduledTaskInfo {
+	return m.scheduler.GetTasks()
 }
 
 // CheckHealth 단일 플러그인 헬스 체크
