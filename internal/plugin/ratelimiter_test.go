@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -8,6 +9,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const testRemoteAddr = "3.3.3.3:1234"
+
+func newTestRequest(t *testing.T, method, url string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), method, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
 
 func TestRateLimiter_InMemory_Allow(t *testing.T) {
 	rl := NewRateLimiter(nil)
@@ -21,7 +33,7 @@ func TestRateLimiter_InMemory_Allow(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/test", nil)
+		req := newTestRequest(t, "GET", "/test")
 		req.RemoteAddr = "192.168.1.1:1234"
 		r.ServeHTTP(w, req)
 
@@ -44,7 +56,7 @@ func TestRateLimiter_InMemory_Block(t *testing.T) {
 	// 3 allowed
 	for i := 0; i < 3; i++ {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/test", nil)
+		req := newTestRequest(t, "GET", "/test")
 		req.RemoteAddr = "10.0.0.1:1234"
 		r.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
@@ -54,7 +66,7 @@ func TestRateLimiter_InMemory_Block(t *testing.T) {
 
 	// 4th blocked
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/test", nil)
+	req := newTestRequest(t, "GET", "/test")
 	req.RemoteAddr = "10.0.0.1:1234"
 	r.ServeHTTP(w, req)
 
@@ -65,7 +77,6 @@ func TestRateLimiter_InMemory_Block(t *testing.T) {
 
 func TestRateLimiter_NoConfig_Passthrough(t *testing.T) {
 	rl := NewRateLimiter(nil)
-	// no Configure call
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -74,7 +85,7 @@ func TestRateLimiter_NoConfig_Passthrough(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/test", nil)
+	req := newTestRequest(t, "GET", "/test")
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -94,7 +105,7 @@ func TestRateLimiter_DifferentIPs(t *testing.T) {
 
 	// IP 1 - allowed
 	w1 := httptest.NewRecorder()
-	req1, _ := http.NewRequest("GET", "/test", nil)
+	req1 := newTestRequest(t, "GET", "/test")
 	req1.RemoteAddr = "1.1.1.1:1234"
 	r.ServeHTTP(w1, req1)
 	if w1.Code != http.StatusOK {
@@ -103,7 +114,7 @@ func TestRateLimiter_DifferentIPs(t *testing.T) {
 
 	// IP 2 - also allowed (separate counter)
 	w2 := httptest.NewRecorder()
-	req2, _ := http.NewRequest("GET", "/test", nil)
+	req2 := newTestRequest(t, "GET", "/test")
 	req2.RemoteAddr = "2.2.2.2:1234"
 	r.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusOK {
@@ -149,8 +160,8 @@ func TestRateLimiter_WindowReset(t *testing.T) {
 
 	// 1st request - allowed
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "3.3.3.3:1234"
+	req := newTestRequest(t, "GET", "/test")
+	req.RemoteAddr = testRemoteAddr
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("1st: expected 200, got %d", w.Code)
@@ -158,8 +169,8 @@ func TestRateLimiter_WindowReset(t *testing.T) {
 
 	// 2nd request - blocked
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "3.3.3.3:1234"
+	req = newTestRequest(t, "GET", "/test")
+	req.RemoteAddr = testRemoteAddr
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("2nd: expected 429, got %d", w.Code)
@@ -170,8 +181,8 @@ func TestRateLimiter_WindowReset(t *testing.T) {
 
 	// 3rd request - allowed again
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/test", nil)
-	req.RemoteAddr = "3.3.3.3:1234"
+	req = newTestRequest(t, "GET", "/test")
+	req.RemoteAddr = testRemoteAddr
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("3rd after reset: expected 200, got %d", w.Code)
