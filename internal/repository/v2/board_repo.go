@@ -10,6 +10,7 @@ type BoardRepository interface {
 	FindByID(id uint64) (*v2.V2Board, error)
 	FindBySlug(slug string) (*v2.V2Board, error)
 	FindAll() ([]*v2.V2Board, error)
+	FindAllIncludingInactive() ([]*v2.V2Board, error)
 	Create(board *v2.V2Board) error
 	Update(board *v2.V2Board) error
 	Delete(id uint64) error
@@ -39,6 +40,12 @@ func (r *boardRepository) FindBySlug(slug string) (*v2.V2Board, error) {
 func (r *boardRepository) FindAll() ([]*v2.V2Board, error) {
 	var boards []*v2.V2Board
 	err := r.db.Where("is_active = ?", true).Order("order_num ASC").Find(&boards).Error
+	return boards, err
+}
+
+func (r *boardRepository) FindAllIncludingInactive() ([]*v2.V2Board, error) {
+	var boards []*v2.V2Board
+	err := r.db.Order("order_num ASC").Find(&boards).Error
 	return boards, err
 }
 

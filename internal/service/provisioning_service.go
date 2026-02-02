@@ -15,11 +15,11 @@ import (
 
 // ProvisioningService handles one-click community creation and subscription management
 type ProvisioningService struct {
-	siteRepo    *repository.SiteRepository
-	subRepo     *repository.SubscriptionRepository
-	dbResolver  *middleware.TenantDBResolver
-	db          *gorm.DB
-	baseDomain  string // e.g. "angple.com"
+	siteRepo   *repository.SiteRepository
+	subRepo    *repository.SubscriptionRepository
+	dbResolver *middleware.TenantDBResolver
+	db         *gorm.DB
+	baseDomain string // e.g. "angple.com"
 }
 
 // NewProvisioningService creates a new ProvisioningService

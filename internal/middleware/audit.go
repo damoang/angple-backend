@@ -12,14 +12,14 @@ import (
 type AuditLog struct {
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 
-	UserID    string `gorm:"column:user_id;index" json:"user_id"`
-	Action    string `gorm:"column:action;index" json:"action"`     // login, register, withdraw, plan_change, suspend, etc.
-	Resource  string `gorm:"column:resource" json:"resource"`       // user, site, subscription, etc.
+	UserID     string `gorm:"column:user_id;index" json:"user_id"`
+	Action     string `gorm:"column:action;index" json:"action"` // login, register, withdraw, plan_change, suspend, etc.
+	Resource   string `gorm:"column:resource" json:"resource"`   // user, site, subscription, etc.
 	ResourceID string `gorm:"column:resource_id" json:"resource_id"`
-	Details   string `gorm:"column:details;type:text" json:"details"`
-	ClientIP  string `gorm:"column:client_ip" json:"client_ip"`
-	UserAgent string `gorm:"column:user_agent" json:"user_agent"`
-	RequestID string `gorm:"column:request_id" json:"request_id"`
+	Details    string `gorm:"column:details;type:text" json:"details"`
+	ClientIP   string `gorm:"column:client_ip" json:"client_ip"`
+	UserAgent  string `gorm:"column:user_agent" json:"user_agent"`
+	RequestID  string `gorm:"column:request_id" json:"request_id"`
 
 	ID int64 `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 }

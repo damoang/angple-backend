@@ -2,12 +2,15 @@ package v2
 
 import (
 	v2handler "github.com/damoang/angple-backend/internal/handler/v2"
+	"github.com/damoang/angple-backend/internal/middleware"
+	"github.com/damoang/angple-backend/pkg/jwt"
 	"github.com/gin-gonic/gin"
 )
 
 // Setup configures v2 API routes (new DB schema)
-func Setup(router *gin.Engine, h *v2handler.V2Handler) {
+func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager) {
 	api := router.Group("/api/v2")
+	auth := middleware.JWTAuth(jwtManager)
 
 	// Users
 	users := api.Group("/users")
@@ -23,14 +26,72 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler) {
 	// Posts (nested under boards)
 	boardPosts := boards.Group("/:slug/posts")
 	boardPosts.GET("", h.ListPosts)
-	boardPosts.POST("", h.CreatePost)
+	boardPosts.POST("", auth, h.CreatePost)
 	boardPosts.GET("/:id", h.GetPost)
-	boardPosts.PUT("/:id", h.UpdatePost)
-	boardPosts.DELETE("/:id", h.DeletePost)
+	boardPosts.PUT("/:id", auth, h.UpdatePost)
+	boardPosts.DELETE("/:id", auth, h.DeletePost)
 
 	// Comments (nested under posts)
 	comments := boardPosts.Group("/:id/comments")
 	comments.GET("", h.ListComments)
-	comments.POST("", h.CreateComment)
-	comments.DELETE("/:comment_id", h.DeleteComment)
+	comments.POST("", auth, h.CreateComment)
+	comments.DELETE("/:comment_id", auth, h.DeleteComment)
+}
+
+// SetupAdmin configures v2 admin API routes
+func SetupAdmin(router *gin.Engine, h *v2handler.AdminHandler, jwtManager *jwt.Manager) {
+	admin := router.Group("/api/v2/admin")
+	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+
+	// Admin Boards
+	adminBoards := admin.Group("/boards")
+	adminBoards.GET("", h.ListBoards)
+	adminBoards.POST("", h.CreateBoard)
+	adminBoards.PUT("/:id", h.UpdateBoard)
+	adminBoards.DELETE("/:id", h.DeleteBoard)
+
+	// Admin Members
+	adminMembers := admin.Group("/members")
+	adminMembers.GET("", h.ListMembers)
+	adminMembers.GET("/:id", h.GetMember)
+	adminMembers.PUT("/:id", h.UpdateMember)
+	adminMembers.POST("/:id/ban", h.BanMember)
+
+	// Admin Dashboard
+	admin.GET("/dashboard/stats", h.GetDashboardStats)
+}
+
+// SetupScrap configures v2 scrap routes
+func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	posts := router.Group("/api/v2/posts")
+	posts.POST("/:id/scrap", auth, h.AddScrap)
+	posts.DELETE("/:id/scrap", auth, h.RemoveScrap)
+
+	me := router.Group("/api/v2/me", auth)
+	me.GET("/scraps", h.ListScraps)
+}
+
+// SetupMemo configures v2 memo routes
+func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	memo := router.Group("/api/v2/members/:id/memo", auth)
+	memo.GET("", h.GetMemo)
+	memo.POST("", h.CreateMemo)
+	memo.PUT("", h.UpdateMemo)
+	memo.DELETE("", h.DeleteMemo)
+}
+
+// SetupMessage configures v2 message routes
+func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	messages := router.Group("/api/v2/messages", auth)
+	messages.POST("", h.SendMessage)
+	messages.GET("/inbox", h.GetInbox)
+	messages.GET("/sent", h.GetSent)
+	messages.GET("/:id", h.GetMessage)
+	messages.DELETE("/:id", h.DeleteMessage)
 }

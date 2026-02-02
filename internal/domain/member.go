@@ -133,16 +133,16 @@ type PointHistory struct {
 
 // Point domain model (g5_point table)
 type Point struct {
-	Datetime  string `gorm:"column:po_datetime" json:"datetime"`
-	Content   string `gorm:"column:po_content" json:"content"`
-	RelTable  string `gorm:"column:po_rel_table" json:"rel_table"`
-	RelAction string `gorm:"column:po_rel_action" json:"rel_action"`
-	MbID      string `gorm:"column:mb_id" json:"mb_id"`
-	RelID     string `gorm:"column:po_rel_id" json:"rel_id"`
-	ID        int    `gorm:"column:po_id;primaryKey" json:"id"`
-	UsePoint  int    `gorm:"column:po_use_point" json:"use_point"`
-	Point     int    `gorm:"column:po_point" json:"point"`
-	MbPoint   int    `gorm:"column:po_mb_point" json:"mb_point"`
+	Datetime   string `gorm:"column:po_datetime" json:"datetime"`
+	Content    string `gorm:"column:po_content" json:"content"`
+	RelTable   string `gorm:"column:po_rel_table" json:"rel_table"`
+	RelAction  string `gorm:"column:po_rel_action" json:"rel_action"`
+	MbID       string `gorm:"column:mb_id" json:"mb_id"`
+	RelID      string `gorm:"column:po_rel_id" json:"rel_id"`
+	ID         int    `gorm:"column:po_id;primaryKey" json:"id"`
+	UsePoint   int    `gorm:"column:po_use_point" json:"use_point"`
+	Point      int    `gorm:"column:po_point" json:"point"`
+	MbPoint    int    `gorm:"column:po_mb_point" json:"mb_point"`
 	ExpireDate string `gorm:"column:po_expire_date" json:"expire_date"`
 }
 

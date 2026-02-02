@@ -126,7 +126,7 @@ func (h *PaymentHandler) StripeWebhook(c *gin.Context) {
 	}
 
 	var event struct {
-		Type string                 `json:"type"`
+		Type string `json:"type"`
 		Data struct {
 			Object map[string]interface{} `json:"object"`
 		} `json:"data"`

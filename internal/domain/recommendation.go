@@ -55,10 +55,10 @@ func (UserInterest) TableName() string {
 type TrendingTopic struct {
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 
-	Topic      string  `gorm:"column:topic;uniqueIndex" json:"topic"`
-	Score      float64 `gorm:"column:score;type:decimal(10,3)" json:"score"`
-	PostCount  int     `gorm:"column:post_count" json:"post_count"`
-	Period     string  `gorm:"column:period" json:"period"` // 24h, 7d, 30d
+	Topic     string  `gorm:"column:topic;uniqueIndex" json:"topic"`
+	Score     float64 `gorm:"column:score;type:decimal(10,3)" json:"score"`
+	PostCount int     `gorm:"column:post_count" json:"post_count"`
+	Period    string  `gorm:"column:period" json:"period"` // 24h, 7d, 30d
 
 	ID int64 `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 }
@@ -69,21 +69,21 @@ func (TrendingTopic) TableName() string {
 
 // RecommendedPost is the response item for personalized feed
 type RecommendedPost struct {
-	PostID     string  `json:"post_id"`
-	BoardID    string  `json:"board_id"`
-	Title      string  `json:"title"`
-	Author     string  `json:"author"`
-	Score      float64 `json:"score"`
-	Reason     string  `json:"reason"` // topic_match, trending, popular, collaborative
-	Topics     []string `json:"topics,omitempty"`
-	Views      int     `json:"views"`
-	Likes      int     `json:"likes"`
-	Comments   int     `json:"comments"`
-	CreatedAt  string  `json:"created_at"`
+	PostID    string   `json:"post_id"`
+	BoardID   string   `json:"board_id"`
+	Title     string   `json:"title"`
+	Author    string   `json:"author"`
+	Score     float64  `json:"score"`
+	Reason    string   `json:"reason"` // topic_match, trending, popular, collaborative
+	Topics    []string `json:"topics,omitempty"`
+	Views     int      `json:"views"`
+	Likes     int      `json:"likes"`
+	Comments  int      `json:"comments"`
+	CreatedAt string   `json:"created_at"`
 }
 
 // PersonalizedFeedResponse wraps the feed with metadata
 type PersonalizedFeedResponse struct {
-	Posts   []RecommendedPost `json:"posts"`
+	Posts  []RecommendedPost `json:"posts"`
 	Topics []string          `json:"user_interests,omitempty"`
 }

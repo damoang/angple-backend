@@ -14,8 +14,8 @@ import (
 
 // TenantService handles tenant management business logic
 type TenantService struct {
-	siteRepo *repository.SiteRepository
-	db       *gorm.DB
+	siteRepo   *repository.SiteRepository
+	db         *gorm.DB
 	dbResolver *middleware.TenantDBResolver
 }
 
@@ -30,10 +30,10 @@ func NewTenantService(siteRepo *repository.SiteRepository, db *gorm.DB, dbResolv
 
 // TenantDetail tenant detail response
 type TenantDetail struct {
-	Site     *domain.SiteResponse     `json:"site"`
-	Settings *domain.SiteSettings     `json:"settings"`
-	Limits   middleware.PlanLimits     `json:"limits"`
-	Users    []domain.SiteUser        `json:"users"`
+	Site     *domain.SiteResponse  `json:"site"`
+	Settings *domain.SiteSettings  `json:"settings"`
+	Limits   middleware.PlanLimits `json:"limits"`
+	Users    []domain.SiteUser     `json:"users"`
 }
 
 // ListTenants lists tenants with optional status filter
@@ -157,15 +157,15 @@ func (s *TenantService) ChangePlan(ctx context.Context, siteID, newPlan string) 
 
 // UsageStats represents usage statistics for a tenant
 type UsageStats struct {
-	SiteID          string           `json:"site_id"`
-	Period          string           `json:"period"`
-	TotalPageViews  int64            `json:"total_page_views"`
-	TotalVisitors   int64            `json:"total_unique_visitors"`
-	TotalAPICalls   int64            `json:"total_api_calls"`
-	TotalPosts      int64            `json:"total_posts_created"`
-	TotalComments   int64            `json:"total_comments_created"`
-	StorageUsedMB   float64          `json:"storage_used_mb"`
-	BandwidthUsedMB float64          `json:"bandwidth_used_mb"`
+	SiteID          string             `json:"site_id"`
+	Period          string             `json:"period"`
+	TotalPageViews  int64              `json:"total_page_views"`
+	TotalVisitors   int64              `json:"total_unique_visitors"`
+	TotalAPICalls   int64              `json:"total_api_calls"`
+	TotalPosts      int64              `json:"total_posts_created"`
+	TotalComments   int64              `json:"total_comments_created"`
+	StorageUsedMB   float64            `json:"storage_used_mb"`
+	BandwidthUsedMB float64            `json:"bandwidth_used_mb"`
 	DailyUsage      []domain.SiteUsage `json:"daily_usage"`
 }
 

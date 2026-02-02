@@ -12,6 +12,7 @@ type CommentRepository interface {
 	Create(comment *v2.V2Comment) error
 	Update(comment *v2.V2Comment) error
 	Delete(id uint64) error
+	Count() (int64, error)
 }
 
 type commentRepository struct {
@@ -54,4 +55,10 @@ func (r *commentRepository) Update(comment *v2.V2Comment) error {
 
 func (r *commentRepository) Delete(id uint64) error {
 	return r.db.Model(&v2.V2Comment{}).Where("id = ?", id).Update("status", "deleted").Error
+}
+
+func (r *commentRepository) Count() (int64, error) {
+	var count int64
+	err := r.db.Model(&v2.V2Comment{}).Where("status = 'active'").Count(&count).Error
+	return count, err
 }

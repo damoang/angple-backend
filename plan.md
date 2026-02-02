@@ -1,6 +1,6 @@
 # ANGPLE Backend — 프로젝트 계획서
 
-> 최종 수정: 2026-02-02 | 버전: v2.0
+> 최종 수정: 2026-02-02 | 버전: v4.0
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 70/81 v1 API + v2 API 레이어 — 전 Phase(1~16) 완료
+- **구현 완료**: 전 Phase(1~24) 완료 — 70/81 v1 API + v2 API + 프로덕션 인프라 + SaaS 풀스택
 - **v2 전환**: `/api/v1` (레거시, deprecated) + `/api/v2` (신규 DB) 공존 중
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
 - **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
@@ -256,7 +256,7 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - ✅ Fail-open 패턴: Redis 장애 시 정상 처리
 - ✅ 캐시 무효화 함수 (`InvalidateCache`): 패턴 기반 일괄 삭제
 
-#### Phase 19: Observability (모니터링/로깅/추적)
+#### Phase 19: Observability (모니터링/로깅/추적) ✅
 
 현재: stdout 단순 로거 + 플러그인 전용 메트릭. 프로덕션 수준 필요.
 
@@ -267,7 +267,7 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - 감사 로그 (Audit Log): 로그인, 권한 변경, 데이터 삭제 등 민감 작업 기록
 - Healthcheck 고도화: DB/Redis/외부 서비스 상태 포함
 
-#### Phase 20: 보안 강화
+#### Phase 20: 보안 강화 ✅
 
 - 소셜 로그인 (OAuth2): 네이버, 카카오, 구글 (api-roadmap.csv 미구현 항목)
 - CORS 정책 강화 (현재 허용 범위 점검)
@@ -280,7 +280,7 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 
 ### 확장 기능 (Phase 21-24)
 
-#### Phase 21: 실시간 검색 (Elasticsearch)
+#### Phase 21: 실시간 검색 (Elasticsearch) ✅
 
 현재: DB LIKE 기반 통합 검색 (Redis 3분 캐시). 대규모 데이터에서 성능 한계.
 
@@ -290,7 +290,7 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - 검색 결과 하이라이팅
 - 실시간 인덱스 동기화 (게시글 작성/수정/삭제 시)
 
-#### Phase 22: 미디어 파이프라인
+#### Phase 22: 미디어 파이프라인 ✅
 
 현재: 로컬 파일 시스템 기반 업로드. 스케일링 한계.
 
@@ -300,7 +300,7 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - 동영상 업로드 + 트랜스코딩 (ffmpeg 또는 외부 서비스)
 - 파일 바이러스 스캔
 
-#### Phase 23: 국제화 (i18n)
+#### Phase 23: 국제화 (i18n) ✅
 
 현재: 한국어 단일 언어. 에러 메시지/응답 메시지 하드코딩.
 
@@ -309,7 +309,7 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - 에러 코드 체계 정비 (문자열 메시지 → 코드 + 번역)
 - 관리자 UI 다국어 지원
 
-#### Phase 24: 결제 연동
+#### Phase 24: 결제 연동 ✅
 
 현재: SaaS 과금 모델만 존재 (Subscription/Invoice). 실 결제 미연동.
 
@@ -322,6 +322,95 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 
 ---
 
+### 프로덕션 전환 (Phase 25-27)
+
+#### Phase 25: v2 API 대규모 확장 — v1 기능 이전
+
+현재 v2는 11개 엔드포인트만 존재. v1의 100+ 엔드포인트 기능을 v2 DB 기반으로 재구현.
+
+**게시글/댓글 v2 CRUD (v2 DB 테이블)**
+- POST/GET/PUT/DELETE `/api/v2/boards/:board_id/posts`
+- POST/GET/PUT/DELETE `/api/v2/boards/:board_id/posts/:post_id/comments`
+- 추천/비추천 v2: `/api/v2/.../recommend`, `/api/v2/.../downvote`
+
+**스크랩/메모/쪽지 v2**
+- CRUD `/api/v2/scraps`
+- CRUD `/api/v2/memos`
+- CRUD `/api/v2/messages` (쪽지)
+
+**관리자 API v2**
+- 게시판 관리: CRUD `/api/v2/admin/boards`
+- 회원 관리: `/api/v2/admin/members` (목록/검색/차단/권한변경)
+- 사이트 설정: `/api/v2/admin/settings`
+- 금지어 필터: `/api/v2/admin/filter-words`
+- 감사 로그 조회: GET `/api/v2/admin/audit-logs`
+
+**통계 API**
+- 대시보드: `/api/v2/admin/dashboard/stats`
+- 접속 통계: `/api/v2/admin/stats/visitors`
+- 게시판별 활동: `/api/v2/admin/stats/boards`
+
+**예상 변경 파일**: 10+ 신규 handler/service/repository, routes.go 대규모 확장
+
+#### Phase 26: 데이터 마이그레이션 도구
+
+v1(g5_*) → v2 DB 안전한 전환 보장.
+
+- 마이그레이션 CLI 도구: `cmd/migrate/main.go`
+  - 회원(g5_member → v2_members)
+  - 게시글(g5_write_* → v2_posts)
+  - 댓글(g5_write_* where wr_is_comment=1 → v2_comments)
+  - 첨부파일(g5_board_file → v2_files)
+  - 포인트(g5_point → v2_points)
+- 데이터 검증 도구: 마이그레이션 전후 레코드 수/무결성 비교
+- 이중 쓰기 모드: v1 쓰기 시 v2에도 동시 기록 (전환기)
+- 롤백 스크립트: v2 → v1 역마이그레이션
+
+#### Phase 27: v1 API Sunset & v2 완전 전환
+
+v1 Sunset 데드라인: **2026-08-01**
+
+- v1 API에 `Sunset: 2026-08-01` 헤더 강제 (이미 일부 적용)
+- v1 → v2 리다이렉트 미들웨어 (301 Permanent Redirect)
+- v1 코드 완전 제거: handler/service/repository에서 g5_* 직접 접근 코드 삭제
+- GORM `sql_mode=''` 비활성화 → STRICT 모드 활성화
+- 레거시 비밀번호 해싱 제거 (v2는 bcrypt 전용)
+
+---
+
+### 운영 안정화 (Phase 28-30)
+
+#### Phase 28: 테스트 & 부하 테스트
+
+- 통합 테스트 (Integration Test): DB/Redis 포함 E2E 시나리오
+- API 부하 테스트: k6 또는 vegeta로 동시 접속 2만명 시뮬레이션
+  - P99 응답 시간 ≤ 100ms 목표
+  - 초당 처리량(TPS) 측정
+- 결제 플로우 E2E 테스트 (Toss 테스트 모드 + Stripe 테스트 키)
+- CI 파이프라인에 부하 테스트 게이트 추가
+
+#### Phase 29: 컨테이너 오케스트레이션 & 인프라
+
+- Kubernetes 매니페스트: Deployment, Service, Ingress, HPA
+- Helm 차트 또는 Kustomize 구성
+- Pod Autoscaling: CPU/메모리 기반 HPA, 요청 수 기반 KEDA
+- ConfigMap/Secret 관리: 환경별 설정 분리
+- Blue/Green 또는 Canary 배포 전략
+- PDB(Pod Disruption Budget) 설정
+- Liveness/Readiness Probe 고도화
+
+#### Phase 30: 운영 안정화 & SLA 달성
+
+- Grafana 대시보드 완성: 골든 시그널 (지연, 트래픽, 에러, 포화)
+- 알럿 규칙: Slack/PagerDuty 연동 (P99 > 200ms, 에러율 > 1%)
+- 로그 집중화: Loki 또는 ELK 스택
+- 장애 대응 런북(Runbook) 작성
+- 백업 자동화: MySQL 일일 스냅샷 + S3 오프사이트
+- DR(Disaster Recovery) 계획: RTO < 1h, RPO < 5min
+- SLA 목표: 99.9% (월 다운타임 < 43분)
+
+---
+
 ## 4. 핵심 마일스톤
 
 | 마일스톤 | Phase | 체크포인트 |
@@ -331,8 +420,10 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 | **v2 전환 완료** | Phase 12 ✅ | v1→deprecated, v2→활성 URL 정리 |
 | **SaaS 기반 완성** | Phase 15 ✅ | 원클릭 커뮤니티 생성, 구독 관리 |
 | **AI 추천 완성** | Phase 16 ✅ | 개인화 피드, 트렌딩, 토픽 추출 |
-| **프로덕션 준비** | Phase 20 완료 | 테스트 70%+, 모니터링, 보안 강화 |
-| **풀 SaaS 런칭** | Phase 24 완료 | 결제 연동, 미디어 CDN, 검색 고도화 |
+| **프로덕션 준비** | Phase 20 완료 ✅ | 테스트 70%+, 모니터링, 보안 강화 |
+| **풀 SaaS 런칭** | Phase 24 완료 ✅ | 결제 연동, 미디어 CDN, 검색 고도화 |
+| **v2 API 완전 전환** | Phase 27 | v1 API 제거, v2 100% 전환 |
+| **프로덕션 안정화** | Phase 30 | 부하 테스트 완료, K8s 배포, SLA 99.9% |
 
 ---
 
@@ -342,23 +433,28 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 
 | 항목 | 심각도 | 해결 Phase | 설명 |
 |------|--------|-----------|------|
-| 테스트 커버리지 부족 | 높 | Phase 17 | 핵심 서비스 테스트 29파일 중 대부분 플러그인 영역 |
-| Redis 캐시 전역 미적용 | 중 | Phase 18 | commerce 플러그인에만 적용, 코어 API 캐시 없음 |
-| 구조화 로깅 미적용 | 중 | Phase 19 | stdout 단순 로거, request_id/tracing 없음 |
-| 감사 로그 미존재 | 중 | Phase 19 | 민감 작업 추적 불가 |
-| 소셜 로그인 미구현 | 중 | Phase 20 | 네이버/카카오/구글 OAuth 미연동 |
-| sql_mode 비활성화 | 중 | v1 제거 시 | 그누보드 호환용, v2 전용 시 STRICT 활성화 |
-| 로컬 파일 시스템 의존 | 중 | Phase 22 | 멀티 인스턴스 배포 시 파일 공유 문제 |
-| 결제 미연동 | 높 | Phase 24 | SaaS 과금 모델만 존재, 실 결제 플로우 없음 |
+| ~~테스트 커버리지 부족~~ | ~~높~~ | ~~Phase 17~~ | ✅ 해결 — 70개 서비스 테스트 |
+| ~~Redis 캐시 전역 미적용~~ | ~~중~~ | ~~Phase 18~~ | ✅ 해결 — 슬라이딩 윈도우 Rate Limiter + 응답 캐시 |
+| ~~구조화 로깅 미적용~~ | ~~중~~ | ~~Phase 19~~ | ✅ 해결 — zerolog + Prometheus 메트릭 |
+| ~~감사 로그 미존재~~ | ~~중~~ | ~~Phase 19~~ | ✅ 해결 — 비동기 audit_logs 테이블 |
+| ~~소셜 로그인 미구현~~ | ~~중~~ | ~~Phase 20~~ | ✅ 해결 — 네이버/카카오/구글 OAuth2 |
+| sql_mode 비활성화 | 중 | Phase 27 | 그누보드 호환용, v2 전용 시 STRICT 활성화 |
+| v2 API 엔드포인트 부족 (11개) | 높 | Phase 25 | v1의 100+ 엔드포인트 대비 v2 커버리지 부족 |
+| 관리자 인증 미구현 (TODO 21개) | 높 | Phase 25 | admin 핸들러에 인증 체크 누락 |
+| 데이터 마이그레이션 도구 부재 | 높 | Phase 26 | g5_* → v2 테이블 전환 자동화 필요 |
+| 통합 테스트 부재 | 중 | Phase 28 | 단위 테스트만 존재, DB 포함 E2E 없음 |
+| ~~로컬 파일 시스템 의존~~ | ~~중~~ | ~~Phase 22~~ | ✅ 해결 — S3/R2 오브젝트 스토리지 + CDN |
+| ~~결제 미연동~~ | ~~높~~ | ~~Phase 24~~ | ✅ 해결 — 토스페이먼츠 + Stripe 연동 |
 
 ### 리스크
 
 | 리스크 | 영향도 | 완화 전략 |
 |--------|--------|----------|
-| 프로덕션 장애 감지 지연 | 높음 | Phase 19 Observability로 해결 |
-| 동시 접속 폭증 | 중간 | Phase 18 캐시 + Rate Limiter 전역 적용 |
-| 마이그레이션 데이터 손실 | 높음 | 이중 쓰기, 롤백 스크립트, 데이터 검증 도구 |
-| 결제 사고 | 높음 | Phase 24에서 웹훅 검증 + 멱등성 보장 |
+| ~~프로덕션 장애 감지 지연~~ | ~~높음~~ | ✅ Phase 19 Observability로 해결 |
+| ~~동시 접속 폭증~~ | ~~중간~~ | ✅ Phase 18 캐시 + Rate Limiter 전역 적용 |
+| 마이그레이션 데이터 손실 | 높음 | Phase 26에서 해결 — 이중 쓰기, 롤백 스크립트, 데이터 검증 도구 |
+| v1 Sunset 후 호환성 깨짐 | 중간 | Phase 27 리다이렉트 미들웨어 + 프론트엔드 동기 전환 |
+| ~~결제 사고~~ | ~~높음~~ | ✅ Phase 24 웹훅 검증 + 멱등성 보장 |
 
 ---
 

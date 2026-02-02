@@ -6,6 +6,7 @@ import (
 
 	"github.com/damoang/angple-backend/internal/common"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
+	"github.com/damoang/angple-backend/internal/middleware"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/gin-gonic/gin"
 )
@@ -153,8 +154,11 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		return
 	}
 
-	// TODO: get user_id from JWT claims
-	userID := uint64(1) // placeholder
+	userID, err := strconv.ParseUint(middleware.GetUserID(c), 10, 64)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "잘못된 사용자 인증 정보", err)
+		return
+	}
 
 	post := &v2domain.V2Post{
 		BoardID: board.ID,
@@ -256,8 +260,11 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		return
 	}
 
-	// TODO: get user_id from JWT claims
-	userID := uint64(1)
+	userID, err := strconv.ParseUint(middleware.GetUserID(c), 10, 64)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "잘못된 사용자 인증 정보", err)
+		return
+	}
 
 	comment := &v2domain.V2Comment{
 		PostID:   postID,

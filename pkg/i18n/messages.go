@@ -12,25 +12,25 @@ func DefaultMessages() map[Locale]map[string]string {
 
 var koMessages = map[string]string{
 	// Common errors
-	"error.not_found":       "요청한 리소스를 찾을 수 없습니다",
-	"error.unauthorized":    "인증이 필요합니다",
-	"error.forbidden":       "접근 권한이 없습니다",
-	"error.bad_request":     "잘못된 요청입니다",
-	"error.internal":        "서버 내부 오류가 발생했습니다",
+	"error.not_found":         "요청한 리소스를 찾을 수 없습니다",
+	"error.unauthorized":      "인증이 필요합니다",
+	"error.forbidden":         "접근 권한이 없습니다",
+	"error.bad_request":       "잘못된 요청입니다",
+	"error.internal":          "서버 내부 오류가 발생했습니다",
 	"error.too_many_requests": "요청이 너무 많습니다. 잠시 후 다시 시도해주세요",
-	"error.validation":      "입력값이 올바르지 않습니다",
+	"error.validation":        "입력값이 올바르지 않습니다",
 
 	// Auth
-	"auth.login_success":       "로그인 되었습니다",
-	"auth.login_failed":        "아이디 또는 비밀번호가 올바르지 않습니다",
-	"auth.token_expired":       "인증 토큰이 만료되었습니다. 다시 로그인해주세요",
-	"auth.token_invalid":       "유효하지 않은 인증 토큰입니다",
-	"auth.register_success":    "회원가입이 완료되었습니다",
-	"auth.duplicate_id":        "이미 사용 중인 아이디입니다",
-	"auth.duplicate_email":     "이미 사용 중인 이메일입니다",
-	"auth.duplicate_nickname":  "이미 사용 중인 닉네임입니다",
-	"auth.withdraw_success":    "회원 탈퇴가 완료되었습니다",
-	"auth.logout_success":      "로그아웃 되었습니다",
+	"auth.login_success":      "로그인 되었습니다",
+	"auth.login_failed":       "아이디 또는 비밀번호가 올바르지 않습니다",
+	"auth.token_expired":      "인증 토큰이 만료되었습니다. 다시 로그인해주세요",
+	"auth.token_invalid":      "유효하지 않은 인증 토큰입니다",
+	"auth.register_success":   "회원가입이 완료되었습니다",
+	"auth.duplicate_id":       "이미 사용 중인 아이디입니다",
+	"auth.duplicate_email":    "이미 사용 중인 이메일입니다",
+	"auth.duplicate_nickname": "이미 사용 중인 닉네임입니다",
+	"auth.withdraw_success":   "회원 탈퇴가 완료되었습니다",
+	"auth.logout_success":     "로그아웃 되었습니다",
 
 	// Posts
 	"post.not_found":      "게시글을 찾을 수 없습니다",
@@ -45,15 +45,15 @@ var koMessages = map[string]string{
 	"comment.delete_success": "댓글이 삭제되었습니다",
 
 	// Members
-	"member.not_found":    "회원을 찾을 수 없습니다",
-	"member.blocked":      "차단된 회원입니다",
-	"member.suspended":    "이용이 정지된 계정입니다",
+	"member.not_found": "회원을 찾을 수 없습니다",
+	"member.blocked":   "차단된 회원입니다",
+	"member.suspended": "이용이 정지된 계정입니다",
 
 	// Files
-	"file.too_large":     "파일 크기가 제한을 초과했습니다",
+	"file.too_large":        "파일 크기가 제한을 초과했습니다",
 	"file.type_not_allowed": "허용되지 않는 파일 형식입니다",
-	"file.upload_success": "파일이 업로드되었습니다",
-	"file.delete_success": "파일이 삭제되었습니다",
+	"file.upload_success":   "파일이 업로드되었습니다",
+	"file.delete_success":   "파일이 삭제되었습니다",
 
 	// Rate limit
 	"rate_limit.exceeded": "요청 제한을 초과했습니다. %d초 후 다시 시도해주세요",
@@ -68,25 +68,25 @@ var koMessages = map[string]string{
 
 var enMessages = map[string]string{
 	// Common errors
-	"error.not_found":       "The requested resource was not found",
-	"error.unauthorized":    "Authentication is required",
-	"error.forbidden":       "You do not have permission to access this resource",
-	"error.bad_request":     "Invalid request",
-	"error.internal":        "An internal server error occurred",
+	"error.not_found":         "The requested resource was not found",
+	"error.unauthorized":      "Authentication is required",
+	"error.forbidden":         "You do not have permission to access this resource",
+	"error.bad_request":       "Invalid request",
+	"error.internal":          "An internal server error occurred",
 	"error.too_many_requests": "Too many requests. Please try again later",
-	"error.validation":      "Invalid input",
+	"error.validation":        "Invalid input",
 
 	// Auth
-	"auth.login_success":       "Successfully logged in",
-	"auth.login_failed":        "Invalid username or password",
-	"auth.token_expired":       "Authentication token has expired. Please login again",
-	"auth.token_invalid":       "Invalid authentication token",
-	"auth.register_success":    "Registration completed",
-	"auth.duplicate_id":        "This user ID is already taken",
-	"auth.duplicate_email":     "This email is already registered",
-	"auth.duplicate_nickname":  "This nickname is already taken",
-	"auth.withdraw_success":    "Account has been deleted",
-	"auth.logout_success":      "Successfully logged out",
+	"auth.login_success":      "Successfully logged in",
+	"auth.login_failed":       "Invalid username or password",
+	"auth.token_expired":      "Authentication token has expired. Please login again",
+	"auth.token_invalid":      "Invalid authentication token",
+	"auth.register_success":   "Registration completed",
+	"auth.duplicate_id":       "This user ID is already taken",
+	"auth.duplicate_email":    "This email is already registered",
+	"auth.duplicate_nickname": "This nickname is already taken",
+	"auth.withdraw_success":   "Account has been deleted",
+	"auth.logout_success":     "Successfully logged out",
 
 	// Posts
 	"post.not_found":      "Post not found",
@@ -101,15 +101,15 @@ var enMessages = map[string]string{
 	"comment.delete_success": "Comment deleted successfully",
 
 	// Members
-	"member.not_found":    "Member not found",
-	"member.blocked":      "This member has been blocked",
-	"member.suspended":    "This account has been suspended",
+	"member.not_found": "Member not found",
+	"member.blocked":   "This member has been blocked",
+	"member.suspended": "This account has been suspended",
 
 	// Files
-	"file.too_large":     "File size exceeds the limit",
+	"file.too_large":        "File size exceeds the limit",
 	"file.type_not_allowed": "File type is not allowed",
-	"file.upload_success": "File uploaded successfully",
-	"file.delete_success": "File deleted successfully",
+	"file.upload_success":   "File uploaded successfully",
+	"file.delete_success":   "File deleted successfully",
 
 	// Rate limit
 	"rate_limit.exceeded": "Rate limit exceeded. Please retry after %d seconds",
@@ -124,25 +124,25 @@ var enMessages = map[string]string{
 
 var jaMessages = map[string]string{
 	// Common errors
-	"error.not_found":       "リクエストされたリソースが見つかりません",
-	"error.unauthorized":    "認証が必要です",
-	"error.forbidden":       "アクセス権限がありません",
-	"error.bad_request":     "無効なリクエストです",
-	"error.internal":        "サーバー内部エラーが発生しました",
+	"error.not_found":         "リクエストされたリソースが見つかりません",
+	"error.unauthorized":      "認証が必要です",
+	"error.forbidden":         "アクセス権限がありません",
+	"error.bad_request":       "無効なリクエストです",
+	"error.internal":          "サーバー内部エラーが発生しました",
 	"error.too_many_requests": "リクエストが多すぎます。しばらくしてから再試行してください",
-	"error.validation":      "入力値が正しくありません",
+	"error.validation":        "入力値が正しくありません",
 
 	// Auth
-	"auth.login_success":       "ログインしました",
-	"auth.login_failed":        "IDまたはパスワードが正しくありません",
-	"auth.token_expired":       "認証トークンの有効期限が切れました。再度ログインしてください",
-	"auth.token_invalid":       "無効な認証トークンです",
-	"auth.register_success":    "会員登録が完了しました",
-	"auth.duplicate_id":        "このIDは既に使用されています",
-	"auth.duplicate_email":     "このメールアドレスは既に登録されています",
-	"auth.duplicate_nickname":  "このニックネームは既に使用されています",
-	"auth.withdraw_success":    "退会が完了しました",
-	"auth.logout_success":      "ログアウトしました",
+	"auth.login_success":      "ログインしました",
+	"auth.login_failed":       "IDまたはパスワードが正しくありません",
+	"auth.token_expired":      "認証トークンの有効期限が切れました。再度ログインしてください",
+	"auth.token_invalid":      "無効な認証トークンです",
+	"auth.register_success":   "会員登録が完了しました",
+	"auth.duplicate_id":       "このIDは既に使用されています",
+	"auth.duplicate_email":    "このメールアドレスは既に登録されています",
+	"auth.duplicate_nickname": "このニックネームは既に使用されています",
+	"auth.withdraw_success":   "退会が完了しました",
+	"auth.logout_success":     "ログアウトしました",
 
 	// Posts
 	"post.not_found":      "投稿が見つかりません",
@@ -157,15 +157,15 @@ var jaMessages = map[string]string{
 	"comment.delete_success": "コメントが削除されました",
 
 	// Members
-	"member.not_found":    "会員が見つかりません",
-	"member.blocked":      "ブロックされた会員です",
-	"member.suspended":    "利用停止されたアカウントです",
+	"member.not_found": "会員が見つかりません",
+	"member.blocked":   "ブロックされた会員です",
+	"member.suspended": "利用停止されたアカウントです",
 
 	// Files
-	"file.too_large":     "ファイルサイズが制限を超えています",
+	"file.too_large":        "ファイルサイズが制限を超えています",
 	"file.type_not_allowed": "許可されていないファイル形式です",
-	"file.upload_success": "ファイルがアップロードされました",
-	"file.delete_success": "ファイルが削除されました",
+	"file.upload_success":   "ファイルがアップロードされました",
+	"file.delete_success":   "ファイルが削除されました",
 
 	// Rate limit
 	"rate_limit.exceeded": "リクエスト制限を超えました。%d秒後に再試行してください",

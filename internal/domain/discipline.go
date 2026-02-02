@@ -63,13 +63,13 @@ type DisciplineLogContent struct {
 
 // DisciplineResponse represents a discipline log entry for API response
 type DisciplineResponse struct {
-	ID          int                     `json:"id"`
-	Subject     string                  `json:"subject"`
-	Status      string                  `json:"status"`  // wr_4
-	ProcessType string                  `json:"process_type"` // wr_7
-	Content     *DisciplineLogContent   `json:"content,omitempty"`
-	CreatedAt   string                  `json:"created_at"`
-	CommentCount int                    `json:"comment_count"`
+	ID           int                   `json:"id"`
+	Subject      string                `json:"subject"`
+	Status       string                `json:"status"`       // wr_4
+	ProcessType  string                `json:"process_type"` // wr_7
+	Content      *DisciplineLogContent `json:"content,omitempty"`
+	CreatedAt    string                `json:"created_at"`
+	CommentCount int                   `json:"comment_count"`
 }
 
 // AppealRequest represents a request to submit an appeal
