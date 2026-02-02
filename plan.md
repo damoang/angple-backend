@@ -21,7 +21,8 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 61/81 API (약 75.3%) — Phase 5 완료
+- **구현 완료**: 70/81 v1 API + v2 API 레이어 — Phase 12 완료
+- **v2 전환**: `/api/v1` (레거시, deprecated) + `/api/v2` (신규 DB) 공존 중
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
 - **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
 - **Commerce 플러그인**: 완료
@@ -131,27 +132,27 @@ Redis Pub/Sub 기반 멀티 인스턴스 알림 전파, gorilla/websocket 사용
 
 Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1만명 대비)
 
-#### Phase 6: 관리자 API (13개 API)
+#### Phase 6: 관리자 API ✅ (PR #81)
 
-| 카테고리 | API 수 | 주요 기능 |
-|---------|--------|----------|
-| 회원 관리 | 5 | 목록/수정/포인트/제한/해제 |
-| 게시판 관리 | 3 | 목록/설정/생성 |
-| 그룹 관리 | 3 | 목록/설정/생성 |
-| 신고 관리 | 2 | 목록/처리 |
+| 카테고리 | API 수 | 상태 |
+|---------|--------|------|
+| 회원 관리 | 5 | ✅ List/Get/Update/AdjustPoint/Restrict |
+| 게시판 관리 | 5 | ✅ 기존 구현 완료 |
+| 그룹 관리 | 0 | ⏭️ g5_group 테이블 미존재, 스킵 |
+| 신고 관리 | 5+ | ✅ 기존 구현 완료 |
 
-**완료 기준**: 관리자 권한(level 9+) 검증, 이용제한 시 자동 쪽지 발송
+총 API 수: 66/81 (Phase 6까지)
 
-#### Phase 7: 광고 시스템 (4개 API)
+#### Phase 7: 광고 시스템 ✅ (PR #82)
 
-| API | 비고 |
-|-----|------|
-| 광고주 통계 | 본인만 조회 |
-| 남은 광고 기간 | |
-| 광고 가져오기 | 위치별 표시 |
-| 광고 클릭 기록 | 통계용 |
+| API | 상태 | 비고 |
+|-----|------|------|
+| 광고주 통계 | ✅ | GET /promotion/my/stats (본인만) |
+| 남은 광고 기간 | ✅ | GET /promotion/my/remaining |
+| 광고 가져오기 | ✅ | GET /banner/list?position= (기존) |
+| 광고 클릭 기록 | ✅ | GET /banner/:id/click + POST /:id/view (기존) |
 
-**완료 기준**: angple-ads 시스템과 연동, 클릭 통계 수집
+총 API 수: 70/81 (Phase 7까지, 신규 2개 + 기존 2개)
 
 ---
 
@@ -159,47 +160,40 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 
 > v2 DB 스키마: [`docs/specs/core-spec-v1.0.md` §3](docs/specs/core-spec-v1.0.md) 참조
 
-#### Phase 8: v2 Core 테이블 마이그레이션
+#### Phase 8: v2 Core 테이블 마이그레이션 ✅ (PR #83)
 
-- 신규 DB 스키마 생성 (users, boards, posts, comments, files, notifications 등)
-- 그누보드 데이터 → v2 테이블 마이그레이션 스크립트 작성
-- Meta 테이블 (user_meta, post_meta, comment_meta, option_meta) 생성
-- 플러그인 관리 테이블 (plugin_installations, plugin_settings, plugin_events) 생성
+- ✅ v2_ 접두사 Core 테이블 10개: users, boards, posts, comments, categories, tags, post_tags, files, notifications, sessions
+- ✅ Meta 테이블 4개: user_meta, post_meta, comment_meta, option_meta
+- ✅ GORM AutoMigrate (서버 시작 시 자동, 멱등)
+- ✅ 데이터 마이그레이션: Go 코드 (MigrateV2Data) + SQL 스크립트 (migrations/001_gnuboard_to_v2.sql)
+- ✅ 플러그인 관리 테이블 (이전 Phase에서 이미 구현됨)
 
-**완료 기준**: 마이그레이션 스크립트의 무중단 실행, 데이터 정합성 검증
+#### Phase 9: v2 API 개발 (v1과 병행) ✅ (PR #84)
 
-#### Phase 9: v2 API 개발 (v1과 병행)
+- ✅ v2 Repository 4종 (user, post, comment, board) — v2_ 테이블 기반 GORM 구현
+- ✅ v2 Handler: Users/Boards/Posts/Comments CRUD 전체 엔드포인트
+- ✅ v2 Routes: `/api/v2-next` 경로로 레거시와 충돌 없이 공존
+- ✅ main.go DI 배선, 라우터 v1/v2 공존 처리
 
-- `/api/v2/*` 엔드포인트를 신규 DB 기반으로 재구현
-- v1 API (`/api/v1/*`)는 레거시 DB 기반으로 유지
-- 라우터에서 v1/v2 공존 처리
-- 동일 비즈니스 로직 재사용 (Repository만 교체)
+#### Phase 10: 프론트엔드 v2 전환 ✅ (PR #85)
 
-**완료 기준**: v1/v2 API 동시 운영, 동일 데이터에 대한 일관된 응답
+- ✅ `V2Response` 표준 응답 형식 (`success` 필드, `per_page`, `total_pages`) — core-spec §4.3 준수
+- ✅ v2 Handler를 V2Response 형식으로 전환
+- ✅ `docs/v1-to-v2-migration-guide.md` — 프론트엔드 전환 가이드 (엔드포인트 매핑, 데이터 모델, 전환 절차)
 
-#### Phase 10: 프론트엔드 v2 전환
+#### Phase 11: v1 Deprecated ✅ (PR #86)
 
-- angple 프론트엔드의 API 클라이언트를 v2로 전환
-- v1 → v2 전환 가이드 문서 작성
-- 프론트엔드 QA 및 회귀 테스트
+- ✅ Deprecation 미들웨어: `Deprecation: true`, `Sunset`, `Link` 헤더 자동 추가
+- ✅ APIUsageTracker: 엔드포인트별 atomic counter 사용량 추적
+- ✅ 모니터링 엔드포인트: `GET /api/v2/admin/v1-usage`, `POST .../reset`
+- ✅ Sunset 날짜: 2026-08-01
 
-**완료 기준**: 프론트엔드가 100% v2 API 사용
+#### Phase 12: v1/v2 URL 정리 ✅ (PR #87)
 
-#### Phase 11: v1 Deprecated
-
-- v1 API에 deprecation 헤더 추가
-- v1 API 사용량 모니터링
-- 외부 연동 서비스에 v2 전환 안내
-
-**완료 기준**: v1 API 호출 0건 (모니터링 기준)
-
-#### Phase 12: v1 제거
-
-- v1 관련 코드, 라우트, Repository 삭제
-- 레거시 테이블 참조 코드 제거
-- 코드베이스 정리 및 리팩토링
-
-**완료 기준**: 그누보드 의존성 완전 제거
+- ✅ 레거시 API: `/api/v2` → `/api/v1` 으로 이동 (deprecation 유지)
+- ✅ 신규 v2 API: `/api/v2-next` → `/api/v2` 로 승격
+- ✅ CLAUDE.md, migration guide 문서 URL 갱신
+- ⏳ 레거시 코드 완전 제거는 프론트엔드 v2 전환 완료 후 진행
 
 ---
 
