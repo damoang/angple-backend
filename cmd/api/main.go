@@ -28,6 +28,7 @@ import (
 	"github.com/damoang/angple-backend/internal/ws"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
+	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -141,6 +142,19 @@ func main() {
 		pkglogger.Info("✅ Connected to Redis")
 	}
 
+	// Elasticsearch 연결
+	var esClient *pkges.Client
+	if cfg.Elasticsearch.Enabled && len(cfg.Elasticsearch.Addresses) > 0 {
+		var esErr error
+		esClient, esErr = pkges.NewClient(cfg.Elasticsearch.Addresses, cfg.Elasticsearch.Username, cfg.Elasticsearch.Password)
+		if esErr != nil {
+			pkglogger.Info("⚠️  Warning: Elasticsearch connection failed: %v (continuing without ES)", esErr)
+			esClient = nil
+		} else {
+			pkglogger.Info("✅ Connected to Elasticsearch")
+		}
+	}
+
 	// WebSocket Hub (Redis Pub/Sub for multi-instance)
 	wsHub := ws.NewHub(redisClient)
 	go wsHub.Run()
@@ -199,6 +213,7 @@ func main() {
 	var auditLogger *middleware.AuditLogger
 	var oauthHandler *handler.OAuthHandler
 	var oauthService *service.OAuthService
+	var searchHandler *handler.SearchHandler
 
 	if db != nil {
 		// Repositories
@@ -332,6 +347,12 @@ func main() {
 			})
 		}
 		oauthHandler = handler.NewOAuthHandler(oauthService)
+
+		// Elasticsearch Search (optional)
+		if esClient != nil {
+			searchSvc := service.NewSearchService(esClient, db)
+			searchHandler = handler.NewSearchHandler(searchSvc)
+		}
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -484,6 +505,18 @@ func main() {
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": logs, "meta": gin.H{"total": total, "page": page}})
 			})
+		}
+
+		// Elasticsearch Search API
+		if searchHandler != nil {
+			search := router.Group("/api/v2/search")
+			search.GET("", searchHandler.Search)
+			search.GET("/autocomplete", searchHandler.Autocomplete)
+
+			adminSearch := router.Group("/api/v2/admin/search")
+			adminSearch.POST("/index", searchHandler.BulkIndex)
+			adminSearch.POST("/index-post", searchHandler.IndexPost)
+			adminSearch.DELETE("/index/:board_id/:post_id", searchHandler.DeletePostIndex)
 		}
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")

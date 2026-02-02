@@ -9,13 +9,22 @@ import (
 
 // Config 애플리케이션 설정 구조체
 type Config struct {
-	JWT       JWTConfig       `yaml:"jwt"`
-	Server    ServerConfig    `yaml:"server"`
-	DataPaths DataPathsConfig `yaml:"data_paths"`
-	CORS      CORSConfig      `yaml:"cors"`
-	Redis     RedisConfig     `yaml:"redis"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Plugins   PluginsConfig   `yaml:"plugins"`
+	JWT           JWTConfig           `yaml:"jwt"`
+	Server        ServerConfig        `yaml:"server"`
+	DataPaths     DataPathsConfig     `yaml:"data_paths"`
+	CORS          CORSConfig          `yaml:"cors"`
+	Redis         RedisConfig         `yaml:"redis"`
+	Database      DatabaseConfig      `yaml:"database"`
+	Plugins       PluginsConfig       `yaml:"plugins"`
+	Elasticsearch ElasticsearchConfig `yaml:"elasticsearch"`
+}
+
+// ElasticsearchConfig Elasticsearch 설정
+type ElasticsearchConfig struct {
+	Addresses []string `yaml:"addresses"`
+	Username  string   `yaml:"username"`
+	Password  string   `yaml:"password"`
+	Enabled   bool     `yaml:"enabled"`
 }
 
 // PluginsConfig 플러그인 설정
@@ -149,6 +158,18 @@ func overrideFromEnv(cfg *Config) {
 	// CORS 설정
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
 		cfg.CORS.AllowOrigins = corsOrigins
+	}
+
+	// Elasticsearch 설정
+	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+		cfg.Elasticsearch.Addresses = []string{esURL}
+		cfg.Elasticsearch.Enabled = true
+	}
+	if esUser := os.Getenv("ELASTICSEARCH_USERNAME"); esUser != "" {
+		cfg.Elasticsearch.Username = esUser
+	}
+	if esPass := os.Getenv("ELASTICSEARCH_PASSWORD"); esPass != "" {
+		cfg.Elasticsearch.Password = esPass
 	}
 }
 
