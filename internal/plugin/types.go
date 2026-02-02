@@ -205,3 +205,8 @@ type HookAware interface {
 type Schedulable interface {
 	RegisterSchedules(scheduler *Scheduler)
 }
+
+// RateLimitable 선택적 인터페이스 - API 레이트 리밋을 설정하고 싶은 플러그인이 구현
+type RateLimitable interface {
+	ConfigureRateLimit(limiter *RateLimiter)
+}

@@ -25,6 +25,7 @@ type Manager struct {
 	settings    SettingGetter
 	permissions PermissionSyncer
 	scheduler   *Scheduler
+	rateLimiter *RateLimiter
 }
 
 // NewManager 새 매니저 생성
@@ -40,6 +41,7 @@ func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logge
 		settings:    settings,
 		permissions: permissions,
 		scheduler:   NewScheduler(logger),
+		rateLimiter: NewRateLimiter(redisClient),
 	}
 }
 
@@ -158,7 +160,13 @@ func (m *Manager) Enable(name string) error {
 			m.logger.Info("Registered schedules for plugin: %s", name)
 		}
 
-		// 5) 라우트 등록
+		// 5) 레이트 리밋 설정 (RateLimitable 구현 시)
+		if rlim, ok := info.Instance.(RateLimitable); ok {
+			rlim.ConfigureRateLimit(m.rateLimiter)
+			m.logger.Info("Configured rate limit for plugin: %s", name)
+		}
+
+		// 6) 라우트 등록
 		m.registry.RegisterPlugin(info)
 	}
 
@@ -210,6 +218,9 @@ func (m *Manager) Disable(name string) error {
 
 	// 스케줄 해제
 	m.scheduler.Unregister(name)
+
+	// 레이트 리밋 해제
+	m.rateLimiter.Remove(name)
 
 	// 라우트 해제
 	m.registry.UnregisterPlugin(name)
@@ -268,6 +279,16 @@ func (m *Manager) StopScheduler() {
 // GetScheduledTasks 등록된 스케줄 작업 목록
 func (m *Manager) GetScheduledTasks() []ScheduledTaskInfo {
 	return m.scheduler.GetTasks()
+}
+
+// GetRateLimiter 레이트 리미터 반환
+func (m *Manager) GetRateLimiter() *RateLimiter {
+	return m.rateLimiter
+}
+
+// GetRateLimitConfigs 레이트 리밋 설정 목록 조회
+func (m *Manager) GetRateLimitConfigs() []RateLimitConfig {
+	return m.rateLimiter.GetAllConfigs()
 }
 
 // CheckHealth 단일 플러그인 헬스 체크

@@ -319,6 +319,7 @@ func main() {
 			adminPlugins.GET("/dashboard", storeHandler.Dashboard)
 			adminPlugins.GET("/health", storeHandler.HealthCheck)
 			adminPlugins.GET("/schedules", storeHandler.ScheduledTasks)
+			adminPlugins.GET("/rate-limits", storeHandler.RateLimitConfigs)
 			adminPlugins.GET("/settings/export", settingHandler.ExportAllSettings)
 			adminPlugins.POST("/settings/import", settingHandler.ImportSettings)
 			adminPlugins.GET("/:name", storeHandler.GetPlugin)
