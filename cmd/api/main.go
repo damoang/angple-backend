@@ -20,6 +20,7 @@ import (
 	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/internal/routes"
 	"github.com/damoang/angple-backend/internal/service"
+	"github.com/damoang/angple-backend/internal/ws"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
@@ -125,6 +126,10 @@ func main() {
 		pkglogger.Info("✅ Connected to Redis")
 	}
 
+	// WebSocket Hub (Redis Pub/Sub for multi-instance)
+	wsHub := ws.NewHub(redisClient)
+	go wsHub.Run()
+
 	// DI Container: Repository -> Service -> Handler
 
 	// JWT Manager
@@ -169,6 +174,7 @@ func main() {
 	var scrapHandler *handler.ScrapHandler
 	var blockHandler *handler.BlockHandler
 	var messageHandler *handler.MessageHandler
+	var wsHandler *handler.WSHandler
 
 	if db != nil {
 		// Repositories
@@ -208,7 +214,7 @@ func main() {
 		promotionService := service.NewPromotionService(promotionRepo)
 		bannerService := service.NewBannerService(bannerRepo)
 		goodService := service.NewGoodService(goodRepo)
-		notificationService := service.NewNotificationService(notificationRepo)
+		notificationService := service.NewNotificationService(notificationRepo, wsHub)
 		memberProfileService := service.NewMemberProfileService(memberRepo, pointRepo, db)
 
 		scrapService := service.NewScrapService(scrapRepo)
@@ -246,6 +252,7 @@ func main() {
 		scrapHandler = handler.NewScrapHandler(scrapService)
 		blockHandler = handler.NewBlockHandler(blockService)
 		messageHandler = handler.NewMessageHandler(messageService)
+		wsHandler = handler.NewWSHandler(wsHub)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -291,7 +298,7 @@ func main() {
 
 	// API v2 라우트 (only if DB is connected)
 	if db != nil {
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, cfg)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, cfg)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}

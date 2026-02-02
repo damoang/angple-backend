@@ -37,6 +37,7 @@ func Setup(
 	scrapHandler *handler.ScrapHandler,
 	blockHandler *handler.BlockHandler,
 	messageHandler *handler.MessageHandler,
+	wsHandler *handler.WSHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -221,6 +222,10 @@ func Setup(
 	notifications.POST("/:id/read", notificationHandler.MarkAsRead)
 	notifications.POST("/read-all", notificationHandler.MarkAllAsRead)
 	notifications.DELETE("/:id", notificationHandler.Delete)
+
+	// WebSocket (실시간 알림 스트림 - 로그인 필요)
+	wsGroup := router.Group("/ws", middleware.DamoangCookieAuth(damoangJWT, cfg))
+	wsGroup.GET("/notifications", wsHandler.Connect)
 
 	// Upload (파일 업로드 API - 로그인 필요)
 	upload := api.Group("/upload")

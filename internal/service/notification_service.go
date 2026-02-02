@@ -7,16 +7,61 @@ import (
 
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
+	"github.com/damoang/angple-backend/internal/ws"
 )
 
 // NotificationService handles notification business logic
 type NotificationService struct {
 	repo *repository.NotificationRepository
+	hub  *ws.Hub
 }
 
 // NewNotificationService creates a new NotificationService
-func NewNotificationService(repo *repository.NotificationRepository) *NotificationService {
-	return &NotificationService{repo: repo}
+func NewNotificationService(repo *repository.NotificationRepository, hub *ws.Hub) *NotificationService {
+	return &NotificationService{repo: repo, hub: hub}
+}
+
+// CreateAndBroadcast creates a notification in DB and pushes it via WebSocket
+func (s *NotificationService) CreateAndBroadcast(memberID, nType, title, content, url, senderID, senderName string) error {
+	n := &domain.Notification{
+		MemberID:   memberID,
+		Type:       nType,
+		Title:      title,
+		Content:    content,
+		URL:        url,
+		SenderID:   senderID,
+		SenderName: senderName,
+		IsRead:     false,
+		CreatedAt:  time.Now(),
+	}
+
+	if err := s.repo.Create(n); err != nil {
+		return err
+	}
+
+	// Push via WebSocket if hub is available
+	if s.hub != nil {
+		unreadCount, _ := s.repo.GetUnreadCount(memberID)
+		s.hub.SendToMember(memberID, &ws.Event{
+			Type: "notification",
+			Payload: map[string]interface{}{
+				"id":          n.ID,
+				"type":        n.Type,
+				"title":       n.Title,
+				"content":     n.Content,
+				"url":         n.URL,
+				"sender_id":   n.SenderID,
+				"sender_name": n.SenderName,
+				"created_at":  n.CreatedAt.Format(time.RFC3339),
+			},
+		})
+		s.hub.SendToMember(memberID, &ws.Event{
+			Type:    "unread_count",
+			Payload: map[string]interface{}{"count": unreadCount},
+		})
+	}
+
+	return nil
 }
 
 // GetUnreadCount returns the unread notification count for a member
