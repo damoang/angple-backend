@@ -199,11 +199,14 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 
 ### 장기 비전 (Phase 13+)
 
-#### Phase 13: 플러그인 마켓플레이스 API
+#### Phase 13: 플러그인 마켓플레이스 API ✅ (PR #88)
 
-- 플러그인 검색, 설치, 업데이트, 제거 API
-- 자동 보안 검사 파이프라인
-- 개발자 등록 및 수익 분배 시스템
+- ✅ Public API 5개: 마켓플레이스 탐색/상세, 리뷰 목록/작성, 다운로드 추적
+- ✅ Developer API 4개: 개발자 등록, 프로필, 플러그인 제출, 내 제출 목록
+- ✅ Admin API 2개: 대기 중 제출 목록, 승인/거절 심사
+- ✅ DB 테이블 4개: plugin_developers, plugin_submissions, plugin_reviews, plugin_downloads
+- ⏳ 자동 보안 검사 파이프라인 (CI/CD 영역, 추후)
+- ⏳ 수익 분배 시스템 (결제 연동 필요, 추후)
 
 #### Phase 14: 멀티테넌트 지원
 
