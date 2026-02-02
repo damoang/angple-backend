@@ -14,6 +14,7 @@ type SettingService struct {
 	settingRepo *repository.SettingRepository
 	eventRepo   *repository.EventRepository
 	catalogSvc  *CatalogService
+	reloader    plugin.PluginReloader
 }
 
 // NewSettingService 생성자
@@ -27,6 +28,11 @@ func NewSettingService(
 		eventRepo:   eventRepo,
 		catalogSvc:  catalogSvc,
 	}
+}
+
+// SetReloader 플러그인 리로더 설정 (순환 의존 방지를 위한 후설정)
+func (s *SettingService) SetReloader(reloader plugin.PluginReloader) {
+	s.reloader = reloader
 }
 
 // SettingWithSchema 설정값과 스키마 결합
@@ -124,6 +130,14 @@ func (s *SettingService) SaveSettings(pluginName string, settings map[string]str
 		ActorID:    &actorID,
 	}
 	_ = s.eventRepo.Create(event)
+
+	// 설정 변경 후 플러그인 자동 리로드
+	if s.reloader != nil {
+		if err := s.reloader.ReloadPlugin(pluginName); err != nil {
+			// 리로드 실패는 경고로 처리 (설정 자체는 이미 저장됨)
+			fmt.Printf("[WARN] Failed to reload plugin %s after config change: %v\n", pluginName, err)
+		}
+	}
 
 	return nil
 }

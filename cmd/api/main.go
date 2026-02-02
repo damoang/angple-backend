@@ -290,6 +290,9 @@ func main() {
 		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger, settingSvc, permSvc)
 		pluginManager.GetRegistry().SetRouter(router)
 
+		// 설정 변경 시 플러그인 자동 리로드 연결
+		settingSvc.SetReloader(pluginManager)
+
 		// 내장 플러그인 등록 (바이너리에 컴파일됨, 활성화는 DB 기반)
 		commercePlugin := commerce.New()
 		if err := pluginManager.RegisterBuiltIn("commerce", commercePlugin, commerce.Manifest); err != nil {
