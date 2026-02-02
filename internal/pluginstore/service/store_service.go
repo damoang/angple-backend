@@ -86,6 +86,9 @@ func (s *StoreService) Install(name, actorID string, manager *plugin.Manager) er
 		return fmt.Errorf("failed to enable plugin: %w", err)
 	}
 
+	// 라이프사이클 훅: OnInstall
+	manager.NotifyInstall(name)
+
 	// 이벤트 로그
 	s.logEvent(name, domain.EventInstalled, map[string]string{"version": manifest.Version}, actorID)
 
@@ -178,6 +181,9 @@ func (s *StoreService) Uninstall(name, actorID string, manager *plugin.Manager) 
 	if dependents, err := s.checkReverseDependencies(name, manager); err == nil && len(dependents) > 0 {
 		return fmt.Errorf("cannot uninstall %s: plugins %v depend on it", name, dependents)
 	}
+
+	// 라이프사이클 훅: OnUninstall
+	manager.NotifyUninstall(name)
 
 	// 활성화 상태면 먼저 비활성화
 	if inst.Status == domain.StatusEnabled {
