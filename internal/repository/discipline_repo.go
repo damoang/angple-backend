@@ -119,3 +119,90 @@ func (r *DisciplineRepository) GetByID(id int) (*domain.DisciplineLog, error) {
 	}
 	return &log, nil
 }
+
+// FindByTargetMember returns discipline logs where the subject contains the member ID (parent posts only)
+func (r *DisciplineRepository) FindByTargetMember(memberID string, page, limit int) ([]domain.DisciplineLog, int64, error) {
+	var logs []domain.DisciplineLog
+	var total int64
+
+	// DisciplineLog content JSON에 target_id가 포함된 것을 찾음
+	// wr_is_comment = 0 (본글만, 소명 댓글 제외)
+	query := r.db.Table(disciplineLogTable).
+		Where("wr_is_comment = 0 AND wr_content LIKE ?", fmt.Sprintf("%%\"target_id\":\"%s\"%%", memberID))
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	if err := query.Order("wr_datetime DESC").
+		Offset(offset).Limit(limit).
+		Find(&logs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return logs, total, nil
+}
+
+// ListAll returns all discipline logs (parent posts only, for admin board view)
+func (r *DisciplineRepository) ListAll(page, limit int) ([]domain.DisciplineLog, int64, error) {
+	var logs []domain.DisciplineLog
+	var total int64
+
+	query := r.db.Table(disciplineLogTable).Where("wr_is_comment = 0")
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	if err := query.Order("wr_datetime DESC").
+		Offset(offset).Limit(limit).
+		Find(&logs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return logs, total, nil
+}
+
+// CreateAppeal creates an appeal comment (소명 글) under a discipline log
+func (r *DisciplineRepository) CreateAppeal(parentID int, memberID, memberName, content, ip string) (int, error) {
+	// Get parent to derive wr_num
+	parent, err := r.GetByID(parentID)
+	if err != nil {
+		return 0, fmt.Errorf("이용제한 내역을 찾을 수 없습니다")
+	}
+
+	// Count existing comments to build reply string
+	var commentCount int64
+	r.db.Table(disciplineLogTable).
+		Where("wr_parent = ? AND wr_is_comment = 1", parentID).
+		Count(&commentCount)
+
+	now := time.Now()
+	appeal := &domain.DisciplineLog{
+		Num:       parent.Num,
+		Reply:     fmt.Sprintf("%02d", commentCount+1),
+		Parent:    parentID,
+		IsComment: 1,
+		Option:    "html1",
+		Subject:   "",
+		Content:   content,
+		MemberID:  memberID,
+		Name:      memberName,
+		DateTime:  now,
+		Last:      now.Format("2006-01-02 15:04:05"),
+		IP:        ip,
+	}
+
+	if err := r.db.Table(disciplineLogTable).Create(appeal).Error; err != nil {
+		return 0, err
+	}
+
+	// Update parent comment count
+	r.db.Table(disciplineLogTable).
+		Where("wr_id = ?", parentID).
+		Update("wr_comment", gorm.Expr("wr_comment + 1"))
+
+	return appeal.ID, nil
+}

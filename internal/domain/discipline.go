@@ -61,6 +61,22 @@ type DisciplineLogContent struct {
 	ProcessedBy    string   `json:"processed_by"`
 }
 
+// DisciplineResponse represents a discipline log entry for API response
+type DisciplineResponse struct {
+	ID          int                     `json:"id"`
+	Subject     string                  `json:"subject"`
+	Status      string                  `json:"status"`  // wr_4
+	ProcessType string                  `json:"process_type"` // wr_7
+	Content     *DisciplineLogContent   `json:"content,omitempty"`
+	CreatedAt   string                  `json:"created_at"`
+	CommentCount int                    `json:"comment_count"`
+}
+
+// AppealRequest represents a request to submit an appeal
+type AppealRequest struct {
+	Content string `json:"content" binding:"required"`
+}
+
 // G5Memo represents a message (쪽지) in g5_memo table
 type G5Memo struct {
 	ID           int       `gorm:"column:me_id;primaryKey;autoIncrement" json:"id"`

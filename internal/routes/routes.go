@@ -38,6 +38,7 @@ func Setup(
 	blockHandler *handler.BlockHandler,
 	messageHandler *handler.MessageHandler,
 	wsHandler *handler.WSHandler,
+	disciplineHandler *handler.DisciplineHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -205,12 +206,22 @@ func Setup(
 	reactions.GET("", reactionHandler.GetReactions) // 반응 목록
 	reactions.POST("", reactionHandler.React)       // 반응 추가/제거
 
-	// Reports (신고 API - 관리자 전용)
+	// Reports (신고 API)
 	reports := api.Group("/reports")
-	reports.GET("", reportHandler.ListReports)             // 신고 목록
-	reports.GET("/data", reportHandler.GetReportData)      // 신고 데이터 조회
-	reports.GET("/recent", reportHandler.GetRecentReports) // 최근 신고 목록
-	reports.POST("/process", reportHandler.ProcessReport)  // 신고 처리
+	reports.POST("", reportHandler.SubmitReport)           // 신고 접수 (일반 사용자)
+	reports.GET("/mine", reportHandler.MyReports)          // 내 신고 내역
+	reports.GET("", reportHandler.ListReports)             // 신고 목록 (관리자)
+	reports.GET("/data", reportHandler.GetReportData)      // 신고 데이터 조회 (관리자)
+	reports.GET("/recent", reportHandler.GetRecentReports) // 최근 신고 목록 (관리자)
+	reports.GET("/stats", reportHandler.GetStats)          // 신고 통계 (관리자)
+	reports.POST("/process", reportHandler.ProcessReport)  // 신고 처리 (관리자)
+
+	// Disciplines (이용제한 API)
+	disciplines := api.Group("/disciplines")
+	disciplines.GET("/board", disciplineHandler.ListBoard)       // 이용제한 게시판
+	disciplines.GET("/:id", disciplineHandler.GetDiscipline)     // 이용제한 상세 열람
+	disciplines.POST("/:id/appeal", disciplineHandler.SubmitAppeal) // 소명 글 작성
+	members.GET("/me/disciplines", disciplineHandler.MyDisciplines) // 내 이용제한 내역
 
 	// Dajoongi (다중이 탐지 API - 관리자 전용)
 	api.GET("/dajoongi", dajoongiHandler.GetDuplicateAccounts)
