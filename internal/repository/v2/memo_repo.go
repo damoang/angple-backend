@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"errors"
+
 	v2 "github.com/damoang/angple-backend/internal/domain/v2"
 	"gorm.io/gorm"
 )
@@ -30,7 +32,7 @@ func (r *memoRepository) FindByUserAndTarget(userID, targetUserID uint64) (*v2.V
 func (r *memoRepository) Upsert(memo *v2.V2Memo) error {
 	existing := &v2.V2Memo{}
 	result := r.db.Where("user_id = ? AND target_user_id = ?", memo.UserID, memo.TargetUserID).First(existing)
-	if result.Error == gorm.ErrRecordNotFound {
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return r.db.Create(memo).Error
 	}
 	if result.Error != nil {

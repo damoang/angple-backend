@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -44,7 +45,7 @@ func (h *MemoHandler) GetMemo(c *gin.Context) {
 
 	memo, err := h.memoRepo.FindByUserAndTarget(userID, targetUserID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.V2Success(c, nil)
 			return
 		}

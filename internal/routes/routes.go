@@ -163,27 +163,27 @@ func Setup(
 
 	// Members (회원 검증 API - 공개)
 	members := api.Group("/members")
-	members.DELETE("/me", authHandler.Withdraw)                    // 회원 탈퇴 (본인만)
-	members.POST("/check-id", memberHandler.CheckUserID)         // 회원 ID 중복 확인
-	members.POST("/check-nickname", memberHandler.CheckNickname) // 닉네임 중복 확인
-	members.POST("/check-email", memberHandler.CheckEmail)       // 이메일 중복 확인
-	members.POST("/check-phone", memberHandler.CheckPhone)       // 휴대폰번호 중복 확인
-	members.GET("/:id/nickname", memberHandler.GetNickname)      // 회원 닉네임 조회
-	members.GET("/:id/profile", memberProfileHandler.GetProfile) // 회원 프로필 조회
-	members.GET("/:id/posts", memberProfileHandler.GetPosts)     // 회원 작성글 조회
-	members.GET("/:id/comments", memberProfileHandler.GetComments) // 회원 작성댓글 조회
+	members.DELETE("/me", authHandler.Withdraw)                              // 회원 탈퇴 (본인만)
+	members.POST("/check-id", memberHandler.CheckUserID)                     // 회원 ID 중복 확인
+	members.POST("/check-nickname", memberHandler.CheckNickname)             // 닉네임 중복 확인
+	members.POST("/check-email", memberHandler.CheckEmail)                   // 이메일 중복 확인
+	members.POST("/check-phone", memberHandler.CheckPhone)                   // 휴대폰번호 중복 확인
+	members.GET("/:id/nickname", memberHandler.GetNickname)                  // 회원 닉네임 조회
+	members.GET("/:id/profile", memberProfileHandler.GetProfile)             // 회원 프로필 조회
+	members.GET("/:id/posts", memberProfileHandler.GetPosts)                 // 회원 작성글 조회
+	members.GET("/:id/comments", memberProfileHandler.GetComments)           // 회원 작성댓글 조회
 	members.GET("/:id/points/history", memberProfileHandler.GetPointHistory) // 포인트 내역 (본인만)
-	members.POST("/:id/block", blockHandler.BlockMember)                    // 회원 차단
-	members.DELETE("/:id/block", blockHandler.UnblockMember)                // 차단 해제
-	members.GET("/me/blocks", blockHandler.ListBlocks)                      // 차단 목록
-	members.GET("/me/scraps", scrapHandler.ListScraps)                      // 내 스크랩 목록
+	members.POST("/:id/block", blockHandler.BlockMember)                     // 회원 차단
+	members.DELETE("/:id/block", blockHandler.UnblockMember)                 // 차단 해제
+	members.GET("/me/blocks", blockHandler.ListBlocks)                       // 차단 목록
+	members.GET("/me/scraps", scrapHandler.ListScraps)                       // 내 스크랩 목록
 
 	// Messages (쪽지 API - 로그인 필요)
 	messages := api.Group("/messages")
-	messages.POST("", messageHandler.SendMessage)        // 쪽지 보내기
-	messages.GET("/inbox", messageHandler.GetInbox)      // 받은 쪽지함
-	messages.GET("/sent", messageHandler.GetSent)        // 보낸 쪽지함
-	messages.GET("/:id", messageHandler.GetMessage)      // 쪽지 상세
+	messages.POST("", messageHandler.SendMessage)         // 쪽지 보내기
+	messages.GET("/inbox", messageHandler.GetInbox)       // 받은 쪽지함
+	messages.GET("/sent", messageHandler.GetSent)         // 보낸 쪽지함
+	messages.GET("/:id", messageHandler.GetMessage)       // 쪽지 상세
 	messages.DELETE("/:id", messageHandler.DeleteMessage) // 쪽지 삭제
 
 	// Autosave (자동 저장 API - 로그인 필요)
@@ -226,15 +226,15 @@ func Setup(
 
 	// Disciplines (이용제한 API)
 	disciplines := api.Group("/disciplines")
-	disciplines.GET("/board", disciplineHandler.ListBoard)       // 이용제한 게시판
-	disciplines.GET("/:id", disciplineHandler.GetDiscipline)     // 이용제한 상세 열람
+	disciplines.GET("/board", disciplineHandler.ListBoard)          // 이용제한 게시판
+	disciplines.GET("/:id", disciplineHandler.GetDiscipline)        // 이용제한 상세 열람
 	disciplines.POST("/:id/appeal", disciplineHandler.SubmitAppeal) // 소명 글 작성
 	members.GET("/me/disciplines", disciplineHandler.MyDisciplines) // 내 이용제한 내역
 
 	// Gallery (갤러리 API - 공개, Redis 캐시)
 	gallery := api.Group("/gallery")
-	gallery.GET("", galleryHandler.GetGalleryAll)          // 전체 갤러리
-	gallery.GET("/:board_id", galleryHandler.GetGallery)   // 게시판별 갤러리
+	gallery.GET("", galleryHandler.GetGalleryAll)        // 전체 갤러리
+	gallery.GET("/:board_id", galleryHandler.GetGallery) // 게시판별 갤러리
 
 	// Unified Search (통합 검색 API - 공개, Redis 캐시)
 	api.GET("/search", galleryHandler.UnifiedSearch)
@@ -256,8 +256,8 @@ func Setup(
 
 	// Upload (파일 업로드 API - 로그인 필요)
 	upload := api.Group("/upload")
-	upload.POST("/editor", fileHandler.UploadEditorImage)       // 에디터 이미지 업로드
-	upload.POST("/attachment", fileHandler.UploadAttachment)     // 첨부파일 업로드
+	upload.POST("/editor", fileHandler.UploadEditorImage)    // 에디터 이미지 업로드
+	upload.POST("/attachment", fileHandler.UploadAttachment) // 첨부파일 업로드
 
 	// Files (파일 다운로드 API - 공개)
 	files := api.Group("/files")
