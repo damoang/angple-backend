@@ -3,6 +3,7 @@ package v2
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -14,6 +15,8 @@ import (
 )
 
 // V2AuthService handles v2 authentication with bcrypt + legacy password support
+//
+//nolint:revive
 type V2AuthService struct {
 	userRepo   v2repo.UserRepository
 	jwtManager *jwt.Manager
@@ -28,6 +31,8 @@ func NewV2AuthService(userRepo v2repo.UserRepository, jwtManager *jwt.Manager) *
 }
 
 // V2LoginResponse represents v2 login response
+//
+//nolint:revive
 type V2LoginResponse struct {
 	User         *v2domain.V2User `json:"user"`
 	AccessToken  string           `json:"access_token"`
@@ -54,11 +59,13 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		return nil, common.ErrInvalidCredentials
 	}
 
-	// If the password is legacy format, upgrade to bcrypt
+	// If the password is legacy format, upgrade to bcrypt (best-effort, non-blocking)
 	if !isBcryptHash(user.Password) {
 		if upgraded, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost); hashErr == nil {
 			user.Password = string(upgraded)
-			_ = s.userRepo.Update(user)
+			if updateErr := s.userRepo.Update(user); updateErr != nil {
+				log.Printf("[v2-auth] password upgrade failed for user %s: %v", username, updateErr)
+			}
 		}
 	}
 

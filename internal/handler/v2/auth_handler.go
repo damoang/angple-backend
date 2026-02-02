@@ -11,6 +11,8 @@ import (
 )
 
 // V2AuthHandler handles v2 authentication endpoints
+//
+//nolint:revive
 type V2AuthHandler struct {
 	authService *v2svc.V2AuthService
 }
