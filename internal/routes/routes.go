@@ -41,15 +41,21 @@ func Setup(
 	disciplineHandler *handler.DisciplineHandler,
 	galleryHandler *handler.GalleryHandler,
 	adminHandler *handler.AdminHandler,
+	v1UsageTracker *middleware.APIUsageTracker,
 	cfg *config.Config,
 ) {
-	// 레거시 API (그누보드 DB 기반) - /api/v1 및 /api/v2 동시 서빙
-	// /api/v2는 프론트엔드 전환 완료 전까지 레거시로 유지
-	api := router.Group("/api/v2", middleware.DamoangCookieAuth(damoangJWT, cfg))
+	// Deprecation 설정 (레거시 API용)
+	deprecationMW := middleware.Deprecation(middleware.DeprecationConfig{
+		SunsetDate:        "Sat, 01 Aug 2026 00:00:00 GMT",
+		MigrationGuideURL: "https://github.com/damoang/angple-backend/blob/main/docs/v1-to-v2-migration-guide.md",
+	})
+
+	// 레거시 API (그누보드 DB 기반) - Deprecation 헤더 + 사용량 추적
+	api := router.Group("/api/v2", middleware.DamoangCookieAuth(damoangJWT, cfg), deprecationMW, v1UsageTracker.Track())
 
 	// /api/v1 별칭 — 레거시 g5_* DB 기반 (주요 엔드포인트만)
-	apiV1 := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg))
-	_ = apiV1 // v1 라우트는 Phase 10에서 프론트 전환 후 등록
+	apiV1 := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg), deprecationMW, v1UsageTracker.Track())
+	_ = apiV1 // v1 라우트는 프론트 전환 후 등록
 
 	// Authentication endpoints (no auth required)
 	auth := api.Group("/auth")
