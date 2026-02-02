@@ -289,6 +289,15 @@ func main() {
 		// Plugin Manager 생성 (settingSvc, permSvc 전달)
 		pluginManager := plugin.NewManager("plugins", db, redisClient, pluginLogger, settingSvc, permSvc)
 		pluginManager.GetRegistry().SetRouter(router)
+		pluginManager.GetRegistry().SetJWTVerifier(plugin.NewDefaultJWTVerifier(
+			func(token string) (string, string, int, error) {
+				claims, err := jwtManager.VerifyToken(token)
+				if err != nil {
+					return "", "", 0, err
+				}
+				return claims.UserID, claims.Nickname, claims.Level, nil
+			},
+		))
 
 		// 설정 변경 시 플러그인 자동 리로드 연결
 		settingSvc.SetReloader(pluginManager)
