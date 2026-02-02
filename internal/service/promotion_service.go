@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"math"
+	"time"
 
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
@@ -28,6 +30,10 @@ type PromotionService interface {
 
 	// Check if user is an advertiser
 	IsAdvertiser(memberID string) (bool, *domain.Advertiser, error)
+
+	// Advertiser self-service
+	GetMyStats(memberID string) (*domain.AdvertiserStatsResponse, error)
+	GetMyRemaining(memberID string) (*domain.AdvertiserRemainingResponse, error)
 }
 
 type promotionService struct {
@@ -300,6 +306,60 @@ func (s *promotionService) DeletePromotionPost(id int64, memberID string) error 
 // IncrementViews increments the view count of a promotion post
 func (s *promotionService) IncrementViews(id int64) error {
 	return s.repo.IncrementViews(id)
+}
+
+// GetMyStats returns the advertiser's own stats
+func (s *promotionService) GetMyStats(memberID string) (*domain.AdvertiserStatsResponse, error) {
+	advertiser, err := s.repo.FindAdvertiserByMemberID(memberID)
+	if err != nil {
+		return nil, errors.New("광고주 정보를 찾을 수 없습니다")
+	}
+
+	totalViews, totalLikes, postCount, err := s.repo.GetPostStatsByAdvertiser(advertiser.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &domain.AdvertiserStatsResponse{
+		AdvertiserID: advertiser.ID,
+		Name:         advertiser.Name,
+		TotalViews:   totalViews,
+		TotalLikes:   totalLikes,
+		PostCount:    postCount,
+		IsActive:     advertiser.IsActive,
+		IsPinned:     advertiser.IsPinned,
+		StartDate:    advertiser.StartDate,
+		EndDate:      advertiser.EndDate,
+	}, nil
+}
+
+// GetMyRemaining returns the advertiser's remaining ad period
+func (s *promotionService) GetMyRemaining(memberID string) (*domain.AdvertiserRemainingResponse, error) {
+	advertiser, err := s.repo.FindAdvertiserByMemberID(memberID)
+	if err != nil {
+		return nil, errors.New("광고주 정보를 찾을 수 없습니다")
+	}
+
+	remainingDays := -1 // unlimited
+	isExpired := false
+	if advertiser.EndDate != nil {
+		diff := time.Until(*advertiser.EndDate).Hours() / 24
+		remainingDays = int(math.Ceil(diff))
+		if remainingDays < 0 {
+			remainingDays = 0
+			isExpired = true
+		}
+	}
+
+	return &domain.AdvertiserRemainingResponse{
+		AdvertiserID:  advertiser.ID,
+		Name:          advertiser.Name,
+		StartDate:     advertiser.StartDate,
+		EndDate:       advertiser.EndDate,
+		RemainingDays: remainingDays,
+		IsActive:      advertiser.IsActive,
+		IsExpired:     isExpired,
+	}, nil
 }
 
 // IsAdvertiser checks if a member is an advertiser
