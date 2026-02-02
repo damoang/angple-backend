@@ -75,6 +75,11 @@ func (r *NotificationRepository) MarkAllAsRead(memberID string) error {
 		Update("nt_is_read", 1).Error
 }
 
+// Create inserts a new notification
+func (r *NotificationRepository) Create(notification *domain.Notification) error {
+	return r.db.Create(notification).Error
+}
+
 // Delete deletes a notification by ID
 func (r *NotificationRepository) Delete(id int) error {
 	return r.db.Where("nt_id = ?", id).Delete(&domain.Notification{}).Error
