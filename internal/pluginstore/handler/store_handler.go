@@ -186,6 +186,13 @@ func (h *StoreHandler) ScheduledTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": tasks})
 }
 
+// RateLimitConfigs 레이트 리밋 설정 목록 조회
+// GET /api/v2/admin/plugins/rate-limits
+func (h *StoreHandler) RateLimitConfigs(c *gin.Context) {
+	configs := h.manager.GetRateLimitConfigs()
+	c.JSON(http.StatusOK, gin.H{"data": configs})
+}
+
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
 	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴
