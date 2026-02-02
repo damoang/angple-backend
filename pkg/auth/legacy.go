@@ -49,6 +49,16 @@ func verifyMySQLPassword(plain, hashed string) bool {
 	return generated == hashed
 }
 
+// HashPassword hashes a password using MySQL PASSWORD() format for Gnuboard compatibility
+// Format: *<SHA1(SHA1(password))>
+//
+//nolint:gosec // G401: Gnuboard 레거시 호환을 위해 SHA1 필요
+func HashPassword(plain string) string {
+	sha1Once := sha1.Sum([]byte(plain))
+	sha1Twice := sha1.Sum(sha1Once[:])
+	return "*" + strings.ToUpper(fmt.Sprintf("%x", sha1Twice))
+}
+
 // verifySHA1 verifies against simple SHA1 hash
 //
 //nolint:gosec // G401: Gnuboard 레거시 호환을 위해 SHA1 필요

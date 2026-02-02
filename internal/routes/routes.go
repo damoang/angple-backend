@@ -43,6 +43,7 @@ func Setup(
 	auth.POST("/login", authHandler.Login)
 	auth.POST("/refresh", authHandler.RefreshToken)
 	auth.POST("/logout", authHandler.Logout)
+	auth.POST("/register", authHandler.Register) // 회원가입
 
 	// Current user endpoint (uses damoang_jwt cookie)
 	auth.GET("/me", authHandler.GetCurrentUser)
@@ -144,6 +145,7 @@ func Setup(
 
 	// Members (회원 검증 API - 공개)
 	members := api.Group("/members")
+	members.DELETE("/me", authHandler.Withdraw)                    // 회원 탈퇴 (본인만)
 	members.POST("/check-id", memberHandler.CheckUserID)         // 회원 ID 중복 확인
 	members.POST("/check-nickname", memberHandler.CheckNickname) // 닉네임 중복 확인
 	members.POST("/check-email", memberHandler.CheckEmail)       // 이메일 중복 확인
