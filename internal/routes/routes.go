@@ -40,6 +40,7 @@ func Setup(
 	wsHandler *handler.WSHandler,
 	disciplineHandler *handler.DisciplineHandler,
 	galleryHandler *handler.GalleryHandler,
+	adminHandler *handler.AdminHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -255,6 +256,15 @@ func Setup(
 	// Files (파일 다운로드 API - 공개)
 	files := api.Group("/files")
 	files.GET("/:board_id/:wr_id/:file_no/download", fileHandler.DownloadFile) // 파일 다운로드
+
+	// Admin Members (관리자 회원 관리)
+	adminMembers := api.Group("/admin/members")
+	// TODO: 운영 환경에서는 middleware.JWTAuth(jwtManager) + 관리자 권한 체크 추가 필요
+	adminMembers.GET("", adminHandler.ListMembers)
+	adminMembers.GET("/:id", adminHandler.GetMember)
+	adminMembers.PUT("/:id", adminHandler.UpdateMember)
+	adminMembers.POST("/:id/point", adminHandler.AdjustPoint)
+	adminMembers.POST("/:id/restrict", adminHandler.RestrictMember)
 
 	// ============================================
 	// Plugin Routes (/api/plugins/*)

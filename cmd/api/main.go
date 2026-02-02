@@ -177,6 +177,7 @@ func main() {
 	var wsHandler *handler.WSHandler
 	var disciplineHandler *handler.DisciplineHandler
 	var galleryHandler *handler.GalleryHandler
+	var adminHandler *handler.AdminHandler
 
 	if db != nil {
 		// Repositories
@@ -226,6 +227,7 @@ func main() {
 		messageService := service.NewMessageService(messageRepo, memberRepo, blockRepo)
 		disciplineService := service.NewDisciplineService(disciplineRepo)
 		galleryService := service.NewGalleryService(galleryRepo, redisClient)
+		adminMemberService := service.NewAdminMemberService(memberRepo, db)
 
 		// File upload path
 		uploadPath := cfg.DataPaths.UploadPath
@@ -261,6 +263,7 @@ func main() {
 		wsHandler = handler.NewWSHandler(wsHub)
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
+		adminHandler = handler.NewAdminHandler(adminMemberService)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -306,7 +309,7 @@ func main() {
 
 	// API v2 라우트 (only if DB is connected)
 	if db != nil {
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, cfg)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, adminHandler, cfg)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
