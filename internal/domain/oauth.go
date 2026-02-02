@@ -59,12 +59,12 @@ type OAuthLoginResponse struct {
 
 // APIKey represents an API key for external integrations
 type APIKey struct {
-	ID        int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Key       string    `gorm:"column:api_key;uniqueIndex;size:64" json:"key"`
-	Name      string    `gorm:"column:name" json:"name"`
-	UserID    string    `gorm:"column:user_id;index" json:"user_id"`
-	Scopes    string    `gorm:"column:scopes" json:"scopes"` // comma-separated: read,write,admin
-	Active    bool      `gorm:"column:active;default:true" json:"active"`
+	ID        int64      `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Key       string     `gorm:"column:api_key;uniqueIndex;size:64" json:"key"`
+	Name      string     `gorm:"column:name" json:"name"`
+	UserID    string     `gorm:"column:user_id;index" json:"user_id"`
+	Scopes    string     `gorm:"column:scopes" json:"scopes"` // comma-separated: read,write,admin
+	Active    bool       `gorm:"column:active;default:true" json:"active"`
 	ExpiresAt *time.Time `gorm:"column:expires_at" json:"expires_at"`
 	LastUsed  *time.Time `gorm:"column:last_used_at" json:"last_used_at"`
 	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`

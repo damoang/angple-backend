@@ -20,36 +20,36 @@ func (PluginDeveloper) TableName() string { return "plugin_developers" }
 
 // PluginSubmission 플러그인 제출 (마켓플레이스 등록 요청)
 type PluginSubmission struct {
-	ID           uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	DeveloperID  uint64    `gorm:"index;not null" json:"developer_id"`
-	PluginName   string    `gorm:"size:100;not null" json:"plugin_name"`
-	Version      string    `gorm:"size:20;not null" json:"version"`
-	Title        string    `gorm:"size:200;not null" json:"title"`
-	Description  string    `gorm:"type:text" json:"description"`
-	Category     string    `gorm:"size:50" json:"category"`
-	Tags         string    `gorm:"type:text" json:"tags"` // JSON array
-	SourceURL    string    `gorm:"size:500" json:"source_url"`
-	DownloadURL  string    `gorm:"size:500" json:"download_url"`
-	Readme       string    `gorm:"type:longtext" json:"readme"`
-	Status       string    `gorm:"size:20;default:pending;index" json:"status"` // pending, approved, rejected
-	ReviewNote   string    `gorm:"type:text" json:"review_note,omitempty"`
-	ReviewedBy   *uint64   `json:"reviewed_by,omitempty"`
-	ReviewedAt   *time.Time `json:"reviewed_at,omitempty"`
-	DownloadCount int64    `gorm:"default:0" json:"download_count"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            uint64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	DeveloperID   uint64     `gorm:"index;not null" json:"developer_id"`
+	PluginName    string     `gorm:"size:100;not null" json:"plugin_name"`
+	Version       string     `gorm:"size:20;not null" json:"version"`
+	Title         string     `gorm:"size:200;not null" json:"title"`
+	Description   string     `gorm:"type:text" json:"description"`
+	Category      string     `gorm:"size:50" json:"category"`
+	Tags          string     `gorm:"type:text" json:"tags"` // JSON array
+	SourceURL     string     `gorm:"size:500" json:"source_url"`
+	DownloadURL   string     `gorm:"size:500" json:"download_url"`
+	Readme        string     `gorm:"type:longtext" json:"readme"`
+	Status        string     `gorm:"size:20;default:pending;index" json:"status"` // pending, approved, rejected
+	ReviewNote    string     `gorm:"type:text" json:"review_note,omitempty"`
+	ReviewedBy    *uint64    `json:"reviewed_by,omitempty"`
+	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
+	DownloadCount int64      `gorm:"default:0" json:"download_count"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func (PluginSubmission) TableName() string { return "plugin_submissions" }
 
 // PluginReview 플러그인 리뷰/평점
 type PluginReview struct {
-	ID           uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	PluginName   string    `gorm:"size:100;index;not null" json:"plugin_name"`
-	UserID       uint64    `gorm:"not null" json:"user_id"`
-	Rating       int       `gorm:"not null" json:"rating"` // 1-5
-	Comment      string    `gorm:"type:text" json:"comment"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID         uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	PluginName string    `gorm:"size:100;index;not null" json:"plugin_name"`
+	UserID     uint64    `gorm:"not null" json:"user_id"`
+	Rating     int       `gorm:"not null" json:"rating"` // 1-5
+	Comment    string    `gorm:"type:text" json:"comment"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 func (PluginReview) TableName() string { return "plugin_reviews" }

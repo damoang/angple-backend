@@ -22,15 +22,15 @@ type Config struct {
 
 // StorageConfig S3-compatible object storage 설정
 type StorageConfig struct {
-	Endpoint       string `yaml:"endpoint"`
-	Region         string `yaml:"region"`
-	AccessKeyID    string `yaml:"access_key_id"`
+	Endpoint        string `yaml:"endpoint"`
+	Region          string `yaml:"region"`
+	AccessKeyID     string `yaml:"access_key_id"`
 	SecretAccessKey string `yaml:"secret_access_key"`
-	Bucket         string `yaml:"bucket"`
-	CDNURL         string `yaml:"cdn_url"`
-	BasePath       string `yaml:"base_path"`
-	ForcePathStyle bool   `yaml:"force_path_style"`
-	Enabled        bool   `yaml:"enabled"`
+	Bucket          string `yaml:"bucket"`
+	CDNURL          string `yaml:"cdn_url"`
+	BasePath        string `yaml:"base_path"`
+	ForcePathStyle  bool   `yaml:"force_path_style"`
+	Enabled         bool   `yaml:"enabled"`
 }
 
 // ElasticsearchConfig Elasticsearch 설정

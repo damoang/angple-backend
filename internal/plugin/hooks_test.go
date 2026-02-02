@@ -67,4 +67,3 @@ func TestHookManagerDoUserAfterLogin(t *testing.T) {
 		t.Errorf("level = %v, want %d", captured["level"], 10)
 	}
 }
-

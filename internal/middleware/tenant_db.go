@@ -10,8 +10,8 @@ import (
 // TenantDBResolver resolves the correct database connection for a tenant
 // based on the site's DB strategy (shared, schema, dedicated)
 type TenantDBResolver struct {
-	defaultDB  *gorm.DB
-	schemaDbs  sync.Map // map[string]*gorm.DB — per-schema connections
+	defaultDB *gorm.DB
+	schemaDbs sync.Map // map[string]*gorm.DB — per-schema connections
 }
 
 // NewTenantDBResolver creates a new resolver
@@ -67,17 +67,17 @@ func (r *TenantDBResolver) DropSchema(schemaName string) error {
 
 // PlanLimits defines resource limits per plan
 type PlanLimits struct {
-	MaxStorage      int64 `json:"max_storage_mb"`       // MB
-	MaxBandwidth    int64 `json:"max_bandwidth_mb"`      // MB/month
-	MaxPosts        int   `json:"max_posts"`
-	MaxBoards       int   `json:"max_boards"`
-	MaxUsers        int   `json:"max_users"`
-	MaxAPICalls     int   `json:"max_api_calls_per_day"`
-	MaxFileSize     int64 `json:"max_file_size_mb"`      // MB per file
-	CustomDomain    bool  `json:"custom_domain"`
-	SSLEnabled      bool  `json:"ssl_enabled"`
-	PluginsAllowed  bool  `json:"plugins_allowed"`
-	MaxPlugins      int   `json:"max_plugins"`
+	MaxStorage     int64 `json:"max_storage_mb"`   // MB
+	MaxBandwidth   int64 `json:"max_bandwidth_mb"` // MB/month
+	MaxPosts       int   `json:"max_posts"`
+	MaxBoards      int   `json:"max_boards"`
+	MaxUsers       int   `json:"max_users"`
+	MaxAPICalls    int   `json:"max_api_calls_per_day"`
+	MaxFileSize    int64 `json:"max_file_size_mb"` // MB per file
+	CustomDomain   bool  `json:"custom_domain"`
+	SSLEnabled     bool  `json:"ssl_enabled"`
+	PluginsAllowed bool  `json:"plugins_allowed"`
+	MaxPlugins     int   `json:"max_plugins"`
 }
 
 // GetPlanLimits returns resource limits for a given plan

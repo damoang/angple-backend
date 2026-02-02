@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	galleryCacheTTL = 5 * time.Minute  // 갤러리 캐시 5분
-	searchCacheTTL  = 3 * time.Minute  // 검색 캐시 3분
+	galleryCacheTTL  = 5 * time.Minute  // 갤러리 캐시 5분
+	searchCacheTTL   = 3 * time.Minute  // 검색 캐시 3분
 	boardIDsCacheTTL = 10 * time.Minute // 게시판 ID 목록 캐시 10분
 )
 

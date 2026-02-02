@@ -211,9 +211,9 @@ func (s *PaymentService) CreateStripeCheckout(ctx context.Context, req *domain.S
 	sessionURL, _ := resp["url"].(string)
 
 	return map[string]string{
-		"session_id":  sessionID,
+		"session_id":   sessionID,
 		"checkout_url": sessionURL,
-		"order_id":    orderID,
+		"order_id":     orderID,
 	}, nil
 }
 

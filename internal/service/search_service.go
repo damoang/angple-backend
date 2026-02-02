@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	es "github.com/damoang/angple-backend/pkg/elasticsearch"
+	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	"gorm.io/gorm"
 )
 
@@ -294,15 +294,15 @@ func (s *SearchService) BulkIndexPosts(ctx context.Context, boardID string, limi
 	tableName := fmt.Sprintf("g5_write_%s", boardID)
 
 	var rows []struct {
-		WrID      int    `gorm:"column:wr_id"`
-		WrSubject string `gorm:"column:wr_subject"`
-		WrContent string `gorm:"column:wr_content"`
-		WrName    string `gorm:"column:wr_name"`
-		MbID      string `gorm:"column:mb_id"`
-		CaName    string `gorm:"column:ca_name"`
+		WrID       int    `gorm:"column:wr_id"`
+		WrSubject  string `gorm:"column:wr_subject"`
+		WrContent  string `gorm:"column:wr_content"`
+		WrName     string `gorm:"column:wr_name"`
+		MbID       string `gorm:"column:mb_id"`
+		CaName     string `gorm:"column:ca_name"`
 		WrDatetime string `gorm:"column:wr_datetime"`
-		WrHit     int    `gorm:"column:wr_hit"`
-		WrGood    int    `gorm:"column:wr_good"`
+		WrHit      int    `gorm:"column:wr_hit"`
+		WrGood     int    `gorm:"column:wr_good"`
 	}
 
 	err := s.db.Table(tableName).
