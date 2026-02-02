@@ -27,6 +27,7 @@ type Manager struct {
 	scheduler   *Scheduler
 	rateLimiter *RateLimiter
 	metrics     *Metrics
+	eventBus    *EventBus
 }
 
 // NewManager 새 매니저 생성
@@ -44,6 +45,7 @@ func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logge
 		scheduler:   NewScheduler(logger),
 		rateLimiter: NewRateLimiter(redisClient),
 		metrics:     NewMetrics(),
+		eventBus:    NewEventBus(logger),
 	}
 }
 
@@ -168,7 +170,13 @@ func (m *Manager) Enable(name string) error {
 			m.logger.Info("Configured rate limit for plugin: %s", name)
 		}
 
-		// 6) 라우트 등록
+		// 6) 이벤트 버스 등록 (EventAware 구현 시)
+		if ea, ok := info.Instance.(EventAware); ok {
+			ea.RegisterEvents(m.eventBus)
+			m.logger.Info("Registered events for plugin: %s", name)
+		}
+
+		// 7) 라우트 등록
 		m.registry.RegisterPlugin(info)
 	}
 
@@ -239,6 +247,9 @@ func (m *Manager) Disable(name string) error {
 
 	// 레이트 리밋 해제
 	m.rateLimiter.Remove(name)
+
+	// 이벤트 버스 구독 해제
+	m.eventBus.Unsubscribe(name)
 
 	// 라우트 해제
 	m.registry.UnregisterPlugin(name)
@@ -322,6 +333,16 @@ func (m *Manager) GetAllPluginMetrics() []MetricsSummary {
 // GetMetrics 메트릭 수집기 반환 (미들웨어 등록용)
 func (m *Manager) GetMetrics() *Metrics {
 	return m.metrics
+}
+
+// GetEventBus 이벤트 버스 반환
+func (m *Manager) GetEventBus() *EventBus {
+	return m.eventBus
+}
+
+// GetEventSubscriptions 이벤트 구독 현황 조회
+func (m *Manager) GetEventSubscriptions() map[string][]string {
+	return m.eventBus.GetSubscriptions()
 }
 
 // NotifyInstall 설치 시 라이프사이클 훅 호출

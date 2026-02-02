@@ -321,6 +321,7 @@ func main() {
 			adminPlugins.GET("/schedules", storeHandler.ScheduledTasks)
 			adminPlugins.GET("/rate-limits", storeHandler.RateLimitConfigs)
 			adminPlugins.GET("/metrics", storeHandler.PluginMetrics)
+			adminPlugins.GET("/event-subscriptions", storeHandler.EventSubscriptions)
 			adminPlugins.GET("/settings/export", settingHandler.ExportAllSettings)
 			adminPlugins.POST("/settings/import", settingHandler.ImportSettings)
 			adminPlugins.GET("/:name", storeHandler.GetPlugin)

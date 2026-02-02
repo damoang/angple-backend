@@ -208,6 +208,13 @@ func (h *StoreHandler) PluginMetricsSingle(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": metrics})
 }
 
+// EventSubscriptions 이벤트 구독 현황 조회
+// GET /api/v2/admin/plugins/event-subscriptions
+func (h *StoreHandler) EventSubscriptions(c *gin.Context) {
+	subs := h.manager.GetEventSubscriptions()
+	c.JSON(http.StatusOK, gin.H{"data": subs})
+}
+
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
 	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴
