@@ -34,6 +34,9 @@ func Setup(
 	notificationHandler *handler.NotificationHandler,
 	memberProfileHandler *handler.MemberProfileHandler,
 	fileHandler *handler.FileHandler,
+	scrapHandler *handler.ScrapHandler,
+	blockHandler *handler.BlockHandler,
+	messageHandler *handler.MessageHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -91,6 +94,10 @@ func Setup(
 		boardPosts.DELETE("/:id/recommend", goodHandler.CancelRecommendPost)
 		boardPosts.POST("/:id/downvote", goodHandler.DownvotePost)
 		boardPosts.DELETE("/:id/downvote", goodHandler.CancelDownvotePost)
+
+		// 스크랩
+		boardPosts.POST("/:id/scrap", scrapHandler.AddScrap)
+		boardPosts.DELETE("/:id/scrap", scrapHandler.RemoveScrap)
 
 		// 댓글 관련 (파라미터 이름 통일: post_id -> id)
 		comments := boardPosts.Group("/:id/comments")
@@ -156,6 +163,18 @@ func Setup(
 	members.GET("/:id/posts", memberProfileHandler.GetPosts)     // 회원 작성글 조회
 	members.GET("/:id/comments", memberProfileHandler.GetComments) // 회원 작성댓글 조회
 	members.GET("/:id/points/history", memberProfileHandler.GetPointHistory) // 포인트 내역 (본인만)
+	members.POST("/:id/block", blockHandler.BlockMember)                    // 회원 차단
+	members.DELETE("/:id/block", blockHandler.UnblockMember)                // 차단 해제
+	members.GET("/me/blocks", blockHandler.ListBlocks)                      // 차단 목록
+	members.GET("/me/scraps", scrapHandler.ListScraps)                      // 내 스크랩 목록
+
+	// Messages (쪽지 API - 로그인 필요)
+	messages := api.Group("/messages")
+	messages.POST("", messageHandler.SendMessage)        // 쪽지 보내기
+	messages.GET("/inbox", messageHandler.GetInbox)      // 받은 쪽지함
+	messages.GET("/sent", messageHandler.GetSent)        // 보낸 쪽지함
+	messages.GET("/:id", messageHandler.GetMessage)      // 쪽지 상세
+	messages.DELETE("/:id", messageHandler.DeleteMessage) // 쪽지 삭제
 
 	// Autosave (자동 저장 API - 로그인 필요)
 	autosave := api.Group("/autosave")

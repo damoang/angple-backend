@@ -166,6 +166,9 @@ func main() {
 	var notificationHandler *handler.NotificationHandler
 	var memberProfileHandler *handler.MemberProfileHandler
 	var fileHandler *handler.FileHandler
+	var scrapHandler *handler.ScrapHandler
+	var blockHandler *handler.BlockHandler
+	var messageHandler *handler.MessageHandler
 
 	if db != nil {
 		// Repositories
@@ -186,6 +189,9 @@ func main() {
 		notificationRepo := repository.NewNotificationRepository(db)
 		pointRepo := repository.NewPointRepository(db)
 		fileRepo := repository.NewFileRepository(db)
+		scrapRepo := repository.NewScrapRepository(db)
+		blockRepo := repository.NewBlockRepository(db)
+		messageRepo := repository.NewMessageRepository(db)
 
 		// Services
 		authService := service.NewAuthService(memberRepo, jwtManager, hookManager)
@@ -204,6 +210,10 @@ func main() {
 		goodService := service.NewGoodService(goodRepo)
 		notificationService := service.NewNotificationService(notificationRepo)
 		memberProfileService := service.NewMemberProfileService(memberRepo, pointRepo, db)
+
+		scrapService := service.NewScrapService(scrapRepo)
+		blockService := service.NewBlockService(blockRepo, memberRepo)
+		messageService := service.NewMessageService(messageRepo, memberRepo, blockRepo)
 
 		// File upload path
 		uploadPath := cfg.DataPaths.UploadPath
@@ -233,6 +243,9 @@ func main() {
 		notificationHandler = handler.NewNotificationHandler(notificationService)
 		memberProfileHandler = handler.NewMemberProfileHandler(memberProfileService)
 		fileHandler = handler.NewFileHandler(fileService)
+		scrapHandler = handler.NewScrapHandler(scrapService)
+		blockHandler = handler.NewBlockHandler(blockService)
+		messageHandler = handler.NewMessageHandler(messageService)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -278,7 +291,7 @@ func main() {
 
 	// API v2 라우트 (only if DB is connected)
 	if db != nil {
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, cfg)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, cfg)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
