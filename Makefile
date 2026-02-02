@@ -108,10 +108,22 @@ test:
 	@echo "Running tests..."
 	go test -v ./...
 
+test-integration:
+	@echo "Running v2 integration tests..."
+	go test -v -count=1 ./tests/integration/...
+
 test-coverage:
 	@echo "Running tests with coverage..."
 	go test -v -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
+
+test-load-k6:
+	@echo "Running k6 smoke test..."
+	k6 run --env BASE_URL=http://localhost:8081 tests/load/k6-load-test.js
+
+test-load-k6-ci:
+	@echo "Running k6 CI load test..."
+	k6 run --env BASE_URL=http://localhost:8081 --env SCENARIO=ci tests/load/k6-load-test.js
 
 # Docker
 docker-up:
