@@ -31,6 +31,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/driver/mysql"
@@ -92,6 +93,11 @@ func main() {
 
 	// 로거 초기화
 	pkglogger.Init()
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "development"
+	}
+	pkglogger.InitStructured(env)
 	pkglogger.Info("Starting Angple API Server...")
 
 	// 설정 로드 (APP_ENV 환경변수로 config 파일 선택)
@@ -189,6 +195,7 @@ func main() {
 	var tenantHandler *handler.TenantHandler
 	var provisioningHandler *handler.ProvisioningHandler
 	var recommendationHandler *handler.RecommendationHandler
+	var auditLogger *middleware.AuditLogger
 
 	if db != nil {
 		// Repositories
@@ -292,6 +299,9 @@ func main() {
 		_ = recRepo.AutoMigrate()
 		recSvc := service.NewRecommendationService(recRepo, db)
 		recommendationHandler = handler.NewRecommendationHandler(recSvc)
+
+		// Audit Logger
+		auditLogger = middleware.NewAuditLogger(db)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -324,10 +334,17 @@ func main() {
 	}
 	router.Use(cors.New(corsConfig))
 
+	// Observability middleware
+	router.Use(middleware.Metrics())
+	router.Use(middleware.RequestLogger())
+
 	// Global Rate Limiter (IP별 120 req/min)
 	if redisClient != nil {
 		router.Use(middleware.RateLimit(redisClient, middleware.DefaultRateLimitConfig()))
 	}
+
+	// Prometheus metrics endpoint
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Health Check
 	router.GET("/health", func(c *gin.Context) {
@@ -399,6 +416,25 @@ func main() {
 		adminRec := router.Group("/api/v2/admin/recommendations")
 		adminRec.POST("/extract", recommendationHandler.ExtractTopics)
 		adminRec.POST("/refresh-trending", recommendationHandler.RefreshTrending)
+
+		// Audit Log API (관리자)
+		if auditLogger != nil {
+			router.GET("/api/v2/admin/audit-logs", func(c *gin.Context) {
+				userID := c.Query("user_id")
+				action := c.Query("action")
+				page := 1
+				perPage := 50
+				if v, err := fmt.Sscanf(c.DefaultQuery("page", "1"), "%d", &page); v == 0 || err != nil {
+					page = 1
+				}
+				logs, total, err := auditLogger.ListAuditLogs(c.Request.Context(), userID, action, page, perPage)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": logs, "meta": gin.H{"total": total, "page": page}})
+			})
+		}
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
