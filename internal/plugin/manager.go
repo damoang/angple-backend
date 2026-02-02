@@ -186,6 +186,13 @@ func (m *Manager) Enable(name string) error {
 		}
 	}
 
+	// 라이프사이클 훅: OnEnable
+	if lc, ok := info.Instance.(LifecycleAware); ok {
+		if err := lc.OnEnable(); err != nil {
+			m.logger.Warn("OnEnable hook failed for plugin %s: %v", name, err)
+		}
+	}
+
 	m.mu.Lock()
 	info.Status = StatusEnabled
 	m.mu.Unlock()
@@ -206,6 +213,15 @@ func (m *Manager) Disable(name string) error {
 
 	if info.Status != StatusEnabled {
 		return nil // 이미 비활성화됨
+	}
+
+	// 라이프사이클 훅: OnDisable
+	if info.Instance != nil {
+		if lc, ok := info.Instance.(LifecycleAware); ok {
+			if err := lc.OnDisable(); err != nil {
+				m.logger.Warn("OnDisable hook failed for plugin %s: %v", name, err)
+			}
+		}
 	}
 
 	// 플러그인 종료
@@ -306,6 +322,36 @@ func (m *Manager) GetAllPluginMetrics() []MetricsSummary {
 // GetMetrics 메트릭 수집기 반환 (미들웨어 등록용)
 func (m *Manager) GetMetrics() *Metrics {
 	return m.metrics
+}
+
+// NotifyInstall 설치 시 라이프사이클 훅 호출
+func (m *Manager) NotifyInstall(name string) {
+	m.mu.RLock()
+	info, exists := m.plugins[name]
+	m.mu.RUnlock()
+	if !exists || info.Instance == nil {
+		return
+	}
+	if lc, ok := info.Instance.(LifecycleAware); ok {
+		if err := lc.OnInstall(); err != nil {
+			m.logger.Warn("OnInstall hook failed for plugin %s: %v", name, err)
+		}
+	}
+}
+
+// NotifyUninstall 제거 시 라이프사이클 훅 호출
+func (m *Manager) NotifyUninstall(name string) {
+	m.mu.RLock()
+	info, exists := m.plugins[name]
+	m.mu.RUnlock()
+	if !exists || info.Instance == nil {
+		return
+	}
+	if lc, ok := info.Instance.(LifecycleAware); ok {
+		if err := lc.OnUninstall(); err != nil {
+			m.logger.Warn("OnUninstall hook failed for plugin %s: %v", name, err)
+		}
+	}
 }
 
 // CheckHealth 단일 플러그인 헬스 체크
