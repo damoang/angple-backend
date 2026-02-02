@@ -187,6 +187,7 @@ func main() {
 	var galleryHandler *handler.GalleryHandler
 	var adminHandler *handler.AdminHandler
 	var tenantHandler *handler.TenantHandler
+	var provisioningHandler *handler.ProvisioningHandler
 
 	if db != nil {
 		// Repositories
@@ -278,6 +279,12 @@ func main() {
 		tenantDBResolver := middleware.NewTenantDBResolver(db)
 		tenantSvc := service.NewTenantService(siteRepo, db, tenantDBResolver)
 		tenantHandler = handler.NewTenantHandler(tenantSvc)
+
+		// SaaS Provisioning
+		subRepo := repository.NewSubscriptionRepository(db)
+		_ = subRepo.AutoMigrate()
+		provisioningSvc := service.NewProvisioningService(siteRepo, subRepo, tenantDBResolver, db, "angple.com")
+		provisioningHandler = handler.NewProvisioningHandler(provisioningSvc)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -359,6 +366,16 @@ func main() {
 		adminTenants.POST("/:id/unsuspend", tenantHandler.UnsuspendTenant)
 		adminTenants.PUT("/:id/plan", tenantHandler.ChangePlan)
 		adminTenants.GET("/:id/usage", tenantHandler.GetUsage)
+
+		// SaaS Provisioning API
+		saas := router.Group("/api/v2/saas")
+		saas.GET("/pricing", provisioningHandler.GetPricing)
+		saas.POST("/communities", provisioningHandler.ProvisionCommunity)
+		saas.DELETE("/communities/:id", provisioningHandler.DeleteCommunity)
+		saas.GET("/communities/:id/subscription", provisioningHandler.GetSubscription)
+		saas.PUT("/communities/:id/subscription/plan", provisioningHandler.ChangePlan)
+		saas.POST("/communities/:id/subscription/cancel", provisioningHandler.CancelSubscription)
+		saas.GET("/communities/:id/invoices", provisioningHandler.GetInvoices)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
