@@ -1,18 +1,18 @@
 package plugin
 
-// PluginOverview 플러그인 전체 현황 요약
-type PluginOverview struct {
+// Overview 플러그인 전체 현황 요약
+type Overview struct {
 	TotalPlugins   int             `json:"total_plugins"`
 	EnabledCount   int             `json:"enabled_count"`
 	DisabledCount  int             `json:"disabled_count"`
 	ErrorCount     int             `json:"error_count"`
-	Plugins        []PluginSummary `json:"plugins"`
+	Plugins        []Summary `json:"plugins"`
 	TotalRoutes    int             `json:"total_routes"`
 	TotalSchedules int             `json:"total_schedules"`
 }
 
-// PluginSummary 개별 플러그인 요약
-type PluginSummary struct {
+// Summary 개별 플러그인 요약
+type Summary struct {
 	Name        string       `json:"name"`
 	Version     string       `json:"version"`
 	Title       string       `json:"title"`
@@ -25,7 +25,7 @@ type PluginSummary struct {
 }
 
 // GetOverview 플러그인 전체 현황 조회
-func (m *Manager) GetOverview() PluginOverview {
+func (m *Manager) GetOverview() Overview {
 	m.mu.RLock()
 	plugins := make([]*PluginInfo, 0, len(m.plugins))
 	for _, info := range m.plugins {
@@ -33,7 +33,7 @@ func (m *Manager) GetOverview() PluginOverview {
 	}
 	m.mu.RUnlock()
 
-	overview := PluginOverview{}
+	overview := Overview{}
 	overview.TotalPlugins = len(plugins)
 
 	routes := m.registry.GetRegisteredRoutes()
@@ -54,7 +54,7 @@ func (m *Manager) GetOverview() PluginOverview {
 		routeCount := len(routes[name])
 		overview.TotalRoutes += routeCount
 
-		summary := PluginSummary{
+		summary := Summary{
 			Name:        name,
 			Version:     info.Manifest.Version,
 			Title:       info.Manifest.Title,
@@ -92,8 +92,8 @@ func (m *Manager) GetOverview() PluginOverview {
 	return overview
 }
 
-// PluginDetail 플러그인 상세 정보 (capabilities 포함)
-type PluginDetail struct {
+// Detail 플러그인 상세 정보 (capabilities 포함)
+type Detail struct {
 	Name        string              `json:"name"`
 	Version     string              `json:"version"`
 	Title       string              `json:"title"`
@@ -111,8 +111,8 @@ type PluginDetail struct {
 	Health      PluginHealth        `json:"health"`
 }
 
-// GetPluginDetail 플러그인 상세 정보 조회
-func (m *Manager) GetPluginDetail(name string) *PluginDetail {
+// GetDetail 플러그인 상세 정보 조회
+func (m *Manager) GetDetail(name string) *Detail {
 	m.mu.RLock()
 	info, exists := m.plugins[name]
 	m.mu.RUnlock()
@@ -121,7 +121,7 @@ func (m *Manager) GetPluginDetail(name string) *PluginDetail {
 		return nil
 	}
 
-	detail := &PluginDetail{
+	detail := &Detail{
 		Name:        info.Manifest.Name,
 		Version:     info.Manifest.Version,
 		Title:       info.Manifest.Title,

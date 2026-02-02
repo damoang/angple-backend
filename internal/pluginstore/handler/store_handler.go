@@ -226,7 +226,7 @@ func (h *StoreHandler) PluginOverview(c *gin.Context) {
 // GET /api/v2/admin/plugins/:name/detail
 func (h *StoreHandler) PluginDetail(c *gin.Context) {
 	name := c.Param("name")
-	detail := h.manager.GetPluginDetail(name)
+	detail := h.manager.GetDetail(name)
 	if detail == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": gin.H{"code": "PLUGIN_NOT_FOUND", "message": "플러그인을 찾을 수 없습니다"},

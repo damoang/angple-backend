@@ -66,7 +66,7 @@ func TestGetPluginDetail(t *testing.T) {
 	}
 	m.mu.Unlock()
 
-	detail := m.GetPluginDetail("test-detail")
+	detail := m.GetDetail("test-detail")
 	if detail == nil {
 		t.Fatal("expected detail, got nil")
 	}
@@ -92,7 +92,7 @@ func TestGetPluginDetail_NotFound(t *testing.T) {
 	logger := NewDefaultLogger("test")
 	m := NewManager("plugins", nil, nil, logger, nil, nil)
 
-	detail := m.GetPluginDetail("nonexistent")
+	detail := m.GetDetail("nonexistent")
 	if detail != nil {
 		t.Fatal("expected nil for nonexistent plugin")
 	}
