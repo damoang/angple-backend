@@ -239,6 +239,7 @@ func main() {
 	var oauthService *service.OAuthService
 	var searchHandler *handler.SearchHandler
 	var mediaHandler *handler.MediaHandler
+	var paymentHandler *handler.PaymentHandler
 
 	if db != nil {
 		// Repositories
@@ -384,6 +385,15 @@ func main() {
 			mediaSvc := service.NewMediaService(s3Client)
 			mediaHandler = handler.NewMediaHandler(mediaSvc)
 		}
+
+		// Payment Service (Toss + Stripe)
+		paymentRepo := repository.NewPaymentRepository(db)
+		subRepo2 := repository.NewSubscriptionRepository(db)
+		paymentSvc := service.NewPaymentService(paymentRepo, subRepo2, db, service.PaymentConfig{
+			TossSecretKey:   os.Getenv("TOSS_SECRET_KEY"),
+			StripeSecretKey: os.Getenv("STRIPE_SECRET_KEY"),
+		})
+		paymentHandler = handler.NewPaymentHandler(paymentSvc)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -550,6 +560,19 @@ func main() {
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": logs, "meta": gin.H{"total": total, "page": page}})
 			})
+		}
+
+		// Payment API (Toss + Stripe)
+		if paymentHandler != nil {
+			payments := router.Group("/api/v2/payments")
+			payments.POST("/toss", middleware.JWTAuth(jwtManager), paymentHandler.CreateTossPayment)
+			payments.POST("/toss/confirm", paymentHandler.ConfirmTossPayment)
+			payments.POST("/toss/webhook", paymentHandler.TossWebhook)
+			payments.POST("/stripe/checkout", middleware.JWTAuth(jwtManager), paymentHandler.CreateStripeCheckout)
+			payments.POST("/stripe/webhook", paymentHandler.StripeWebhook)
+			payments.POST("/refund", middleware.JWTAuth(jwtManager), paymentHandler.RefundPayment)
+			payments.GET("", middleware.JWTAuth(jwtManager), paymentHandler.ListPayments)
+			payments.GET("/:order_id", middleware.JWTAuth(jwtManager), paymentHandler.GetPayment)
 		}
 
 		// Media Pipeline API (S3 storage)
