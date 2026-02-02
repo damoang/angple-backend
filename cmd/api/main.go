@@ -109,6 +109,10 @@ func main() {
 		if err := migration.Run(db); err != nil {
 			pkglogger.Info("⚠️  Migration warning: %v", err)
 		}
+		// v2 스키마 생성 (v2_ 접두사 테이블, 기존 g5_* 와 공존)
+		if err := migration.RunV2Schema(db); err != nil {
+			pkglogger.Info("⚠️  V2 schema migration warning: %v", err)
+		}
 	}
 
 	// Redis 연결
