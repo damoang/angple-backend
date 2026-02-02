@@ -29,6 +29,7 @@ import (
 	"github.com/damoang/angple-backend/pkg/jwt"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
+	"github.com/damoang/angple-backend/pkg/i18n"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
 	pkgstorage "github.com/damoang/angple-backend/pkg/storage"
 	"github.com/gin-contrib/cors"
@@ -416,6 +417,20 @@ func main() {
 		corsConfig.AllowOrigins = splitAndTrim(allowOrigins, ",")
 	}
 	router.Use(cors.New(corsConfig))
+
+	// i18n Bundle (메시지 번들 초기화)
+	i18nBundle := i18n.NewBundle(i18n.LocaleKo)
+	for locale, msgs := range i18n.DefaultMessages() {
+		i18nBundle.LoadMessages(locale, msgs)
+	}
+	// JSON 파일이 있으면 오버라이드
+	if _, err := os.Stat("i18n"); err == nil {
+		_ = i18nBundle.LoadDir("i18n")
+	}
+	_ = i18nBundle // available for handlers via context
+
+	// i18n middleware (Accept-Language 감지)
+	router.Use(middleware.I18n())
 
 	// Security middleware
 	router.Use(middleware.SecurityHeaders())
