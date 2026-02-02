@@ -1,6 +1,6 @@
 # ANGPLE Backend — 프로젝트 계획서
 
-> 최종 수정: 2026-02-02 | 버전: v1.1
+> 최종 수정: 2026-02-02 | 버전: v1.2
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 28/81 API (약 34.6%) — Phase 1 완료
+- **구현 완료**: 43/81 API (약 53.1%) — Phase 2 완료
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
 - **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
 - **Commerce 플러그인**: 완료
@@ -72,16 +72,25 @@
 **미구현 (Phase 1에서 제외)**:
 - 소셜 로그인 (`/auth/social/{provider}`) → Phase 2 이후로 이동 (OAuth 프로바이더 연동 필요)
 
-#### Phase 2: 스크랩, 메모, 차단, 쪽지 (15개 API)
+#### Phase 2: 스크랩, 메모, 차단, 쪽지 (15개 API) ✅ 완료 (2026-02-02)
 
-| 카테고리 | API 수 | 주요 기능 |
-|---------|--------|----------|
-| 스크랩 | 3 | 추가/취소/목록 (g5_scrap 테이블) |
-| 메모 | 4 | 회원별 메모 CRUD |
-| 차단 | 3 | 차단/해제/목록 (글·댓글 숨김) |
-| 쪽지 | 5 | 발송/수신함/발신함/상세/삭제 |
-
-**완료 기준**: 차단 회원 글 필터링, 쪽지 읽음 상태 업데이트
+| API | Method | Endpoint | 상태 | PR |
+|-----|--------|----------|------|-----|
+| 스크랩 추가 | POST | `/boards/{id}/posts/{id}/scrap` | ✅ | #77 |
+| 스크랩 취소 | DELETE | `/boards/{id}/posts/{id}/scrap` | ✅ | #77 |
+| 내 스크랩 목록 | GET | `/members/me/scraps` | ✅ | #77 |
+| 메모 조회 | GET | `/members/{id}/memo` | ✅ | 기존 구현 |
+| 메모 생성 | POST | `/members/{id}/memo` | ✅ | 기존 구현 |
+| 메모 수정 | PUT | `/members/{id}/memo` | ✅ | 기존 구현 |
+| 메모 삭제 | DELETE | `/members/{id}/memo` | ✅ | 기존 구현 |
+| 회원 차단 | POST | `/members/{id}/block` | ✅ | #77 |
+| 차단 해제 | DELETE | `/members/{id}/block` | ✅ | #77 |
+| 차단 목록 | GET | `/members/me/blocks` | ✅ | #77 |
+| 쪽지 보내기 | POST | `/messages` | ✅ | #77 |
+| 받은 쪽지함 | GET | `/messages/inbox` | ✅ | #77 |
+| 보낸 쪽지함 | GET | `/messages/sent` | ✅ | #77 |
+| 쪽지 상세 | GET | `/messages/{id}` | ✅ | #77 |
+| 쪽지 삭제 | DELETE | `/messages/{id}` | ✅ | #77 |
 
 #### Phase 3: 알림, WebSocket (6개 API)
 
