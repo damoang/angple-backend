@@ -327,7 +327,8 @@ func (m *Manager) RunMigrations(name string) error {
 			continue // 이미 실행됨
 		}
 
-		sql, err := os.ReadFile(filePath)
+		cleanPath := filepath.Clean(filePath)
+		sql, err := os.ReadFile(cleanPath) // #nosec G304 -- path from plugin dir + glob, not user input
 		if err != nil {
 			return fmt.Errorf("마이그레이션 파일 읽기 실패 %s: %w", filename, err)
 		}
