@@ -66,7 +66,7 @@ func TestSandbox_Timeout(t *testing.T) {
 		case <-time.After(200 * time.Millisecond):
 			c.String(http.StatusOK, "done")
 		case <-c.Request.Context().Done():
-			// Context cancelled
+			// Context canceled
 			return
 		}
 	})
