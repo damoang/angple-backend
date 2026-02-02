@@ -56,7 +56,7 @@ func (s *commentService) GetComment(boardID string, id int) (*domain.CommentResp
 
 	// comment.content Filter
 	if s.hooks != nil {
-		data := s.hooks.Apply("comment.content", map[string]interface{}{
+		data := s.hooks.Apply(plugin.HookCommentContent, map[string]interface{}{
 			"board_id":   boardID,
 			"comment_id": id,
 			"content":    resp.Content,
@@ -113,7 +113,7 @@ func (s *commentService) CreateComment(
 
 	// before_create Filter
 	if s.hooks != nil {
-		data := s.hooks.Apply("comment.before_create", map[string]interface{}{
+		data := s.hooks.Apply(plugin.HookCommentBeforeCreate, map[string]interface{}{
 			"board_id":  boardID,
 			"post_id":   postID,
 			"content":   comment.Content,
@@ -130,7 +130,7 @@ func (s *commentService) CreateComment(
 
 	// after_create Action
 	if s.hooks != nil {
-		s.hooks.Do("comment.after_create", map[string]interface{}{
+		s.hooks.Do(plugin.HookCommentAfterCreate, map[string]interface{}{
 			"board_id":  boardID,
 			"post_id":   postID,
 			"author_id": authorID,
@@ -163,7 +163,7 @@ func (s *commentService) UpdateComment(
 
 	// before_update Filter
 	if s.hooks != nil {
-		data := s.hooks.Apply("comment.before_update", map[string]interface{}{
+		data := s.hooks.Apply(plugin.HookCommentBeforeUpdate, map[string]interface{}{
 			"board_id":   boardID,
 			"comment_id": id,
 			"content":    comment.Content,
@@ -180,7 +180,7 @@ func (s *commentService) UpdateComment(
 
 	// after_update Action
 	if s.hooks != nil {
-		s.hooks.Do("comment.after_update", map[string]interface{}{
+		s.hooks.Do(plugin.HookCommentAfterUpdate, map[string]interface{}{
 			"board_id":   boardID,
 			"comment_id": id,
 			"author_id":  authorID,
@@ -206,7 +206,7 @@ func (s *commentService) DeleteComment(boardID string, id int, authorID string) 
 
 	// before_delete Filter
 	if s.hooks != nil {
-		s.hooks.Apply("comment.before_delete", map[string]interface{}{
+		s.hooks.Apply(plugin.HookCommentBeforeDelete, map[string]interface{}{
 			"board_id":   boardID,
 			"comment_id": id,
 			"author_id":  authorID,
@@ -219,7 +219,7 @@ func (s *commentService) DeleteComment(boardID string, id int, authorID string) 
 
 	// after_delete Action
 	if s.hooks != nil {
-		s.hooks.Do("comment.after_delete", map[string]interface{}{
+		s.hooks.Do(plugin.HookCommentAfterDelete, map[string]interface{}{
 			"board_id":   boardID,
 			"comment_id": id,
 			"author_id":  authorID,

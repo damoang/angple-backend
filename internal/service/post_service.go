@@ -74,7 +74,7 @@ func (s *postService) GetPost(boardID string, id int) (*domain.PostResponse, err
 
 	// post.content Filter (content 렌더링 시)
 	if s.hooks != nil {
-		data := s.hooks.Apply("post.content", map[string]interface{}{
+		data := s.hooks.Apply(plugin.HookPostContent, map[string]interface{}{
 			"board_id": boardID,
 			"post_id":  id,
 			"content":  resp.Content,
@@ -100,7 +100,7 @@ func (s *postService) CreatePost(boardID string, req *domain.CreatePostRequest, 
 
 	// before_create Filter
 	if s.hooks != nil {
-		data := s.hooks.Apply("post.before_create", map[string]interface{}{
+		data := s.hooks.Apply(plugin.HookPostBeforeCreate, map[string]interface{}{
 			"board_id":  boardID,
 			"title":     post.Title,
 			"content":   post.Content,
@@ -120,7 +120,7 @@ func (s *postService) CreatePost(boardID string, req *domain.CreatePostRequest, 
 
 	// after_create Action
 	if s.hooks != nil {
-		s.hooks.Do("post.after_create", map[string]interface{}{
+		s.hooks.Do(plugin.HookPostAfterCreate, map[string]interface{}{
 			"board_id":  boardID,
 			"post_id":   post.ID,
 			"title":     post.Title,
@@ -152,7 +152,7 @@ func (s *postService) UpdatePost(boardID string, id int, req *domain.UpdatePostR
 
 	// before_update Filter
 	if s.hooks != nil {
-		data := s.hooks.Apply("post.before_update", map[string]interface{}{
+		data := s.hooks.Apply(plugin.HookPostBeforeUpdate, map[string]interface{}{
 			"board_id":  boardID,
 			"post_id":   id,
 			"title":     post.Title,
@@ -173,7 +173,7 @@ func (s *postService) UpdatePost(boardID string, id int, req *domain.UpdatePostR
 
 	// after_update Action
 	if s.hooks != nil {
-		s.hooks.Do("post.after_update", map[string]interface{}{
+		s.hooks.Do(plugin.HookPostAfterUpdate, map[string]interface{}{
 			"board_id":  boardID,
 			"post_id":   id,
 			"author_id": authorID,
@@ -200,7 +200,7 @@ func (s *postService) DeletePost(boardID string, id int, authorID string) error 
 
 	// before_delete Filter
 	if s.hooks != nil {
-		s.hooks.Apply("post.before_delete", map[string]interface{}{
+		s.hooks.Apply(plugin.HookPostBeforeDelete, map[string]interface{}{
 			"board_id":  boardID,
 			"post_id":   id,
 			"author_id": authorID,
@@ -213,7 +213,7 @@ func (s *postService) DeletePost(boardID string, id int, authorID string) error 
 
 	// after_delete Action
 	if s.hooks != nil {
-		s.hooks.Do("post.after_delete", map[string]interface{}{
+		s.hooks.Do(plugin.HookPostAfterDelete, map[string]interface{}{
 			"board_id":  boardID,
 			"post_id":   id,
 			"author_id": authorID,

@@ -184,7 +184,7 @@ func main() {
 		notificationRepo := repository.NewNotificationRepository(db)
 
 		// Services
-		authService := service.NewAuthService(memberRepo, jwtManager)
+		authService := service.NewAuthService(memberRepo, jwtManager, hookManager)
 		postService := service.NewPostService(postRepo, hookManager)
 		commentService := service.NewCommentService(commentRepo, goodRepo, hookManager)
 		menuService := service.NewMenuService(menuRepo)

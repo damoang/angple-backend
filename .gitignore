@@ -56,4 +56,4 @@ __pycache__/
 
 # Serena
 .serena/
-api
+/api
