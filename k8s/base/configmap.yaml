@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: angple-config
+  namespace: angple
+data:
+  APP_ENV: "production"
+  DB_HOST: "mysql"
+  DB_PORT: "3306"
+  DB_NAME: "damoang"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  SERVER_PORT: "8081"
+  GATEWAY_PORT: "8080"
