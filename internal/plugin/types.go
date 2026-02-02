@@ -211,6 +211,11 @@ type RateLimitable interface {
 	ConfigureRateLimit(limiter *RateLimiter)
 }
 
+// EventAware 선택적 인터페이스 - 이벤트 버스 구독
+type EventAware interface {
+	RegisterEvents(bus *EventBus)
+}
+
 // LifecycleAware 선택적 인터페이스 - 설치/제거/활성화/비활성화 이벤트 수신
 type LifecycleAware interface {
 	OnInstall() error
