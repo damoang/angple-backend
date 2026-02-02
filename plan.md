@@ -237,14 +237,15 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 
 ### 프로덕션 준비 (Phase 17-20)
 
-#### Phase 17: 테스트 커버리지 강화
+#### Phase 17: 테스트 커버리지 강화 ✅
 
-현재 테스트 29개 파일 (대부분 플러그인/커머스). 핵심 서비스 테스트 부족.
-
-- 핵심 Service 단위 테스트: auth, post, comment, member, recommendation
-- Repository 테스트 (SQLite in-memory 활용)
-- Handler 통합 테스트 (httptest + gin test mode)
-- 목표: 핵심 비즈니스 로직 커버리지 70%+
+- ✅ AuthService 테스트 12개: 로그인/회원가입/탈퇴/토큰갱신 (성공+실패 케이스)
+- ✅ PostService 테스트 13개: CRUD/검색/페이지네이션/권한검증
+- ✅ RecommendationService 테스트 8개: 키워드추출/불용어/HTML제거
+- ✅ ProvisioningService 테스트: DB전략/플랜가격 검증
+- ✅ TenantService 테스트: DB전략/PlanLimits 검증
+- ✅ 기존 ReportService 테스트 유지
+- 서비스 레이어 테스트 총 70개 PASS
 
 #### Phase 18: 성능 최적화 & Redis 캐시
 
