@@ -1,6 +1,6 @@
 # ANGPLE Backend — 프로젝트 계획서
 
-> 최종 수정: 2026-02-02 | 버전: v1.3
+> 최종 수정: 2026-02-02 | 버전: v1.4
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 49/81 API (약 60.5%) — Phase 3 완료
+- **구현 완료**: 56/81 API (약 69.1%) — Phase 4 완료
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
 - **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
 - **Commerce 플러그인**: 완료
@@ -105,19 +105,19 @@
 
 Redis Pub/Sub 기반 멀티 인스턴스 알림 전파, gorilla/websocket 사용
 
-#### Phase 4: 신고, 이용제한 (7개 API)
+#### Phase 4: 신고, 이용제한 (7개 API) ✅ 완료 (2026-02-02)
 
-| API | 비고 |
-|-----|------|
-| 신고 접수 | 누적 시 자동 이용제한 이동 |
-| 내 신고 내역 | |
-| 신고 처리 상태 | pending/processed/rejected |
-| 이용제한 내역 | |
-| 이용제한 게시판 | 별도 스킨 |
-| 소명 글 작성 | 자동 제목 포맷 |
-| 이용제한 열람 | |
+| API | Method | Endpoint | 상태 | PR |
+|-----|--------|----------|------|-----|
+| 신고 접수 | POST | `/reports` | ✅ | #79 |
+| 내 신고 내역 | GET | `/reports/mine` | ✅ | #79 |
+| 신고 통계 | GET | `/reports/stats` | ✅ | #79 |
+| 이용제한 내역 | GET | `/members/me/disciplines` | ✅ | #79 |
+| 이용제한 게시판 | GET | `/disciplines/board` | ✅ | #79 |
+| 이용제한 열람 | GET | `/disciplines/{id}` | ✅ | #79 |
+| 소명 글 작성 | POST | `/disciplines/{id}/appeal` | ✅ | #79 |
 
-**완료 기준**: 신고 → 이용제한 → 소명 전체 플로우
+기존 관리자 API (신고 목록/데이터/최근/처리)는 이미 구현 완료
 
 #### Phase 5: 추천글, 갤러리, 통합검색 (5개 API)
 
