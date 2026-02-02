@@ -21,7 +21,7 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 70/81 v1 API + v2 API 레이어 — Phase 14 완료
+- **구현 완료**: 70/81 v1 API + v2 API 레이어 — 전 Phase(1~16) 완료
 - **v2 전환**: `/api/v1` (레거시, deprecated) + `/api/v2` (신규 DB) 공존 중
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
 - **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
