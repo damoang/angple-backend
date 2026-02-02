@@ -128,6 +128,94 @@ func (s *SettingService) SaveSettings(pluginName string, settings map[string]str
 	return nil
 }
 
+// PluginConfigExport 플러그인 설정 내보내기 데이터
+type PluginConfigExport struct {
+	PluginName string            `json:"plugin_name"`
+	Version    string            `json:"version"`
+	Settings   map[string]string `json:"settings"`
+	ExportedAt string            `json:"exported_at"`
+}
+
+// ExportAllSettings 전체 플러그인 설정 내보내기
+func (s *SettingService) ExportAllSettings() ([]PluginConfigExport, error) {
+	manifests := s.catalogSvc.ListManifests()
+	exports := make([]PluginConfigExport, 0, len(manifests))
+
+	for _, m := range manifests {
+		saved, err := s.settingRepo.GetAll(m.Name)
+		if err != nil {
+			continue
+		}
+		if len(saved) == 0 {
+			continue
+		}
+
+		settings := make(map[string]string, len(saved))
+		for _, setting := range saved {
+			if setting.SettingValue != nil {
+				settings[setting.SettingKey] = *setting.SettingValue
+			}
+		}
+
+		exports = append(exports, PluginConfigExport{
+			PluginName: m.Name,
+			Version:    m.Version,
+			Settings:   settings,
+		})
+	}
+
+	return exports, nil
+}
+
+// ExportSettings 단일 플러그인 설정 내보내기
+func (s *SettingService) ExportSettings(pluginName string) (*PluginConfigExport, error) {
+	manifest := s.catalogSvc.GetManifest(pluginName)
+	if manifest == nil {
+		return nil, fmt.Errorf("plugin %s not found", pluginName)
+	}
+
+	saved, err := s.settingRepo.GetAll(pluginName)
+	if err != nil {
+		return nil, err
+	}
+
+	settings := make(map[string]string, len(saved))
+	for _, setting := range saved {
+		if setting.SettingValue != nil {
+			settings[setting.SettingKey] = *setting.SettingValue
+		}
+	}
+
+	return &PluginConfigExport{
+		PluginName: pluginName,
+		Version:    manifest.Version,
+		Settings:   settings,
+	}, nil
+}
+
+// ImportSettings 플러그인 설정 가져오기
+func (s *SettingService) ImportSettings(exports []PluginConfigExport, actorID string) ([]string, []string) {
+	var imported, skipped []string
+
+	for _, export := range exports {
+		manifest := s.catalogSvc.GetManifest(export.PluginName)
+		if manifest == nil {
+			skipped = append(skipped, fmt.Sprintf("%s: 플러그인을 찾을 수 없음", export.PluginName))
+			continue
+		}
+
+		err := s.SaveSettings(export.PluginName, export.Settings, actorID)
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s: %s", export.PluginName, err.Error()))
+			continue
+		}
+
+		imported = append(imported, export.PluginName)
+	}
+
+	return imported, skipped
+}
+
 // GetSettingsAsMap 설정값을 map[string]interface{}로 반환 (PluginContext.Config 주입용)
 // 기본값 적용 + 타입 변환 포함
 func (s *SettingService) GetSettingsAsMap(pluginName string) (map[string]interface{}, error) {

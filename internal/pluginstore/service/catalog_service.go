@@ -72,3 +72,12 @@ func (s *CatalogService) GetCatalogEntry(name string) (*domain.CatalogEntry, err
 func (s *CatalogService) GetManifest(name string) *plugin.PluginManifest {
 	return s.manifests[name]
 }
+
+// ListManifests 전체 매니페스트 목록 반환
+func (s *CatalogService) ListManifests() []*plugin.PluginManifest {
+	result := make([]*plugin.PluginManifest, 0, len(s.manifests))
+	for _, m := range s.manifests {
+		result = append(result, m)
+	}
+	return result
+}
