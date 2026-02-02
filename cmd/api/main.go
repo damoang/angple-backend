@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/damoang/angple-backend/docs" // swagger docs
 	"github.com/damoang/angple-backend/internal/config"
+	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/handler"
 	"github.com/damoang/angple-backend/internal/migration"
 	"github.com/damoang/angple-backend/internal/plugin"
@@ -196,6 +197,8 @@ func main() {
 	var provisioningHandler *handler.ProvisioningHandler
 	var recommendationHandler *handler.RecommendationHandler
 	var auditLogger *middleware.AuditLogger
+	var oauthHandler *handler.OAuthHandler
+	var oauthService *service.OAuthService
 
 	if db != nil {
 		// Repositories
@@ -302,6 +305,33 @@ func main() {
 
 		// Audit Logger
 		auditLogger = middleware.NewAuditLogger(db)
+
+		// OAuth Service + Handler
+		oauthService = service.NewOAuthService(db, jwtManager)
+		// Register providers from environment variables
+		if clientID := os.Getenv("NAVER_CLIENT_ID"); clientID != "" {
+			oauthService.RegisterProvider(domain.OAuthProviderNaver, &domain.OAuthConfig{
+				ClientID:     clientID,
+				ClientSecret: os.Getenv("NAVER_CLIENT_SECRET"),
+				RedirectURL:  os.Getenv("NAVER_REDIRECT_URL"),
+			})
+		}
+		if clientID := os.Getenv("KAKAO_CLIENT_ID"); clientID != "" {
+			oauthService.RegisterProvider(domain.OAuthProviderKakao, &domain.OAuthConfig{
+				ClientID:     clientID,
+				ClientSecret: os.Getenv("KAKAO_CLIENT_SECRET"),
+				RedirectURL:  os.Getenv("KAKAO_REDIRECT_URL"),
+			})
+		}
+		if clientID := os.Getenv("GOOGLE_CLIENT_ID"); clientID != "" {
+			oauthService.RegisterProvider(domain.OAuthProviderGoogle, &domain.OAuthConfig{
+				ClientID:     clientID,
+				ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+				RedirectURL:  os.Getenv("GOOGLE_REDIRECT_URL"),
+				Scopes:       []string{"openid", "email", "profile"},
+			})
+		}
+		oauthHandler = handler.NewOAuthHandler(oauthService)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -323,9 +353,11 @@ func main() {
 
 	corsConfig := cors.Config{
 		AllowOrigins:     []string{allowOrigins},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-CSRF-Token", "X-Request-ID"},
 		AllowCredentials: true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		ExposeHeaders:    []string{"X-Request-ID", "X-RateLimit-Remaining", "X-Cache"},
+		MaxAge:           86400,
 	}
 	// CORS가 단일 origin 문자열인 경우 처리
 	if len(corsConfig.AllowOrigins) == 1 && corsConfig.AllowOrigins[0] != "" {
@@ -333,6 +365,10 @@ func main() {
 		corsConfig.AllowOrigins = splitAndTrim(allowOrigins, ",")
 	}
 	router.Use(cors.New(corsConfig))
+
+	// Security middleware
+	router.Use(middleware.SecurityHeaders())
+	router.Use(middleware.InputSanitizer())
 
 	// Observability middleware
 	router.Use(middleware.Metrics())
@@ -416,6 +452,20 @@ func main() {
 		adminRec := router.Group("/api/v2/admin/recommendations")
 		adminRec.POST("/extract", recommendationHandler.ExtractTopics)
 		adminRec.POST("/refresh-trending", recommendationHandler.RefreshTrending)
+
+		// OAuth2 Social Login API
+		if oauthHandler != nil {
+			oauth := router.Group("/api/v2/auth/oauth")
+			oauth.GET("/:provider", oauthHandler.Redirect)
+			oauth.GET("/:provider/callback", oauthHandler.Callback)
+
+			// API Key management (authenticated)
+			apiKeys := router.Group("/api/v2/auth/api-keys", middleware.JWTAuth(jwtManager))
+			apiKeys.POST("", oauthHandler.GenerateAPIKey)
+		}
+
+		// CSRF token endpoint (for v1 cookie-based auth)
+		router.GET("/api/v1/tokens/csrf", middleware.GenerateCSRFToken())
 
 		// Audit Log API (관리자)
 		if auditLogger != nil {
