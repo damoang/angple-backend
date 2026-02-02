@@ -1,6 +1,6 @@
 # ANGPLE Backend — 프로젝트 계획서
 
-> 최종 수정: 2026-02-02 | 버전: v1.2
+> 최종 수정: 2026-02-02 | 버전: v1.3
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 43/81 API (약 53.1%) — Phase 2 완료
+- **구현 완료**: 49/81 API (약 60.5%) — Phase 3 완료
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
 - **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
 - **Commerce 플러그인**: 완료
@@ -92,18 +92,18 @@
 | 쪽지 상세 | GET | `/messages/{id}` | ✅ | #77 |
 | 쪽지 삭제 | DELETE | `/messages/{id}` | ✅ | #77 |
 
-#### Phase 3: 알림, WebSocket (6개 API)
+#### Phase 3: 알림, WebSocket (6개 API) ✅ 완료 (2026-02-02)
 
-| API | 비고 |
-|-----|------|
-| 알림 목록 | 페이지네이션 |
-| 읽지 않은 알림 | unread_count 포함 |
-| 알림 읽음 처리 | 단건 |
-| 모두 읽음 | 일괄 |
-| 알림 삭제 | 단건 |
-| WebSocket 알림 스트림 | 댓글, 추천, 쪽지 실시간 |
+| API | Method | Endpoint | 상태 | PR |
+|-----|--------|----------|------|-----|
+| 알림 목록 | GET | `/notifications` | ✅ | 기존 구현 |
+| 읽지 않은 알림 | GET | `/notifications/unread-count` | ✅ | 기존 구현 |
+| 알림 읽음 처리 | POST | `/notifications/{id}/read` | ✅ | 기존 구현 |
+| 모두 읽음 | POST | `/notifications/read-all` | ✅ | 기존 구현 |
+| 알림 삭제 | DELETE | `/notifications/{id}` | ✅ | 기존 구현 |
+| WebSocket 알림 스트림 | GET | `/ws/notifications` | ✅ | #78 |
 
-**완료 기준**: WebSocket 연결 안정성, Redis Pub/Sub 기반 알림 전파
+Redis Pub/Sub 기반 멀티 인스턴스 알림 전파, gorilla/websocket 사용
 
 #### Phase 4: 신고, 이용제한 (7개 API)
 
