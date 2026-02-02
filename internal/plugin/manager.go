@@ -26,8 +26,8 @@ type Manager struct {
 	permissions PermissionSyncer
 	scheduler   *Scheduler
 	rateLimiter *RateLimiter
-	metrics  *Metrics
-	eventBus *EventBus
+	metrics     *Metrics
+	eventBus    *EventBus
 }
 
 // NewManager 새 매니저 생성
@@ -44,8 +44,8 @@ func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logge
 		permissions: permissions,
 		scheduler:   NewScheduler(logger),
 		rateLimiter: NewRateLimiter(redisClient),
-		metrics:  NewMetrics(),
-		eventBus: NewEventBus(logger),
+		metrics:     NewMetrics(),
+		eventBus:    NewEventBus(logger),
 	}
 }
 

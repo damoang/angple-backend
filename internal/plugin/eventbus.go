@@ -8,7 +8,7 @@ import (
 // Event 플러그인 간 이벤트
 type Event struct {
 	Topic     string                 `json:"topic"`
-	Source    string                 `json:"source"`     // 발행 플러그인
+	Source    string                 `json:"source"` // 발행 플러그인
 	Payload   map[string]interface{} `json:"payload"`
 	Timestamp time.Time              `json:"timestamp"`
 }
