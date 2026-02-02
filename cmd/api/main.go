@@ -22,6 +22,7 @@ import (
 	"github.com/damoang/angple-backend/internal/repository"
 	v2handler "github.com/damoang/angple-backend/internal/handler/v2"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	"github.com/damoang/angple-backend/internal/routes"
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
@@ -496,7 +497,23 @@ func main() {
 		v2CommentRepo := v2repo.NewCommentRepository(db)
 		v2BoardRepo := v2repo.NewBoardRepository(db)
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo)
-		v2routes.Setup(router, v2Handler)
+		v2routes.Setup(router, v2Handler, jwtManager)
+
+		// v2 Admin API
+		v2AdminSvc := v2svc.NewAdminService(v2UserRepo, v2BoardRepo, v2PostRepo, v2CommentRepo)
+		v2AdminHandler := v2handler.NewAdminHandler(v2AdminSvc)
+		v2routes.SetupAdmin(router, v2AdminHandler, jwtManager)
+
+		// v2 Scrap, Memo, Message
+		v2ScrapRepo := v2repo.NewScrapRepository(db)
+		v2MemoRepo := v2repo.NewMemoRepository(db)
+		v2MessageRepo := v2repo.NewMessageRepository(db)
+		v2ScrapHandler := v2handler.NewScrapHandler(v2ScrapRepo)
+		v2MemoHandler := v2handler.NewMemoHandler(v2MemoRepo)
+		v2MessageHandler := v2handler.NewMessageHandler(v2MessageRepo)
+		v2routes.SetupScrap(router, v2ScrapHandler, jwtManager)
+		v2routes.SetupMemo(router, v2MemoHandler, jwtManager)
+		v2routes.SetupMessage(router, v2MessageHandler, jwtManager)
 
 		// Tenant Management (멀티테넌트 관리)
 		adminTenants := router.Group("/api/v2/admin/tenants")
@@ -655,7 +672,7 @@ func main() {
 
 		// Admin Plugin Store 라우트 등록
 		adminPlugins := router.Group("/api/v1/admin/plugins")
-		// TODO: 운영 환경에서는 admin 미들웨어 추가 필요
+		adminPlugins.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		{
 			adminPlugins.GET("", storeHandler.ListPlugins)
 			adminPlugins.GET("/dashboard", storeHandler.Dashboard)

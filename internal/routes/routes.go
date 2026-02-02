@@ -136,10 +136,9 @@ func Setup(
 	menus.GET("/sidebar", menuHandler.GetSidebarMenus)
 	menus.GET("/header", menuHandler.GetHeaderMenus)
 
-	// Admin Menus (관리자 전용 - 개발 중 인증 비활성화)
-	// TODO: 운영 환경에서는 middleware.JWTAuth(jwtManager) 추가 필요
+	// Admin Menus (관리자 전용)
 	adminMenus := api.Group("/admin/menus")
-	// adminMenus.Use(middleware.JWTAuth(jwtManager))
+	adminMenus.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 	adminMenus.GET("", menuHandler.GetAllMenusForAdmin)
 	adminMenus.POST("", menuHandler.CreateMenu)
 	adminMenus.PUT("/:id", menuHandler.UpdateMenu)
@@ -157,10 +156,10 @@ func Setup(
 
 	// Settings endpoints
 	sites.GET("/:id/settings", siteHandler.GetSettings)
-	sites.PUT("/:id/settings", siteHandler.UpdateSettings) // TODO: 인증 추가 필요
+	sites.PUT("/:id/settings", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), siteHandler.UpdateSettings)
 
 	// Provisioning endpoint (결제 후 사이트 생성)
-	sites.POST("", siteHandler.Create) // TODO: 인증 추가 필요 (Admin only)
+	sites.POST("", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), siteHandler.Create)
 
 	// Members (회원 검증 API - 공개)
 	members := api.Group("/members")
@@ -266,7 +265,7 @@ func Setup(
 
 	// Admin Members (관리자 회원 관리)
 	adminMembers := api.Group("/admin/members")
-	// TODO: 운영 환경에서는 middleware.JWTAuth(jwtManager) + 관리자 권한 체크 추가 필요
+	adminMembers.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 	adminMembers.GET("", adminHandler.ListMembers)
 	adminMembers.GET("/:id", adminHandler.GetMember)
 	adminMembers.PUT("/:id", adminHandler.UpdateMember)
