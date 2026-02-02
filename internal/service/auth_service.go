@@ -3,6 +3,7 @@ package service
 import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
+	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/pkg/auth"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -17,6 +18,7 @@ type AuthService interface {
 type authService struct {
 	memberRepo repository.MemberRepository
 	jwtManager *jwt.Manager
+	hooks      *plugin.HookManager
 }
 
 // LoginResponse login response
@@ -33,10 +35,11 @@ type TokenPair struct {
 }
 
 // NewAuthService creates a new AuthService
-func NewAuthService(memberRepo repository.MemberRepository, jwtManager *jwt.Manager) AuthService {
+func NewAuthService(memberRepo repository.MemberRepository, jwtManager *jwt.Manager, hooks *plugin.HookManager) AuthService {
 	return &authService{
 		memberRepo: memberRepo,
 		jwtManager: jwtManager,
+		hooks:      hooks,
 	}
 }
 
@@ -66,6 +69,15 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 
 	// 4. Update login time (async)
 	go s.memberRepo.UpdateLoginTime(member.UserID) //nolint:errcheck // 비동기 로그인 시간 업데이트, 실패해도 무시
+
+	// 5. Fire after_login hook
+	if s.hooks != nil {
+		s.hooks.Do(plugin.HookUserAfterLogin, map[string]interface{}{
+			"user_id":  member.UserID,
+			"nickname": member.Nickname,
+			"level":    member.Level,
+		})
+	}
 
 	return &LoginResponse{
 		AccessToken:  accessToken,
