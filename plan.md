@@ -224,11 +224,14 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - ✅ 플랜별 가격 정보 API (`/api/v2/saas/pricing`)
 - ✅ SaaS API 7개: `/api/v2/saas/*`
 
-#### Phase 16: AI 추천 엔진
+#### Phase 16: AI 추천 엔진 ✅
 
-- 사용자 행동 분석 기반 콘텐츠 추천
-- 키워드/토픽 자동 추출
-- 개인화된 피드 생성
+- ✅ 사용자 행동 추적 (view/like/comment/scrap/search)
+- ✅ 키워드/토픽 자동 추출 (TF 기반, 한국어+영어)
+- ✅ 사용자 관심사 프로파일링 (UserInterest 누적 스코어)
+- ✅ 개인화된 피드 생성 (토픽 매칭 + 인기글 보완)
+- ✅ 트렌딩 토픽 (24h/7d/30d)
+- ✅ API 6개: `/api/v2/recommendations/*` + `/api/v2/admin/recommendations/*`
 
 ---
 
