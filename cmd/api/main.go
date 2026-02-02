@@ -431,10 +431,38 @@ func main() {
 			adminPlugins.GET("/:name/detail", storeHandler.PluginDetail)
 		}
 
+		// Marketplace (플러그인 마켓플레이스)
+		marketplaceRepo := pluginstoreRepo.NewMarketplaceRepository(db)
+		if err := marketplaceRepo.AutoMigrate(); err != nil {
+			pkglogger.Info("⚠️  Marketplace migration warning: %v", err)
+		}
+		marketplaceSvc := pluginstoreSvc.NewMarketplaceService(marketplaceRepo)
+		marketplaceHandler := pluginstoreHandler.NewMarketplaceHandler(marketplaceSvc)
+
+		// 마켓플레이스 Public API (v2)
+		mp := router.Group("/api/v2/marketplace")
+		mp.GET("", marketplaceHandler.Browse)
+		mp.GET("/:name", marketplaceHandler.GetPlugin)
+		mp.GET("/:name/reviews", marketplaceHandler.GetReviews)
+		mp.POST("/:name/reviews", marketplaceHandler.AddReview)
+		mp.POST("/:name/download", marketplaceHandler.TrackDownload)
+
+		// 마켓플레이스 Developer API (v2, 인증 필요)
+		mpDev := router.Group("/api/v2/marketplace/developers")
+		mpDev.POST("/register", marketplaceHandler.RegisterDeveloper)
+		mpDev.GET("/me", marketplaceHandler.GetMyProfile)
+		mpDev.POST("/submissions", marketplaceHandler.SubmitPlugin)
+		mpDev.GET("/submissions", marketplaceHandler.ListMySubmissions)
+
+		// 마켓플레이스 Admin API
+		mpAdmin := router.Group("/api/v2/admin/marketplace")
+		mpAdmin.GET("/submissions/pending", marketplaceHandler.ListPendingSubmissions)
+		mpAdmin.POST("/submissions/:id/review", marketplaceHandler.ReviewSubmission)
+
 		// 플러그인 스케줄러 시작
 		pluginManager.StartScheduler()
 
-		pkglogger.Info("Plugin Store initialized")
+		pkglogger.Info("Plugin Store & Marketplace initialized")
 	}
 
 	// 서버 시작
