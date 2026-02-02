@@ -189,6 +189,85 @@ func TestConflictCheck(t *testing.T) {
 	}
 }
 
+func TestDisableBlockedByDependency(t *testing.T) {
+	db := setupTestDB(t)
+	installRepo := repository.NewInstallationRepository(db)
+	eventRepo := repository.NewEventRepository(db)
+	settingRepo := repository.NewSettingRepository(db)
+
+	catalogSvc := NewCatalogService(installRepo)
+
+	basePlugin := &plugin.PluginManifest{Name: "base-plugin", Version: "1.0.0"}
+	childPlugin := &plugin.PluginManifest{
+		Name:    "child-plugin",
+		Version: "1.0.0",
+		Requires: plugin.Requires{
+			Plugins: []plugin.PluginDependency{{Name: "base-plugin", Version: ">=1.0.0"}},
+		},
+	}
+	catalogSvc.RegisterManifest(basePlugin)
+	catalogSvc.RegisterManifest(childPlugin)
+
+	logger := plugin.NewDefaultLogger("test")
+	storeSvc := NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, logger)
+
+	manager := plugin.NewManager("", db, nil, logger, nil, nil)
+	manager.RegisterBuiltIn("base-plugin", &mockPlugin{name: "base-plugin"}, basePlugin)
+	manager.RegisterBuiltIn("child-plugin", &mockPlugin{name: "child-plugin"}, childPlugin)
+
+	_ = storeSvc.Install("base-plugin", "admin", manager)
+	_ = storeSvc.Install("child-plugin", "admin", manager)
+
+	// base-plugin 비활성화 시도 → child-plugin이 의존하므로 차단
+	err := storeSvc.Disable("base-plugin", "admin", manager)
+	if err == nil {
+		t.Fatal("expected error: cannot disable base-plugin while child-plugin depends on it")
+	}
+}
+
+func TestUninstallBlockedByDependency(t *testing.T) {
+	db := setupTestDB(t)
+	installRepo := repository.NewInstallationRepository(db)
+	eventRepo := repository.NewEventRepository(db)
+	settingRepo := repository.NewSettingRepository(db)
+
+	catalogSvc := NewCatalogService(installRepo)
+
+	basePlugin := &plugin.PluginManifest{Name: "base-plugin", Version: "1.0.0"}
+	childPlugin := &plugin.PluginManifest{
+		Name:    "child-plugin",
+		Version: "1.0.0",
+		Requires: plugin.Requires{
+			Plugins: []plugin.PluginDependency{{Name: "base-plugin", Version: ">=1.0.0"}},
+		},
+	}
+	catalogSvc.RegisterManifest(basePlugin)
+	catalogSvc.RegisterManifest(childPlugin)
+
+	logger := plugin.NewDefaultLogger("test")
+	storeSvc := NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, logger)
+
+	manager := plugin.NewManager("", db, nil, logger, nil, nil)
+	manager.RegisterBuiltIn("base-plugin", &mockPlugin{name: "base-plugin"}, basePlugin)
+	manager.RegisterBuiltIn("child-plugin", &mockPlugin{name: "child-plugin"}, childPlugin)
+
+	_ = storeSvc.Install("base-plugin", "admin", manager)
+	_ = storeSvc.Install("child-plugin", "admin", manager)
+
+	// base-plugin 삭제 시도 → child-plugin이 의존하므로 차단
+	err := storeSvc.Uninstall("base-plugin", "admin", manager)
+	if err == nil {
+		t.Fatal("expected error: cannot uninstall base-plugin while child-plugin depends on it")
+	}
+
+	// child-plugin 먼저 삭제 → 그 후 base-plugin 삭제 가능
+	_ = storeSvc.Uninstall("child-plugin", "admin", manager)
+	err = storeSvc.Uninstall("base-plugin", "admin", manager)
+	if err != nil {
+		t.Fatalf("expected base-plugin uninstall to succeed after child removed: %v", err)
+	}
+}
+
 func TestGetEvents(t *testing.T) {
 	storeSvc, _, manager := setupStoreService(t)
 

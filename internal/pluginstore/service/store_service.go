@@ -139,6 +139,11 @@ func (s *StoreService) Disable(name, actorID string, manager *plugin.Manager) er
 		return nil
 	}
 
+	// 역방향 의존성 체크: 다른 활성 플러그인이 이 플러그인에 의존하는지 확인
+	if dependents, err := s.checkReverseDependencies(name, manager); err == nil && len(dependents) > 0 {
+		return fmt.Errorf("cannot disable %s: plugins %v depend on it", name, dependents)
+	}
+
 	// 매니저에서 비활성화
 	if err := manager.Disable(name); err != nil {
 		return fmt.Errorf("failed to disable plugin: %w", err)
@@ -162,6 +167,11 @@ func (s *StoreService) Uninstall(name, actorID string, manager *plugin.Manager) 
 	inst, err := s.installRepo.FindByName(name)
 	if err != nil {
 		return fmt.Errorf("plugin %s is not installed", name)
+	}
+
+	// 역방향 의존성 체크: 다른 설치된 플러그인이 이 플러그인에 의존하는지 확인
+	if dependents, err := s.checkReverseDependencies(name, manager); err == nil && len(dependents) > 0 {
+		return fmt.Errorf("cannot uninstall %s: plugins %v depend on it", name, dependents)
 	}
 
 	// 활성화 상태면 먼저 비활성화
@@ -249,6 +259,31 @@ func (s *StoreService) checkConflicts(manifest *plugin.PluginManifest) error {
 		}
 	}
 	return nil
+}
+
+// checkReverseDependencies 다른 설치된(활성) 플러그인이 대상 플러그인에 의존하는지 확인
+func (s *StoreService) checkReverseDependencies(name string, manager *plugin.Manager) ([]string, error) {
+	allPlugins := manager.GetAllPlugins()
+	var dependents []string
+
+	for _, p := range allPlugins {
+		if p.Manifest == nil || p.Manifest.Name == name {
+			continue
+		}
+		// 설치+활성 상태인 플러그인만 체크
+		inst, err := s.installRepo.FindByName(p.Manifest.Name)
+		if err != nil || inst == nil || inst.Status != domain.StatusEnabled {
+			continue
+		}
+		for _, dep := range p.Manifest.Requires.Plugins {
+			if dep.Name == name {
+				dependents = append(dependents, p.Manifest.Name)
+				break
+			}
+		}
+	}
+
+	return dependents, nil
 }
 
 // logEvent 이벤트 기록 헬퍼
