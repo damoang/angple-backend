@@ -21,7 +21,7 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 70/81 v1 API + v2 API 레이어 — Phase 12 완료
+- **구현 완료**: 70/81 v1 API + v2 API 레이어 — Phase 14 완료
 - **v2 전환**: `/api/v1` (레거시, deprecated) + `/api/v2` (신규 DB) 공존 중
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
 - **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
@@ -208,11 +208,13 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - ⏳ 자동 보안 검사 파이프라인 (CI/CD 영역, 추후)
 - ⏳ 수익 분배 시스템 (결제 연동 필요, 추후)
 
-#### Phase 14: 멀티테넌트 지원
+#### Phase 14: 멀티테넌트 지원 ✅
 
-- 테넌트별 DB 스키마 격리
-- 테넌트 관리 API
-- 리소스 할당 및 제한
+- ✅ TenantDBResolver: shared/schema/dedicated DB 전략별 격리
+- ✅ PlanLimits: free/pro/business/enterprise 플랜별 리소스 제한
+- ✅ TenantService: 목록/상세/정지/해제/플랜변경/사용량 조회
+- ✅ Admin API 7개: `/api/v2/admin/tenants/*`
+- ✅ 플랜 업그레이드 시 자동 스키마 생성
 
 #### Phase 15: 호스팅 SaaS 백엔드
 
