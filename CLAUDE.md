@@ -71,7 +71,7 @@ make deps                 # 의존성 다운로드
 curl http://localhost:8081/health
 
 # 로그인 테스트
-curl -X POST http://localhost:8081/api/v2/auth/login \
+curl -X POST http://localhost:8081/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"user_id":"user1","password":"test1234"}'
 ```
@@ -317,10 +317,10 @@ db.Exec("SET SESSION sql_mode = ''")
 
 ## API 버전 관리
 
-현재 버전: `/api/v2`
+v1(레거시): `/api/v1`, v2(신규): `/api/v2`
 
 ```go
-api := app.Group("/api/v2")
+api := app.Group("/api/v1")  // 레거시 (그누보드 DB)
 
 // 인증
 api.Group("/auth")
@@ -455,7 +455,7 @@ db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 
 3. **JWT 토큰 만료**
    - 증상: 401 Unauthorized
-   - 해결: `/api/v2/auth/refresh`로 토큰 재발급
+   - 해결: `/api/v1/auth/refresh`로 토큰 재발급
 
 ## 중요 참고 문서
 
@@ -472,10 +472,10 @@ db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 
 | 버전 | 데이터베이스 | 상태 |
 |------|-------------|------|
-| **v1** (`/api/v2/*`) | 그누보드 DB (g5_*) | 현재 개발 중 |
-| **v2** (계획) | 신규 설계 DB | 추후 구현 |
+| **v1** (`/api/v1/*`) | 그누보드 DB (g5_*) | Deprecated (Sunset: 2026-08-01) |
+| **v2** (`/api/v2/*`) | 신규 설계 DB (v2_*) | 활성 개발 중 |
 
-> **참고**: 현재 URL은 `/api/v2`이지만 실제로는 그누보드 DB를 사용하는 v1 역할입니다.
-> 추후 정리 시 `/api/v1`으로 변경 예정.
+> v1은 레거시 그누보드 DB 기반이며 deprecation 헤더가 포함됩니다.
+> 전환 가이드: `docs/v1-to-v2-migration-guide.md`
 
 자세한 내용은 `docs/specs/api-versioning.md` 참고.
