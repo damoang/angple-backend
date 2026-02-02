@@ -186,6 +186,7 @@ func main() {
 	var disciplineHandler *handler.DisciplineHandler
 	var galleryHandler *handler.GalleryHandler
 	var adminHandler *handler.AdminHandler
+	var tenantHandler *handler.TenantHandler
 
 	if db != nil {
 		// Repositories
@@ -272,6 +273,11 @@ func main() {
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
 		adminHandler = handler.NewAdminHandler(adminMemberService)
+
+		// Tenant Management
+		tenantDBResolver := middleware.NewTenantDBResolver(db)
+		tenantSvc := service.NewTenantService(siteRepo, db, tenantDBResolver)
+		tenantHandler = handler.NewTenantHandler(tenantSvc)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -343,6 +349,16 @@ func main() {
 		v2BoardRepo := v2repo.NewBoardRepository(db)
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo)
 		v2routes.Setup(router, v2Handler)
+
+		// Tenant Management (멀티테넌트 관리)
+		adminTenants := router.Group("/api/v2/admin/tenants")
+		adminTenants.GET("", tenantHandler.ListTenants)
+		adminTenants.GET("/plans", tenantHandler.GetPlanLimits)
+		adminTenants.GET("/:id", tenantHandler.GetTenant)
+		adminTenants.POST("/:id/suspend", tenantHandler.SuspendTenant)
+		adminTenants.POST("/:id/unsuspend", tenantHandler.UnsuspendTenant)
+		adminTenants.PUT("/:id/plan", tenantHandler.ChangePlan)
+		adminTenants.GET("/:id/usage", tenantHandler.GetUsage)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
