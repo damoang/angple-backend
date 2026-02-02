@@ -273,6 +273,10 @@ func Setup(
 
 	// Promotion Plugin (직홍게 플러그인)
 	promotion := plugins.Group("/promotion")
+	// 광고주 본인 API
+	promotion.GET("/my/stats", promotionHandler.GetMyStats)
+	promotion.GET("/my/remaining", promotionHandler.GetMyRemaining)
+
 	promotion.GET("/posts", promotionHandler.ListPromotionPosts)
 	promotion.GET("/posts/insert", promotionHandler.GetPromotionPostsForInsert)
 	promotion.GET("/posts/:id", promotionHandler.GetPromotionPost)

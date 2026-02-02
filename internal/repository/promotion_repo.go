@@ -24,6 +24,9 @@ type PromotionRepository interface {
 	UpdatePromotionPost(post *domain.PromotionPost) error
 	DeletePromotionPost(id int64) error
 	IncrementViews(id int64) error
+
+	// Stats methods
+	GetPostStatsByAdvertiser(advertiserID int64) (totalViews int, totalLikes int, postCount int, err error)
 }
 
 // promotionRepository implements PromotionRepository with GORM
@@ -259,4 +262,18 @@ func (r *promotionRepository) IncrementViews(id int64) error {
 	return r.db.Model(&domain.PromotionPost{}).
 		Where("id = ?", id).
 		UpdateColumn("views", gorm.Expr("views + 1")).Error
+}
+
+// GetPostStatsByAdvertiser returns aggregated stats for an advertiser's posts
+func (r *promotionRepository) GetPostStatsByAdvertiser(advertiserID int64) (totalViews int, totalLikes int, postCount int, err error) {
+	var result struct {
+		TotalViews int
+		TotalLikes int
+		PostCount  int
+	}
+	err = r.db.Model(&domain.PromotionPost{}).
+		Select("COALESCE(SUM(views), 0) as total_views, COALESCE(SUM(likes), 0) as total_likes, COUNT(*) as post_count").
+		Where("advertiser_id = ? AND is_active = ?", advertiserID, true).
+		Scan(&result).Error
+	return result.TotalViews, result.TotalLikes, result.PostCount, err
 }

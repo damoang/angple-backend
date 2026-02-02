@@ -253,6 +253,46 @@ func (h *PromotionHandler) DeletePromotionPost(c *gin.Context) {
 	common.SuccessResponse(c, gin.H{"message": "Post deleted successfully"}, nil)
 }
 
+// ============= Advertiser Self-Service Endpoints =============
+
+// GetMyStats handles GET /promotion/my/stats
+func (h *PromotionHandler) GetMyStats(c *gin.Context) {
+	memberID := middleware.GetUserID(c)
+	if memberID == "" {
+		memberID = middleware.GetDamoangUserID(c)
+	}
+	if memberID == "" {
+		common.ErrorResponse(c, 401, "Unauthorized", nil)
+		return
+	}
+
+	data, err := h.service.GetMyStats(memberID)
+	if err != nil {
+		common.ErrorResponse(c, 404, "광고주 정보를 찾을 수 없습니다", err)
+		return
+	}
+	common.SuccessResponse(c, data, nil)
+}
+
+// GetMyRemaining handles GET /promotion/my/remaining
+func (h *PromotionHandler) GetMyRemaining(c *gin.Context) {
+	memberID := middleware.GetUserID(c)
+	if memberID == "" {
+		memberID = middleware.GetDamoangUserID(c)
+	}
+	if memberID == "" {
+		common.ErrorResponse(c, 401, "Unauthorized", nil)
+		return
+	}
+
+	data, err := h.service.GetMyRemaining(memberID)
+	if err != nil {
+		common.ErrorResponse(c, 404, "광고주 정보를 찾을 수 없습니다", err)
+		return
+	}
+	common.SuccessResponse(c, data, nil)
+}
+
 // ============= Admin Endpoints =============
 
 // ListAdvertisers godoc

@@ -155,6 +155,30 @@ type CreatePromotionPostRequest struct {
 	ImageURL string `json:"image_url"`
 }
 
+// AdvertiserStatsResponse represents advertiser's own statistics
+type AdvertiserStatsResponse struct {
+	AdvertiserID int64      `json:"advertiser_id"`
+	Name         string     `json:"name"`
+	TotalViews   int        `json:"total_views"`
+	TotalLikes   int        `json:"total_likes"`
+	PostCount    int        `json:"post_count"`
+	IsActive     bool       `json:"is_active"`
+	IsPinned     bool       `json:"is_pinned"`
+	StartDate    *time.Time `json:"start_date,omitempty"`
+	EndDate      *time.Time `json:"end_date,omitempty"`
+}
+
+// AdvertiserRemainingResponse represents remaining ad period
+type AdvertiserRemainingResponse struct {
+	AdvertiserID  int64      `json:"advertiser_id"`
+	Name          string     `json:"name"`
+	StartDate     *time.Time `json:"start_date,omitempty"`
+	EndDate       *time.Time `json:"end_date,omitempty"`
+	RemainingDays int        `json:"remaining_days"` // -1 if no end date (unlimited)
+	IsActive      bool       `json:"is_active"`
+	IsExpired     bool       `json:"is_expired"`
+}
+
 // UpdatePromotionPostRequest is the request body for updating a promotion post
 type UpdatePromotionPostRequest struct {
 	Title    string `json:"title"`
