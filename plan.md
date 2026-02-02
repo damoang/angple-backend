@@ -247,16 +247,14 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - ✅ 기존 ReportService 테스트 유지
 - 서비스 레이어 테스트 총 70개 PASS
 
-#### Phase 18: 성능 최적화 & Redis 캐시
+#### Phase 18: 성능 최적화 & Redis 캐시 ✅
 
-현재 Redis 캐시는 commerce 플러그인에만 적용. 전역 캐시 레이어 필요.
-
-- 게시판 설정 캐시 (g5_board, TTL 10분)
-- 인기 게시글/추천글 캐시 (TTL 5분)
-- 사용자 세션/프로필 캐시 (TTL 30분)
-- 전역 Rate Limiter 미들웨어 (현재 commerce 플러그인에만 존재)
-- DB 쿼리 N+1 문제 점검 및 Preload 최적화
-- Connection Pool 프로덕션 튜닝
+- ✅ 전역 Redis 캐시 미들웨어 (`middleware/cache.go`): GET 응답 캐시, X-Cache HIT/MISS 헤더
+- ✅ 전역 Rate Limiter (`middleware/rate_limit.go`): Lua 슬라이딩 윈도우, IP별 120 req/min
+- ✅ 사용자별 Rate Limiter (`RateLimitPerUser`): 인증 사용자 ID 기반
+- ✅ 캐시 적용: 트렌딩 토픽(5분), 플랜 가격(10분), PlanLimits(10분)
+- ✅ Fail-open 패턴: Redis 장애 시 정상 처리
+- ✅ 캐시 무효화 함수 (`InvalidateCache`): 패턴 기반 일괄 삭제
 
 #### Phase 19: Observability (모니터링/로깅/추적)
 

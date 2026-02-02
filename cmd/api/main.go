@@ -324,6 +324,11 @@ func main() {
 	}
 	router.Use(cors.New(corsConfig))
 
+	// Global Rate Limiter (IP별 120 req/min)
+	if redisClient != nil {
+		router.Use(middleware.RateLimit(redisClient, middleware.DefaultRateLimitConfig()))
+	}
+
 	// Health Check
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -367,7 +372,7 @@ func main() {
 		// Tenant Management (멀티테넌트 관리)
 		adminTenants := router.Group("/api/v2/admin/tenants")
 		adminTenants.GET("", tenantHandler.ListTenants)
-		adminTenants.GET("/plans", tenantHandler.GetPlanLimits)
+		adminTenants.GET("/plans", middleware.CacheWithTTL(redisClient, 10*time.Minute), tenantHandler.GetPlanLimits)
 		adminTenants.GET("/:id", tenantHandler.GetTenant)
 		adminTenants.POST("/:id/suspend", tenantHandler.SuspendTenant)
 		adminTenants.POST("/:id/unsuspend", tenantHandler.UnsuspendTenant)
@@ -376,7 +381,7 @@ func main() {
 
 		// SaaS Provisioning API
 		saas := router.Group("/api/v2/saas")
-		saas.GET("/pricing", provisioningHandler.GetPricing)
+		saas.GET("/pricing", middleware.CacheWithTTL(redisClient, 10*time.Minute), provisioningHandler.GetPricing)
 		saas.POST("/communities", provisioningHandler.ProvisionCommunity)
 		saas.DELETE("/communities/:id", provisioningHandler.DeleteCommunity)
 		saas.GET("/communities/:id/subscription", provisioningHandler.GetSubscription)
@@ -388,7 +393,7 @@ func main() {
 		rec := router.Group("/api/v2/recommendations")
 		rec.GET("/feed", recommendationHandler.GetPersonalizedFeed)
 		rec.POST("/track", recommendationHandler.TrackActivity)
-		rec.GET("/trending", recommendationHandler.GetTrendingTopics)
+		rec.GET("/trending", middleware.CacheWithTTL(redisClient, 5*time.Minute), recommendationHandler.GetTrendingTopics)
 		rec.GET("/interests", recommendationHandler.GetUserInterests)
 
 		adminRec := router.Group("/api/v2/admin/recommendations")
