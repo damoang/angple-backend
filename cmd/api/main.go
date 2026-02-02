@@ -316,6 +316,7 @@ func main() {
 		// TODO: 운영 환경에서는 admin 미들웨어 추가 필요
 		{
 			adminPlugins.GET("", storeHandler.ListPlugins)
+			adminPlugins.GET("/dashboard", storeHandler.Dashboard)
 			adminPlugins.GET("/health", storeHandler.HealthCheck)
 			adminPlugins.GET("/:name", storeHandler.GetPlugin)
 			adminPlugins.POST("/:name/install", storeHandler.InstallPlugin)
