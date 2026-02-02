@@ -30,6 +30,7 @@ import (
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
+	pkgstorage "github.com/damoang/angple-backend/pkg/storage"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -155,6 +156,28 @@ func main() {
 		}
 	}
 
+	// S3-compatible storage
+	var s3Client *pkgstorage.S3Client
+	if cfg.Storage.Enabled && cfg.Storage.Bucket != "" {
+		var s3Err error
+		s3Client, s3Err = pkgstorage.NewS3Client(pkgstorage.S3Config{
+			Endpoint:        cfg.Storage.Endpoint,
+			Region:          cfg.Storage.Region,
+			AccessKeyID:     cfg.Storage.AccessKeyID,
+			SecretAccessKey: cfg.Storage.SecretAccessKey,
+			Bucket:          cfg.Storage.Bucket,
+			CDNURL:          cfg.Storage.CDNURL,
+			BasePath:        cfg.Storage.BasePath,
+			ForcePathStyle:  cfg.Storage.ForcePathStyle,
+		})
+		if s3Err != nil {
+			pkglogger.Info("⚠️  Warning: S3 storage init failed: %v (continuing without S3)", s3Err)
+			s3Client = nil
+		} else {
+			pkglogger.Info("✅ Connected to S3 storage")
+		}
+	}
+
 	// WebSocket Hub (Redis Pub/Sub for multi-instance)
 	wsHub := ws.NewHub(redisClient)
 	go wsHub.Run()
@@ -214,6 +237,7 @@ func main() {
 	var oauthHandler *handler.OAuthHandler
 	var oauthService *service.OAuthService
 	var searchHandler *handler.SearchHandler
+	var mediaHandler *handler.MediaHandler
 
 	if db != nil {
 		// Repositories
@@ -352,6 +376,12 @@ func main() {
 		if esClient != nil {
 			searchSvc := service.NewSearchService(esClient, db)
 			searchHandler = handler.NewSearchHandler(searchSvc)
+		}
+
+		// Media Pipeline (S3 storage)
+		if s3Client != nil {
+			mediaSvc := service.NewMediaService(s3Client)
+			mediaHandler = handler.NewMediaHandler(mediaSvc)
 		}
 	}
 
@@ -505,6 +535,15 @@ func main() {
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": logs, "meta": gin.H{"total": total, "page": page}})
 			})
+		}
+
+		// Media Pipeline API (S3 storage)
+		if mediaHandler != nil {
+			media := router.Group("/api/v2/media", middleware.JWTAuth(jwtManager))
+			media.POST("/images", mediaHandler.UploadImage)
+			media.POST("/attachments", mediaHandler.UploadAttachment)
+			media.POST("/videos", mediaHandler.UploadVideo)
+			media.DELETE("/files", mediaHandler.DeleteFile)
 		}
 
 		// Elasticsearch Search API
