@@ -2,13 +2,13 @@ package plugin
 
 // Overview 플러그인 전체 현황 요약
 type Overview struct {
-	TotalPlugins   int             `json:"total_plugins"`
-	EnabledCount   int             `json:"enabled_count"`
-	DisabledCount  int             `json:"disabled_count"`
-	ErrorCount     int             `json:"error_count"`
+	TotalPlugins   int       `json:"total_plugins"`
+	EnabledCount   int       `json:"enabled_count"`
+	DisabledCount  int       `json:"disabled_count"`
+	ErrorCount     int       `json:"error_count"`
 	Plugins        []Summary `json:"plugins"`
-	TotalRoutes    int             `json:"total_routes"`
-	TotalSchedules int             `json:"total_schedules"`
+	TotalRoutes    int       `json:"total_routes"`
+	TotalSchedules int       `json:"total_schedules"`
 }
 
 // Summary 개별 플러그인 요약
