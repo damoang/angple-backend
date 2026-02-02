@@ -216,11 +216,13 @@ Redis 캐시: 갤러리 5분, 검색 3분, 게시판ID 10분 TTL (동시접속 1
 - ✅ Admin API 7개: `/api/v2/admin/tenants/*`
 - ✅ 플랜 업그레이드 시 자동 스키마 생성
 
-#### Phase 15: 호스팅 SaaS 백엔드
+#### Phase 15: 호스팅 SaaS 백엔드 ✅
 
-- 원클릭 커뮤니티 생성 API
-- 과금/구독 시스템
-- 자동 스케일링
+- ✅ 원클릭 커뮤니티 생성 API (ProvisionCommunity)
+- ✅ 과금/구독 시스템 (Subscription, Invoice 모델 + CRUD)
+- ✅ 플랜 변경/구독 취소/청구서 조회 API
+- ✅ 플랜별 가격 정보 API (`/api/v2/saas/pricing`)
+- ✅ SaaS API 7개: `/api/v2/saas/*`
 
 #### Phase 16: AI 추천 엔진
 
