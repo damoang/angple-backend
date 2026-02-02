@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway test clean docker-up docker-down
+.PHONY: help dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway build-migrate test clean docker-up docker-down migrate migrate-dry-run migrate-verify
 
 # 기본 타겟
 help:
@@ -28,6 +28,11 @@ help:
 	@echo "🚀 운영 환경:"
 	@echo "  make docker-up        - 운영 Docker Compose 실행 (외부 DB 연결)"
 	@echo "  make docker-down      - 운영 Docker Compose 중지"
+	@echo ""
+	@echo "🔄 마이그레이션 (g5_* → v2_*):"
+	@echo "  make migrate          - 전체 데이터 마이그레이션 실행"
+	@echo "  make migrate-dry-run  - 마이그레이션 미리보기 (실행 안함)"
+	@echo "  make migrate-verify   - 마이그레이션 데이터 검증"
 	@echo ""
 	@echo "🧹 기타:"
 	@echo "  make clean            - 빌드 결과물 삭제"
@@ -71,7 +76,7 @@ dev-gateway:
 	go run cmd/gateway/main.go
 
 # 빌드
-build: build-api build-gateway
+build: build-api build-gateway build-migrate
 
 build-api:
 	@echo "Building API server..."
@@ -80,6 +85,23 @@ build-api:
 build-gateway:
 	@echo "Building Gateway..."
 	go build -o bin/gateway cmd/gateway/main.go
+
+build-migrate:
+	@echo "Building Migration tool..."
+	go build -o bin/migrate cmd/migrate/main.go
+
+# 마이그레이션
+migrate:
+	@echo "Running data migration (all targets)..."
+	go run cmd/migrate/main.go -target=all
+
+migrate-dry-run:
+	@echo "Dry-run migration..."
+	go run cmd/migrate/main.go -dry-run
+
+migrate-verify:
+	@echo "Verifying migration data..."
+	go run cmd/migrate/main.go -verify
 
 # 테스트
 test:
