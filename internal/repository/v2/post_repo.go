@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"time"
+
 	v2 "github.com/damoang/angple-backend/internal/domain/v2"
 	"gorm.io/gorm"
 )
@@ -13,6 +15,8 @@ type PostRepository interface {
 	Update(post *v2.V2Post) error
 	Delete(id uint64) error
 	IncrementViewCount(id uint64) error
+	Count() (int64, error)
+	CountSince(since time.Time) (int64, error)
 }
 
 type postRepository struct {
@@ -60,4 +64,16 @@ func (r *postRepository) Delete(id uint64) error {
 func (r *postRepository) IncrementViewCount(id uint64) error {
 	return r.db.Model(&v2.V2Post{}).Where("id = ?", id).
 		UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
+}
+
+func (r *postRepository) Count() (int64, error) {
+	var count int64
+	err := r.db.Model(&v2.V2Post{}).Where("status != 'deleted'").Count(&count).Error
+	return count, err
+}
+
+func (r *postRepository) CountSince(since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&v2.V2Post{}).Where("status != 'deleted' AND created_at >= ?", since).Count(&count).Error
+	return count, err
 }

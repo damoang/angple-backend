@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"time"
+
 	v2 "github.com/damoang/angple-backend/internal/domain/v2"
 	"gorm.io/gorm"
 )
@@ -13,6 +15,8 @@ type UserRepository interface {
 	Create(user *v2.V2User) error
 	Update(user *v2.V2User) error
 	FindAll(page, limit int, keyword string) ([]*v2.V2User, int64, error)
+	Count() (int64, error)
+	CountSince(since time.Time) (int64, error)
 }
 
 type userRepository struct {
@@ -67,4 +71,16 @@ func (r *userRepository) FindAll(page, limit int, keyword string) ([]*v2.V2User,
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+func (r *userRepository) Count() (int64, error) {
+	var count int64
+	err := r.db.Model(&v2.V2User{}).Count(&count).Error
+	return count, err
+}
+
+func (r *userRepository) CountSince(since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&v2.V2User{}).Where("created_at >= ?", since).Count(&count).Error
+	return count, err
 }
