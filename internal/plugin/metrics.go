@@ -8,8 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// PluginMetrics 플러그인별 API 메트릭 수집기
-type PluginMetrics struct {
+// Metrics 플러그인별 API 메트릭 수집기
+type Metrics struct {
 	plugins map[string]*pluginMetric
 	mu      sync.RWMutex
 }
@@ -30,8 +30,8 @@ type endpointMetric struct {
 	MaxLatency int64
 }
 
-// PluginMetricsSummary API 응답용 메트릭 요약
-type PluginMetricsSummary struct {
+// MetricsSummary API 응답용 메트릭 요약
+type MetricsSummary struct {
 	PluginName    string                      `json:"plugin_name"`
 	TotalRequests int64                       `json:"total_requests"`
 	TotalErrors   int64                       `json:"total_errors"`
@@ -50,15 +50,15 @@ type EndpointSummary struct {
 	MaxLatencyMs int64   `json:"max_latency_ms"`
 }
 
-// NewPluginMetrics 생성자
-func NewPluginMetrics() *PluginMetrics {
-	return &PluginMetrics{
+// NewMetrics 생성자
+func NewMetrics() *Metrics {
+	return &Metrics{
 		plugins: make(map[string]*pluginMetric),
 	}
 }
 
 // Middleware Gin 미들웨어 - 플러그인 API 호출 메트릭 수집
-func (pm *PluginMetrics) Middleware(pluginName string) gin.HandlerFunc {
+func (pm *Metrics) Middleware(pluginName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 
@@ -73,7 +73,7 @@ func (pm *PluginMetrics) Middleware(pluginName string) gin.HandlerFunc {
 }
 
 // record 메트릭 기록
-func (pm *PluginMetrics) record(pluginName, endpoint string, status int, latencyMs int64) {
+func (pm *Metrics) record(pluginName, endpoint string, status int, latencyMs int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -117,13 +117,13 @@ func (pm *PluginMetrics) record(pluginName, endpoint string, status int, latency
 }
 
 // GetSummary 특정 플러그인 메트릭 요약
-func (pm *PluginMetrics) GetSummary(pluginName string) *PluginMetricsSummary {
+func (pm *Metrics) GetSummary(pluginName string) *MetricsSummary {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
 	m, exists := pm.plugins[pluginName]
 	if !exists {
-		return &PluginMetricsSummary{
+		return &MetricsSummary{
 			PluginName:  pluginName,
 			StatusCodes: make(map[int]int64),
 			Endpoints:   make(map[string]*EndpointSummary),
@@ -134,18 +134,18 @@ func (pm *PluginMetrics) GetSummary(pluginName string) *PluginMetricsSummary {
 }
 
 // GetAllSummaries 전체 플러그인 메트릭 요약
-func (pm *PluginMetrics) GetAllSummaries() []PluginMetricsSummary {
+func (pm *Metrics) GetAllSummaries() []MetricsSummary {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	result := make([]PluginMetricsSummary, 0, len(pm.plugins))
+	result := make([]MetricsSummary, 0, len(pm.plugins))
 	for name, m := range pm.plugins {
 		result = append(result, *pm.buildSummary(name, m))
 	}
 	return result
 }
 
-func (pm *PluginMetrics) buildSummary(name string, m *pluginMetric) *PluginMetricsSummary {
+func (pm *Metrics) buildSummary(name string, m *pluginMetric) *MetricsSummary {
 	var avgLatency float64
 	var errorRate float64
 	if m.TotalRequests > 0 {
@@ -173,7 +173,7 @@ func (pm *PluginMetrics) buildSummary(name string, m *pluginMetric) *PluginMetri
 		}
 	}
 
-	return &PluginMetricsSummary{
+	return &MetricsSummary{
 		PluginName:    name,
 		TotalRequests: m.TotalRequests,
 		TotalErrors:   m.TotalErrors,
@@ -185,14 +185,14 @@ func (pm *PluginMetrics) buildSummary(name string, m *pluginMetric) *PluginMetri
 }
 
 // Reset 특정 플러그인 메트릭 초기화
-func (pm *PluginMetrics) Reset(pluginName string) {
+func (pm *Metrics) Reset(pluginName string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	delete(pm.plugins, pluginName)
 }
 
 // ResetAll 전체 메트릭 초기화
-func (pm *PluginMetrics) ResetAll() {
+func (pm *Metrics) ResetAll() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.plugins = make(map[string]*pluginMetric)

@@ -26,7 +26,7 @@ type Manager struct {
 	permissions PermissionSyncer
 	scheduler   *Scheduler
 	rateLimiter *RateLimiter
-	metrics     *PluginMetrics
+	metrics     *Metrics
 }
 
 // NewManager 새 매니저 생성
@@ -43,7 +43,7 @@ func NewManager(pluginsDir string, db *gorm.DB, redisClient *redis.Client, logge
 		permissions: permissions,
 		scheduler:   NewScheduler(logger),
 		rateLimiter: NewRateLimiter(redisClient),
-		metrics:     NewPluginMetrics(),
+		metrics:     NewMetrics(),
 	}
 }
 
@@ -294,17 +294,17 @@ func (m *Manager) GetRateLimitConfigs() []RateLimitConfig {
 }
 
 // GetPluginMetrics 특정 플러그인 메트릭 조회
-func (m *Manager) GetPluginMetrics(name string) *PluginMetricsSummary {
+func (m *Manager) GetPluginMetrics(name string) *MetricsSummary {
 	return m.metrics.GetSummary(name)
 }
 
 // GetAllPluginMetrics 전체 플러그인 메트릭 조회
-func (m *Manager) GetAllPluginMetrics() []PluginMetricsSummary {
+func (m *Manager) GetAllPluginMetrics() []MetricsSummary {
 	return m.metrics.GetAllSummaries()
 }
 
 // GetMetrics 메트릭 수집기 반환 (미들웨어 등록용)
-func (m *Manager) GetMetrics() *PluginMetrics {
+func (m *Manager) GetMetrics() *Metrics {
 	return m.metrics
 }
 

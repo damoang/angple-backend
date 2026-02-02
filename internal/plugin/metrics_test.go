@@ -11,7 +11,7 @@ import (
 )
 
 func TestMetrics_Record(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 	pm.record("test-plugin", "GET /api/test", 200, 50)
 	pm.record("test-plugin", "GET /api/test", 200, 30)
 	pm.record("test-plugin", "GET /api/test", 500, 100)
@@ -29,7 +29,7 @@ func TestMetrics_Record(t *testing.T) {
 }
 
 func TestMetrics_Middleware(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -63,7 +63,7 @@ func TestMetrics_Middleware(t *testing.T) {
 }
 
 func TestMetrics_ErrorRate(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 	pm.record("p", "GET /", 200, 10)
 	pm.record("p", "GET /", 200, 10)
 	pm.record("p", "GET /", 400, 10)
@@ -76,7 +76,7 @@ func TestMetrics_ErrorRate(t *testing.T) {
 }
 
 func TestMetrics_EmptyPlugin(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 	summary := pm.GetSummary("nonexistent")
 	if summary.TotalRequests != 0 {
 		t.Fatal("expected 0 requests for nonexistent plugin")
@@ -84,7 +84,7 @@ func TestMetrics_EmptyPlugin(t *testing.T) {
 }
 
 func TestMetrics_GetAllSummaries(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 	pm.record("a", "GET /", 200, 10)
 	pm.record("b", "GET /", 200, 20)
 
@@ -95,7 +95,7 @@ func TestMetrics_GetAllSummaries(t *testing.T) {
 }
 
 func TestMetrics_Reset(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 	pm.record("test", "GET /", 200, 10)
 
 	pm.Reset("test")
@@ -106,7 +106,7 @@ func TestMetrics_Reset(t *testing.T) {
 }
 
 func TestMetrics_EndpointMinMax(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 	pm.record("p", "GET /api", 200, 10)
 	pm.record("p", "GET /api", 200, 50)
 	pm.record("p", "GET /api", 200, 30)
@@ -125,7 +125,7 @@ func TestMetrics_EndpointMinMax(t *testing.T) {
 }
 
 func TestMetrics_StatusCodes(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 	pm.record("p", "GET /", 200, 10)
 	pm.record("p", "GET /", 200, 10)
 	pm.record("p", "GET /", 404, 10)
@@ -140,7 +140,7 @@ func TestMetrics_StatusCodes(t *testing.T) {
 }
 
 func TestMetrics_LatencyTracking(t *testing.T) {
-	pm := NewPluginMetrics()
+	pm := NewMetrics()
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
