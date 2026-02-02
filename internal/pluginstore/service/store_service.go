@@ -56,7 +56,7 @@ func (s *StoreService) Install(name, actorID string, manager *plugin.Manager) er
 	}
 
 	// 충돌 체크
-	if err := s.checkConflicts(manifest); err != nil {
+	if err := s.checkConflicts(name, manager); err != nil {
 		return err
 	}
 
@@ -102,6 +102,11 @@ func (s *StoreService) Enable(name, actorID string, manager *plugin.Manager) err
 
 	if inst.Status == domain.StatusEnabled {
 		return nil
+	}
+
+	// 충돌 플러그인 확인
+	if err := s.checkConflicts(name, manager); err != nil {
+		return err
 	}
 
 	// 매니저에서 활성화
@@ -321,14 +326,44 @@ func (s *StoreService) checkDependencies(manifest *plugin.PluginManifest) error 
 	return nil
 }
 
-// checkConflicts 충돌 검증
-func (s *StoreService) checkConflicts(manifest *plugin.PluginManifest) error {
-	for _, conflict := range manifest.Conflicts {
-		inst, err := s.installRepo.FindByName(conflict)
-		if err == nil && inst != nil && inst.Status == domain.StatusEnabled {
-			return fmt.Errorf("conflict: plugin %s conflicts with enabled plugin %s", manifest.Name, conflict)
+// checkConflicts 충돌 검증 (양방향: 대상의 Conflicts + 활성 플러그인의 Conflicts)
+func (s *StoreService) checkConflicts(name string, manager *plugin.Manager) error {
+	targetInfo, found := manager.GetPlugin(name)
+	if !found || targetInfo.Manifest == nil {
+		return nil
+	}
+
+	allPlugins := manager.GetAllPlugins()
+
+	// 활성 플러그인 목록 수집
+	enabledPlugins := make(map[string]*plugin.PluginManifest)
+	for _, p := range allPlugins {
+		if p.Manifest == nil || p.Manifest.Name == name {
+			continue
+		}
+		inst, err := s.installRepo.FindByName(p.Manifest.Name)
+		if err != nil || inst == nil || inst.Status != domain.StatusEnabled {
+			continue
+		}
+		enabledPlugins[p.Manifest.Name] = p.Manifest
+	}
+
+	// 1) 대상 플러그인의 Conflicts에 활성 플러그인이 있는지
+	for _, c := range targetInfo.Manifest.Conflicts {
+		if _, ok := enabledPlugins[c]; ok {
+			return fmt.Errorf("충돌: %s은(는) 활성 플러그인 %s과(와) 충돌합니다", name, c)
 		}
 	}
+
+	// 2) 활성 플러그인의 Conflicts에 대상 플러그인이 있는지 (양방향)
+	for epName, epManifest := range enabledPlugins {
+		for _, c := range epManifest.Conflicts {
+			if c == name {
+				return fmt.Errorf("충돌: 활성 플러그인 %s이(가) %s과(와) 충돌을 선언했습니다", epName, name)
+			}
+		}
+	}
+
 	return nil
 }
 

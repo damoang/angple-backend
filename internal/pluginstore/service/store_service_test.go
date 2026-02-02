@@ -189,6 +189,65 @@ func TestConflictCheck(t *testing.T) {
 	}
 }
 
+func TestConflictBidirectional(t *testing.T) {
+	db := setupTestDB(t)
+	installRepo := repository.NewInstallationRepository(db)
+	eventRepo := repository.NewEventRepository(db)
+	settingRepo := repository.NewSettingRepository(db)
+
+	catalogSvc := NewCatalogService(installRepo)
+
+	// plugin-x에서 plugin-y를 충돌로 선언하지 않았지만
+	// plugin-y에서 plugin-x를 충돌로 선언 → plugin-x 활성화 시에도 차단되어야 함
+	pluginX := &plugin.PluginManifest{Name: "plugin-x", Version: "1.0.0"}
+	pluginY := &plugin.PluginManifest{Name: "plugin-y", Version: "1.0.0", Conflicts: []string{"plugin-x"}}
+	catalogSvc.RegisterManifest(pluginX)
+	catalogSvc.RegisterManifest(pluginY)
+
+	logger := plugin.NewDefaultLogger("test")
+	storeSvc := NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, logger)
+
+	manager := plugin.NewManager("", db, nil, logger, nil, nil)
+	manager.RegisterBuiltIn("plugin-x", &mockPlugin{name: "plugin-x"}, pluginX)
+	manager.RegisterBuiltIn("plugin-y", &mockPlugin{name: "plugin-y"}, pluginY)
+
+	// plugin-y 먼저 설치 (활성)
+	_ = storeSvc.Install("plugin-y", "admin", manager)
+
+	// plugin-x 설치 시도 → plugin-y가 plugin-x를 충돌로 선언했으므로 차단
+	err := storeSvc.Install("plugin-x", "admin", manager)
+	if err == nil {
+		t.Fatal("expected conflict error from bidirectional check")
+	}
+}
+
+func TestNoConflict(t *testing.T) {
+	db := setupTestDB(t)
+	installRepo := repository.NewInstallationRepository(db)
+	eventRepo := repository.NewEventRepository(db)
+	settingRepo := repository.NewSettingRepository(db)
+
+	catalogSvc := NewCatalogService(installRepo)
+
+	pluginA := &plugin.PluginManifest{Name: "plugin-a", Version: "1.0.0"}
+	pluginC := &plugin.PluginManifest{Name: "plugin-c", Version: "1.0.0"}
+	catalogSvc.RegisterManifest(pluginA)
+	catalogSvc.RegisterManifest(pluginC)
+
+	logger := plugin.NewDefaultLogger("test")
+	storeSvc := NewStoreService(installRepo, eventRepo, settingRepo, catalogSvc, logger)
+
+	manager := plugin.NewManager("", db, nil, logger, nil, nil)
+	manager.RegisterBuiltIn("plugin-a", &mockPlugin{name: "plugin-a"}, pluginA)
+	manager.RegisterBuiltIn("plugin-c", &mockPlugin{name: "plugin-c"}, pluginC)
+
+	_ = storeSvc.Install("plugin-a", "admin", manager)
+	err := storeSvc.Install("plugin-c", "admin", manager)
+	if err != nil {
+		t.Fatalf("expected no conflict, got: %v", err)
+	}
+}
+
 func TestDisableBlockedByDependency(t *testing.T) {
 	db := setupTestDB(t)
 	installRepo := repository.NewInstallationRepository(db)
