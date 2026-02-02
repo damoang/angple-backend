@@ -219,6 +219,77 @@ func (s *StoreService) BootEnabledPlugins(manager *plugin.Manager) error {
 	return nil
 }
 
+// DashboardData 대시보드 응답 구조
+type DashboardData struct {
+	Total        int                   `json:"total"`
+	Installed    int                   `json:"installed"`
+	Enabled      int                   `json:"enabled"`
+	Disabled     int                   `json:"disabled"`
+	Error        int                   `json:"error"`
+	Plugins      []DashboardPlugin     `json:"plugins"`
+	RecentEvents []domain.PluginEvent  `json:"recent_events"`
+	Health       []plugin.PluginHealth `json:"health"`
+}
+
+// DashboardPlugin 대시보드 플러그인 요약
+type DashboardPlugin struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Title   string `json:"title"`
+	Status  string `json:"status"` // not_installed, enabled, disabled, error
+}
+
+// GetDashboard 플러그인 대시보드 통계
+func (s *StoreService) GetDashboard(manager *plugin.Manager) (*DashboardData, error) {
+	// 카탈로그에서 전체 플러그인
+	allPlugins := manager.GetAllPlugins()
+
+	// 설치 상태 조회
+	installations, _ := s.installRepo.FindAll()
+	installMap := make(map[string]*domain.PluginInstallation, len(installations))
+	for i := range installations {
+		installMap[installations[i].PluginName] = &installations[i]
+	}
+
+	dash := &DashboardData{
+		Total:   len(allPlugins),
+		Plugins: make([]DashboardPlugin, 0, len(allPlugins)),
+	}
+
+	for _, p := range allPlugins {
+		if p.Manifest == nil {
+			continue
+		}
+		dp := DashboardPlugin{
+			Name:    p.Manifest.Name,
+			Version: p.Manifest.Version,
+			Title:   p.Manifest.Title,
+			Status:  "not_installed",
+		}
+		if inst, ok := installMap[p.Manifest.Name]; ok {
+			dp.Status = inst.Status
+			dash.Installed++
+			switch inst.Status {
+			case domain.StatusEnabled:
+				dash.Enabled++
+			case domain.StatusDisabled:
+				dash.Disabled++
+			case domain.StatusError:
+				dash.Error++
+			}
+		}
+		dash.Plugins = append(dash.Plugins, dp)
+	}
+
+	// 최근 이벤트 (전체, 10건)
+	dash.RecentEvents, _ = s.eventRepo.ListRecent(10)
+
+	// 헬스 체크
+	dash.Health = manager.CheckAllHealth()
+
+	return dash, nil
+}
+
 // GetInstallation 설치 정보 조회
 func (s *StoreService) GetInstallation(name string) (*domain.PluginInstallation, error) {
 	return s.installRepo.FindByName(name)

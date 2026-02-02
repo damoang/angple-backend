@@ -166,6 +166,19 @@ func (h *StoreHandler) HealthCheckSingle(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
+// Dashboard 플러그인 대시보드
+// GET /api/v2/admin/plugins/dashboard
+func (h *StoreHandler) Dashboard(c *gin.Context) {
+	data, err := h.storeSvc.GetDashboard(h.manager)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{"code": "DASHBOARD_ERROR", "message": err.Error()},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": data})
+}
+
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
 	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴

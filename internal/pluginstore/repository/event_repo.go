@@ -20,6 +20,16 @@ func (r *EventRepository) Create(event *domain.PluginEvent) error {
 	return r.db.Create(event).Error
 }
 
+// ListRecent 전체 최근 이벤트 조회
+func (r *EventRepository) ListRecent(limit int) ([]domain.PluginEvent, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	var list []domain.PluginEvent
+	err := r.db.Order("created_at DESC").Limit(limit).Find(&list).Error
+	return list, err
+}
+
 // ListByPlugin 플러그인별 이벤트 조회 (최신순, 기본 50개)
 func (r *EventRepository) ListByPlugin(pluginName string, limit int) ([]domain.PluginEvent, error) {
 	if limit <= 0 {
