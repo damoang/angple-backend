@@ -1,6 +1,6 @@
 # ANGPLE Backend — 프로젝트 계획서
 
-> 최종 수정: 2026-01-31 | 버전: v1.0
+> 최종 수정: 2026-02-02 | 버전: v1.1
 
 ---
 
@@ -21,20 +21,24 @@
 
 ## 2. 현재 상태 요약
 
-- **구현 완료**: 15/81 API (약 18.5%)
+- **구현 완료**: 28/81 API (약 34.6%) — Phase 1 완료
 - **아키텍처**: Clean Architecture (Handler → Service → Repository) 확립
-- **플러그인 시스템**: 스펙 완성, 기본 구현 완료
+- **플러그인 시스템**: 스펙 완성, 기본 구현 완료, Hook 연동 완료
 - **Commerce 플러그인**: 완료
-- **인증**: JWT + 레거시 SSO (damoang_jwt) 동작
+- **인증**: JWT + 레거시 SSO (damoang_jwt) + 회원가입/탈퇴 동작
 - **CI/CD**: GitHub Actions + GHCR + AWS EC2 배포 파이프라인 구축
 
-### 완료된 API (15개)
+### 완료된 API (28개)
 
 | 영역 | API | 상태 |
 |------|-----|------|
-| 인증 | 로그인, 토큰 재발급, 프로필 조회 | ✅ |
+| 인증 | 로그인, 토큰 재발급, 프로필 조회, 회원가입, 로그아웃 | ✅ |
 | 게시글 | 목록, 검색, 상세, 작성, 수정, 삭제 | ✅ |
 | 댓글 | 목록, 상세, 작성, 수정, 삭제 | ✅ |
+| 추천/비추천 | 게시글 추천/취소, 비추천/취소, 댓글 추천/취소 | ✅ |
+| 회원 프로필 | 프로필 조회, 작성글, 작성댓글, 포인트 내역 | ✅ |
+| 회원 탈퇴 | DELETE /members/me | ✅ |
+| 파일 | 에디터 이미지 업로드, 첨부파일 업로드, 다운로드 | ✅ |
 | 시스템 | Health Check | ✅ |
 
 ---
@@ -45,28 +49,28 @@
 
 > 상세 API 목록: [`docs/api-roadmap.csv`](docs/api-roadmap.csv) 참조
 
-#### Phase 1: 추천/비추천, 회원, 파일 업로드 (16개 API)
+#### Phase 1: 추천/비추천, 회원, 파일 업로드 (13개 API) ✅ 완료 (2026-02-02)
 
-| API | Method | Endpoint | 비고 |
-|-----|--------|----------|------|
-| 게시글 추천 | POST | `/boards/{id}/posts/{id}/recommend` | 토글 방식 |
-| 게시글 추천 취소 | DELETE | `/boards/{id}/posts/{id}/recommend` | |
-| 게시글 비추천 | POST | `/boards/{id}/posts/{id}/downvote` | 관리자 설정 따름 |
-| 게시글 비추천 취소 | DELETE | `/boards/{id}/posts/{id}/downvote` | |
-| 댓글 추천 | POST | `.../comments/{id}/recommend` | |
-| 댓글 추천 취소 | DELETE | `.../comments/{id}/recommend` | |
-| 회원 프로필 | GET | `/members/{user_id}` | 사이드바 표시용 |
-| 회원 작성글 | GET | `/members/{user_id}/posts` | 최근 5개 |
-| 회원 작성댓글 | GET | `/members/{user_id}/comments` | 최근 5개 |
-| 포인트 내역 | GET | `/members/{user_id}/points/history` | 본인만 |
-| 회원가입 | POST | `/auth/register` | 포인트 지급 |
-| 소셜 로그인 | POST | `/auth/social/{provider}` | 6개 프로바이더 |
-| 회원 탈퇴 | DELETE | `/members/me` | 데이터 보존 정책 |
-| 에디터 이미지 업로드 | POST | `/upload/editor` | webp 변환 |
-| 첨부파일 업로드 | POST | `/upload/attachment` | 포인트 체크 |
-| 파일 다운로드 | GET | `/files/{file_id}/download` | 포인트 차감 |
+| API | Method | Endpoint | 상태 | PR |
+|-----|--------|----------|------|-----|
+| 게시글 추천 | POST | `/boards/{id}/posts/{id}/recommend` | ✅ | 기존 구현 |
+| 게시글 추천 취소 | DELETE | `/boards/{id}/posts/{id}/recommend` | ✅ | 기존 구현 |
+| 게시글 비추천 | POST | `/boards/{id}/posts/{id}/downvote` | ✅ | 기존 구현 |
+| 게시글 비추천 취소 | DELETE | `/boards/{id}/posts/{id}/downvote` | ✅ | 기존 구현 |
+| 댓글 추천 | POST | `.../comments/{id}/recommend` | ✅ | 기존 구현 |
+| 댓글 추천 취소 | DELETE | `.../comments/{id}/recommend` | ✅ | 기존 구현 |
+| 회원 프로필 | GET | `/members/{id}/profile` | ✅ | #74 |
+| 회원 작성글 | GET | `/members/{id}/posts` | ✅ | #74 |
+| 회원 작성댓글 | GET | `/members/{id}/comments` | ✅ | #74 |
+| 포인트 내역 | GET | `/members/{id}/points/history` | ✅ | #74 |
+| 회원가입 | POST | `/auth/register` | ✅ | #75 |
+| 회원 탈퇴 | DELETE | `/members/me` | ✅ | #75 |
+| 에디터 이미지 업로드 | POST | `/upload/editor` | ✅ | #76 |
+| 첨부파일 업로드 | POST | `/upload/attachment` | ✅ | #76 |
+| 파일 다운로드 | GET | `/files/{board_id}/{wr_id}/{file_no}/download` | ✅ | #76 |
 
-**완료 기준**: 추천/비추천 토글, 회원가입 플로우, 파일 업/다운로드 정상 동작
+**미구현 (Phase 1에서 제외)**:
+- 소셜 로그인 (`/auth/social/{provider}`) → Phase 2 이후로 이동 (OAuth 프로바이더 연동 필요)
 
 #### Phase 2: 스크랩, 메모, 차단, 쪽지 (15개 API)
 
