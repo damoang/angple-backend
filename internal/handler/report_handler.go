@@ -216,6 +216,75 @@ func (h *ReportHandler) ProcessReport(c *gin.Context) {
 	})
 }
 
+// SubmitReport handles POST /api/v2/reports
+// @Summary 신고 접수
+// @Tags reports
+// @Accept json
+// @Produce json
+// @Param request body domain.SubmitReportRequest true "신고 내용"
+// @Success 200 {object} common.APIResponse
+// @Router /reports [post]
+func (h *ReportHandler) SubmitReport(c *gin.Context) {
+	userID := middleware.GetDamoangUserID(c)
+	if userID == "" {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+
+	var req domain.SubmitReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		return
+	}
+
+	report, err := h.service.Create(userID, req.TargetID, req.Table, req.PostID, req.Reason)
+	if err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: domain.ReportListResponse{
+			ID:         report.ID,
+			Table:      report.Table,
+			Parent:     report.Parent,
+			ReporterID: report.ReporterID,
+			TargetID:   report.TargetID,
+			Reason:     report.Reason,
+			Status:     report.Status(),
+			CreatedAt:  report.CreatedAt.Format("2006-01-02 15:04:05"),
+		},
+	})
+}
+
+// MyReports handles GET /api/v2/reports/mine
+// @Summary 내 신고 내역
+// @Tags reports
+// @Produce json
+// @Param limit query int false "조회 개수 (기본 20)"
+// @Success 200 {object} common.APIResponse{data=[]domain.ReportListResponse}
+// @Router /reports/mine [get]
+func (h *ReportHandler) MyReports(c *gin.Context) {
+	userID := middleware.GetDamoangUserID(c)
+	if userID == "" {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 1 {
+		limit = 20
+	}
+
+	reports, err := h.service.GetMyReports(userID, limit)
+	if err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "신고 내역 조회 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{Data: reports})
+}
+
 // GetStats handles GET /api/v2/reports/stats
 // @Summary 신고 통계 조회
 // @Description 신고 통계를 조회합니다 (관리자 전용)

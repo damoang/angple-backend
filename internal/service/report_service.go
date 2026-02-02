@@ -170,6 +170,34 @@ func (s *ReportService) Create(reporterID, targetID, table string, parent int, r
 	return report, nil
 }
 
+// GetMyReports returns reports submitted by the given user
+func (s *ReportService) GetMyReports(userID string, limit int) ([]domain.ReportListResponse, error) {
+	if limit < 1 || limit > 50 {
+		limit = 20
+	}
+
+	reports, err := s.repo.GetByReporter(userID, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	responses := make([]domain.ReportListResponse, len(reports))
+	for i, report := range reports {
+		responses[i] = domain.ReportListResponse{
+			ID:         report.ID,
+			Table:      report.Table,
+			Parent:     report.Parent,
+			ReporterID: report.ReporterID,
+			TargetID:   report.TargetID,
+			Reason:     report.Reason,
+			Status:     report.Status(),
+			CreatedAt:  report.CreatedAt.Format("2006-01-02 15:04:05"),
+		}
+	}
+
+	return responses, nil
+}
+
 // GetStats retrieves report statistics
 func (s *ReportService) GetStats() (map[string]int64, error) {
 	stats := make(map[string]int64)
