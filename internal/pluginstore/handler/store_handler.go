@@ -151,6 +151,21 @@ func (h *StoreHandler) GetEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": events})
 }
 
+// HealthCheck 플러그인 헬스 체크
+// GET /api/v2/admin/plugins/health
+func (h *StoreHandler) HealthCheck(c *gin.Context) {
+	results := h.manager.CheckAllHealth()
+	c.JSON(http.StatusOK, gin.H{"data": results})
+}
+
+// HealthCheckSingle 단일 플러그인 헬스 체크
+// GET /api/v2/admin/plugins/:name/health
+func (h *StoreHandler) HealthCheckSingle(c *gin.Context) {
+	name := c.Param("name")
+	result := h.manager.CheckHealth(name)
+	c.JSON(http.StatusOK, gin.H{"data": result})
+}
+
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
 	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴

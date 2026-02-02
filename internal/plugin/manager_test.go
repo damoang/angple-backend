@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -152,5 +153,92 @@ func TestManager_EnableNonExistent(t *testing.T) {
 	err := manager.Enable("non-existent")
 	if err == nil {
 		t.Error("expected error for non-existent plugin")
+	}
+}
+
+// HealthyPlugin implements HealthCheckable
+type HealthyPlugin struct {
+	MockPlugin
+}
+
+func (h *HealthyPlugin) HealthCheck() error { return nil }
+
+// UnhealthyPlugin implements HealthCheckable with error
+type UnhealthyPlugin struct {
+	MockPlugin
+}
+
+func (u *UnhealthyPlugin) HealthCheck() error {
+	return fmt.Errorf("database connection lost")
+}
+
+func TestCheckHealth_Healthy(t *testing.T) {
+	logger := NewDefaultLogger("test")
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil, nil)
+	router := gin.New()
+	manager.GetRegistry().SetRouter(router)
+
+	p := &HealthyPlugin{MockPlugin{name: "healthy-plugin"}}
+	manifest := &PluginManifest{Name: "healthy-plugin", Version: "1.0.0", Requires: Requires{Angple: ">=1.0.0"}}
+	_ = manager.RegisterBuiltIn("healthy-plugin", p, manifest)
+	_ = manager.Enable("healthy-plugin")
+
+	result := manager.CheckHealth("healthy-plugin")
+	if result.Status != "healthy" {
+		t.Errorf("expected healthy, got %s", result.Status)
+	}
+}
+
+func TestCheckHealth_Unhealthy(t *testing.T) {
+	logger := NewDefaultLogger("test")
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil, nil)
+	router := gin.New()
+	manager.GetRegistry().SetRouter(router)
+
+	p := &UnhealthyPlugin{MockPlugin{name: "bad-plugin"}}
+	manifest := &PluginManifest{Name: "bad-plugin", Version: "1.0.0", Requires: Requires{Angple: ">=1.0.0"}}
+	_ = manager.RegisterBuiltIn("bad-plugin", p, manifest)
+	_ = manager.Enable("bad-plugin")
+
+	result := manager.CheckHealth("bad-plugin")
+	if result.Status != "unhealthy" {
+		t.Errorf("expected unhealthy, got %s", result.Status)
+	}
+	if result.Message != "database connection lost" {
+		t.Errorf("unexpected message: %s", result.Message)
+	}
+}
+
+func TestCheckHealth_Disabled(t *testing.T) {
+	logger := NewDefaultLogger("test")
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil, nil)
+
+	manifest := &PluginManifest{Name: "disabled-plugin", Version: "1.0.0"}
+	_ = manager.RegisterBuiltIn("disabled-plugin", &MockPlugin{name: "disabled-plugin"}, manifest)
+
+	result := manager.CheckHealth("disabled-plugin")
+	if result.Status != "disabled" {
+		t.Errorf("expected disabled, got %s", result.Status)
+	}
+}
+
+func TestCheckAllHealth(t *testing.T) {
+	logger := NewDefaultLogger("test")
+	manager := NewManager("/tmp/plugins", nil, nil, logger, nil, nil)
+	router := gin.New()
+	manager.GetRegistry().SetRouter(router)
+
+	p1 := &HealthyPlugin{MockPlugin{name: "p1"}}
+	m1 := &PluginManifest{Name: "p1", Version: "1.0.0", Requires: Requires{Angple: ">=1.0.0"}}
+	_ = manager.RegisterBuiltIn("p1", p1, m1)
+	_ = manager.Enable("p1")
+
+	p2 := &MockPlugin{name: "p2"}
+	m2 := &PluginManifest{Name: "p2", Version: "1.0.0"}
+	_ = manager.RegisterBuiltIn("p2", p2, m2)
+
+	results := manager.CheckAllHealth()
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
 	}
 }
