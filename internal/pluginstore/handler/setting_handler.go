@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/pluginstore/service"
 	"github.com/gin-gonic/gin"
 )
@@ -11,11 +12,12 @@ import (
 // SettingHandler 플러그인 설정 핸들러
 type SettingHandler struct {
 	settingSvc *service.SettingService
+	reloader   plugin.PluginReloader
 }
 
 // NewSettingHandler 생성자
-func NewSettingHandler(settingSvc *service.SettingService) *SettingHandler {
-	return &SettingHandler{settingSvc: settingSvc}
+func NewSettingHandler(settingSvc *service.SettingService, reloader plugin.PluginReloader) *SettingHandler {
+	return &SettingHandler{settingSvc: settingSvc, reloader: reloader}
 }
 
 // GetSettings 플러그인 설정 조회
@@ -59,6 +61,16 @@ func (h *SettingHandler) SaveSettings(c *gin.Context) {
 			"error": gin.H{"code": "SAVE_ERROR", "message": err.Error()},
 		})
 		return
+	}
+
+	// 설정 변경 후 플러그인 재초기화
+	if h.reloader != nil {
+		if err := h.reloader.ReloadPlugin(name); err != nil {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{
+				"message": "설정이 저장되었습니다 (재시작 실패: " + err.Error() + ")",
+			}})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "설정이 저장되었습니다"}})

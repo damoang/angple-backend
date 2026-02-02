@@ -179,6 +179,11 @@ type PermissionSyncer interface {
 	CheckPermission(pluginName, permissionID string, userLevel int) (bool, error)
 }
 
+// PluginReloader 설정 변경 시 플러그인 재초기화를 위한 인터페이스
+type PluginReloader interface {
+	ReloadPlugin(name string) error
+}
+
 // HookAware 선택적 인터페이스 - Hook을 등록하고 싶은 플러그인이 구현
 type HookAware interface {
 	RegisterHooks(hm *HookManager)

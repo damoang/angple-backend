@@ -216,6 +216,34 @@ func (m *Manager) Disable(name string) error {
 	return nil
 }
 
+// ReloadPlugin 플러그인 재초기화 (설정 변경 후 호출)
+func (m *Manager) ReloadPlugin(name string) error {
+	m.mu.RLock()
+	info, exists := m.plugins[name]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("plugin %s not found", name)
+	}
+
+	if info.Status != StatusEnabled {
+		return nil // 비활성 상태면 재시작 불필요
+	}
+
+	m.logger.Info("Reloading plugin: %s", name)
+
+	if err := m.Disable(name); err != nil {
+		return fmt.Errorf("failed to disable plugin for reload: %w", err)
+	}
+
+	if err := m.Enable(name); err != nil {
+		return fmt.Errorf("failed to re-enable plugin after reload: %w", err)
+	}
+
+	m.logger.Info("Plugin reloaded: %s", name)
+	return nil
+}
+
 // GetPlugin 플러그인 정보 조회
 func (m *Manager) GetPlugin(name string) (*PluginInfo, bool) {
 	m.mu.RLock()
