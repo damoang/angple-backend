@@ -35,126 +35,112 @@ func NewV2Handler(
 
 // === Users ===
 
-// GetUser handles GET /api/v2/users/:id
+// GetUser handles GET /api/v2-next/users/:id
 func (h *V2Handler) GetUser(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 사용자 ID", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 사용자 ID", err)
 		return
 	}
 	user, err := h.userRepo.FindByID(id)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{
-		"id": user.ID, "username": user.Username, "nickname": user.Nickname,
-		"level": user.Level, "status": user.Status, "avatar_url": user.AvatarURL,
-		"bio": user.Bio, "created_at": user.CreatedAt,
-	}})
+	common.V2Success(c, user)
 }
 
-// GetUserByUsername handles GET /api/v2/users/username/:username
+// GetUserByUsername handles GET /api/v2-next/users/username/:username
 func (h *V2Handler) GetUserByUsername(c *gin.Context) {
 	username := c.Param("username")
 	user, err := h.userRepo.FindByUsername(username)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{
-		"id": user.ID, "username": user.Username, "nickname": user.Nickname,
-		"level": user.Level, "avatar_url": user.AvatarURL, "bio": user.Bio,
-		"created_at": user.CreatedAt,
-	}})
+	common.V2Success(c, user)
 }
 
-// ListUsers handles GET /api/v2/users
+// ListUsers handles GET /api/v2-next/users
 func (h *V2Handler) ListUsers(c *gin.Context) {
-	page, limit := parsePagination(c)
+	page, perPage := parsePagination(c)
 	keyword := c.Query("keyword")
 
-	users, total, err := h.userRepo.FindAll(page, limit, keyword)
+	users, total, err := h.userRepo.FindAll(page, perPage, keyword)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "사용자 목록 조회 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "사용자 목록 조회 실패", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{
-		Data: users,
-		Meta: &common.Meta{Page: page, Limit: limit, Total: total},
-	})
+	common.V2SuccessWithMeta(c, users, common.NewV2Meta(page, perPage, total))
 }
 
 // === Boards ===
 
-// ListBoards handles GET /api/v2/boards
+// ListBoards handles GET /api/v2-next/boards
 func (h *V2Handler) ListBoards(c *gin.Context) {
 	boards, err := h.boardRepo.FindAll()
 	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "게시판 목록 조회 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시판 목록 조회 실패", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{Data: boards})
+	common.V2Success(c, boards)
 }
 
-// GetBoard handles GET /api/v2/boards/:slug
+// GetBoard handles GET /api/v2-next/boards/:slug
 func (h *V2Handler) GetBoard(c *gin.Context) {
 	slug := c.Param("slug")
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{Data: board})
+	common.V2Success(c, board)
 }
 
 // === Posts ===
 
-// ListPosts handles GET /api/v2/boards/:slug/posts
+// ListPosts handles GET /api/v2-next/boards/:slug/posts
 func (h *V2Handler) ListPosts(c *gin.Context) {
 	slug := c.Param("slug")
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
 		return
 	}
 
-	page, limit := parsePagination(c)
-	posts, total, err := h.postRepo.FindByBoard(board.ID, page, limit)
+	page, perPage := parsePagination(c)
+	posts, total, err := h.postRepo.FindByBoard(board.ID, page, perPage)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "게시글 목록 조회 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 목록 조회 실패", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{
-		Data: posts,
-		Meta: &common.Meta{Page: page, Limit: limit, Total: total},
-	})
+	common.V2SuccessWithMeta(c, posts, common.NewV2Meta(page, perPage, total))
 }
 
-// GetPost handles GET /api/v2/boards/:slug/posts/:id
+// GetPost handles GET /api/v2-next/boards/:slug/posts/:id
 func (h *V2Handler) GetPost(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
 		return
 	}
 
 	post, err := h.postRepo.FindByID(id)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
 		return
 	}
 
 	_ = h.postRepo.IncrementViewCount(id) //nolint:errcheck
-	c.JSON(http.StatusOK, common.APIResponse{Data: post})
+	common.V2Success(c, post)
 }
 
-// CreatePost handles POST /api/v2/boards/:slug/posts
+// CreatePost handles POST /api/v2-next/boards/:slug/posts
 func (h *V2Handler) CreatePost(c *gin.Context) {
 	slug := c.Param("slug")
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
 		return
 	}
 
@@ -163,7 +149,7 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		Content string `json:"content" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
 		return
 	}
 
@@ -178,23 +164,23 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		Status:  "published",
 	}
 	if err := h.postRepo.Create(post); err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "게시글 작성 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 작성 실패", err)
 		return
 	}
-	c.JSON(http.StatusCreated, common.APIResponse{Data: post})
+	common.V2Created(c, post)
 }
 
-// UpdatePost handles PUT /api/v2/boards/:slug/posts/:id
+// UpdatePost handles PUT /api/v2-next/boards/:slug/posts/:id
 func (h *V2Handler) UpdatePost(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
 		return
 	}
 
 	post, err := h.postRepo.FindByID(id)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
 		return
 	}
 
@@ -203,7 +189,7 @@ func (h *V2Handler) UpdatePost(c *gin.Context) {
 		Content string `json:"content"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
 		return
 	}
 
@@ -214,53 +200,50 @@ func (h *V2Handler) UpdatePost(c *gin.Context) {
 		post.Content = req.Content
 	}
 	if err := h.postRepo.Update(post); err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "게시글 수정 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 수정 실패", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{Data: post})
+	common.V2Success(c, post)
 }
 
-// DeletePost handles DELETE /api/v2/boards/:slug/posts/:id
+// DeletePost handles DELETE /api/v2-next/boards/:slug/posts/:id
 func (h *V2Handler) DeletePost(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
 		return
 	}
 	if err := h.postRepo.Delete(id); err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "게시글 삭제 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 삭제 실패", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{"message": "삭제 완료"}})
+	common.V2Success(c, gin.H{"message": "삭제 완료"})
 }
 
 // === Comments ===
 
-// ListComments handles GET /api/v2/boards/:slug/posts/:id/comments
+// ListComments handles GET /api/v2-next/boards/:slug/posts/:id/comments
 func (h *V2Handler) ListComments(c *gin.Context) {
 	postID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
 		return
 	}
 
-	page, limit := parsePagination(c)
-	comments, total, err := h.commentRepo.FindByPost(postID, page, limit)
+	page, perPage := parsePagination(c)
+	comments, total, err := h.commentRepo.FindByPost(postID, page, perPage)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "댓글 목록 조회 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "댓글 목록 조회 실패", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{
-		Data: comments,
-		Meta: &common.Meta{Page: page, Limit: limit, Total: total},
-	})
+	common.V2SuccessWithMeta(c, comments, common.NewV2Meta(page, perPage, total))
 }
 
-// CreateComment handles POST /api/v2/boards/:slug/posts/:id/comments
+// CreateComment handles POST /api/v2-next/boards/:slug/posts/:id/comments
 func (h *V2Handler) CreateComment(c *gin.Context) {
 	postID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
 		return
 	}
 
@@ -269,7 +252,7 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		ParentID *uint64 `json:"parent_id,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
 		return
 	}
 
@@ -288,24 +271,24 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 	}
 
 	if err := h.commentRepo.Create(comment); err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "댓글 작성 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "댓글 작성 실패", err)
 		return
 	}
-	c.JSON(http.StatusCreated, common.APIResponse{Data: comment})
+	common.V2Created(c, comment)
 }
 
-// DeleteComment handles DELETE /api/v2/boards/:slug/posts/:post_id/comments/:id
+// DeleteComment handles DELETE /api/v2-next/boards/:slug/posts/:post_id/comments/:comment_id
 func (h *V2Handler) DeleteComment(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("comment_id"), 10, 64)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 댓글 ID", err)
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 댓글 ID", err)
 		return
 	}
 	if err := h.commentRepo.Delete(id); err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "댓글 삭제 실패", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "댓글 삭제 실패", err)
 		return
 	}
-	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{"message": "삭제 완료"}})
+	common.V2Success(c, gin.H{"message": "삭제 완료"})
 }
 
 // === Helpers ===
@@ -315,9 +298,9 @@ func parsePagination(c *gin.Context) (int, int) {
 	if p, err := strconv.Atoi(c.Query("page")); err == nil && p > 0 {
 		page = p
 	}
-	limit := 20
+	perPage := 20
 	if l, err := strconv.Atoi(c.Query("per_page")); err == nil && l > 0 && l <= 100 {
-		limit = l
+		perPage = l
 	}
-	return page, limit
+	return page, perPage
 }
