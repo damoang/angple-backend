@@ -13,6 +13,7 @@ type Registry struct {
 	pluginRouters    map[string]gin.IRouter
 	registeredAPIs   map[string][]RegisteredRoute
 	routesRegistered map[string]bool // Gin 라우트는 한번 등록하면 제거 불가
+	jwtVerifier      JWTVerifier
 	mu               sync.RWMutex
 }
 
@@ -40,6 +41,13 @@ func (r *Registry) SetRouter(router gin.IRouter) {
 	r.router = router
 }
 
+// SetJWTVerifier JWT 검증기 설정
+func (r *Registry) SetJWTVerifier(verifier JWTVerifier) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.jwtVerifier = verifier
+}
+
 // GetPluginRouter 플러그인용 라우터 그룹 반환
 // 경로: /api/plugins/{plugin-name}
 func (r *Registry) GetPluginRouter(pluginName string) gin.IRouter {
@@ -58,6 +66,11 @@ func (r *Registry) GetPluginRouter(pluginName string) gin.IRouter {
 	path := fmt.Sprintf("/api/plugins/%s", pluginName)
 	pluginRouter := r.router.Group(path)
 	r.pluginRouters[pluginName] = pluginRouter
+
+	// JWT 검증기가 설정되어 있으면 인증 미들웨어 적용
+	if r.jwtVerifier != nil {
+		pluginRouter.Use(r.createAuthMiddleware(pluginName))
+	}
 
 	return pluginRouter
 }
@@ -130,6 +143,31 @@ func (r *Registry) GetPluginRoutes(pluginName string) []RegisteredRoute {
 		return append([]RegisteredRoute{}, routes...)
 	}
 	return nil
+}
+
+// createAuthMiddleware 매니페스트 기반 인증 미들웨어 생성
+func (r *Registry) createAuthMiddleware(pluginName string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 등록된 라우트에서 auth 타입 조회
+		r.mu.RLock()
+		routes := r.registeredAPIs[pluginName]
+		r.mu.RUnlock()
+
+		// 현재 요청의 상대 경로에서 auth 타입 결정
+		authType := "none" // 기본값: 인증 불필요
+		requestPath := c.Request.URL.Path
+		prefix := fmt.Sprintf("/api/plugins/%s", pluginName)
+
+		for _, route := range routes {
+			fullPath := prefix + route.Path
+			if requestPath == fullPath && c.Request.Method == route.Method {
+				authType = route.Auth
+				break
+			}
+		}
+
+		PluginAuthMiddleware(authType, r.jwtVerifier)(c)
+	}
 }
 
 // HasPlugin 플러그인 등록 여부 확인
