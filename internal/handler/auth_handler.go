@@ -148,6 +148,65 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	})
 }
 
+// Register handles POST /api/v2/auth/register
+// @Summary 회원가입
+// @Description 새로운 회원 계정을 생성합니다
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body service.RegisterRequest true "회원가입 정보"
+// @Success 201 {object} common.APIResponse{data=domain.MemberResponse}
+// @Failure 400 {object} common.APIResponse
+// @Failure 409 {object} common.APIResponse
+// @Router /auth/register [post]
+func (h *AuthHandler) Register(c *gin.Context) {
+	var req service.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		return
+	}
+
+	member, err := h.service.Register(&req)
+	if err != nil {
+		if errors.Is(err, common.ErrUserAlreadyExists) {
+			common.ErrorResponse(c, http.StatusConflict, "이미 존재하는 회원입니다", err)
+			return
+		}
+		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, common.APIResponse{Data: member})
+}
+
+// Withdraw handles DELETE /api/v2/members/me
+// @Summary 회원 탈퇴
+// @Description 현재 로그인한 회원의 탈퇴를 처리합니다 (데이터 보존)
+// @Tags auth
+// @Produce json
+// @Success 200 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Router /members/me [delete]
+func (h *AuthHandler) Withdraw(c *gin.Context) {
+	userID := middleware.GetDamoangUserID(c)
+	if userID == "" {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+
+	if err := h.service.Withdraw(userID); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+
+	// 쿠키 삭제
+	h.clearRefreshTokenCookie(c)
+
+	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{
+		"message": "회원 탈퇴가 완료되었습니다",
+	}})
+}
+
 // setRefreshTokenCookie refreshToken을 httpOnly 쿠키로 설정
 func (h *AuthHandler) setRefreshTokenCookie(c *gin.Context, token string) {
 	secure := !h.config.IsDevelopment()

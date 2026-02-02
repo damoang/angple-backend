@@ -1,6 +1,9 @@
 package service
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/plugin"
@@ -9,10 +12,21 @@ import (
 	"github.com/damoang/angple-backend/pkg/jwt"
 )
 
+// RegisterRequest represents a registration request
+type RegisterRequest struct {
+	UserID   string `json:"user_id" binding:"required"`
+	Password string `json:"password" binding:"required"`
+	Name     string `json:"name" binding:"required"`
+	Nickname string `json:"nickname" binding:"required"`
+	Email    string `json:"email" binding:"required"`
+}
+
 // AuthService authentication business logic
 type AuthService interface {
 	Login(userID, password string) (*LoginResponse, error)
 	RefreshToken(refreshToken string) (*TokenPair, error)
+	Register(req *RegisterRequest) (*domain.MemberResponse, error)
+	Withdraw(userID string) error
 }
 
 type authService struct {
@@ -84,6 +98,72 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 		RefreshToken: refreshToken,
 		User:         member.ToResponse(),
 	}, nil
+}
+
+// Register creates a new member account
+func (s *authService) Register(req *RegisterRequest) (*domain.MemberResponse, error) {
+	// 중복 체크
+	exists, err := s.memberRepo.ExistsByUserID(req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, common.ErrUserAlreadyExists
+	}
+
+	exists, err = s.memberRepo.ExistsByEmail(req.Email)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, fmt.Errorf("이미 사용 중인 이메일입니다")
+	}
+
+	exists, err = s.memberRepo.ExistsByNickname(req.Nickname, "")
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, fmt.Errorf("이미 사용 중인 닉네임입니다")
+	}
+
+	// 비밀번호 해싱 (MySQL PASSWORD() 호환)
+	hashedPassword := auth.HashPassword(req.Password)
+
+	member := &domain.Member{
+		UserID:    req.UserID,
+		Password:  hashedPassword,
+		Name:      req.Name,
+		Nickname:  req.Nickname,
+		Email:     req.Email,
+		Level:     2, // 기본 회원 레벨
+		Point:     0,
+		CreatedAt: time.Now(),
+	}
+
+	if err := s.memberRepo.Create(member); err != nil {
+		return nil, err
+	}
+
+	return member.ToResponse(), nil
+}
+
+// Withdraw marks a member as withdrawn (data preserved)
+func (s *authService) Withdraw(userID string) error {
+	member, err := s.memberRepo.FindByUserID(userID)
+	if err != nil {
+		return common.ErrUserNotFound
+	}
+
+	if member.LeaveDate != "" {
+		return fmt.Errorf("이미 탈퇴한 회원입니다")
+	}
+
+	// 탈퇴일 기록 (데이터 보존, YYYYMMDD 형식)
+	leaveDate := time.Now().Format("20060102")
+	member.LeaveDate = leaveDate
+
+	return s.memberRepo.Update(member.ID, member)
 }
 
 // RefreshToken creates new access token from refresh token
