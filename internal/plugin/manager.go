@@ -2,6 +2,9 @@ package plugin
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -266,6 +269,18 @@ func (m *Manager) Shutdown() error {
 	return nil
 }
 
+// PluginMigrationRecord 마이그레이션 실행 이력 (GORM 모델)
+type PluginMigrationRecord struct {
+	ID         int64     `gorm:"primaryKey"`
+	PluginName string    `gorm:"size:100;uniqueIndex:uk_plugin_migration"`
+	Filename   string    `gorm:"size:255;uniqueIndex:uk_plugin_migration"`
+	ExecutedAt time.Time `gorm:"autoCreateTime"`
+}
+
+func (PluginMigrationRecord) TableName() string {
+	return "plugin_migrations"
+}
+
 // RunMigrations 플러그인 마이그레이션 실행
 func (m *Manager) RunMigrations(name string) error {
 	m.mu.RLock()
@@ -277,8 +292,11 @@ func (m *Manager) RunMigrations(name string) error {
 	}
 
 	if info.IsBuiltIn {
-		// 내장 플러그인은 별도 마이그레이션 디렉토리 사용
 		return m.runBuiltInMigrations(name)
+	}
+
+	if m.db == nil {
+		return fmt.Errorf("database not initialized")
 	}
 
 	files, err := m.loader.GetMigrationFiles(info.Path)
@@ -290,8 +308,48 @@ func (m *Manager) RunMigrations(name string) error {
 		return nil
 	}
 
-	// TODO: 마이그레이션 버전 추적 및 실행
-	m.logger.Info("Found %d migration files for plugin %s", len(files), name)
+	// 파일명 순서 정렬 (001_init.up.sql, 002_add_column.up.sql, ...)
+	sort.Strings(files)
+
+	// 이미 실행된 마이그레이션 조회
+	var executed []PluginMigrationRecord
+	m.db.Where("plugin_name = ?", name).Find(&executed)
+	executedMap := make(map[string]bool, len(executed))
+	for _, rec := range executed {
+		executedMap[rec.Filename] = true
+	}
+
+	// 미실행 마이그레이션 순서대로 실행
+	for _, filePath := range files {
+		filename := filepath.Base(filePath)
+
+		if executedMap[filename] {
+			continue // 이미 실행됨
+		}
+
+		cleanPath := filepath.Clean(filePath)
+		sql, err := os.ReadFile(cleanPath) // #nosec G304 -- path from plugin dir + glob, not user input
+		if err != nil {
+			return fmt.Errorf("마이그레이션 파일 읽기 실패 %s: %w", filename, err)
+		}
+
+		// SQL 실행
+		if err := m.db.Exec(string(sql)).Error; err != nil {
+			return fmt.Errorf("마이그레이션 실행 실패 %s: %w", filename, err)
+		}
+
+		// 실행 이력 기록
+		record := &PluginMigrationRecord{
+			PluginName: name,
+			Filename:   filename,
+		}
+		if err := m.db.Create(record).Error; err != nil {
+			return fmt.Errorf("마이그레이션 이력 기록 실패 %s: %w", filename, err)
+		}
+
+		m.logger.Info("마이그레이션 실행 완료: %s/%s", name, filename)
+	}
+
 	return nil
 }
 
