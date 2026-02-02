@@ -318,6 +318,7 @@ func main() {
 			adminPlugins.GET("", storeHandler.ListPlugins)
 			adminPlugins.GET("/dashboard", storeHandler.Dashboard)
 			adminPlugins.GET("/health", storeHandler.HealthCheck)
+			adminPlugins.GET("/schedules", storeHandler.ScheduledTasks)
 			adminPlugins.GET("/settings/export", settingHandler.ExportAllSettings)
 			adminPlugins.POST("/settings/import", settingHandler.ImportSettings)
 			adminPlugins.GET("/:name", storeHandler.GetPlugin)
@@ -333,6 +334,9 @@ func main() {
 			adminPlugins.PUT("/:name/permissions/:permId", permHandler.UpdatePermission)
 			adminPlugins.GET("/:name/health", storeHandler.HealthCheckSingle)
 		}
+
+		// 플러그인 스케줄러 시작
+		pluginManager.StartScheduler()
 
 		pkglogger.Info("Plugin Store initialized")
 	}
