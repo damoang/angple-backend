@@ -226,7 +226,9 @@ func migratePosts(db *gorm.DB, _ int) error {
 	return nil
 }
 
-func migrateComments(db *gorm.DB, _ int) error {
+// migratePerBoard iterates all boards and executes a SQL builder function per board.
+// sqlBuilder receives (boardID, tableName) and returns the SQL to execute.
+func migratePerBoard(db *gorm.DB, label string, sqlBuilder func(boardID, tableName string) string) error {
 	boardIDs, err := getBoardIDs(db)
 	if err != nil {
 		return err
@@ -239,8 +241,20 @@ func migrateComments(db *gorm.DB, _ int) error {
 			continue
 		}
 
-		// Two-step: first build a temp mapping of wr_parent -> v2_post.id
-		sql := fmt.Sprintf(`
+		result := db.Exec(sqlBuilder(boardID, tableName))
+		if result.Error != nil {
+			log.Printf("[migrate:%s] Warning: %s: %v", label, boardID, result.Error)
+			continue
+		}
+		totalRows += result.RowsAffected
+	}
+	log.Printf("[migrate:%s] Migrated %d rows", label, totalRows)
+	return nil
+}
+
+func migrateComments(db *gorm.DB, _ int) error {
+	return migratePerBoard(db, "comments", func(boardID, tableName string) string {
+		return fmt.Sprintf(`
 			INSERT IGNORE INTO v2_comments (post_id, user_id, content, depth, status, created_at, updated_at)
 			SELECT
 				p.id,
@@ -256,32 +270,12 @@ func migrateComments(db *gorm.DB, _ int) error {
 				AND p.created_at = (SELECT wr_datetime FROM %s WHERE wr_id = w.wr_parent AND wr_is_comment = 0 LIMIT 1)
 			WHERE w.wr_is_comment = 1
 		`, tableName, boardID, tableName, tableName)
-
-		result := db.Exec(sql)
-		if result.Error != nil {
-			log.Printf("[migrate:comments] Warning: %s: %v", tableName, result.Error)
-			continue
-		}
-		totalRows += result.RowsAffected
-	}
-	log.Printf("[migrate:comments] Migrated %d rows", totalRows)
-	return nil
+	})
 }
 
 func migrateFiles(db *gorm.DB, _ int) error {
-	boardIDs, err := getBoardIDs(db)
-	if err != nil {
-		return err
-	}
-
-	var totalRows int64
-	for _, boardID := range boardIDs {
-		tableName := fmt.Sprintf("g5_write_%s", boardID)
-		if !tableExists(db, tableName) {
-			continue
-		}
-
-		sql := fmt.Sprintf(`
+	return migratePerBoard(db, "files", func(boardID, tableName string) string {
+		return fmt.Sprintf(`
 			INSERT IGNORE INTO v2_files (post_id, user_id, original_name, stored_name, mime_type, file_size, storage_path, download_count, created_at)
 			SELECT
 				p.id,
@@ -300,16 +294,7 @@ func migrateFiles(db *gorm.DB, _ int) error {
 				AND p.created_at = w.wr_datetime
 			WHERE f.bo_table = '%s'
 		`, boardID, tableName, boardID, boardID)
-
-		result := db.Exec(sql)
-		if result.Error != nil {
-			log.Printf("[migrate:files] Warning: %s: %v", boardID, result.Error)
-			continue
-		}
-		totalRows += result.RowsAffected
-	}
-	log.Printf("[migrate:files] Migrated %d rows", totalRows)
-	return nil
+	})
 }
 
 func migrateScraps(db *gorm.DB, _ int) error {
