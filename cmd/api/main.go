@@ -308,7 +308,7 @@ func main() {
 
 		// Plugin Store Admin API 핸들러
 		storeHandler := pluginstoreHandler.NewStoreHandler(storeSvc, catalogSvc, pluginManager)
-		settingHandler := pluginstoreHandler.NewSettingHandler(settingSvc)
+		settingHandler := pluginstoreHandler.NewSettingHandler(settingSvc, pluginManager)
 		permHandler := pluginstoreHandler.NewPermissionHandler(permSvc)
 
 		// Admin Plugin Store 라우트 등록
