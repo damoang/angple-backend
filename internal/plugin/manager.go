@@ -244,6 +244,45 @@ func (m *Manager) ReloadPlugin(name string) error {
 	return nil
 }
 
+// CheckHealth 단일 플러그인 헬스 체크
+func (m *Manager) CheckHealth(name string) PluginHealth {
+	m.mu.RLock()
+	info, exists := m.plugins[name]
+	m.mu.RUnlock()
+
+	if !exists {
+		return PluginHealth{Name: name, Status: "unknown", Message: "plugin not found"}
+	}
+
+	if info.Status != StatusEnabled {
+		return PluginHealth{Name: name, Status: "disabled"}
+	}
+
+	if hc, ok := info.Instance.(HealthCheckable); ok {
+		if err := hc.HealthCheck(); err != nil {
+			return PluginHealth{Name: name, Status: "unhealthy", Message: err.Error()}
+		}
+	}
+
+	return PluginHealth{Name: name, Status: "healthy"}
+}
+
+// CheckAllHealth 모든 활성 플러그인 헬스 체크
+func (m *Manager) CheckAllHealth() []PluginHealth {
+	m.mu.RLock()
+	plugins := make([]*PluginInfo, 0, len(m.plugins))
+	for _, info := range m.plugins {
+		plugins = append(plugins, info)
+	}
+	m.mu.RUnlock()
+
+	results := make([]PluginHealth, 0, len(plugins))
+	for _, info := range plugins {
+		results = append(results, m.CheckHealth(info.Manifest.Name))
+	}
+	return results
+}
+
 // GetPlugin 플러그인 정보 조회
 func (m *Manager) GetPlugin(name string) (*PluginInfo, bool) {
 	m.mu.RLock()

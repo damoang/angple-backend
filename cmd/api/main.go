@@ -316,6 +316,7 @@ func main() {
 		// TODO: 운영 환경에서는 admin 미들웨어 추가 필요
 		{
 			adminPlugins.GET("", storeHandler.ListPlugins)
+			adminPlugins.GET("/health", storeHandler.HealthCheck)
 			adminPlugins.GET("/:name", storeHandler.GetPlugin)
 			adminPlugins.POST("/:name/install", storeHandler.InstallPlugin)
 			adminPlugins.POST("/:name/enable", storeHandler.EnablePlugin)
@@ -326,6 +327,7 @@ func main() {
 			adminPlugins.GET("/:name/events", storeHandler.GetEvents)
 			adminPlugins.GET("/:name/permissions", permHandler.GetPermissions)
 			adminPlugins.PUT("/:name/permissions/:permId", permHandler.UpdatePermission)
+			adminPlugins.GET("/:name/health", storeHandler.HealthCheckSingle)
 		}
 
 		pkglogger.Info("Plugin Store initialized")

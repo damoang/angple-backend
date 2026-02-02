@@ -184,6 +184,18 @@ type PluginReloader interface {
 	ReloadPlugin(name string) error
 }
 
+// HealthCheckable 선택적 인터페이스 - 플러그인 상태 점검
+type HealthCheckable interface {
+	HealthCheck() error
+}
+
+// PluginHealth 플러그인 헬스 체크 결과
+type PluginHealth struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"` // healthy, unhealthy, disabled
+	Message string `json:"message,omitempty"`
+}
+
 // HookAware 선택적 인터페이스 - Hook을 등록하고 싶은 플러그인이 구현
 type HookAware interface {
 	RegisterHooks(hm *HookManager)
