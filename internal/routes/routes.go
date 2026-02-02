@@ -32,6 +32,7 @@ func Setup(
 	goodHandler *handler.GoodHandler,
 	recommendedHandler *handler.RecommendedHandler,
 	notificationHandler *handler.NotificationHandler,
+	memberProfileHandler *handler.MemberProfileHandler,
 	cfg *config.Config,
 ) {
 	// Global middleware for damoang_jwt cookie authentication
@@ -148,6 +149,10 @@ func Setup(
 	members.POST("/check-email", memberHandler.CheckEmail)       // 이메일 중복 확인
 	members.POST("/check-phone", memberHandler.CheckPhone)       // 휴대폰번호 중복 확인
 	members.GET("/:id/nickname", memberHandler.GetNickname)      // 회원 닉네임 조회
+	members.GET("/:id/profile", memberProfileHandler.GetProfile) // 회원 프로필 조회
+	members.GET("/:id/posts", memberProfileHandler.GetPosts)     // 회원 작성글 조회
+	members.GET("/:id/comments", memberProfileHandler.GetComments) // 회원 작성댓글 조회
+	members.GET("/:id/points/history", memberProfileHandler.GetPointHistory) // 포인트 내역 (본인만)
 
 	// Autosave (자동 저장 API - 로그인 필요)
 	autosave := api.Group("/autosave")
