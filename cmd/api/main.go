@@ -188,6 +188,7 @@ func main() {
 	var adminHandler *handler.AdminHandler
 	var tenantHandler *handler.TenantHandler
 	var provisioningHandler *handler.ProvisioningHandler
+	var recommendationHandler *handler.RecommendationHandler
 
 	if db != nil {
 		// Repositories
@@ -285,6 +286,12 @@ func main() {
 		_ = subRepo.AutoMigrate()
 		provisioningSvc := service.NewProvisioningService(siteRepo, subRepo, tenantDBResolver, db, "angple.com")
 		provisioningHandler = handler.NewProvisioningHandler(provisioningSvc)
+
+		// AI Recommendation
+		recRepo := repository.NewRecommendationRepository(db)
+		_ = recRepo.AutoMigrate()
+		recSvc := service.NewRecommendationService(recRepo, db)
+		recommendationHandler = handler.NewRecommendationHandler(recSvc)
 	}
 
 	// Recommended Handler (파일 직접 읽기)
@@ -376,6 +383,17 @@ func main() {
 		saas.PUT("/communities/:id/subscription/plan", provisioningHandler.ChangePlan)
 		saas.POST("/communities/:id/subscription/cancel", provisioningHandler.CancelSubscription)
 		saas.GET("/communities/:id/invoices", provisioningHandler.GetInvoices)
+
+		// AI Recommendation API
+		rec := router.Group("/api/v2/recommendations")
+		rec.GET("/feed", recommendationHandler.GetPersonalizedFeed)
+		rec.POST("/track", recommendationHandler.TrackActivity)
+		rec.GET("/trending", recommendationHandler.GetTrendingTopics)
+		rec.GET("/interests", recommendationHandler.GetUserInterests)
+
+		adminRec := router.Group("/api/v2/admin/recommendations")
+		adminRec.POST("/extract", recommendationHandler.ExtractTopics)
+		adminRec.POST("/refresh-trending", recommendationHandler.RefreshTrending)
 	} else {
 		pkglogger.Info("⚠️  Skipping API route setup (no DB connection)")
 	}
