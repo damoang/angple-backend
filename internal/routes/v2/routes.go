@@ -7,6 +7,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// SetupAuth configures v2 authentication routes
+func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.Manager) {
+	authGroup := router.Group("/api/v2/auth")
+	authGroup.POST("/login", h.Login)
+	authGroup.POST("/refresh", h.RefreshToken)
+	authGroup.POST("/logout", h.Logout)
+	authGroup.GET("/me", middleware.JWTAuth(jwtManager), h.GetMe)
+}
+
 // Setup configures v2 API routes (new DB schema)
 func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager) {
 	api := router.Group("/api/v2")

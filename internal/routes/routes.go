@@ -50,8 +50,11 @@ func Setup(
 		MigrationGuideURL: "https://github.com/damoang/angple-backend/blob/main/docs/v1-to-v2-migration-guide.md",
 	})
 
-	// 레거시 API (그누보드 DB 기반) → /api/v1 으로 이동, Deprecation 헤더 + 사용량 추적
-	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg), deprecationMW, v1UsageTracker.Track())
+	// v1→v2 리다이렉트 (Enabled=false: Link 헤더만 추가, true로 변경 시 301 리다이렉트)
+	v1Redirect := middleware.V1ToV2Redirect(middleware.V1RedirectConfig{Enabled: false})
+
+	// 레거시 API (그누보드 DB 기반) → /api/v1 으로 이동, Deprecation 헤더 + 사용량 추적 + v2 리다이렉트 힌트
+	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg), deprecationMW, v1Redirect, v1UsageTracker.Track())
 
 	// Authentication endpoints (no auth required)
 	auth := api.Group("/auth")
