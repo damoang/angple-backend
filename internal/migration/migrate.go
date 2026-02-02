@@ -9,7 +9,7 @@ import (
 // Run executes AutoMigrate for the menus table and seeds default data if empty.
 func Run(db *gorm.DB) error {
 	// 1. AutoMigrate - 테이블 없으면 생성, 있으면 skip
-	if err := db.AutoMigrate(&domain.Menu{}, &pluginstoreDomain.PluginInstallation{}, &pluginstoreDomain.PluginSetting{}, &pluginstoreDomain.PluginEvent{}, &pluginstoreDomain.PluginPermission{}, &pluginstoreDomain.PluginMigration{}); err != nil {
+	if err := db.AutoMigrate(&domain.Menu{}, &domain.MemberBlock{}, &pluginstoreDomain.PluginInstallation{}, &pluginstoreDomain.PluginSetting{}, &pluginstoreDomain.PluginEvent{}, &pluginstoreDomain.PluginPermission{}, &pluginstoreDomain.PluginMigration{}); err != nil {
 		return err
 	}
 
