@@ -40,11 +40,11 @@ func (h *ShippingHandler) GetCarriers(c *gin.Context) {
 // @Produce json
 // @Param order_id path int true "주문 ID"
 // @Param request body domain.RegisterShippingRequest true "송장 정보"
-// @Success 200 {object} common.Response
-// @Failure 400 {object} common.Response
-// @Failure 401 {object} common.Response
-// @Failure 403 {object} common.Response
-// @Failure 404 {object} common.Response
+// @Success 200 {object} common.APIResponse
+// @Failure 400 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Failure 403 {object} common.APIResponse
+// @Failure 404 {object} common.APIResponse
 // @Router /seller/orders/{order_id}/shipping [post]
 func (h *ShippingHandler) RegisterShipping(c *gin.Context) {
 	// 판매자 ID 가져오기
@@ -100,10 +100,10 @@ func (h *ShippingHandler) RegisterShipping(c *gin.Context) {
 // @Produce json
 // @Param order_id path int true "주문 ID"
 // @Success 200 {object} domain.TrackingResponse
-// @Failure 400 {object} common.Response
-// @Failure 401 {object} common.Response
-// @Failure 403 {object} common.Response
-// @Failure 404 {object} common.Response
+// @Failure 400 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Failure 403 {object} common.APIResponse
+// @Failure 404 {object} common.APIResponse
 // @Router /orders/{id}/tracking [get]
 func (h *ShippingHandler) TrackShipping(c *gin.Context) {
 	// 사용자 ID 가져오기
@@ -146,11 +146,11 @@ func (h *ShippingHandler) TrackShipping(c *gin.Context) {
 // @Tags Shipping
 // @Produce json
 // @Param order_id path int true "주문 ID"
-// @Success 200 {object} common.Response
-// @Failure 400 {object} common.Response
-// @Failure 401 {object} common.Response
-// @Failure 403 {object} common.Response
-// @Failure 404 {object} common.Response
+// @Success 200 {object} common.APIResponse
+// @Failure 400 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Failure 403 {object} common.APIResponse
+// @Failure 404 {object} common.APIResponse
 // @Router /seller/orders/{order_id}/delivered [post]
 func (h *ShippingHandler) MarkDelivered(c *gin.Context) {
 	// 판매자 ID 가져오기
