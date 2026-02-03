@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway build-migrate test clean docker-up docker-down migrate migrate-dry-run migrate-verify
+.PHONY: help dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway build-migrate test clean docker-up docker-down migrate migrate-dry-run migrate-verify swagger swagger-fmt
 
 # 기본 타겟
 help:
@@ -75,8 +75,8 @@ dev-gateway:
 	@echo "Starting Gateway in development mode..."
 	go run cmd/gateway/main.go
 
-# 빌드
-build: build-api build-gateway build-migrate
+# 빌드 (swagger 자동 생성 포함)
+build: swagger build-api build-gateway build-migrate
 
 build-api:
 	@echo "Building API server..."
@@ -169,9 +169,10 @@ fmt:
 # Swagger 문서 생성
 swagger:
 	@echo "Generating Swagger documentation..."
-	swag init -g cmd/api/main.go -o docs
+	@command -v swag >/dev/null 2>&1 || { echo "Installing swag..."; go install github.com/swaggo/swag/cmd/swag@latest; }
+	$$(go env GOPATH)/bin/swag init -g cmd/api/main.go -o docs
 	@echo "✅ Swagger docs generated in docs/"
-	@echo "   View at: http://localhost:8082/swagger/index.html"
+	@echo "   View at: http://localhost:8081/swagger/index.html"
 
 swagger-fmt:
 	@echo "Formatting Swagger comments..."

@@ -26,7 +26,7 @@ func NewFileHandler(service service.FileService) *FileHandler {
 // @Tags upload
 // @Accept multipart/form-data
 // @Produce json
-// @Param file formance file true "이미지 파일"
+// @Param file formData file true "이미지 파일"
 // @Param board_id formData string true "게시판 ID"
 // @Param wr_id formData int false "게시글 ID (기본 0)"
 // @Success 200 {object} common.APIResponse{data=domain.FileUploadResponse}
@@ -72,7 +72,7 @@ func (h *FileHandler) UploadEditorImage(c *gin.Context) {
 // @Tags upload
 // @Accept multipart/form-data
 // @Produce json
-// @Param file formance file true "첨부 파일"
+// @Param file formData file true "첨부 파일"
 // @Param board_id formData string true "게시판 ID"
 // @Param wr_id formData int false "게시글 ID (기본 0)"
 // @Success 200 {object} common.APIResponse{data=domain.FileUploadResponse}

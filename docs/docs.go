@@ -21,9 +21,14 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/auth/login": {
-            "post": {
-                "description": "사용자 ID와 비밀번호로 로그인하여 JWT 토큰을 발급받습니다",
+        "/admin/banners": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "활성/비활성 포함 모든 배너 목록을 조회합니다",
                 "consumes": [
                     "application/json"
                 ],
@@ -31,20 +36,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "banners"
                 ],
-                "summary": "로그인",
-                "parameters": [
-                    {
-                        "description": "로그인 요청",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handler.LoginRequest"
-                        }
-                    }
-                ],
+                "summary": "모든 배너 목록 조회 (관리자)",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -57,18 +51,71 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "object",
-                                            "properties": {
-                                                "access_token": {
-                                                    "type": "string"
-                                                },
-                                                "expires_in": {
-                                                    "type": "integer"
-                                                },
-                                                "user": {
-                                                    "type": "object"
-                                                }
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.BannerResponse"
                                             }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "새 배너를 추가합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "banners"
+                ],
+                "summary": "배너 추가 (관리자)",
+                "parameters": [
+                    {
+                        "description": "배너 추가 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CreateBannerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.BannerResponse"
                                         }
                                     }
                                 }
@@ -96,9 +143,14 @@ const docTemplate = `{
                 }
             }
         },
-        "/auth/logout": {
-            "post": {
-                "description": "로그아웃하여 RefreshToken 쿠키를 삭제합니다",
+        "/admin/banners/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "배너 정보를 수정합니다",
                 "consumes": [
                     "application/json"
                 ],
@@ -106,9 +158,27 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "banners"
                 ],
-                "summary": "로그아웃",
+                "summary": "배너 수정 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "배너 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "배너 수정 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.UpdateBannerRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -121,24 +191,46 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "object",
-                                            "properties": {
-                                                "message": {
-                                                    "type": "string"
-                                                }
-                                            }
+                                            "$ref": "#/definitions/domain.BannerResponse"
                                         }
                                     }
                                 }
                             ]
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
                     }
                 }
-            }
-        },
-        "/auth/me": {
-            "get": {
-                "description": "다모앙 JWT 쿠키를 통해 현재 로그인한 사용자 정보를 조회합니다 (별도 JWT 토큰 불필요)",
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "배너를 삭제합니다",
                 "consumes": [
                     "application/json"
                 ],
@@ -146,53 +238,54 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "banners"
                 ],
-                "summary": "현재 사용자 정보 조회 (다모앙 쿠키 인증)",
+                "summary": "배너 삭제 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "배너 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/common.APIResponse"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "object",
-                                            "properties": {
-                                                "mb_email": {
-                                                    "type": "string"
-                                                },
-                                                "mb_id": {
-                                                    "type": "string"
-                                                },
-                                                "mb_level": {
-                                                    "type": "integer"
-                                                },
-                                                "mb_name": {
-                                                    "type": "string"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
                         }
                     }
                 }
             }
         },
-        "/auth/profile": {
+        "/admin/banners/{id}/stats": {
             "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "JWT 토큰을 사용하여 현재 로그인한 사용자의 프로필 정보를 조회합니다",
+                "description": "배너의 클릭/노출 통계를 조회합니다",
                 "consumes": [
                     "application/json"
                 ],
@@ -200,9 +293,18 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "banners"
                 ],
-                "summary": "프로필 조회 (JWT 인증 필요)",
+                "summary": "배너 통계 조회 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "배너 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -215,17 +317,1111 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "object",
-                                            "properties": {
-                                                "level": {
-                                                    "type": "integer"
-                                                },
-                                                "nickname": {
-                                                    "type": "string"
-                                                },
-                                                "user_id": {
-                                                    "type": "string"
-                                                }
+                                            "$ref": "#/definitions/domain.BannerStatsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/promotion/advertisers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "모든 광고주 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "광고주 목록 조회 (관리자)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.AdvertiserResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "새 광고주를 추가합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "광고주 추가 (관리자)",
+                "parameters": [
+                    {
+                        "description": "광고주 추가 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CreateAdvertiserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.AdvertiserResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/promotion/advertisers/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "광고주 정보를 수정합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "광고주 수정 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "광고주 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "광고주 수정 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.UpdateAdvertiserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.AdvertiserResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "광고주를 삭제합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "광고주 삭제 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "광고주 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/recommendations/extract": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "recommendation"
+                ],
+                "summary": "게시글 토픽 추출 (관리자)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/recommendations/refresh-trending": {
+            "post": {
+                "tags": [
+                    "recommendation"
+                ],
+                "summary": "트렌딩 갱신 (관리자)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/tenants": {
+            "get": {
+                "tags": [
+                    "admin-tenants"
+                ],
+                "summary": "테넌트 목록 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "페이지당 항목",
+                        "name": "per_page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "all",
+                        "description": "상태 필터 (active, suspended, all)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/tenants/plans": {
+            "get": {
+                "tags": [
+                    "admin-tenants"
+                ],
+                "summary": "플랜별 리소스 제한 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/tenants/{id}": {
+            "get": {
+                "tags": [
+                    "admin-tenants"
+                ],
+                "summary": "테넌트 상세 (관리자)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/tenants/{id}/plan": {
+            "put": {
+                "tags": [
+                    "admin-tenants"
+                ],
+                "summary": "테넌트 플랜 변경 (관리자)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/tenants/{id}/suspend": {
+            "post": {
+                "tags": [
+                    "admin-tenants"
+                ],
+                "summary": "테넌트 정지 (관리자)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/tenants/{id}/unsuspend": {
+            "post": {
+                "tags": [
+                    "admin-tenants"
+                ],
+                "summary": "테넌트 정지 해제 (관리자)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/admin/tenants/{id}/usage": {
+            "get": {
+                "tags": [
+                    "admin-tenants"
+                ],
+                "summary": "테넌트 사용량 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/marketplace": {
+            "get": {
+                "tags": [
+                    "marketplace"
+                ],
+                "summary": "마켓플레이스 탐색",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "페이지당 항목",
+                        "name": "per_page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "카테고리 필터",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "검색 키워드",
+                        "name": "keyword",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/marketplace/developers/me": {
+            "get": {
+                "tags": [
+                    "marketplace-developer"
+                ],
+                "summary": "내 개발자 프로필",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/marketplace/developers/register": {
+            "post": {
+                "tags": [
+                    "marketplace-developer"
+                ],
+                "summary": "개발자 등록",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/marketplace/developers/submissions": {
+            "get": {
+                "tags": [
+                    "marketplace-developer"
+                ],
+                "summary": "내 제출 목록",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "marketplace-developer"
+                ],
+                "summary": "플러그인 제출",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/marketplace/{name}": {
+            "get": {
+                "tags": [
+                    "marketplace"
+                ],
+                "summary": "플러그인 상세",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "플러그인 이름",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/marketplace/{name}/download": {
+            "post": {
+                "tags": [
+                    "marketplace"
+                ],
+                "summary": "다운로드 기록",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "플러그인 이름",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/marketplace/{name}/reviews": {
+            "get": {
+                "tags": [
+                    "marketplace"
+                ],
+                "summary": "플러그인 리뷰 목록",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "플러그인 이름",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "marketplace"
+                ],
+                "summary": "리뷰 작성",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "플러그인 이름",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/recommendations/feed": {
+            "get": {
+                "tags": [
+                    "recommendation"
+                ],
+                "summary": "개인화 피드 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "결과 수",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/recommendations/interests": {
+            "get": {
+                "tags": [
+                    "recommendation"
+                ],
+                "summary": "사용자 관심 토픽 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "결과 수",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/recommendations/track": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "recommendation"
+                ],
+                "summary": "사용자 행동 기록",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/recommendations/trending": {
+            "get": {
+                "tags": [
+                    "recommendation"
+                ],
+                "summary": "트렌딩 토픽 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "24h",
+                        "description": "기간 (24h, 7d, 30d)",
+                        "name": "period",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "결과 수",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/saas/communities": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "saas"
+                ],
+                "summary": "원클릭 커뮤니티 생성",
+                "parameters": [
+                    {
+                        "description": "생성 정보",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ProvisionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/saas/communities/{id}": {
+            "delete": {
+                "tags": [
+                    "saas"
+                ],
+                "summary": "커뮤니티 삭제 (비활성화)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/saas/communities/{id}/invoices": {
+            "get": {
+                "tags": [
+                    "saas"
+                ],
+                "summary": "청구서 목록 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "페이지당 항목",
+                        "name": "per_page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/saas/communities/{id}/subscription": {
+            "get": {
+                "tags": [
+                    "saas"
+                ],
+                "summary": "구독 정보 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/saas/communities/{id}/subscription/cancel": {
+            "post": {
+                "tags": [
+                    "saas"
+                ],
+                "summary": "구독 취소",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/saas/communities/{id}/subscription/plan": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "saas"
+                ],
+                "summary": "플랜 변경 (업/다운그레이드)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "사이트 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "플랜 변경 정보",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ChangePlanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/saas/pricing": {
+            "get": {
+                "tags": [
+                    "saas"
+                ],
+                "summary": "플랜 가격 정보 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.V2Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/register": {
+            "post": {
+                "description": "새로운 회원 계정을 생성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "회원가입",
+                "parameters": [
+                    {
+                        "description": "회원가입 정보",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/service.RegisterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.MemberResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/autosave": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "자동 저장된 게시글 목록을 조회합니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "autosave"
+                ],
+                "summary": "자동 저장 목록 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.AutosaveListItem"
                                             }
                                         }
                                     }
@@ -240,11 +1436,14 @@ const docTemplate = `{
                         }
                     }
                 }
-            }
-        },
-        "/auth/refresh": {
+            },
             "post": {
-                "description": "RefreshToken을 사용하여 새로운 AccessToken을 발급받습니다 (Token Rotation 적용)",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "작성 중인 게시글을 자동으로 저장합니다",
                 "consumes": [
                     "application/json"
                 ],
@@ -252,9 +1451,20 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "auth"
+                    "autosave"
                 ],
-                "summary": "토큰 갱신",
+                "summary": "게시글 자동 저장",
+                "parameters": [
+                    {
+                        "description": "저장할 내용",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.AutosaveRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -267,15 +1477,65 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "object",
-                                            "properties": {
-                                                "access_token": {
-                                                    "type": "string"
-                                                },
-                                                "expires_in": {
-                                                    "type": "integer"
-                                                }
-                                            }
+                                            "$ref": "#/definitions/domain.AutosaveResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/autosave/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "자동 저장된 게시글을 불러옵니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "autosave"
+                ],
+                "summary": "자동 저장 불러오기",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "자동저장 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.AutosaveDetail"
                                         }
                                     }
                                 }
@@ -284,6 +1544,255 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "자동 저장된 게시글을 삭제합니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "autosave"
+                ],
+                "summary": "자동 저장 삭제",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "자동저장 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.AutosaveResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/banners": {
+            "get": {
+                "description": "활성 배너 목록을 위치별로 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "banners"
+                ],
+                "summary": "배너 목록 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "배너 위치 (header, sidebar, content, footer)",
+                        "name": "position",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.BannerListResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/banners/{id}": {
+            "get": {
+                "description": "배너 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "banners"
+                ],
+                "summary": "배너 상세 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "배너 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.BannerResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/banners/{id}/click": {
+            "get": {
+                "description": "배너 클릭을 트래킹합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "banners"
+                ],
+                "summary": "배너 클릭 트래킹",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "배너 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/banners/{id}/view": {
+            "post": {
+                "description": "배너 노출을 트래킹합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "banners"
+                ],
+                "summary": "배너 노출 트래킹",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "배너 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/common.APIResponse"
                         }
@@ -734,6 +2243,5788 @@ const docTemplate = `{
                 }
             }
         },
+        "/boards/{board_id}/posts/{id}/preview": {
+            "get": {
+                "description": "특정 게시글의 미리보기 정보를 조회합니다 (관리자용)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "posts"
+                ],
+                "summary": "게시글 미리보기",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.PostPreviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/boards/{board_id}/posts/{id}/reactions": {
+            "get": {
+                "description": "게시글의 반응 목록을 조회합니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "posts"
+                ],
+                "summary": "게시글 반응 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "게시글에 반응(좋아요, 하트 등)을 추가하거나 제거합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "posts"
+                ],
+                "summary": "게시글 반응 추가/제거",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "반응 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ReactionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/domain.ReactionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/domain.ReactionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/domain.ReactionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/boards/{board_id}/posts/{id}/scrap": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scrap"
+                ],
+                "summary": "게시글 스크랩",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ScrapResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scrap"
+                ],
+                "summary": "스크랩 취소",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/dajoongi": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "동일 IP에서 여러 계정으로 활동한 기록을 조회합니다 (관리자 전용)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "다중이 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 3,
+                        "description": "조회 기간 (일)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.DajoongiResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/disciplines/board": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "discipline"
+                ],
+                "summary": "이용제한 게시판",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.DisciplineResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/disciplines/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "discipline"
+                ],
+                "summary": "이용제한 상세 열람",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "이용제한 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.DisciplineResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/disciplines/{id}/appeal": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "discipline"
+                ],
+                "summary": "소명 글 작성",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "이용제한 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "소명 내용",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.AppealRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/files/{board_id}/{wr_id}/{file_no}/download": {
+            "get": {
+                "description": "첨부파일을 다운로드합니다",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "파일 다운로드",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID",
+                        "name": "wr_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "파일 번호",
+                        "name": "file_no",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/filter/check": {
+            "post": {
+                "description": "제목과 내용에서 금지어를 검사합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "filter"
+                ],
+                "summary": "금지어 필터 검사",
+                "parameters": [
+                    {
+                        "description": "검사할 내용",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CheckFilterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.CheckFilterResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/gallery": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "gallery"
+                ],
+                "summary": "전체 갤러리",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.GalleryItem"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/gallery/{board_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "gallery"
+                ],
+                "summary": "게시판 갤러리",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.GalleryItem"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/members/check-email": {
+            "post": {
+                "description": "회원가입/수정 시 사용할 이메일의 유효성 및 중복을 확인합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "이메일 중복 확인",
+                "parameters": [
+                    {
+                        "description": "확인할 이메일",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CheckEmailRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.ValidationResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/check-id": {
+            "post": {
+                "description": "회원가입 시 사용할 아이디의 유효성 및 중복을 확인합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 ID 중복 확인",
+                "parameters": [
+                    {
+                        "description": "확인할 회원 ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CheckUserIDRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.ValidationResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/check-nickname": {
+            "post": {
+                "description": "회원가입/수정 시 사용할 닉네임의 유효성 및 중복을 확인합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "닉네임 중복 확인",
+                "parameters": [
+                    {
+                        "description": "확인할 닉네임",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CheckNicknameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.ValidationResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/check-phone": {
+            "post": {
+                "description": "회원가입/수정 시 사용할 휴대폰번호의 유효성 및 중복을 확인합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "휴대폰번호 중복 확인",
+                "parameters": [
+                    {
+                        "description": "확인할 휴대폰번호",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CheckPhoneRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.ValidationResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/me": {
+            "delete": {
+                "description": "현재 로그인한 회원의 탈퇴를 처리합니다 (데이터 보존)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "회원 탈퇴",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/me/blocks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "block"
+                ],
+                "summary": "차단 목록",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.BlockResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/members/me/disciplines": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "discipline"
+                ],
+                "summary": "내 이용제한 내역",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.DisciplineResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/members/me/scraps": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scrap"
+                ],
+                "summary": "내 스크랩 목록",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 (기본 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기 (기본 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.ScrapResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/members/{id}/memo": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "특정 회원에 대한 메모를 조회합니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 메모 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "대상 회원 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "토큰만 조회",
+                        "name": "token_only",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.MemoResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "특정 회원에 대한 메모를 수정합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 메모 수정",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "대상 회원 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "메모 내용",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.MemoRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.MemoResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "특정 회원에 대한 메모를 생성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 메모 생성",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "대상 회원 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "메모 내용",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.MemoRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.MemoResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "특정 회원에 대한 메모를 삭제합니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 메모 삭제",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "대상 회원 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/{id}/nickname": {
+            "get": {
+                "description": "회원 ID로 닉네임을 조회합니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 닉네임 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "회원 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/{user_id}": {
+            "get": {
+                "description": "회원 ID로 공개 프로필 정보를 조회합니다",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 프로필 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "회원 ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.MemberProfileResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/{user_id}/block": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "block"
+                ],
+                "summary": "회원 차단",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "차단할 회원 ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.BlockResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "block"
+                ],
+                "summary": "차단 해제",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "차단 해제할 회원 ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/members/{user_id}/comments": {
+            "get": {
+                "description": "회원의 최근 작성댓글 목록을 조회합니다 (최근 5개)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 작성댓글 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "회원 ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "조회 개수 (기본 5, 최대 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.MemberCommentSummary"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/{user_id}/points/history": {
+            "get": {
+                "description": "본인의 포인트 내역을 조회합니다 (본인만 조회 가능)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "포인트 내역 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "회원 ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "조회 개수 (기본 20, 최대 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.PointHistory"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/{user_id}/posts": {
+            "get": {
+                "description": "회원의 최근 작성글 목록을 조회합니다 (최근 5개)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "members"
+                ],
+                "summary": "회원 작성글 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "회원 ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "조회 개수 (기본 5, 최대 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.MemberPostSummary"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/messages": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "쪽지 보내기",
+                "parameters": [
+                    {
+                        "description": "쪽지 내용",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.SendMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/messages/inbox": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "받은 쪽지함",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.MessageResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/messages/sent": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "보낸 쪽지함",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.MessageResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/messages/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "쪽지 상세",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "쪽지 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "쪽지 삭제",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "쪽지 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/orders/{id}/tracking": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Shipping"
+                ],
+                "summary": "배송 추적",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 ID",
+                        "name": "order_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/domain.TrackingResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/admin/coupons": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "쿠폰 목록을 조회합니다 (관리자 전용)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "쿠폰 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "상태 필터 (active, inactive, expired)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "공개 여부 필터",
+                        "name": "is_public",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.CouponResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "새로운 쿠폰을 생성합니다 (관리자 전용)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "쿠폰 생성",
+                "parameters": [
+                    {
+                        "description": "쿠폰 생성 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CreateCouponRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.CouponResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/admin/coupons/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "쿠폰 상세 정보를 조회합니다 (관리자 전용)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "쿠폰 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "쿠폰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.CouponResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "기존 쿠폰을 수정합니다 (관리자 전용)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "쿠폰 수정",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "쿠폰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "쿠폰 수정 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.UpdateCouponRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.CouponResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "쿠폰을 삭제합니다 (관리자 전용)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "쿠폰 삭제",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "쿠폰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/admin/settlements": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "모든 판매자의 정산 내역을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-settlements"
+                ],
+                "summary": "전체 정산 목록 조회 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 (기본: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 개수 (기본: 20, 최대: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "상태 필터 (pending, processing, completed, failed)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "연도 필터",
+                        "name": "year",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "월 필터",
+                        "name": "month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 기준 (created_at, period_start, settlement_amount)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 순서 (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.SettlementResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/admin/settlements/{id}/process": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "정산을 처리합니다 (송금)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-settlements"
+                ],
+                "summary": "정산 처리 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "정산 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "정산 처리 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ProcessSettlementRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/admin/settlements/{seller_id}": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "특정 기간의 정산을 생성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-settlements"
+                ],
+                "summary": "정산 생성 (관리자)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "판매자 ID",
+                        "name": "seller_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "정산 생성 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.CreateSettlementRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.SettlementResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/cart": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "사용자의 장바구니를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-cart"
+                ],
+                "summary": "장바구니 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.CartResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "장바구니에 상품을 추가합니다. 이미 있는 상품이면 수량이 증가합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-cart"
+                ],
+                "summary": "장바구니에 상품 추가",
+                "parameters": [
+                    {
+                        "description": "장바구니 추가 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.AddToCartRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.CartItemResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "장바구니의 모든 아이템을 삭제합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-cart"
+                ],
+                "summary": "장바구니 비우기",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/cart/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "장바구니 아이템의 수량을 변경합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-cart"
+                ],
+                "summary": "장바구니 아이템 수량 변경",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "장바구니 아이템 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "수량 변경 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.UpdateCartRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.CartItemResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "장바구니에서 아이템을 삭제합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-cart"
+                ],
+                "summary": "장바구니에서 아이템 삭제",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "장바구니 아이템 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/coupons/apply": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "주문에 쿠폰을 적용합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "주문에 쿠폰 적용",
+                "parameters": [
+                    {
+                        "description": "쿠폰 적용 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ApplyCouponRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/coupons/public": {
+            "get": {
+                "description": "공개된 사용 가능한 쿠폰 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "공개 쿠폰 목록 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.CouponResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/coupons/validate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "쿠폰 코드의 유효성을 검증합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "쿠폰 유효성 검증",
+                "parameters": [
+                    {
+                        "description": "쿠폰 검증 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ValidateCouponRequest"
+                        }
+                    },
+                    {
+                        "type": "number",
+                        "format": "float64",
+                        "description": "주문 금액",
+                        "name": "order_amount",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ValidateCouponResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/downloads": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "사용자의 전체 다운로드 가능한 파일 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-downloads"
+                ],
+                "summary": "내 다운로드 목록",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.DownloadResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/downloads/by-token/{token}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "서명된 토큰으로 파일을 다운로드합니다",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "commerce-downloads"
+                ],
+                "summary": "파일 다운로드",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "다운로드 토큰",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "서명",
+                        "name": "sig",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "만료 시간 (Unix timestamp)",
+                        "name": "exp",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/downloads/{order_item_id}/{file_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "파일 다운로드를 위한 서명된 URL을 생성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-downloads"
+                ],
+                "summary": "다운로드 URL 생성",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 아이템 ID",
+                        "name": "order_item_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "파일 ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.DownloadURLResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/order-items/{id}/downloads": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "주문 아이템의 다운로드 가능한 파일 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-downloads"
+                ],
+                "summary": "다운로드 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 아이템 ID",
+                        "name": "order_item_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.DownloadResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/orders": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "사용자의 주문 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-orders"
+                ],
+                "summary": "내 주문 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호 (기본값: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수 (기본값: 20, 최대: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "주문 상태 (pending, paid, processing, shipped, delivered, completed, cancelled, refunded)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 기준 (created_at, total)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 순서 (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.OrderResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "장바구니에 담긴 상품으로 주문을 생성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-orders"
+                ],
+                "summary": "주문 생성",
+                "parameters": [
+                    {
+                        "description": "주문 생성 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CreateOrderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.OrderResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/orders/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "주문의 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-orders"
+                ],
+                "summary": "주문 상세 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.OrderResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/orders/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "주문을 취소합니다 (pending 상태만 가능)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-orders"
+                ],
+                "summary": "주문 취소",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "취소 요청",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/domain.CancelOrderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/orders/{order_id}/coupon": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "주문에서 적용된 쿠폰을 제거합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-coupons"
+                ],
+                "summary": "주문에서 쿠폰 제거",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 ID",
+                        "name": "order_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/payments/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "결제를 취소합니다 (전체 취소 또는 부분 취소)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-payments"
+                ],
+                "summary": "결제 취소",
+                "parameters": [
+                    {
+                        "description": "결제 취소 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CancelPaymentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/payments/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "PG 결제창에서 결제 완료 후 호출하여 결제를 확정합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-payments"
+                ],
+                "summary": "결제 완료",
+                "parameters": [
+                    {
+                        "description": "결제 완료 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CompletePaymentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.PaymentResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/payments/prepare": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "결제를 준비하고 PG 결제창 호출에 필요한 정보를 반환합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-payments"
+                ],
+                "summary": "결제 준비",
+                "parameters": [
+                    {
+                        "description": "결제 준비 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.PreparePaymentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.PreparePaymentResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/payments/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "결제 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-payments"
+                ],
+                "summary": "결제 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "결제 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.PaymentResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/products": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "판매자 본인의 상품 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-products"
+                ],
+                "summary": "내 상품 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호 (기본값: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수 (기본값: 20, 최대: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "상품 유형 (digital, physical)",
+                        "name": "product_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "상태 (draft, published, archived)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "검색어",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 기준 (created_at, updated_at, price, sales_count, view_count)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 순서 (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.ProductResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "새 상품을 등록합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-products"
+                ],
+                "summary": "상품 등록",
+                "parameters": [
+                    {
+                        "description": "상품 등록 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CreateProductRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ProductResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/products/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "판매자 본인의 상품 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-products"
+                ],
+                "summary": "내 상품 상세 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "상품 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ProductResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "상품 정보를 수정합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-products"
+                ],
+                "summary": "상품 수정",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "상품 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "상품 수정 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.UpdateProductRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ProductResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "상품을 삭제합니다 (소프트 삭제)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-products"
+                ],
+                "summary": "상품 삭제",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "상품 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/products/{product_id}/reviews": {
+            "get": {
+                "description": "특정 상품의 리뷰 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "상품 리뷰 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "상품 ID",
+                        "name": "product_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "평점 필터 (1-5)",
+                        "name": "rating",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 기준 (created_at, rating, helpful_count)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 방향 (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.ReviewResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/products/{product_id}/reviews/summary": {
+            "get": {
+                "description": "특정 상품의 리뷰 요약 정보를 조회합니다 (총 리뷰 수, 평균 평점, 평점별 분포)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "상품 리뷰 요약 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "상품 ID",
+                        "name": "product_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ReviewSummary"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/reviews": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "구매 확정된 상품에 대해 리뷰를 작성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "리뷰 작성",
+                "parameters": [
+                    {
+                        "description": "리뷰 작성 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CreateReviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ReviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/reviews/my": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "로그인한 사용자가 작성한 리뷰 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "내 리뷰 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 기준",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 방향",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.ReviewResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/reviews/{id}": {
+            "get": {
+                "description": "리뷰 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "리뷰 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "리뷰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ReviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "자신이 작성한 리뷰를 수정합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "리뷰 수정",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "리뷰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "리뷰 수정 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.UpdateReviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ReviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "자신이 작성한 리뷰를 삭제합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "리뷰 삭제",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "리뷰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/reviews/{id}/helpful": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "리뷰에 '도움됨'을 표시하거나 취소합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "리뷰 도움됨 토글",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "리뷰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/reviews/{id}/reply": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "판매자가 자신의 상품 리뷰에 답글을 작성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "리뷰에 답글 작성",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "리뷰 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "답글 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ReplyReviewRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ReviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/seller/reviews": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "판매자의 모든 상품에 대한 리뷰 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-reviews"
+                ],
+                "summary": "판매자 리뷰 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.ReviewResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/settlements": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "내 정산 내역을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-settlements"
+                ],
+                "summary": "정산 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 (기본: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 개수 (기본: 20, 최대: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "상태 필터 (pending, processing, completed, failed)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "연도 필터",
+                        "name": "year",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "월 필터",
+                        "name": "month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 기준 (created_at, period_start, settlement_amount)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 순서 (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.SettlementResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/settlements/summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "내 정산 요약 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-settlements"
+                ],
+                "summary": "정산 요약 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.SettlementSummary"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/settlements/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "정산 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-settlements"
+                ],
+                "summary": "정산 상세 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "정산 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.SettlementResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/shop/products": {
+            "get": {
+                "description": "공개된 상품 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-shop"
+                ],
+                "summary": "공개 상품 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호 (기본값: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수 (기본값: 20, 최대: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "상품 유형 (digital, physical)",
+                        "name": "product_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "검색어",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 기준 (created_at, price, sales_count, view_count)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "정렬 순서 (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.ProductResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/shop/products/slug/{slug}": {
+            "get": {
+                "description": "슬러그로 공개된 상품의 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-shop"
+                ],
+                "summary": "슬러그로 공개 상품 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "상품 슬러그",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ProductResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/shop/products/{id}": {
+            "get": {
+                "description": "공개된 상품의 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-shop"
+                ],
+                "summary": "공개 상품 상세 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "상품 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.ProductResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/commerce/webhooks/{provider}": {
+            "post": {
+                "description": "PG사에서 전송하는 웹훅을 처리합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "commerce-webhooks"
+                ],
+                "summary": "PG 웹훅 처리",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PG사 (inicis, tosspayments)",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/promotion/posts": {
+            "get": {
+                "description": "활성 광고주의 직접홍보 게시글 목록을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "직홍게 글 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "페이지 번호 (기본값: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "페이지당 항목 수 (기본값: 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.PromotionListResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "직접홍보 게시글을 작성합니다 (광고주만)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "직홍게 글 작성",
+                "parameters": [
+                    {
+                        "description": "게시글 작성 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.CreatePromotionPostRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.PromotionPostResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/promotion/posts/insert": {
+            "get": {
+                "description": "다른 게시판에 삽입할 직홍게 글을 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "사잇광고용 글 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 3,
+                        "description": "조회할 글 개수 (기본값: 3)",
+                        "name": "count",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.PromotionPostResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/promotion/posts/{id}": {
+            "get": {
+                "description": "직접홍보 게시글 상세 정보를 조회합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "직홍게 글 상세 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.PromotionPostResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "직접홍보 게시글을 수정합니다 (작성자만)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "직홍게 글 수정",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "게시글 수정 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.UpdatePromotionPostRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.PromotionPostResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "직접홍보 게시글을 삭제합니다 (작성자만)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "promotion"
+                ],
+                "summary": "직홍게 글 삭제",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/recommended/ai/{period}": {
             "get": {
                 "description": "AI 분석 기반 특정 기간 동안의 추천 게시글 목록을 조회합니다. 파일이 없는 경우 빈 배열을 반환합니다.",
@@ -823,6 +8114,746 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/reports": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "신고 목록을 조회합니다 (관리자 전용)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "신고 목록 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "상태 필터 (pending, monitoring, approved, dismissed)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 번호",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지당 항목 수",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "신고 접수",
+                "parameters": [
+                    {
+                        "description": "신고 내용",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.SubmitReportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reports/data": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "신고 상세 데이터를 조회합니다 (관리자 전용)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "신고 데이터 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "신고 테이블",
+                        "name": "sg_table",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "신고 ID",
+                        "name": "sg_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reports/mine": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "내 신고 내역",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "조회 개수 (기본 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.ReportListResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/reports/process": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "신고를 처리합니다 (관리자 전용)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "신고 처리",
+                "parameters": [
+                    {
+                        "description": "신고 처리 요청",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.ReportActionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reports/recent": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "최근 신고 목록을 조회합니다 (관리자 전용)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "최근 신고 목록 조회",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "조회할 개수",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reports/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "신고 통계를 조회합니다 (관리자 전용)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "신고 통계 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "통합 검색",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "검색어",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "페이지 크기",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/domain.UnifiedSearchResult"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/seller/orders/{order_id}/delivered": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Shipping"
+                ],
+                "summary": "배송 완료 처리",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 ID",
+                        "name": "order_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/seller/orders/{order_id}/shipping": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Shipping"
+                ],
+                "summary": "송장번호 등록",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "주문 ID",
+                        "name": "order_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "송장 정보",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/domain.RegisterShippingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/shipping/carriers": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Shipping"
+                ],
+                "summary": "배송사 목록 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/domain.ShippingCarrierListResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tokens/comment": {
+            "post": {
+                "description": "댓글 작성에 필요한 CSRF 토큰을 생성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "댓글 작성 토큰 생성",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.TokenResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/tokens/write": {
+            "post": {
+                "description": "게시글 작성에 필요한 CSRF 토큰을 생성합니다",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tokens"
+                ],
+                "summary": "게시글 작성 토큰 생성",
+                "parameters": [
+                    {
+                        "description": "토큰 케이스",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.GenerateWriteTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.TokenResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/upload/attachment": {
+            "post": {
+                "description": "게시글에 첨부할 파일을 업로드합니다",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "upload"
+                ],
+                "summary": "첨부파일 업로드",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "첨부 파일",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID (기본 0)",
+                        "name": "wr_id",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.FileUploadResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/upload/editor": {
+            "post": {
+                "description": "게시글 에디터에 삽입할 이미지를 업로드합니다",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "upload"
+                ],
+                "summary": "에디터 이미지 업로드",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "이미지 파일",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "게시판 ID",
+                        "name": "board_id",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "게시글 ID (기본 0)",
+                        "name": "wr_id",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/domain.FileUploadResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ws/notifications": {
+            "get": {
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "실시간 알림 WebSocket",
+                "responses": {}
+            }
         }
     },
     "definitions": {
@@ -869,6 +8900,690 @@ const docTemplate = `{
                 }
             }
         },
+        "common.V2Error": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {},
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "common.V2Meta": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer"
+                },
+                "per_page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "common.V2Response": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "error": {
+                    "$ref": "#/definitions/common.V2Error"
+                },
+                "meta": {
+                    "$ref": "#/definitions/common.V2Meta"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "domain.AddToCartRequest": {
+            "type": "object",
+            "required": [
+                "product_id",
+                "quantity"
+            ],
+            "properties": {
+                "product_id": {
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "domain.AdvertiserResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_pinned": {
+                    "type": "boolean"
+                },
+                "member_id": {
+                    "type": "string"
+                },
+                "memo": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "post_count": {
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.AppealRequest": {
+            "type": "object",
+            "required": [
+                "content"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ApplyCouponRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "order_id"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "order_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.AutosaveDetail": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.AutosaveListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "uid": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.AutosaveRequest": {
+            "type": "object",
+            "required": [
+                "content",
+                "subject"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "uid": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.AutosaveResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.BannerListResponse": {
+            "type": "object",
+            "properties": {
+                "banners": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.BannerResponse"
+                    }
+                },
+                "position": {
+                    "$ref": "#/definitions/domain.BannerPosition"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.BannerPosition": {
+            "type": "string",
+            "enum": [
+                "header",
+                "sidebar",
+                "content",
+                "footer"
+            ],
+            "x-enum-varnames": [
+                "BannerPositionHeader",
+                "BannerPositionSidebar",
+                "BannerPositionContent",
+                "BannerPositionFooter"
+            ]
+        },
+        "domain.BannerResponse": {
+            "type": "object",
+            "properties": {
+                "alt_text": {
+                    "type": "string"
+                },
+                "click_count": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "link_url": {
+                    "type": "string"
+                },
+                "memo": {
+                    "type": "string"
+                },
+                "position": {
+                    "$ref": "#/definitions/domain.BannerPosition"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.BannerStatsResponse": {
+            "type": "object",
+            "properties": {
+                "banner_id": {
+                    "type": "integer"
+                },
+                "click_count": {
+                    "type": "integer"
+                },
+                "ctr": {
+                    "description": "Click-through rate",
+                    "type": "number"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.BlockResponse": {
+            "type": "object",
+            "properties": {
+                "block_id": {
+                    "type": "integer"
+                },
+                "blocked_at": {
+                    "type": "string"
+                },
+                "nickname": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.CancelOrderRequest": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "maxLength": 255
+                }
+            }
+        },
+        "domain.CancelPaymentRequest": {
+            "type": "object",
+            "required": [
+                "cancel_reason",
+                "payment_id"
+            ],
+            "properties": {
+                "cancel_amount": {
+                    "type": "number"
+                },
+                "cancel_reason": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "payment_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.CartItemResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "product": {
+                    "$ref": "#/definitions/domain.ProductResponse"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "subtotal": {
+                    "type": "number"
+                }
+            }
+        },
+        "domain.CartResponse": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string"
+                },
+                "item_count": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.CartItemResponse"
+                    }
+                },
+                "subtotal": {
+                    "type": "number"
+                },
+                "total_count": {
+                    "description": "총 수량 (각 아이템의 quantity 합)",
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.ChangePlanRequest": {
+            "type": "object",
+            "required": [
+                "plan"
+            ],
+            "properties": {
+                "billing_cycle": {
+                    "type": "string",
+                    "enum": [
+                        "monthly",
+                        "yearly"
+                    ]
+                },
+                "plan": {
+                    "type": "string",
+                    "enum": [
+                        "free",
+                        "pro",
+                        "business",
+                        "enterprise"
+                    ]
+                }
+            }
+        },
+        "domain.CompletePaymentRequest": {
+            "type": "object",
+            "required": [
+                "amount",
+                "payment_id",
+                "pg_order_id",
+                "pg_provider",
+                "pg_tid"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "card_company": {
+                    "description": "카드 결제 시",
+                    "type": "string"
+                },
+                "card_number": {
+                    "type": "string"
+                },
+                "card_type": {
+                    "type": "string"
+                },
+                "install_month": {
+                    "type": "integer"
+                },
+                "payment_id": {
+                    "type": "integer"
+                },
+                "pg_order_id": {
+                    "type": "string"
+                },
+                "pg_provider": {
+                    "type": "string"
+                },
+                "pg_tid": {
+                    "type": "string"
+                },
+                "vbank_due": {
+                    "type": "string"
+                },
+                "vbank_holder": {
+                    "type": "string"
+                },
+                "vbank_name": {
+                    "description": "가상계좌 결제 시",
+                    "type": "string"
+                },
+                "vbank_number": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.CouponResponse": {
+            "type": "object",
+            "properties": {
+                "apply_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "apply_to": {
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "discount_type": {
+                    "type": "string"
+                },
+                "discount_value": {
+                    "type": "number"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "max_discount": {
+                    "type": "number"
+                },
+                "min_order_amount": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "starts_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "usage_count": {
+                    "type": "integer"
+                },
+                "usage_limit": {
+                    "type": "integer"
+                },
+                "usage_per_user": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.CreateAdvertiserRequest": {
+            "type": "object",
+            "required": [
+                "member_id",
+                "name"
+            ],
+            "properties": {
+                "end_date": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_pinned": {
+                    "type": "boolean"
+                },
+                "member_id": {
+                    "type": "string"
+                },
+                "memo": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "post_count": {
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.CreateBannerRequest": {
+            "type": "object",
+            "required": [
+                "position",
+                "title"
+            ],
+            "properties": {
+                "alt_text": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "link_url": {
+                    "type": "string"
+                },
+                "memo": {
+                    "type": "string"
+                },
+                "position": {
+                    "$ref": "#/definitions/domain.BannerPosition"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.CreateCouponRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "discount_type",
+                "discount_value",
+                "name"
+            ],
+            "properties": {
+                "apply_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "apply_to": {
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "product",
+                        "category",
+                        "seller"
+                    ]
+                },
+                "code": {
+                    "type": "string",
+                    "maxLength": 50,
+                    "minLength": 3
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "discount_type": {
+                    "type": "string",
+                    "enum": [
+                        "fixed",
+                        "percent",
+                        "free_shipping"
+                    ]
+                },
+                "discount_value": {
+                    "type": "number"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "max_discount": {
+                    "type": "number"
+                },
+                "min_order_amount": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "starts_at": {
+                    "type": "string"
+                },
+                "usage_limit": {
+                    "type": "integer"
+                },
+                "usage_per_user": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "domain.CreateOrderRequest": {
+            "type": "object",
+            "properties": {
+                "shipping_address": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "shipping_memo": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "shipping_name": {
+                    "description": "배송 정보 (실물 상품 포함 시 필수)",
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "shipping_phone": {
+                    "type": "string",
+                    "maxLength": 20
+                },
+                "shipping_postal": {
+                    "type": "string",
+                    "maxLength": 10
+                }
+            }
+        },
         "domain.CreatePostRequest": {
             "type": "object",
             "required": [
@@ -896,6 +9611,733 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 200,
                     "minLength": 1
+                }
+            }
+        },
+        "domain.CreateProductRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "price",
+                "product_type"
+            ],
+            "properties": {
+                "currency": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "download_expiry": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "download_limit": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "featured_image": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 1
+                },
+                "original_price": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "password": {
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "price": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "product_type": {
+                    "type": "string",
+                    "enum": [
+                        "digital",
+                        "physical"
+                    ]
+                },
+                "short_desc": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "slug": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "published",
+                        "archived"
+                    ]
+                },
+                "stock_quantity": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "visibility": {
+                    "type": "string",
+                    "enum": [
+                        "public",
+                        "private",
+                        "password"
+                    ]
+                }
+            }
+        },
+        "domain.CreatePromotionPostRequest": {
+            "type": "object",
+            "required": [
+                "title"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "link_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.CreateReviewRequest": {
+            "type": "object",
+            "required": [
+                "content",
+                "order_item_id",
+                "product_id",
+                "rating"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "maxLength": 5000,
+                    "minLength": 10
+                },
+                "images": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "order_item_id": {
+                    "type": "integer"
+                },
+                "product_id": {
+                    "type": "integer"
+                },
+                "rating": {
+                    "type": "integer",
+                    "maximum": 5,
+                    "minimum": 1
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 200
+                }
+            }
+        },
+        "domain.DajoongiItem": {
+            "type": "object",
+            "properties": {
+                "boards": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "member_ids": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.DajoongiResponse": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.DajoongiItem"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.DisciplineLogContent": {
+            "type": "object",
+            "properties": {
+                "admin_memo": {
+                    "type": "string"
+                },
+                "penalty_days": {
+                    "description": "제한 일수 (0=주의, -1=영구)",
+                    "type": "integer"
+                },
+                "penalty_reasons": {
+                    "description": "신고 사유 코드",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "penalty_type": {
+                    "description": "[\"level\", \"intercept\"]",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "processed_at": {
+                    "type": "string"
+                },
+                "processed_by": {
+                    "type": "string"
+                },
+                "report_id": {
+                    "type": "integer"
+                },
+                "report_table": {
+                    "type": "string"
+                },
+                "target_content": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_nickname": {
+                    "type": "string"
+                },
+                "target_title": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.DisciplineResponse": {
+            "type": "object",
+            "properties": {
+                "comment_count": {
+                    "type": "integer"
+                },
+                "content": {
+                    "$ref": "#/definitions/domain.DisciplineLogContent"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "process_type": {
+                    "description": "wr_7",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "wr_4",
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.DownloadResponse": {
+            "type": "object",
+            "properties": {
+                "can_download": {
+                    "type": "boolean"
+                },
+                "download_count": {
+                    "type": "integer"
+                },
+                "download_limit": {
+                    "type": "integer"
+                },
+                "download_token": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "file": {
+                    "$ref": "#/definitions/domain.ProductFileResponse"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_expired": {
+                    "type": "boolean"
+                },
+                "last_download_at": {
+                    "type": "string"
+                },
+                "order_item_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.DownloadURLResponse": {
+            "type": "object",
+            "properties": {
+                "download_url": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "file_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.FileUploadResponse": {
+            "type": "object",
+            "properties": {
+                "file_name": {
+                    "type": "string"
+                },
+                "file_size": {
+                    "type": "integer"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.GalleryItem": {
+            "type": "object",
+            "properties": {
+                "author": {
+                    "type": "string"
+                },
+                "author_id": {
+                    "type": "string"
+                },
+                "board_id": {
+                    "type": "string"
+                },
+                "comment_count": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "likes": {
+                    "type": "integer"
+                },
+                "post_id": {
+                    "type": "integer"
+                },
+                "thumbnail_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "views": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.MemberCommentSummary": {
+            "type": "object",
+            "properties": {
+                "board_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "post_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.MemberPostSummary": {
+            "type": "object",
+            "properties": {
+                "board_id": {
+                    "type": "string"
+                },
+                "comments_count": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "likes": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "views": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.MemberProfileResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "level": {
+                    "type": "integer"
+                },
+                "nickname": {
+                    "type": "string"
+                },
+                "point": {
+                    "type": "integer"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.MemberResponse": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "level": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nickname": {
+                    "type": "string"
+                },
+                "point": {
+                    "type": "integer"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.MemoRequest": {
+            "type": "object",
+            "required": [
+                "target_id"
+            ],
+            "properties": {
+                "color": {
+                    "description": "color for display (default: yellow)",
+                    "type": "string"
+                },
+                "content": {
+                    "description": "maps to memo field",
+                    "type": "string"
+                },
+                "memo_detail": {
+                    "description": "detailed memo",
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.MemoResponse": {
+            "type": "object",
+            "properties": {
+                "_token": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "memo_detail": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_nickname": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "from_user_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_read": {
+                    "type": "boolean"
+                },
+                "read_datetime": {
+                    "type": "string"
+                },
+                "send_datetime": {
+                    "type": "string"
+                },
+                "to_user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.OrderItemResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "price": {
+                    "type": "number"
+                },
+                "product_id": {
+                    "type": "integer"
+                },
+                "product_name": {
+                    "type": "string"
+                },
+                "product_type": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subtotal": {
+                    "type": "number"
+                }
+            }
+        },
+        "domain.OrderResponse": {
+            "type": "object",
+            "properties": {
+                "cancelled_at": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "delivered_at": {
+                    "type": "string"
+                },
+                "discount": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.OrderItemResponse"
+                    }
+                },
+                "order_number": {
+                    "type": "string"
+                },
+                "paid_at": {
+                    "description": "타임스탬프",
+                    "type": "string"
+                },
+                "shipped_at": {
+                    "type": "string"
+                },
+                "shipping_address": {
+                    "type": "string"
+                },
+                "shipping_carrier": {
+                    "description": "송장 정보",
+                    "type": "string"
+                },
+                "shipping_fee": {
+                    "type": "number"
+                },
+                "shipping_memo": {
+                    "type": "string"
+                },
+                "shipping_name": {
+                    "description": "배송 정보 (실물 상품 포함 시)",
+                    "type": "string"
+                },
+                "shipping_phone": {
+                    "type": "string"
+                },
+                "shipping_postal": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subtotal": {
+                    "type": "number"
+                },
+                "total": {
+                    "type": "number"
+                },
+                "tracking_number": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.PaymentResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "cancelled_at": {
+                    "type": "string"
+                },
+                "card_company": {
+                    "type": "string"
+                },
+                "card_number": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "install_month": {
+                    "type": "integer"
+                },
+                "order_id": {
+                    "type": "integer"
+                },
+                "order_number": {
+                    "type": "string"
+                },
+                "paid_at": {
+                    "type": "string"
+                },
+                "payment_method": {
+                    "type": "string"
+                },
+                "pg_provider": {
+                    "type": "string"
+                },
+                "pg_tid": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "vbank_due": {
+                    "type": "string"
+                },
+                "vbank_holder": {
+                    "type": "string"
+                },
+                "vbank_name": {
+                    "type": "string"
+                },
+                "vbank_number": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.PointHistory": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "point": {
+                    "type": "integer"
+                },
+                "rel_action": {
+                    "type": "string"
+                },
+                "rel_id": {
+                    "type": "integer"
+                },
+                "rel_table": {
+                    "type": "string"
                 }
             }
         },
@@ -958,6 +10400,1031 @@ const docTemplate = `{
                 }
             }
         },
+        "domain.PreparePaymentRequest": {
+            "type": "object",
+            "required": [
+                "order_id",
+                "payment_method",
+                "pg_provider",
+                "return_url"
+            ],
+            "properties": {
+                "cancel_url": {
+                    "type": "string"
+                },
+                "order_id": {
+                    "type": "integer"
+                },
+                "payment_method": {
+                    "type": "string",
+                    "enum": [
+                        "card",
+                        "bank",
+                        "virtual",
+                        "phone"
+                    ]
+                },
+                "pg_provider": {
+                    "type": "string",
+                    "enum": [
+                        "inicis",
+                        "tosspayments",
+                        "kakaopay"
+                    ]
+                },
+                "return_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.PreparePaymentResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "app_scheme": {
+                    "description": "앱 스킴",
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "extra_data": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "merchant_id": {
+                    "description": "추가 데이터",
+                    "type": "string"
+                },
+                "mobile_url": {
+                    "description": "모바일 URL",
+                    "type": "string"
+                },
+                "order_number": {
+                    "type": "string"
+                },
+                "payment_id": {
+                    "type": "integer"
+                },
+                "pg_order_id": {
+                    "type": "string"
+                },
+                "pg_provider": {
+                    "description": "PG별 응답",
+                    "type": "string"
+                },
+                "redirect_url": {
+                    "description": "리다이렉트 URL (PC)",
+                    "type": "string"
+                },
+                "signature": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ProcessSettlementRequest": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "string",
+                    "maxLength": 1000
+                }
+            }
+        },
+        "domain.ProductFileResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "file_size": {
+                    "type": "integer"
+                },
+                "file_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "product_id": {
+                    "type": "integer"
+                },
+                "sort_order": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.ProductResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "download_expiry": {
+                    "type": "integer"
+                },
+                "download_limit": {
+                    "type": "integer"
+                },
+                "featured_image": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "original_price": {
+                    "type": "number"
+                },
+                "price": {
+                    "type": "number"
+                },
+                "product_type": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "rating_avg": {
+                    "type": "number"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "sales_count": {
+                    "type": "integer"
+                },
+                "seller_id": {
+                    "type": "integer"
+                },
+                "short_desc": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stock_quantity": {
+                    "type": "integer"
+                },
+                "stock_status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.PromotionListResponse": {
+            "type": "object",
+            "properties": {
+                "advertisers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.AdvertiserResponse"
+                    }
+                },
+                "posts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.PromotionPostResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.PromotionPostResponse": {
+            "type": "object",
+            "properties": {
+                "advertiser_id": {
+                    "type": "integer"
+                },
+                "author_name": {
+                    "type": "string"
+                },
+                "comment_count": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "is_pinned": {
+                    "type": "boolean"
+                },
+                "is_promotion": {
+                    "type": "boolean"
+                },
+                "likes": {
+                    "type": "integer"
+                },
+                "link_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "views": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.ProvisionRequest": {
+            "type": "object",
+            "required": [
+                "owner_email",
+                "plan",
+                "site_name",
+                "subdomain"
+            ],
+            "properties": {
+                "owner_email": {
+                    "type": "string"
+                },
+                "plan": {
+                    "type": "string",
+                    "enum": [
+                        "free",
+                        "pro",
+                        "business",
+                        "enterprise"
+                    ]
+                },
+                "site_name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "subdomain": {
+                    "type": "string",
+                    "maxLength": 50,
+                    "minLength": 3
+                },
+                "theme": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ReactionItem": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "choose": {
+                    "type": "boolean"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "reaction": {
+                    "type": "string"
+                },
+                "reactionId": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ReactionRequest": {
+            "type": "object",
+            "properties": {
+                "parentId": {
+                    "description": "parent post ID (for comments)",
+                    "type": "string"
+                },
+                "reaction": {
+                    "description": "reaction type (emoji:xxx, image:xxx)",
+                    "type": "string"
+                },
+                "reactionMode": {
+                    "description": "\"add\" or \"remove\"",
+                    "type": "string"
+                },
+                "targetId": {
+                    "description": "target post/comment ID",
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ReactionResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/definitions/domain.ReactionItem"
+                        }
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.RegisterShippingRequest": {
+            "type": "object",
+            "required": [
+                "carrier",
+                "tracking_number"
+            ],
+            "properties": {
+                "carrier": {
+                    "type": "string",
+                    "enum": [
+                        "cj",
+                        "lotte",
+                        "hanjin",
+                        "post",
+                        "logen",
+                        "kd",
+                        "gspostbox"
+                    ]
+                },
+                "tracking_number": {
+                    "type": "string",
+                    "maxLength": 30,
+                    "minLength": 5
+                }
+            }
+        },
+        "domain.ReplyReviewRequest": {
+            "type": "object",
+            "required": [
+                "reply"
+            ],
+            "properties": {
+                "reply": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "minLength": 1
+                }
+            }
+        },
+        "domain.ReportActionRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "description": "submitOpinion, cancelOpinion, adminApprove, adminDismiss",
+                    "type": "string"
+                },
+                "days": {
+                    "type": "integer"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "sg_id": {
+                    "type": "integer"
+                },
+                "sg_parent": {
+                    "type": "integer"
+                },
+                "sg_table": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ReportListResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "parent": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "reporter_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "table": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ReviewResponse": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "helpful_count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "is_verified": {
+                    "type": "boolean"
+                },
+                "order_item_id": {
+                    "type": "integer"
+                },
+                "product_id": {
+                    "type": "integer"
+                },
+                "rating": {
+                    "type": "integer"
+                },
+                "replied_at": {
+                    "type": "string"
+                },
+                "seller_reply": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                },
+                "user_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ReviewSummary": {
+            "type": "object",
+            "properties": {
+                "average_rating": {
+                    "type": "number"
+                },
+                "product_id": {
+                    "type": "integer"
+                },
+                "rating_counts": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "total_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.ScrapResponse": {
+            "type": "object",
+            "properties": {
+                "author": {
+                    "type": "string"
+                },
+                "board_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "post_id": {
+                    "type": "integer"
+                },
+                "scrap_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.SendMessageRequest": {
+            "type": "object",
+            "required": [
+                "content",
+                "to_user_id"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "to_user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.SettlementResponse": {
+            "type": "object",
+            "properties": {
+                "bank_account": {
+                    "type": "string"
+                },
+                "bank_holder": {
+                    "type": "string"
+                },
+                "bank_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "pg_fees": {
+                    "type": "number"
+                },
+                "platform_fees": {
+                    "type": "number"
+                },
+                "processed_at": {
+                    "type": "string"
+                },
+                "seller_id": {
+                    "type": "integer"
+                },
+                "settlement_amount": {
+                    "type": "number"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "total_refunds": {
+                    "type": "number"
+                },
+                "total_sales": {
+                    "type": "number"
+                }
+            }
+        },
+        "domain.SettlementSummary": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string"
+                },
+                "pending_amount": {
+                    "type": "number"
+                },
+                "total_pg_fees": {
+                    "type": "number"
+                },
+                "total_platform_fees": {
+                    "type": "number"
+                },
+                "total_refunds": {
+                    "type": "number"
+                },
+                "total_sales": {
+                    "type": "number"
+                },
+                "total_settled": {
+                    "type": "number"
+                }
+            }
+        },
+        "domain.ShippingCarrierCode": {
+            "type": "string",
+            "enum": [
+                "cj",
+                "lotte",
+                "hanjin",
+                "post",
+                "logen",
+                "epost",
+                "kd",
+                "gspostbox"
+            ],
+            "x-enum-comments": {
+                "CarrierCJ": "CJ대한통운",
+                "CarrierEPost": "우체국 EMS",
+                "CarrierGSPostBox": "GSPostbox",
+                "CarrierHanjin": "한진택배",
+                "CarrierKD": "경동택배",
+                "CarrierLogen": "로젠택배",
+                "CarrierLotte": "롯데택배",
+                "CarrierPost": "우체국택배"
+            },
+            "x-enum-descriptions": [
+                "CJ대한통운",
+                "롯데택배",
+                "한진택배",
+                "우체국택배",
+                "로젠택배",
+                "우체국 EMS",
+                "경동택배",
+                "GSPostbox"
+            ],
+            "x-enum-varnames": [
+                "CarrierCJ",
+                "CarrierLotte",
+                "CarrierHanjin",
+                "CarrierPost",
+                "CarrierLogen",
+                "CarrierEPost",
+                "CarrierKD",
+                "CarrierGSPostBox"
+            ]
+        },
+        "domain.ShippingCarrierInfo": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "$ref": "#/definitions/domain.ShippingCarrierCode"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tracking_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ShippingCarrierListResponse": {
+            "type": "object",
+            "properties": {
+                "carriers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.ShippingCarrierInfo"
+                    }
+                }
+            }
+        },
+        "domain.ShippingStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "picked_up",
+                "in_transit",
+                "out_for_delivery",
+                "delivered",
+                "exception",
+                "returned"
+            ],
+            "x-enum-comments": {
+                "ShippingStatusDelivered": "배송 완료",
+                "ShippingStatusException": "배송 이상",
+                "ShippingStatusInTransit": "배송 중",
+                "ShippingStatusOutForDelivery": "배송 출발",
+                "ShippingStatusPending": "배송 준비 중",
+                "ShippingStatusPickedUp": "집화 완료",
+                "ShippingStatusReturned": "반송"
+            },
+            "x-enum-descriptions": [
+                "배송 준비 중",
+                "집화 완료",
+                "배송 중",
+                "배송 출발",
+                "배송 완료",
+                "배송 이상",
+                "반송"
+            ],
+            "x-enum-varnames": [
+                "ShippingStatusPending",
+                "ShippingStatusPickedUp",
+                "ShippingStatusInTransit",
+                "ShippingStatusOutForDelivery",
+                "ShippingStatusDelivered",
+                "ShippingStatusException",
+                "ShippingStatusReturned"
+            ]
+        },
+        "domain.SubmitReportRequest": {
+            "type": "object",
+            "required": [
+                "post_id",
+                "reason",
+                "table",
+                "target_id"
+            ],
+            "properties": {
+                "post_id": {
+                    "description": "게시글 ID",
+                    "type": "integer"
+                },
+                "reason": {
+                    "description": "신고 사유",
+                    "type": "string"
+                },
+                "table": {
+                    "description": "게시판 테이블명 (예: free, qa)",
+                    "type": "string"
+                },
+                "target_id": {
+                    "description": "신고 대상 회원 ID",
+                    "type": "string"
+                }
+            }
+        },
+        "domain.TrackingEvent": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "time": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.TrackingInfo": {
+            "type": "object",
+            "properties": {
+                "carrier": {
+                    "$ref": "#/definitions/domain.ShippingCarrierInfo"
+                },
+                "delivered_at": {
+                    "type": "string"
+                },
+                "estimated_date": {
+                    "type": "string"
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.TrackingEvent"
+                    }
+                },
+                "recipient_name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/domain.ShippingStatus"
+                },
+                "status_text": {
+                    "type": "string"
+                },
+                "tracking_number": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.TrackingResponse": {
+            "type": "object",
+            "properties": {
+                "order_id": {
+                    "type": "integer"
+                },
+                "order_number": {
+                    "type": "string"
+                },
+                "tracking_info": {
+                    "$ref": "#/definitions/domain.TrackingInfo"
+                },
+                "tracking_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.UnifiedSearchResult": {
+            "type": "object",
+            "properties": {
+                "author": {
+                    "type": "string"
+                },
+                "author_id": {
+                    "type": "string"
+                },
+                "board_id": {
+                    "type": "string"
+                },
+                "board_name": {
+                    "type": "string"
+                },
+                "content": {
+                    "description": "snippet",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "likes": {
+                    "type": "integer"
+                },
+                "post_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "views": {
+                    "type": "integer"
+                }
+            }
+        },
+        "domain.UpdateAdvertiserRequest": {
+            "type": "object",
+            "properties": {
+                "end_date": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_pinned": {
+                    "type": "boolean"
+                },
+                "memo": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "post_count": {
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.UpdateBannerRequest": {
+            "type": "object",
+            "properties": {
+                "alt_text": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "link_url": {
+                    "type": "string"
+                },
+                "memo": {
+                    "type": "string"
+                },
+                "position": {
+                    "$ref": "#/definitions/domain.BannerPosition"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.UpdateCartRequest": {
+            "type": "object",
+            "required": [
+                "quantity"
+            ],
+            "properties": {
+                "quantity": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "domain.UpdateCouponRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "discount_value": {
+                    "type": "number"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "max_discount": {
+                    "type": "number"
+                },
+                "min_order_amount": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "starts_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "active",
+                        "inactive"
+                    ]
+                },
+                "usage_limit": {
+                    "type": "integer"
+                },
+                "usage_per_user": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
         "domain.UpdatePostRequest": {
             "type": "object",
             "properties": {
@@ -975,18 +11442,394 @@ const docTemplate = `{
                 }
             }
         },
-        "handler.LoginRequest": {
+        "domain.UpdateProductRequest": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "download_expiry": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "download_limit": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "featured_image": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 1
+                },
+                "original_price": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "password": {
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "price": {
+                    "type": "number",
+                    "minimum": 0
+                },
+                "product_type": {
+                    "type": "string",
+                    "enum": [
+                        "digital",
+                        "physical"
+                    ]
+                },
+                "short_desc": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "slug": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "published",
+                        "archived"
+                    ]
+                },
+                "stock_quantity": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "stock_status": {
+                    "type": "string",
+                    "enum": [
+                        "in_stock",
+                        "out_of_stock",
+                        "preorder"
+                    ]
+                },
+                "visibility": {
+                    "type": "string",
+                    "enum": [
+                        "public",
+                        "private",
+                        "password"
+                    ]
+                }
+            }
+        },
+        "domain.UpdatePromotionPostRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "link_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.UpdateReviewRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "maxLength": 5000,
+                    "minLength": 10
+                },
+                "images": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "rating": {
+                    "type": "integer",
+                    "maximum": 5,
+                    "minimum": 1
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 200
+                }
+            }
+        },
+        "domain.ValidateCouponRequest": {
             "type": "object",
             "required": [
+                "code"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                }
+            }
+        },
+        "domain.ValidateCouponResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "discount_type": {
+                    "type": "string"
+                },
+                "discount_value": {
+                    "type": "number"
+                },
+                "max_discount": {
+                    "type": "number"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "min_order_amount": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "valid": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handler.CheckEmailRequest": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "exclude_user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.CheckFilterRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.CheckFilterResponse": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.CheckNicknameRequest": {
+            "type": "object",
+            "required": [
+                "nickname"
+            ],
+            "properties": {
+                "exclude_user_id": {
+                    "type": "string"
+                },
+                "nickname": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.CheckPhoneRequest": {
+            "type": "object",
+            "required": [
+                "phone"
+            ],
+            "properties": {
+                "exclude_user_id": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.CheckUserIDRequest": {
+            "type": "object",
+            "required": [
+                "user_id"
+            ],
+            "properties": {
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.CreateSettlementRequest": {
+            "type": "object",
+            "required": [
+                "period_end",
+                "period_start"
+            ],
+            "properties": {
+                "period_end": {
+                    "description": "YYYY-MM-DD",
+                    "type": "string"
+                },
+                "period_start": {
+                    "description": "YYYY-MM-DD",
+                    "type": "string"
+                }
+            }
+        },
+        "handler.GenerateWriteTokenRequest": {
+            "type": "object",
+            "required": [
+                "token_case"
+            ],
+            "properties": {
+                "token_case": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.PostPreviewData": {
+            "type": "object",
+            "properties": {
+                "board_subject": {
+                    "type": "string"
+                },
+                "comment_info": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "datetime": {
+                    "type": "string"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "good": {
+                    "type": "integer"
+                },
+                "hit": {
+                    "type": "integer"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "is_comment": {
+                    "type": "boolean"
+                },
+                "links": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nogood": {
+                    "type": "integer"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.PostPreviewResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "post": {
+                    "$ref": "#/definitions/handler.PostPreviewData"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handler.TokenResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.RegisterRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "name",
+                "nickname",
                 "password",
                 "user_id"
             ],
             "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nickname": {
+                    "type": "string"
+                },
                 "password": {
                     "type": "string"
                 },
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "service.ValidationResult": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "valid": {
+                    "type": "boolean"
                 }
             }
         }
@@ -1005,7 +11848,7 @@ const docTemplate = `{
 var SwaggerInfo = &swag.Spec{
 	Version:          "2.0",
 	Host:             "localhost:8082",
-	BasePath:         "/api/v2",
+	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Angple Backend API",
 	Description:      "다모앙(damoang.net) 커뮤니티 백엔드 API 서버\n기존 PHP(그누보드) 기반 시스템을 Go로 마이그레이션한 프로젝트",
