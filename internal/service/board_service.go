@@ -222,6 +222,34 @@ func (s *BoardService) CanComment(boardID string, memberLevel int) (bool, error)
 	return memberLevel >= board.CommentLevel, nil
 }
 
+// GetRequiredLevel - 특정 액션에 필요한 레벨 조회
+// Implements middleware.BoardPermissionChecker interface
+func (s *BoardService) GetRequiredLevel(boardID string, action string) int {
+	board, err := s.repo.FindByID(boardID)
+	if err != nil {
+		return 1
+	}
+
+	switch action {
+	case "list":
+		return board.ListLevel
+	case "read":
+		return board.ReadLevel
+	case "write":
+		return board.WriteLevel
+	case "reply":
+		return board.ReplyLevel
+	case "comment":
+		return board.CommentLevel
+	case "upload":
+		return board.UploadLevel
+	case "download":
+		return board.DownloadLevel
+	default:
+		return 1
+	}
+}
+
 // Utility functions
 
 func isValidBoardID(boardID string) bool {

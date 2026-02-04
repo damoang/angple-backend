@@ -43,6 +43,7 @@ func Setup(
 	adminHandler *handler.AdminHandler,
 	v1UsageTracker *middleware.APIUsageTracker,
 	cfg *config.Config,
+	boardPermissionChecker middleware.BoardPermissionChecker,
 ) {
 	// Deprecation 설정 (레거시 API용)
 	deprecationMW := middleware.Deprecation(middleware.DeprecationConfig{
@@ -72,7 +73,7 @@ func Setup(
 	// Board Management (게시판 관리)
 	boardsManagement := api.Group("/boards")
 	boardsManagement.GET("", boardHandler.ListBoards)                                               // 게시판 목록 (공개)
-	boardsManagement.GET("/:board_id", boardHandler.GetBoard)                                       // 게시판 정보 (공개)
+	boardsManagement.GET("/:board_id", middleware.OptionalJWTAuth(jwtManager), boardHandler.GetBoard) // 게시판 정보 (인증 시 권한 정보 포함)
 	boardsManagement.POST("", middleware.JWTAuth(jwtManager), boardHandler.CreateBoard)             // 게시판 생성 (관리자)
 	boardsManagement.PUT("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.UpdateBoard)    // 게시판 수정 (관리자)
 	boardsManagement.DELETE("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.DeleteBoard) // 게시판 삭제 (관리자)
@@ -90,7 +91,7 @@ func Setup(
 		// 게시글 목록 및 검색
 		boardPosts.GET("", postHandler.ListPosts)
 		boardPosts.GET("/search", postHandler.SearchPosts)
-		boardPosts.POST("", middleware.JWTAuth(jwtManager), postHandler.CreatePost)
+		boardPosts.POST("", middleware.JWTAuth(jwtManager), middleware.RequireWrite(boardPermissionChecker), postHandler.CreatePost)
 
 		// 게시글 상세/수정/삭제
 		boardPosts.GET("/:id", postHandler.GetPost)
@@ -118,7 +119,7 @@ func Setup(
 		{
 			comments.GET("", commentHandler.ListComments)
 			comments.GET("/:comment_id", commentHandler.GetComment)
-			comments.POST("", middleware.JWTAuth(jwtManager), commentHandler.CreateComment)
+			comments.POST("", middleware.JWTAuth(jwtManager), middleware.RequireComment(boardPermissionChecker), commentHandler.CreateComment)
 			comments.PUT("/:comment_id", middleware.JWTAuth(jwtManager), commentHandler.UpdateComment)
 			comments.DELETE("/:comment_id", middleware.JWTAuth(jwtManager), commentHandler.DeleteComment)
 			comments.POST("/:comment_id/like", middleware.JWTAuth(jwtManager), commentHandler.LikeComment)
