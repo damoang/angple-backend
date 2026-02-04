@@ -79,7 +79,7 @@ func (c *Comment) ToResponse() *CommentResponse {
 		Author:    c.Author,
 		AuthorID:  c.AuthorID,
 		CreatedAt: c.CreatedAt,
-		Depth:     c.CommentCount, // wr_comment 컬럼이 depth를 나타냄
+		Depth:     len(c.CommentReply), // wr_comment_reply 문자열 길이가 depth (PHP 원본과 동일)
 		Likes:     c.Likes,
 		Dislikes:  c.Dislikes,
 	}
