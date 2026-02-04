@@ -104,3 +104,27 @@ func (h *V2AuthHandler) GetMe(c *gin.Context) {
 
 	common.V2Success(c, user)
 }
+
+// ExchangeGnuboardJWT handles POST /api/v2/auth/exchange
+// Exchanges damoang_jwt cookie for angple JWT tokens
+func (h *V2AuthHandler) ExchangeGnuboardJWT(c *gin.Context) {
+	gnuJwt, err := c.Cookie("damoang_jwt")
+	if err != nil || gnuJwt == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "damoang_jwt 쿠키가 없습니다", nil)
+		return
+	}
+
+	resp, err := h.authService.ExchangeGnuboardJWT(gnuJwt)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "토큰 교환 실패", err)
+		return
+	}
+
+	// Set refresh token as httpOnly cookie
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", "", true, true)
+
+	common.V2Success(c, gin.H{
+		"access_token": resp.AccessToken,
+		"user":         resp.User,
+	})
+}

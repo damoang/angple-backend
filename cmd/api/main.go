@@ -500,7 +500,7 @@ func main() {
 		v2routes.Setup(router, v2Handler, jwtManager)
 
 		// v2 Auth API
-		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager)
+		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager, damoangJWT)
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
 		v2routes.SetupAuth(router, v2AuthHandler, jwtManager)
 

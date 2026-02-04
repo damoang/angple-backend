@@ -13,6 +13,7 @@ func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.M
 	authGroup.POST("/login", h.Login)
 	authGroup.POST("/refresh", h.RefreshToken)
 	authGroup.POST("/logout", h.Logout)
+	authGroup.POST("/exchange", h.ExchangeGnuboardJWT) // damoang_jwt → angple JWT exchange (no auth middleware)
 	authGroup.GET("/me", middleware.JWTAuth(jwtManager), h.GetMe)
 }
 
