@@ -77,6 +77,7 @@ func (s *V2APISuite) SetupSuite() {
 
 	// JWT manager
 	s.jwtManager = jwt.NewManager("test-secret-key-for-integration-tests", 900, 86400)
+	damoangManager := jwt.NewDamoangManager("test-damoang-secret-key")
 
 	// Setup repos, handlers, routes
 	userRepo := v2repo.NewUserRepository(db)
@@ -85,7 +86,7 @@ func (s *V2APISuite) SetupSuite() {
 	boardRepo := v2repo.NewBoardRepository(db)
 
 	v2Handler := v2handler.NewV2Handler(userRepo, postRepo, commentRepo, boardRepo)
-	authSvc := v2svc.NewV2AuthService(userRepo, s.jwtManager)
+	authSvc := v2svc.NewV2AuthService(userRepo, s.jwtManager, damoangManager)
 	authHandler := v2handler.NewV2AuthHandler(authSvc)
 
 	s.router = gin.New()
