@@ -522,11 +522,6 @@ func main() {
 		v2routes.SetupMemo(router, v2MemoHandler, jwtManager)
 		v2routes.SetupMessage(router, v2MessageHandler, jwtManager)
 
-		// v2 Recommendation (Like/Dislike)
-		v2GoodRepo := v2repo.NewGoodRepository(db)
-		v2GoodHandler := v2handler.NewGoodHandler(v2GoodRepo)
-		v2routes.SetupGood(router, v2GoodHandler, jwtManager)
-
 		// Tenant Management (멀티테넌트 관리)
 		adminTenants := router.Group("/api/v2/admin/tenants")
 		adminTenants.GET("", tenantHandler.ListTenants)
