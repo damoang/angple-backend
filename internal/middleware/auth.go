@@ -51,6 +51,42 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 	}
 }
 
+// OptionalJWTAuth attempts to authenticate but continues even if no token is present
+func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.Next()
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
+			c.Abort()
+			return
+		}
+
+		tokenString := parts[1]
+		claims, err := jwtManager.VerifyToken(tokenString)
+		if err != nil {
+			if errors.Is(err, jwt.ErrExpiredToken) {
+				common.ErrorResponse(c, 401, "Token expired", err)
+			} else {
+				common.ErrorResponse(c, 401, "Invalid token", err)
+			}
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", claims.UserID)
+		c.Set("nickname", claims.Nickname)
+		c.Set("level", claims.Level)
+
+		c.Next()
+	}
+}
+
 // GetUserID extracts user ID from context
 func GetUserID(c *gin.Context) string {
 	userID, exists := c.Get("userID")
