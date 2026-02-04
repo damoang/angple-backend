@@ -4,39 +4,39 @@ import (
 	"sync"
 )
 
-// PluginFactory 플러그인 인스턴스 생성 팩토리 함수
-type PluginFactory func() Plugin
+// Factory 플러그인 인스턴스 생성 팩토리 함수
+type Factory func() Plugin
 
-// PluginRegistration 플러그인 등록 정보
-type PluginRegistration struct {
-	Factory  PluginFactory
+// Registration 플러그인 등록 정보
+type Registration struct {
+	Factory  Factory
 	Manifest *PluginManifest
 }
 
 var (
 	// 내장 플러그인 팩토리 레지스트리
-	builtInFactories = make(map[string]PluginRegistration)
+	builtInFactories = make(map[string]Registration)
 	factoryMu        sync.RWMutex
 )
 
 // RegisterFactory 내장 플러그인 팩토리 등록
 // 각 플러그인 패키지의 init()에서 호출됨
-func RegisterFactory(name string, factory PluginFactory, manifest *PluginManifest) {
+func RegisterFactory(name string, factory Factory, manifest *PluginManifest) {
 	factoryMu.Lock()
 	defer factoryMu.Unlock()
 
-	builtInFactories[name] = PluginRegistration{
+	builtInFactories[name] = Registration{
 		Factory:  factory,
 		Manifest: manifest,
 	}
 }
 
 // GetRegisteredFactories 등록된 모든 플러그인 팩토리 반환
-func GetRegisteredFactories() map[string]PluginRegistration {
+func GetRegisteredFactories() map[string]Registration {
 	factoryMu.RLock()
 	defer factoryMu.RUnlock()
 
-	result := make(map[string]PluginRegistration)
+	result := make(map[string]Registration)
 	for name, reg := range builtInFactories {
 		result[name] = reg
 	}
@@ -44,7 +44,7 @@ func GetRegisteredFactories() map[string]PluginRegistration {
 }
 
 // GetFactory 특정 플러그인 팩토리 반환
-func GetFactory(name string) (PluginFactory, *PluginManifest, bool) {
+func GetFactory(name string) (Factory, *PluginManifest, bool) {
 	factoryMu.RLock()
 	defer factoryMu.RUnlock()
 

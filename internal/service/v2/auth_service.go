@@ -144,6 +144,14 @@ func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, er
 	mbName := claims.GetUserName()
 	mbLevel := claims.GetUserLevel()
 
+	// Clamp level to valid uint8 range (0-255)
+	level := mbLevel
+	if level < 0 {
+		level = 0
+	} else if level > 255 {
+		level = 255
+	}
+
 	// Find or create user by username (mb_id)
 	user, err := s.userRepo.FindByUsername(mbID)
 	if err != nil {
@@ -153,7 +161,7 @@ func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, er
 			Username: mbID,
 			Nickname: mbName,
 			Email:    claims.MbEmail,
-			Level:    uint8(mbLevel),
+			Level:    uint8(level), // #nosec G115 - bounds checked above
 			Status:   "active",
 		}
 		if createErr := s.userRepo.Create(user); createErr != nil {
