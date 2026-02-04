@@ -14,6 +14,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// init 플러그인 팩토리 자동 등록
+func init() {
+	plugin.RegisterFactory("commerce", func() plugin.Plugin {
+		return New()
+	}, Manifest)
+}
+
 // CommercePlugin 커머스 플러그인
 type CommercePlugin struct {
 	db                *gorm.DB

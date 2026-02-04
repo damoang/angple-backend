@@ -152,11 +152,12 @@ type Plugin interface {
 
 // PluginContext 플러그인에 전달되는 컨텍스트
 type PluginContext struct {
-	DB       *gorm.DB
-	Redis    *redis.Client
-	Config   map[string]interface{}
-	Logger   Logger
-	BasePath string
+	DB         *gorm.DB
+	Redis      *redis.Client
+	Config     map[string]interface{}
+	Logger     Logger
+	BasePath   string
+	JWTManager interface{} // JWT 매니저 (순환 의존 방지를 위해 interface{} 사용)
 }
 
 // Logger 플러그인용 로거 인터페이스

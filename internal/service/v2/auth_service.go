@@ -136,16 +136,30 @@ func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, er
 		return nil, fmt.Errorf("invalid damoang_jwt: %w", err)
 	}
 
-	// Get mb_id from claims
+	// Get user info from claims
 	mbID := claims.GetUserID()
 	if mbID == "" {
 		return nil, errors.New("mb_id not found in token")
 	}
+	mbName := claims.GetUserName()
+	mbLevel := claims.GetUserLevel()
 
-	// Find user by username (mb_id)
+	// Find or create user by username (mb_id)
 	user, err := s.userRepo.FindByUsername(mbID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		// User doesn't exist in v2_users, create from JWT claims
+		log.Printf("[ExchangeJWT] User %s not found in v2_users, creating...", mbID)
+		user = &v2domain.V2User{
+			Username: mbID,
+			Nickname: mbName,
+			Email:    claims.MbEmail,
+			Level:    uint8(mbLevel),
+			Status:   "active",
+		}
+		if createErr := s.userRepo.Create(user); createErr != nil {
+			return nil, fmt.Errorf("failed to create user: %w", createErr)
+		}
+		log.Printf("[ExchangeJWT] Created user %s with ID %d", mbID, user.ID)
 	}
 
 	if user.Status == "banned" {

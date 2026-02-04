@@ -11,6 +11,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// init 플러그인 팩토리 자동 등록
+func init() {
+	plugin.RegisterFactory("marketplace", func() plugin.Plugin {
+		return New()
+	}, Manifest)
+}
+
 // Manifest 플러그인 매니페스트
 var Manifest = &plugin.PluginManifest{
 	Name:        "marketplace",
@@ -88,17 +95,29 @@ type Plugin struct {
 	wishHandler     *handler.WishHandler
 }
 
-// New 플러그인 인스턴스 생성
-func New(db *gorm.DB, jwtManager *jwt.Manager) *Plugin {
-	p := &Plugin{
-		db:         db,
-		jwtManager: jwtManager,
+// New 플러그인 인스턴스 생성 (빈 인스턴스, Initialize에서 초기화)
+func New() *Plugin {
+	return &Plugin{}
+}
+
+// Name 플러그인 이름 반환
+func (p *Plugin) Name() string {
+	return "marketplace"
+}
+
+// Initialize 플러그인 초기화
+func (p *Plugin) Initialize(ctx *plugin.PluginContext) error {
+	p.db = ctx.DB
+
+	// JWT Manager 타입 변환
+	if jm, ok := ctx.JWTManager.(*jwt.Manager); ok {
+		p.jwtManager = jm
 	}
 
 	// Repository 초기화
-	p.itemRepo = repository.NewItemRepository(db)
-	p.categoryRepo = repository.NewCategoryRepository(db)
-	p.wishRepo = repository.NewWishRepository(db)
+	p.itemRepo = repository.NewItemRepository(p.db)
+	p.categoryRepo = repository.NewCategoryRepository(p.db)
+	p.wishRepo = repository.NewWishRepository(p.db)
 
 	// Service 초기화
 	p.itemService = service.NewItemService(p.itemRepo, p.categoryRepo, p.wishRepo)
@@ -110,16 +129,6 @@ func New(db *gorm.DB, jwtManager *jwt.Manager) *Plugin {
 	p.categoryHandler = handler.NewCategoryHandler(p.categoryService)
 	p.wishHandler = handler.NewWishHandler(p.wishService)
 
-	return p
-}
-
-// Name 플러그인 이름 반환
-func (p *Plugin) Name() string {
-	return "marketplace"
-}
-
-// Initialize 플러그인 초기화 (이미 New에서 초기화됨)
-func (p *Plugin) Initialize(ctx *plugin.PluginContext) error {
 	return nil
 }
 
