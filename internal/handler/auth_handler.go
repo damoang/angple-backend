@@ -37,6 +37,7 @@ type RefreshRequest struct {
 }
 
 // Login handles POST /api/v2/auth/login
+// 모범사례: refresh_token은 httpOnly Cookie로, access_token은 body로
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -66,6 +67,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 // RefreshToken handles POST /api/v2/auth/refresh
+// 모범사례: Cookie에서 refresh_token 읽기, 새 토큰도 Cookie로 설정
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	// 1순위: httpOnly 쿠키에서 refreshToken 읽기
 	refreshToken, err := c.Cookie("refresh_token")
@@ -82,6 +84,8 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	// 토큰 갱신 (토큰 로테이션)
 	tokens, err := h.service.RefreshToken(refreshToken)
 	if errors.Is(err, common.ErrInvalidToken) {
+		// 유효하지 않은 토큰이면 Cookie도 삭제
+		h.clearRefreshTokenCookie(c)
 		common.ErrorResponse(c, 401, "Invalid refresh token", err)
 		return
 	}
