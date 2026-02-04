@@ -26,10 +26,10 @@ jobs:
         go-version: '1.24'
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v9
+      uses: golangci/golangci-lint-action@v7
       with:
-        version: v2.1.6
-        args: --timeout=5m --exclude-dirs=plugins
+        version: v1.64.5
+        args: --timeout=5m --skip-dirs=plugins
 
   golangci-reviewdog:
     name: golangci-lint with reviewdog
@@ -46,23 +46,12 @@ jobs:
       with:
         go-version: '1.24'
 
-    - name: Install golangci-lint
-      run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-
     - name: Run golangci-lint
-      run: |
-        golangci-lint run --timeout=5m --exclude-dirs=plugins --new-from-rev=${{ github.event.pull_request.base.sha }} --output.format=colored-line-number > golangci-result.txt 2>&1 || echo "lint_issues=true" >> $GITHUB_ENV
-
-    - name: Show lint results
-      if: always()
-      run: |
-        if [ -f golangci-result.txt ]; then
-          cat golangci-result.txt
-        fi
-
-    - name: Fail if lint issues found
-      if: env.lint_issues == 'true'
-      run: exit 1
+      uses: golangci/golangci-lint-action@v7
+      with:
+        version: v1.64.5
+        args: --timeout=5m --skip-dirs=plugins
+        only-new-issues: true
 
   format:
     name: Format Check
