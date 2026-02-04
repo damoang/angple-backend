@@ -136,12 +136,12 @@ type UpdateBoardRequest struct {
 
 // BoardPermissions - 사용자별 게시판 권한 정보
 type BoardPermissions struct {
-	CanList    bool `json:"can_list"`
-	CanRead    bool `json:"can_read"`
-	CanWrite   bool `json:"can_write"`
-	CanReply   bool `json:"can_reply"`
-	CanComment bool `json:"can_comment"`
-	CanUpload  bool `json:"can_upload"`
+	CanList     bool `json:"can_list"`
+	CanRead     bool `json:"can_read"`
+	CanWrite    bool `json:"can_write"`
+	CanReply    bool `json:"can_reply"`
+	CanComment  bool `json:"can_comment"`
+	CanUpload   bool `json:"can_upload"`
 	CanDownload bool `json:"can_download"`
 }
 
@@ -169,7 +169,7 @@ type BoardResponse struct {
 	UploadCount     int                  `json:"upload_count"`
 	CountWrite      int                  `json:"count_write"`
 	CountComment    int                  `json:"count_comment"`
-	DisplaySettings BoardDisplaySettings `json:"display_settings"` // 게시판 표시 설정
+	DisplaySettings BoardDisplaySettings `json:"display_settings"`      // 게시판 표시 설정
 	Permissions     *BoardPermissions    `json:"permissions,omitempty"` // 사용자별 권한 (인증 시에만 포함)
 }
 
@@ -223,7 +223,7 @@ func (b *Board) ToResponse() *BoardResponse {
 		CountComment:    b.CountComment,
 		InsertTime:      b.InsertTime,
 		DisplaySettings: b.GetDisplaySettings(), // Extra1에서 파싱
-		Permissions:     nil,                     // 기본값: 권한 정보 없음
+		Permissions:     nil,                    // 기본값: 권한 정보 없음
 	}
 }
 

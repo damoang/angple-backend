@@ -72,11 +72,11 @@ func Setup(
 
 	// Board Management (게시판 관리)
 	boardsManagement := api.Group("/boards")
-	boardsManagement.GET("", boardHandler.ListBoards)                                               // 게시판 목록 (공개)
+	boardsManagement.GET("", boardHandler.ListBoards)                                                 // 게시판 목록 (공개)
 	boardsManagement.GET("/:board_id", middleware.OptionalJWTAuth(jwtManager), boardHandler.GetBoard) // 게시판 정보 (인증 시 권한 정보 포함)
-	boardsManagement.POST("", middleware.JWTAuth(jwtManager), boardHandler.CreateBoard)             // 게시판 생성 (관리자)
-	boardsManagement.PUT("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.UpdateBoard)    // 게시판 수정 (관리자)
-	boardsManagement.DELETE("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.DeleteBoard) // 게시판 삭제 (관리자)
+	boardsManagement.POST("", middleware.JWTAuth(jwtManager), boardHandler.CreateBoard)               // 게시판 생성 (관리자)
+	boardsManagement.PUT("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.UpdateBoard)      // 게시판 수정 (관리자)
+	boardsManagement.DELETE("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.DeleteBoard)   // 게시판 삭제 (관리자)
 
 	// Group별 게시판
 	groups := api.Group("/groups")
