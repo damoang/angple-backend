@@ -134,6 +134,17 @@ type UpdateBoardRequest struct {
 	UploadSize   *int64  `json:"upload_size,omitempty"`
 }
 
+// BoardPermissions - 사용자별 게시판 권한 정보
+type BoardPermissions struct {
+	CanList     bool `json:"can_list"`
+	CanRead     bool `json:"can_read"`
+	CanWrite    bool `json:"can_write"`
+	CanReply    bool `json:"can_reply"`
+	CanComment  bool `json:"can_comment"`
+	CanUpload   bool `json:"can_upload"`
+	CanDownload bool `json:"can_download"`
+}
+
 // BoardResponse - 게시판 응답 DTO
 type BoardResponse struct {
 	InsertTime      time.Time            `json:"insert_time"`
@@ -158,7 +169,8 @@ type BoardResponse struct {
 	UploadCount     int                  `json:"upload_count"`
 	CountWrite      int                  `json:"count_write"`
 	CountComment    int                  `json:"count_comment"`
-	DisplaySettings BoardDisplaySettings `json:"display_settings"` // 게시판 표시 설정
+	DisplaySettings BoardDisplaySettings `json:"display_settings"`      // 게시판 표시 설정
+	Permissions     *BoardPermissions    `json:"permissions,omitempty"` // 사용자별 권한 (인증 시에만 포함)
 }
 
 // GetDisplaySettings parses Extra1 field as BoardDisplaySettings
@@ -211,5 +223,21 @@ func (b *Board) ToResponse() *BoardResponse {
 		CountComment:    b.CountComment,
 		InsertTime:      b.InsertTime,
 		DisplaySettings: b.GetDisplaySettings(), // Extra1에서 파싱
+		Permissions:     nil,                    // 기본값: 권한 정보 없음
 	}
+}
+
+// ToResponseWithPermissions returns BoardResponse with user-specific permissions
+func (b *Board) ToResponseWithPermissions(memberLevel int) *BoardResponse {
+	resp := b.ToResponse()
+	resp.Permissions = &BoardPermissions{
+		CanList:     memberLevel >= b.ListLevel,
+		CanRead:     memberLevel >= b.ReadLevel,
+		CanWrite:    memberLevel >= b.WriteLevel,
+		CanReply:    memberLevel >= b.ReplyLevel,
+		CanComment:  memberLevel >= b.CommentLevel,
+		CanUpload:   memberLevel >= b.UploadLevel,
+		CanDownload: memberLevel >= b.DownloadLevel,
+	}
+	return resp
 }

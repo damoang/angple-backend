@@ -77,7 +77,35 @@ func (h *BoardHandler) GetBoard(c *gin.Context) {
 		return
 	}
 
+	// 사용자 레벨 확인 (인증된 경우 권한 정보 포함)
+	memberLevel := getMemberLevelFromContext(c)
+	if memberLevel > 0 {
+		common.SuccessResponse(c, board.ToResponseWithPermissions(memberLevel), nil)
+		return
+	}
+
 	common.SuccessResponse(c, board.ToResponse(), nil)
+}
+
+// getMemberLevelFromContext extracts member level from context
+// Supports both JWT auth and Damoang cookie auth
+func getMemberLevelFromContext(c *gin.Context) int {
+	// Try JWT auth first (level)
+	if level, exists := c.Get("level"); exists {
+		if lvl, ok := level.(int); ok && lvl > 0 {
+			return lvl
+		}
+	}
+
+	// Try Damoang cookie auth (damoang_user_level)
+	if level, exists := c.Get("damoang_user_level"); exists {
+		if lvl, ok := level.(int); ok && lvl > 0 {
+			return lvl
+		}
+	}
+
+	// Default: not authenticated
+	return 0
 }
 
 // ListBoards - 게시판 목록 조회 (GET /api/v2/boards)
