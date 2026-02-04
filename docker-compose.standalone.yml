@@ -1,0 +1,108 @@
+## Standalone full-stack compose for open-source deployment
+## Usage:
+##   cp .env.example .env  # edit secrets
+##   docker compose -f docker-compose.standalone.yml up -d
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: angple-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+      MYSQL_DATABASE: ${DB_NAME:-angple_db}
+      MYSQL_USER: ${DB_USER:-angple}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?required}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: >-
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --sql-mode=''
+    networks: [angple]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: angple-redis
+    volumes:
+      - redis-data:/data
+    networks: [angple]
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/damoang/angple-backend-api:${ANGPLE_VERSION:-latest}
+    container_name: angple-api
+    ports:
+      - "${API_PORT:-8081}:8081"
+    environment:
+      APP_ENV: ${APP_ENV:-prod}
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-angple}
+      DB_PASSWORD: ${DB_PASSWORD:?required}
+      DB_NAME: ${DB_NAME:-angple_db}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_SECRET: ${JWT_SECRET:?required}
+      DAMOANG_JWT_SECRET: ${DAMOANG_JWT_SECRET:-}
+      API_PORT: "8081"
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:3010}
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_started }
+    networks: [angple]
+    restart: unless-stopped
+
+  gateway:
+    image: ghcr.io/damoang/angple-backend-gateway:${ANGPLE_VERSION:-latest}
+    container_name: angple-gateway
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      LARAVEL_BACKEND_URL: ${LARAVEL_BACKEND_URL:-http://host.docker.internal:80}
+      GO_API_URL: http://api:8081
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [api]
+    networks:
+      angple:
+        aliases: [gateway-internal]
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/damoang/angple-web:${ANGPLE_VERSION:-latest}
+    container_name: angple-web
+    ports:
+      - "${WEB_PORT:-3010}:3000"
+    environment:
+      NODE_ENV: production
+      INTERNAL_API_URL: http://gateway-internal:8080/api/v2
+      BACKEND_URL: http://gateway-internal:8080
+    depends_on: [gateway]
+    volumes:
+      - web-data:/app/data
+    networks: [angple]
+    restart: unless-stopped
+
+  admin:
+    image: ghcr.io/damoang/angple-admin:${ANGPLE_VERSION:-latest}
+    container_name: angple-admin
+    ports:
+      - "${ADMIN_PORT:-3011}:80"
+    depends_on: [gateway]
+    networks: [angple]
+    restart: unless-stopped
+
+networks:
+  angple:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  web-data:

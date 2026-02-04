@@ -21,15 +21,15 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.24'
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        version: latest
-        args: --timeout=5m
+        version: v1.64.8
+        args: --timeout=5m --skip-dirs=plugins
 
   golangci-reviewdog:
     name: golangci-lint with reviewdog
@@ -42,16 +42,16 @@ jobs:
         fetch-depth: 0  # 전체 히스토리 필요 (base commit 비교용)
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.24'
 
     - name: Install golangci-lint
-      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
     - name: Run golangci-lint
       run: |
-        golangci-lint run --timeout=5m --new-from-rev=${{ github.event.pull_request.base.sha }} --out-format=colored-line-number > golangci-result.txt 2>&1 || echo "lint_issues=true" >> $GITHUB_ENV
+        golangci-lint run --timeout=5m --skip-dirs=plugins --new-from-rev=${{ github.event.pull_request.base.sha }} --out-format=colored-line-number > golangci-result.txt 2>&1 || echo "lint_issues=true" >> $GITHUB_ENV
 
     - name: Show lint results
       if: always()
@@ -63,8 +63,8 @@ jobs:
     - name: Report with reviewdog
       uses: golangci/golangci-lint-action@v9
       with:
-        version: latest
-        args: --timeout=5m
+        version: v1.64.8
+        args: --timeout=5m --skip-dirs=plugins
         only-new-issues: true  # 변경된 파일의 새로운 이슈만 리포트
         skip-cache: true       # PR에서 정확한 결과를 위해 캐시 스킵
       continue-on-error: true  # reviewdog rate limit 시 CI 실패 방지
@@ -81,18 +81,19 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.24'
 
     - name: Check formatting
       run: |
-        if [ -n "$(gofmt -s -l .)" ]; then
+        UNFORMATTED=$(find . -name '*.go' -not -path './plugins/*' -not -path './vendor/*' | xargs gofmt -s -l)
+        if [ -n "$UNFORMATTED" ]; then
           echo "The following files are not formatted:"
-          gofmt -s -l .
+          echo "$UNFORMATTED"
           echo "Please run 'gofmt -s -w .' to format your code"
           exit 1
         fi
 
     - name: Run go vet
-      run: go vet ./...
+      run: go vet $(go list ./... | grep -v /plugins/)

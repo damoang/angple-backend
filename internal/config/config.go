@@ -9,17 +9,52 @@ import (
 
 // Config 애플리케이션 설정 구조체
 type Config struct {
-	JWT       JWTConfig       `yaml:"jwt"`
-	Server    ServerConfig    `yaml:"server"`
-	DataPaths DataPathsConfig `yaml:"data_paths"`
-	CORS      CORSConfig      `yaml:"cors"`
-	Redis     RedisConfig     `yaml:"redis"`
-	Database  DatabaseConfig  `yaml:"database"`
+	JWT           JWTConfig           `yaml:"jwt"`
+	Server        ServerConfig        `yaml:"server"`
+	DataPaths     DataPathsConfig     `yaml:"data_paths"`
+	CORS          CORSConfig          `yaml:"cors"`
+	Redis         RedisConfig         `yaml:"redis"`
+	Database      DatabaseConfig      `yaml:"database"`
+	Plugins       PluginsConfig       `yaml:"plugins"`
+	Elasticsearch ElasticsearchConfig `yaml:"elasticsearch"`
+	Storage       StorageConfig       `yaml:"storage"`
+}
+
+// StorageConfig S3-compatible object storage 설정
+type StorageConfig struct {
+	Endpoint        string `yaml:"endpoint"`
+	Region          string `yaml:"region"`
+	AccessKeyID     string `yaml:"access_key_id"`
+	SecretAccessKey string `yaml:"secret_access_key"`
+	Bucket          string `yaml:"bucket"`
+	CDNURL          string `yaml:"cdn_url"`
+	BasePath        string `yaml:"base_path"`
+	ForcePathStyle  bool   `yaml:"force_path_style"`
+	Enabled         bool   `yaml:"enabled"`
+}
+
+// ElasticsearchConfig Elasticsearch 설정
+type ElasticsearchConfig struct {
+	Addresses []string `yaml:"addresses"`
+	Username  string   `yaml:"username"`
+	Password  string   `yaml:"password"`
+	Enabled   bool     `yaml:"enabled"`
+}
+
+// PluginsConfig 플러그인 설정
+type PluginsConfig struct {
+	Commerce CommercePluginConfig `yaml:"commerce"`
+}
+
+// CommercePluginConfig Commerce 플러그인 설정
+type CommercePluginConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // DataPathsConfig 데이터 경로 설정
 type DataPathsConfig struct {
 	RecommendedPath string `yaml:"recommended_path"`
+	UploadPath      string `yaml:"upload_path"`
 }
 
 // ServerConfig 서버 설정
@@ -130,9 +165,46 @@ func overrideFromEnv(cfg *Config) {
 		cfg.DataPaths.RecommendedPath = recommendedPath
 	}
 
+	if uploadPath := os.Getenv("UPLOAD_PATH"); uploadPath != "" {
+		cfg.DataPaths.UploadPath = uploadPath
+	}
+
 	// CORS 설정
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
 		cfg.CORS.AllowOrigins = corsOrigins
+	}
+
+	// Elasticsearch 설정
+	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+		cfg.Elasticsearch.Addresses = []string{esURL}
+		cfg.Elasticsearch.Enabled = true
+	}
+	if esUser := os.Getenv("ELASTICSEARCH_USERNAME"); esUser != "" {
+		cfg.Elasticsearch.Username = esUser
+	}
+	if esPass := os.Getenv("ELASTICSEARCH_PASSWORD"); esPass != "" {
+		cfg.Elasticsearch.Password = esPass
+	}
+
+	// Storage (S3/R2) 설정
+	if endpoint := os.Getenv("S3_ENDPOINT"); endpoint != "" {
+		cfg.Storage.Endpoint = endpoint
+		cfg.Storage.Enabled = true
+	}
+	if accessKey := os.Getenv("S3_ACCESS_KEY_ID"); accessKey != "" {
+		cfg.Storage.AccessKeyID = accessKey
+	}
+	if secretKey := os.Getenv("S3_SECRET_ACCESS_KEY"); secretKey != "" {
+		cfg.Storage.SecretAccessKey = secretKey
+	}
+	if bucket := os.Getenv("S3_BUCKET"); bucket != "" {
+		cfg.Storage.Bucket = bucket
+	}
+	if region := os.Getenv("S3_REGION"); region != "" {
+		cfg.Storage.Region = region
+	}
+	if cdnURL := os.Getenv("CDN_URL"); cdnURL != "" {
+		cfg.Storage.CDNURL = cdnURL
 	}
 }
 

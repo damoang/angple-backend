@@ -27,6 +27,10 @@ type MemberRepository interface {
 	ExistsByNickname(nickname string, excludeUserID string) (bool, error)
 	ExistsByPhone(phone string, excludeUserID string) (bool, error)
 	ExistsByEmailExcluding(email string, excludeUserID string) (bool, error)
+
+	// Admin operations
+	FindAll(page, limit int, keyword string) ([]*domain.Member, int64, error)
+	UpdateFields(id int, fields map[string]interface{}) error
 }
 
 type memberRepository struct {
@@ -154,4 +158,31 @@ func (r *memberRepository) ExistsByEmailExcluding(email string, excludeUserID st
 	}
 	err := query.Count(&count).Error
 	return count > 0, err
+}
+
+// FindAll returns paginated member list with optional keyword search
+func (r *memberRepository) FindAll(page, limit int, keyword string) ([]*domain.Member, int64, error) {
+	var members []*domain.Member
+	var total int64
+
+	query := r.db.Model(&domain.Member{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("mb_id LIKE ? OR mb_nick LIKE ? OR mb_email LIKE ? OR mb_name LIKE ?", like, like, like, like)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	if err := query.Order("mb_no DESC").Offset(offset).Limit(limit).Find(&members).Error; err != nil {
+		return nil, 0, err
+	}
+	return members, total, nil
+}
+
+// UpdateFields updates specific fields of a member
+func (r *memberRepository) UpdateFields(id int, fields map[string]interface{}) error {
+	return r.db.Model(&domain.Member{}).Where("mb_no = ?", id).Updates(fields).Error
 }

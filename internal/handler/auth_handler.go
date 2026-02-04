@@ -56,29 +56,32 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// refresh_token을 httpOnly Cookie로 설정 (XSS 방지)
+	// refreshToken → httpOnly 쿠키 설정
 	h.setRefreshTokenCookie(c, response.RefreshToken)
 
-	// body에는 access_token과 user 정보만 반환
-	c.JSON(http.StatusOK, common.APIResponse{
-		Data: gin.H{
-			"access_token": response.AccessToken,
-			"user":         response.User,
-		},
-	})
+	// 응답에는 accessToken + user만 반환 (refreshToken 제외)
+	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{
+		"access_token": response.AccessToken,
+		"user":         response.User,
+	}})
 }
 
 // RefreshToken handles POST /api/v2/auth/refresh
 // 모범사례: Cookie에서 refresh_token 읽기, 새 토큰도 Cookie로 설정
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	// Cookie에서 refresh_token 읽기 (httpOnly라 JavaScript에서 접근 불가)
+	// 1순위: httpOnly 쿠키에서 refreshToken 읽기
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil || refreshToken == "" {
-		common.ErrorResponse(c, 400, "Refresh token not found in cookie", nil)
-		return
+		// 2순위: JSON body (하위 호환)
+		var req RefreshRequest
+		if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+			common.ErrorResponse(c, 401, "Refresh token not found", nil)
+			return
+		}
+		refreshToken = req.RefreshToken
 	}
 
-	// Refresh tokens
+	// 토큰 갱신 (토큰 로테이션)
 	tokens, err := h.service.RefreshToken(refreshToken)
 	if errors.Is(err, common.ErrInvalidToken) {
 		// 유효하지 않은 토큰이면 Cookie도 삭제
@@ -91,15 +94,13 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// 새 refresh_token을 httpOnly Cookie로 설정
+	// 새 refreshToken → httpOnly 쿠키
 	h.setRefreshTokenCookie(c, tokens.RefreshToken)
 
-	// body에는 access_token만 반환
-	c.JSON(http.StatusOK, common.APIResponse{
-		Data: gin.H{
-			"access_token": tokens.AccessToken,
-		},
-	})
+	// 응답에는 accessToken만 반환
+	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{
+		"access_token": tokens.AccessToken,
+	}})
 }
 
 // GetProfile handles GET /api/v2/auth/profile (requires JWT)
@@ -151,34 +152,94 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	})
 }
 
-// setRefreshTokenCookie sets refresh token as httpOnly cookie
-// 보안: httpOnly=true로 JavaScript에서 접근 불가 (XSS 방지)
-// 보안: secure=true로 HTTPS에서만 전송 (중간자 공격 방지)
-// 보안: SameSite=Strict로 CSRF 방지
+// Register handles POST /api/v2/auth/register
+// @Summary 회원가입
+// @Description 새로운 회원 계정을 생성합니다
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body service.RegisterRequest true "회원가입 정보"
+// @Success 201 {object} common.APIResponse{data=domain.MemberResponse}
+// @Failure 400 {object} common.APIResponse
+// @Failure 409 {object} common.APIResponse
+// @Router /auth/register [post]
+func (h *AuthHandler) Register(c *gin.Context) {
+	var req service.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		return
+	}
+
+	member, err := h.service.Register(&req)
+	if err != nil {
+		if errors.Is(err, common.ErrUserAlreadyExists) {
+			common.ErrorResponse(c, http.StatusConflict, "이미 존재하는 회원입니다", err)
+			return
+		}
+		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, common.APIResponse{Data: member})
+}
+
+// Withdraw handles DELETE /api/v2/members/me
+// @Summary 회원 탈퇴
+// @Description 현재 로그인한 회원의 탈퇴를 처리합니다 (데이터 보존)
+// @Tags auth
+// @Produce json
+// @Success 200 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Router /members/me [delete]
+func (h *AuthHandler) Withdraw(c *gin.Context) {
+	userID := middleware.GetDamoangUserID(c)
+	if userID == "" {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+
+	if err := h.service.Withdraw(userID); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+
+	// 쿠키 삭제
+	h.clearRefreshTokenCookie(c)
+
+	c.JSON(http.StatusOK, common.APIResponse{Data: gin.H{
+		"message": "회원 탈퇴가 완료되었습니다",
+	}})
+}
+
+// setRefreshTokenCookie refreshToken을 httpOnly 쿠키로 설정
 func (h *AuthHandler) setRefreshTokenCookie(c *gin.Context, token string) {
-	maxAge := 7 * 24 * 60 * 60 // 7일 (초 단위)
+	secure := !h.config.IsDevelopment()
+	maxAge := 60 * 60 * 24 * 7 // 7일
+
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
 		"refresh_token", // name
 		token,           // value
-		maxAge,          // maxAge
+		maxAge,          // maxAge (seconds)
 		"/",             // path
-		"",              // domain (빈 문자열 = 현재 도메인)
-		true,            // secure (HTTPS only)
-		true,            // httpOnly (JavaScript 접근 불가)
+		"",              // domain
+		secure,          // secure (dev: false, prod: true)
+		true,            // httpOnly
 	)
 }
 
-// clearRefreshTokenCookie removes refresh token cookie
+// clearRefreshTokenCookie refreshToken 쿠키 삭제
 func (h *AuthHandler) clearRefreshTokenCookie(c *gin.Context) {
+	secure := !h.config.IsDevelopment()
+
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
-		"refresh_token", // name
-		"",              // value
-		-1,              // maxAge (즉시 만료)
-		"/",             // path
-		"",              // domain
-		true,            // secure
-		true,            // httpOnly
+		"refresh_token",
+		"",
+		-1,
+		"/",
+		"",
+		secure,
+		true,
 	)
 }

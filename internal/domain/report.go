@@ -63,6 +63,14 @@ type ReportListResponse struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+// SubmitReportRequest represents a user submitting a report
+type SubmitReportRequest struct {
+	TargetID string `json:"target_id" binding:"required"` // 신고 대상 회원 ID
+	Table    string `json:"table" binding:"required"`     // 게시판 테이블명 (예: free, qa)
+	PostID   int    `json:"post_id" binding:"required"`   // 게시글 ID
+	Reason   string `json:"reason" binding:"required"`    // 신고 사유
+}
+
 // ReportActionRequest represents request for report action
 type ReportActionRequest struct {
 	Action  string   `json:"action"` // submitOpinion, cancelOpinion, adminApprove, adminDismiss

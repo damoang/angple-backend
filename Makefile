@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway test clean docker-up docker-down
+.PHONY: help dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway build-migrate test clean docker-up docker-down migrate migrate-dry-run migrate-verify swagger swagger-fmt
 
 # 기본 타겟
 help:
@@ -28,6 +28,11 @@ help:
 	@echo "🚀 운영 환경:"
 	@echo "  make docker-up        - 운영 Docker Compose 실행 (외부 DB 연결)"
 	@echo "  make docker-down      - 운영 Docker Compose 중지"
+	@echo ""
+	@echo "🔄 마이그레이션 (g5_* → v2_*):"
+	@echo "  make migrate          - 전체 데이터 마이그레이션 실행"
+	@echo "  make migrate-dry-run  - 마이그레이션 미리보기 (실행 안함)"
+	@echo "  make migrate-verify   - 마이그레이션 데이터 검증"
 	@echo ""
 	@echo "🧹 기타:"
 	@echo "  make clean            - 빌드 결과물 삭제"
@@ -70,8 +75,8 @@ dev-gateway:
 	@echo "Starting Gateway in development mode..."
 	go run cmd/gateway/main.go
 
-# 빌드
-build: build-api build-gateway
+# 빌드 (swagger 자동 생성 포함)
+build: swagger build-api build-gateway build-migrate
 
 build-api:
 	@echo "Building API server..."
@@ -81,15 +86,44 @@ build-gateway:
 	@echo "Building Gateway..."
 	go build -o bin/gateway cmd/gateway/main.go
 
+build-migrate:
+	@echo "Building Migration tool..."
+	go build -o bin/migrate cmd/migrate/main.go
+
+# 마이그레이션
+migrate:
+	@echo "Running data migration (all targets)..."
+	go run cmd/migrate/main.go -target=all
+
+migrate-dry-run:
+	@echo "Dry-run migration..."
+	go run cmd/migrate/main.go -dry-run
+
+migrate-verify:
+	@echo "Verifying migration data..."
+	go run cmd/migrate/main.go -verify
+
 # 테스트
 test:
 	@echo "Running tests..."
 	go test -v ./...
 
+test-integration:
+	@echo "Running v2 integration tests..."
+	go test -v -count=1 ./tests/integration/...
+
 test-coverage:
 	@echo "Running tests with coverage..."
 	go test -v -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
+
+test-load-k6:
+	@echo "Running k6 smoke test..."
+	k6 run --env BASE_URL=http://localhost:8081 tests/load/k6-load-test.js
+
+test-load-k6-ci:
+	@echo "Running k6 CI load test..."
+	k6 run --env BASE_URL=http://localhost:8081 --env SCENARIO=ci tests/load/k6-load-test.js
 
 # Docker
 docker-up:
@@ -135,9 +169,10 @@ fmt:
 # Swagger 문서 생성
 swagger:
 	@echo "Generating Swagger documentation..."
-	swag init -g cmd/api/main.go -o docs
+	@command -v swag >/dev/null 2>&1 || { echo "Installing swag..."; go install github.com/swaggo/swag/cmd/swag@latest; }
+	$$(go env GOPATH)/bin/swag init -g cmd/api/main.go -o docs
 	@echo "✅ Swagger docs generated in docs/"
-	@echo "   View at: http://localhost:8082/swagger/index.html"
+	@echo "   View at: http://localhost:8081/swagger/index.html"
 
 swagger-fmt:
 	@echo "Formatting Swagger comments..."

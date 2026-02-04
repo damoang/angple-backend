@@ -1,0 +1,107 @@
+groups:
+  - name: angple-sla
+    rules:
+      # P99 응답 시간 > 200ms (5분간)
+      - alert: HighP99Latency
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency above 200ms"
+          description: "P99 latency is {{ $value | humanizeDuration }} (threshold: 200ms)"
+
+      # P99 응답 시간 > 500ms (5분간) — Critical
+      - alert: CriticalP99Latency
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "P99 latency above 500ms"
+          description: "P99 latency is {{ $value | humanizeDuration }}"
+
+      # 에러율 > 1% (5분간)
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error rate above 1%"
+          description: "Error rate is {{ $value | humanizePercentage }}"
+
+      # 에러율 > 5% — Critical
+      - alert: CriticalErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m]))
+          > 0.05
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate above 5%"
+          description: "Error rate is {{ $value | humanizePercentage }}"
+
+      # API 다운 (health check 실패)
+      - alert: APIDown
+        expr: up{job="angple-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Angple API is down"
+          description: "API instance {{ $labels.instance }} is unreachable"
+
+      # 활성 DB 커넥션 > 80
+      - alert: HighDBConnections
+        expr: db_connections_active > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High DB connection count"
+          description: "Active DB connections: {{ $value }} (max: 100)"
+
+      # Pod 재시작 반복
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{namespace="angple"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pod {{ $labels.pod }} is crash looping"
+
+  - name: angple-capacity
+    rules:
+      # CPU 사용률 > 80%
+      - alert: HighCPUUsage
+        expr: |
+          sum(rate(container_cpu_usage_seconds_total{namespace="angple"}[5m])) by (pod)
+          /
+          sum(kube_pod_container_resource_limits{namespace="angple", resource="cpu"}) by (pod)
+          > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} CPU usage above 80%"
+
+      # 메모리 사용률 > 85%
+      - alert: HighMemoryUsage
+        expr: |
+          sum(container_memory_working_set_bytes{namespace="angple"}) by (pod)
+          /
+          sum(kube_pod_container_resource_limits{namespace="angple", resource="memory"}) by (pod)
+          > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} memory usage above 85%"

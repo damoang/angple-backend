@@ -34,3 +34,8 @@ data_paths:
 
 cors:
   allow_origins: "https://staging.damoang.net, https://api-staging.damoang.net"
+
+# 플러그인 설정
+plugins:
+  commerce:
+    enabled: false  # Staging에서는 비활성화
