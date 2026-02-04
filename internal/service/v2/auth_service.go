@@ -18,15 +18,17 @@ import (
 //
 //nolint:revive
 type V2AuthService struct {
-	userRepo   v2repo.UserRepository
-	jwtManager *jwt.Manager
+	userRepo       v2repo.UserRepository
+	jwtManager     *jwt.Manager
+	damoangManager *jwt.DamoangManager
 }
 
 // NewV2AuthService creates a new V2AuthService
-func NewV2AuthService(userRepo v2repo.UserRepository, jwtManager *jwt.Manager) *V2AuthService {
+func NewV2AuthService(userRepo v2repo.UserRepository, jwtManager *jwt.Manager, damoangManager *jwt.DamoangManager) *V2AuthService {
 	return &V2AuthService{
-		userRepo:   userRepo,
-		jwtManager: jwtManager,
+		userRepo:       userRepo,
+		jwtManager:     jwtManager,
+		damoangManager: damoangManager,
 	}
 }
 
@@ -124,6 +126,51 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 // GetCurrentUser returns the user for the given ID
 func (s *V2AuthService) GetCurrentUser(userID uint64) (*v2domain.V2User, error) {
 	return s.userRepo.FindByID(userID)
+}
+
+// ExchangeGnuboardJWT verifies a damoang.net JWT and issues angple JWT tokens
+func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, error) {
+	// Verify damoang.net JWT
+	claims, err := s.damoangManager.VerifyToken(gnuJwt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid damoang_jwt: %w", err)
+	}
+
+	// Get mb_id from claims
+	mbID := claims.GetUserID()
+	if mbID == "" {
+		return nil, errors.New("mb_id not found in token")
+	}
+
+	// Find user by username (mb_id)
+	user, err := s.userRepo.FindByUsername(mbID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+
+	if user.Status == "banned" {
+		return nil, errors.New("account is banned")
+	}
+	if user.Status == "inactive" {
+		return nil, errors.New("account is inactive")
+	}
+
+	// Generate angple JWT tokens
+	userIDStr := strconv.FormatUint(user.ID, 10)
+	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Nickname, int(user.Level))
+	if err != nil {
+		return nil, fmt.Errorf("generate access token: %w", err)
+	}
+	refreshToken, err := s.jwtManager.GenerateRefreshToken(userIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	return &V2LoginResponse{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }
 
 // verifyPassword checks password against bcrypt or legacy gnuboard hash
