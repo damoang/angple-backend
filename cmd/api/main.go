@@ -15,8 +15,11 @@ import (
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/migration"
 	"github.com/damoang/angple-backend/internal/plugin"
-	"github.com/damoang/angple-backend/internal/plugins/commerce"
-	"github.com/damoang/angple-backend/internal/plugins/marketplace"
+	// 플러그인 자동 등록을 위한 import (init()에서 Factory 등록됨)
+	_ "github.com/damoang/angple-backend/internal/plugins/commerce"
+	_ "github.com/damoang/angple-backend/internal/plugins/embed"
+	_ "github.com/damoang/angple-backend/internal/plugins/imagelink"
+	_ "github.com/damoang/angple-backend/internal/plugins/marketplace"
 	pluginstoreHandler "github.com/damoang/angple-backend/internal/pluginstore/handler"
 	pluginstoreRepo "github.com/damoang/angple-backend/internal/pluginstore/repository"
 	pluginstoreSvc "github.com/damoang/angple-backend/internal/pluginstore/service"
@@ -631,8 +634,13 @@ func main() {
 		eventRepo := pluginstoreRepo.NewEventRepository(db)
 
 		catalogSvc := pluginstoreSvc.NewCatalogService(installRepo)
-		catalogSvc.RegisterManifest(commerce.Manifest)
-		catalogSvc.RegisterManifest(marketplace.Manifest)
+		// Factory에 등록된 모든 플러그인 매니페스트 자동 등록
+		factories := plugin.GetRegisteredFactories()
+		log.Printf("[DEBUG] Registered factories count: %d", len(factories))
+		for name, reg := range factories {
+			log.Printf("[DEBUG] Registering manifest: %s", name)
+			catalogSvc.RegisterManifest(reg.Manifest)
+		}
 
 		permRepo := pluginstoreRepo.NewPermissionRepository(db)
 
@@ -656,15 +664,10 @@ func main() {
 		// 설정 변경 시 플러그인 자동 리로드 연결
 		settingSvc.SetReloader(pluginManager)
 
-		// 내장 플러그인 등록 (바이너리에 컴파일됨, 활성화는 DB 기반)
-		commercePlugin := commerce.New()
-		if err := pluginManager.RegisterBuiltIn("commerce", commercePlugin, commerce.Manifest); err != nil {
-			pkglogger.Info("Failed to register commerce plugin: %v", err)
-		}
-
-		marketplacePlugin := marketplace.New(db, jwtManager)
-		if err := pluginManager.RegisterBuiltIn("marketplace", marketplacePlugin, marketplace.Manifest); err != nil {
-			pkglogger.Info("Failed to register marketplace plugin: %v", err)
+		// 내장 플러그인 자동 등록 (import한 패키지의 init()에서 Factory 등록됨)
+		pluginManager.SetJWTManager(jwtManager)
+		if err := pluginManager.RegisterAllFactories(); err != nil {
+			pkglogger.Info("Failed to register plugin factories: %v", err)
 		}
 
 		// DB에서 enabled 플러그인 자동 활성화
@@ -678,7 +681,7 @@ func main() {
 		permHandler := pluginstoreHandler.NewPermissionHandler(permSvc)
 
 		// Admin Plugin Store 라우트 등록
-		adminPlugins := router.Group("/api/v1/admin/plugins")
+		adminPlugins := router.Group("/api/v2/admin/plugins")
 		adminPlugins.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		{
 			adminPlugins.GET("", storeHandler.ListPlugins)

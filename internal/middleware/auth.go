@@ -10,79 +10,102 @@ import (
 )
 
 // JWTAuth JWT authentication middleware
+// Supports both Authorization header (Bearer token) and damoang_jwt cookie authentication
 func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. Extract Authorization header
+		// 1. Check Authorization header first
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			common.ErrorResponse(c, 401, "Missing authorization header", nil)
-			c.Abort()
-			return
-		}
-
-		// 2. Parse Bearer token
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
-
-		// 3. Verify token
-		claims, err := jwtManager.VerifyToken(tokenString)
-		if err != nil {
-			if errors.Is(err, jwt.ErrExpiredToken) {
-				common.ErrorResponse(c, 401, "Token expired", err)
-			} else {
-				common.ErrorResponse(c, 401, "Invalid token", err)
+		if authHeader != "" {
+			// Parse Bearer token
+			parts := strings.Split(authHeader, " ")
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
+				c.Abort()
+				return
 			}
-			c.Abort()
-			return
-		}
 
-		// 4. Store user info in context
-		c.Set("userID", claims.UserID)
-		c.Set("nickname", claims.Nickname)
-		c.Set("level", claims.Level)
+			tokenString := parts[1]
 
-		c.Next()
-	}
-}
+			// Verify token
+			claims, err := jwtManager.VerifyToken(tokenString)
+			if err != nil {
+				if errors.Is(err, jwt.ErrExpiredToken) {
+					common.ErrorResponse(c, 401, "Token expired", err)
+				} else {
+					common.ErrorResponse(c, 401, "Invalid token", err)
+				}
+				c.Abort()
+				return
+			}
 
-// OptionalJWTAuth attempts to authenticate but continues even if no token is present
-func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+			// Store user info in context
+			c.Set("userID", claims.UserID)
+			c.Set("nickname", claims.Nickname)
+			c.Set("level", claims.Level)
+
 			c.Next()
 			return
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
-			c.Abort()
+		// 2. Fallback: Check damoang_jwt cookie authentication (set by DamoangCookieAuth middleware)
+		if IsDamoangAuthenticated(c) {
+			// Copy damoang context values to standard context keys
+			c.Set("userID", GetDamoangUserID(c))
+			c.Set("nickname", GetDamoangUserName(c))
+			c.Set("level", GetDamoangUserLevel(c))
+
+			c.Next()
 			return
 		}
 
-		tokenString := parts[1]
-		claims, err := jwtManager.VerifyToken(tokenString)
-		if err != nil {
-			if errors.Is(err, jwt.ErrExpiredToken) {
-				common.ErrorResponse(c, 401, "Token expired", err)
-			} else {
-				common.ErrorResponse(c, 401, "Invalid token", err)
+		// 3. No valid authentication found
+		common.ErrorResponse(c, 401, "Missing authorization header", nil)
+		c.Abort()
+	}
+}
+
+// OptionalJWTAuth attempts to authenticate but continues even if no token is present
+// Supports both Authorization header (Bearer token) and damoang_jwt cookie authentication
+func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 1. Check Authorization header first
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" {
+			parts := strings.Split(authHeader, " ")
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
+				c.Abort()
+				return
 			}
-			c.Abort()
+
+			tokenString := parts[1]
+			claims, err := jwtManager.VerifyToken(tokenString)
+			if err != nil {
+				if errors.Is(err, jwt.ErrExpiredToken) {
+					common.ErrorResponse(c, 401, "Token expired", err)
+				} else {
+					common.ErrorResponse(c, 401, "Invalid token", err)
+				}
+				c.Abort()
+				return
+			}
+
+			c.Set("userID", claims.UserID)
+			c.Set("nickname", claims.Nickname)
+			c.Set("level", claims.Level)
+
+			c.Next()
 			return
 		}
 
-		c.Set("userID", claims.UserID)
-		c.Set("nickname", claims.Nickname)
-		c.Set("level", claims.Level)
+		// 2. Fallback: Check damoang_jwt cookie authentication
+		if IsDamoangAuthenticated(c) {
+			c.Set("userID", GetDamoangUserID(c))
+			c.Set("nickname", GetDamoangUserName(c))
+			c.Set("level", GetDamoangUserLevel(c))
+		}
 
+		// Continue even without authentication (optional)
 		c.Next()
 	}
 }

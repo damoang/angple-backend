@@ -15,6 +15,7 @@ func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.M
 	authGroup.POST("/logout", h.Logout)
 	authGroup.POST("/exchange", h.ExchangeGnuboardJWT) // damoang_jwt → angple JWT exchange (no auth middleware)
 	authGroup.GET("/me", middleware.JWTAuth(jwtManager), h.GetMe)
+	authGroup.GET("/profile", middleware.JWTAuth(jwtManager), h.GetMe) // alias for /me
 }
 
 // Setup configures v2 API routes (new DB schema)

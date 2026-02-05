@@ -28,6 +28,7 @@ type Manager struct {
 	rateLimiter *RateLimiter
 	metrics     *Metrics
 	eventBus    *EventBus
+	jwtManager  interface{} // JWT 매니저 (순환 의존 방지)
 }
 
 // NewManager 새 매니저 생성
@@ -97,6 +98,38 @@ func (m *Manager) RegisterBuiltIn(name string, p Plugin, manifest *PluginManifes
 	return nil
 }
 
+// SetJWTManager JWT 매니저 설정
+func (m *Manager) SetJWTManager(jm interface{}) {
+	m.jwtManager = jm
+}
+
+// RegisterAllFactories Factory에 등록된 모든 플러그인 자동 등록
+// 각 플러그인 패키지의 init()에서 RegisterFactory로 등록된 플러그인들을 가져와 등록
+func (m *Manager) RegisterAllFactories() error {
+	factories := GetRegisteredFactories()
+
+	for name, reg := range factories {
+		// 이미 등록된 플러그인은 스킵
+		m.mu.RLock()
+		_, exists := m.plugins[name]
+		m.mu.RUnlock()
+		if exists {
+			continue
+		}
+
+		// 팩토리로 인스턴스 생성
+		instance := reg.Factory()
+
+		// 내장 플러그인으로 등록
+		if err := m.RegisterBuiltIn(name, instance, reg.Manifest); err != nil {
+			m.logger.Error("Failed to register plugin %s: %v", name, err)
+			continue
+		}
+	}
+
+	return nil
+}
+
 // Enable 플러그인 활성화
 func (m *Manager) Enable(name string) error {
 	m.mu.Lock()
@@ -139,11 +172,12 @@ func (m *Manager) Enable(name string) error {
 		}
 
 		ctx := &PluginContext{
-			DB:       m.db,
-			Redis:    m.redis,
-			Config:   pluginConfig,
-			Logger:   m.logger,
-			BasePath: info.Path,
+			DB:         m.db,
+			Redis:      m.redis,
+			Config:     pluginConfig,
+			Logger:     m.logger,
+			BasePath:   info.Path,
+			JWTManager: m.jwtManager,
 		}
 
 		if err := info.Instance.Initialize(ctx); err != nil {

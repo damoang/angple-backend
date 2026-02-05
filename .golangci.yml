@@ -108,6 +108,11 @@ issues:
       linters:
         - dupl
 
+    # Middleware 패턴의 유사 코드 허용 (JWTAuth, OptionalJWTAuth 구조가 비슷함)
+    - path: internal/middleware/.*\.go
+      linters:
+        - dupl
+
     # 플러그인의 타입 네이밍 (Plugin* prefix는 의도적)
     - path: internal/plugin/types\.go
       linters:

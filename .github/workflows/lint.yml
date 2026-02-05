@@ -26,9 +26,9 @@ jobs:
         go-version: '1.24'
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v9
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.64.8
+        version: v1.64.5
         args: --timeout=5m --skip-dirs=plugins
 
   golangci-reviewdog:
@@ -46,32 +46,12 @@ jobs:
       with:
         go-version: '1.24'
 
-    - name: Install golangci-lint
-      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
-
     - name: Run golangci-lint
-      run: |
-        golangci-lint run --timeout=5m --skip-dirs=plugins --new-from-rev=${{ github.event.pull_request.base.sha }} --out-format=colored-line-number > golangci-result.txt 2>&1 || echo "lint_issues=true" >> $GITHUB_ENV
-
-    - name: Show lint results
-      if: always()
-      run: |
-        if [ -f golangci-result.txt ]; then
-          cat golangci-result.txt
-        fi
-
-    - name: Report with reviewdog
-      uses: golangci/golangci-lint-action@v9
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.64.8
+        version: v1.64.5
         args: --timeout=5m --skip-dirs=plugins
-        only-new-issues: true  # 변경된 파일의 새로운 이슈만 리포트
-        skip-cache: true       # PR에서 정확한 결과를 위해 캐시 스킵
-      continue-on-error: true  # reviewdog rate limit 시 CI 실패 방지
-
-    - name: Fail if lint issues found
-      if: env.lint_issues == 'true'
-      run: exit 1
+        only-new-issues: true
 
   format:
     name: Format Check
