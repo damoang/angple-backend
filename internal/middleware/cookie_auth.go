@@ -34,6 +34,11 @@ func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, _ *config.Config) gin.Han
 		c.Set("damoang_user_email", claims.MbEmail) // 이메일은 damoang 형식만
 		c.Set("damoang_authenticated", true)
 
+		// 표준 키도 설정 (RequireAdmin 등 다른 미들웨어 호환)
+		c.Set("userID", claims.GetUserID())
+		c.Set("nickname", claims.GetUserName())
+		c.Set("level", claims.GetUserLevel())
+
 		c.Next()
 	}
 }

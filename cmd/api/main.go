@@ -681,7 +681,7 @@ func main() {
 		settingHandler := pluginstoreHandler.NewSettingHandler(settingSvc, pluginManager)
 		permHandler := pluginstoreHandler.NewPermissionHandler(permSvc)
 
-		// Admin Plugin Store 라우트 등록
+		// Admin Plugin Store 라우트 등록 (v2 API - Bearer 토큰 인증)
 		adminPlugins := router.Group("/api/v2/admin/plugins")
 		adminPlugins.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		{
