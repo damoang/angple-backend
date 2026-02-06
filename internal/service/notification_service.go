@@ -25,14 +25,14 @@ func NewNotificationService(repo *repository.NotificationRepository, hub *ws.Hub
 func (s *NotificationService) CreateAndBroadcast(memberID, nType, title, content, url, senderID, senderName string) error {
 	n := &domain.Notification{
 		MemberID:   memberID,
-		FromCase:   nType,     // ph_from_case
-		ToCase:     "board",   // ph_to_case (default)
-		Title:      title,     // parent_subject
-		Message:    content,   // rel_msg
-		URL:        url,       // rel_url
-		SenderID:   senderID,  // rel_mb_id
+		FromCase:   nType,      // ph_from_case
+		ToCase:     "board",    // ph_to_case (default)
+		Title:      title,      // parent_subject
+		Message:    content,    // rel_msg
+		URL:        url,        // rel_url
+		SenderID:   senderID,   // rel_mb_id
 		SenderName: senderName, // rel_mb_nick
-		IsReadChar: "N",       // ph_readed
+		IsReadChar: "N",        // ph_readed
 		CreatedAt:  time.Now(), // ph_datetime
 	}
 
