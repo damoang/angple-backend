@@ -112,7 +112,7 @@ func newTestJWTManager() *jwt.Manager {
 func TestLogin_Success(t *testing.T) {
 	repo := new(mockMemberRepo)
 	jwtMgr := newTestJWTManager()
-	svc := NewAuthService(repo, jwtMgr, nil)
+	svc := NewAuthService(repo, jwtMgr, nil, nil)
 
 	hashedPwd := auth.HashPassword("password123")
 	member := &domain.Member{
@@ -135,7 +135,7 @@ func TestLogin_Success(t *testing.T) {
 func TestLogin_UserNotFound(t *testing.T) {
 	repo := new(mockMemberRepo)
 	jwtMgr := newTestJWTManager()
-	svc := NewAuthService(repo, jwtMgr, nil)
+	svc := NewAuthService(repo, jwtMgr, nil, nil)
 
 	repo.On("FindByUserID", "nobody").Return(nil, errors.New("not found"))
 
@@ -147,7 +147,7 @@ func TestLogin_UserNotFound(t *testing.T) {
 func TestLogin_WrongPassword(t *testing.T) {
 	repo := new(mockMemberRepo)
 	jwtMgr := newTestJWTManager()
-	svc := NewAuthService(repo, jwtMgr, nil)
+	svc := NewAuthService(repo, jwtMgr, nil, nil)
 
 	member := &domain.Member{
 		UserID:   "testuser",
@@ -163,7 +163,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 func TestRegister_Success(t *testing.T) {
 	repo := new(mockMemberRepo)
 	jwtMgr := newTestJWTManager()
-	svc := NewAuthService(repo, jwtMgr, nil)
+	svc := NewAuthService(repo, jwtMgr, nil, nil)
 
 	repo.On("ExistsByUserID", "newuser").Return(false, nil)
 	repo.On("ExistsByEmail", "new@test.com").Return(false, nil)
@@ -186,7 +186,7 @@ func TestRegister_Success(t *testing.T) {
 
 func TestRegister_DuplicateUserID(t *testing.T) {
 	repo := new(mockMemberRepo)
-	svc := NewAuthService(repo, newTestJWTManager(), nil)
+	svc := NewAuthService(repo, newTestJWTManager(), nil, nil)
 
 	repo.On("ExistsByUserID", "existing").Return(true, nil)
 
@@ -199,7 +199,7 @@ func TestRegister_DuplicateUserID(t *testing.T) {
 
 func TestRegister_DuplicateEmail(t *testing.T) {
 	repo := new(mockMemberRepo)
-	svc := NewAuthService(repo, newTestJWTManager(), nil)
+	svc := NewAuthService(repo, newTestJWTManager(), nil, nil)
 
 	repo.On("ExistsByUserID", "newuser").Return(false, nil)
 	repo.On("ExistsByEmail", "dup@test.com").Return(true, nil)
@@ -214,7 +214,7 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 
 func TestRegister_DuplicateNickname(t *testing.T) {
 	repo := new(mockMemberRepo)
-	svc := NewAuthService(repo, newTestJWTManager(), nil)
+	svc := NewAuthService(repo, newTestJWTManager(), nil, nil)
 
 	repo.On("ExistsByUserID", "newuser").Return(false, nil)
 	repo.On("ExistsByEmail", "e@e.com").Return(false, nil)
@@ -230,7 +230,7 @@ func TestRegister_DuplicateNickname(t *testing.T) {
 
 func TestWithdraw_Success(t *testing.T) {
 	repo := new(mockMemberRepo)
-	svc := NewAuthService(repo, newTestJWTManager(), nil)
+	svc := NewAuthService(repo, newTestJWTManager(), nil, nil)
 
 	member := &domain.Member{ID: 1, UserID: "user1", LeaveDate: ""}
 	repo.On("FindByUserID", "user1").Return(member, nil)
@@ -243,7 +243,7 @@ func TestWithdraw_Success(t *testing.T) {
 
 func TestWithdraw_AlreadyWithdrawn(t *testing.T) {
 	repo := new(mockMemberRepo)
-	svc := NewAuthService(repo, newTestJWTManager(), nil)
+	svc := NewAuthService(repo, newTestJWTManager(), nil, nil)
 
 	member := &domain.Member{UserID: "user1", LeaveDate: "20260101"}
 	repo.On("FindByUserID", "user1").Return(member, nil)
@@ -255,7 +255,7 @@ func TestWithdraw_AlreadyWithdrawn(t *testing.T) {
 
 func TestWithdraw_UserNotFound(t *testing.T) {
 	repo := new(mockMemberRepo)
-	svc := NewAuthService(repo, newTestJWTManager(), nil)
+	svc := NewAuthService(repo, newTestJWTManager(), nil, nil)
 
 	repo.On("FindByUserID", "nobody").Return(nil, errors.New("not found"))
 
@@ -266,7 +266,7 @@ func TestWithdraw_UserNotFound(t *testing.T) {
 func TestRefreshToken_Success(t *testing.T) {
 	repo := new(mockMemberRepo)
 	jwtMgr := newTestJWTManager()
-	svc := NewAuthService(repo, jwtMgr, nil)
+	svc := NewAuthService(repo, jwtMgr, nil, nil)
 
 	// Generate a valid refresh token
 	refreshToken, _ := jwtMgr.GenerateRefreshToken("user1")
@@ -282,7 +282,7 @@ func TestRefreshToken_Success(t *testing.T) {
 
 func TestRefreshToken_InvalidToken(t *testing.T) {
 	repo := new(mockMemberRepo)
-	svc := NewAuthService(repo, newTestJWTManager(), nil)
+	svc := NewAuthService(repo, newTestJWTManager(), nil, nil)
 
 	result, err := svc.RefreshToken("invalid-token")
 	assert.ErrorIs(t, err, common.ErrInvalidToken)
