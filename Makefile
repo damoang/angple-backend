@@ -1,8 +1,11 @@
-.PHONY: help dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway build-migrate test clean docker-up docker-down migrate migrate-dry-run migrate-verify swagger swagger-fmt
+.PHONY: help setup dev dev-docker dev-docker-down dev-docker-logs build build-api build-gateway build-migrate test clean docker-up docker-down migrate migrate-dry-run migrate-verify swagger swagger-fmt
 
 # 기본 타겟
 help:
 	@echo "Angple Backend - Available Commands:"
+	@echo ""
+	@echo "🚀 초기 설정:"
+	@echo "  make setup            - 환경 설정 파일 초기화 (.env.local 생성)"
 	@echo ""
 	@echo "📦 로컬 개발 (Docker All-in-One - 권장):"
 	@echo "  make dev-docker       - Docker로 개발 환경 시작 (MySQL + Redis + API)"
@@ -38,6 +41,32 @@ help:
 	@echo "  make clean            - 빌드 결과물 삭제"
 	@echo "  make fmt              - 코드 포맷팅"
 	@echo "  make lint             - 린트 실행"
+
+# 초기 설정
+setup:
+	@echo "============================================"
+	@echo "  Angple Backend 환경 설정 초기화"
+	@echo "============================================"
+	@echo ""
+	@if [ -f .env.local ]; then \
+		echo "[SKIP] .env.local 이미 존재함"; \
+	elif [ -f .env.example ]; then \
+		cp .env.example .env.local; \
+		echo "[OK]   .env.local 생성됨"; \
+	else \
+		echo "[ERROR] .env.example 파일 없음"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "============================================"
+	@echo "  설정 완료!"
+	@echo "============================================"
+	@echo ""
+	@echo "다음 단계:"
+	@echo "  1. .env.local 파일에서 DB_PASSWORD, JWT_SECRET 등 수정"
+	@echo "  2. make dev-docker  # Docker로 개발 환경 시작"
+	@echo "  3. make dev         # 또는 직접 실행"
+	@echo ""
 
 # 로컬 개발 환경 (Docker All-in-One)
 dev-docker:
@@ -125,21 +154,25 @@ test-load-k6-ci:
 	@echo "Running k6 CI load test..."
 	k6 run --env BASE_URL=http://localhost:8081 --env SCENARIO=ci tests/load/k6-load-test.js
 
-# Docker
+# Docker (프로덕션/스테이징용 - .env.local 필요)
 docker-up:
 	@echo "Starting Docker containers..."
-	docker-compose up -d
+	@if [ ! -f .env.local ]; then \
+		echo "[ERROR] .env.local 파일 없음. 'make setup' 먼저 실행하세요."; \
+		exit 1; \
+	fi
+	docker compose --env-file .env.local up -d
 
 docker-down:
 	@echo "Stopping Docker containers..."
-	docker-compose down
+	docker compose --env-file .env.local down
 
 docker-logs:
-	docker-compose logs -f
+	docker compose --env-file .env.local logs -f
 
 docker-rebuild:
 	@echo "Rebuilding Docker containers..."
-	docker-compose up -d --build
+	docker compose --env-file .env.local up -d --build
 
 # 정리
 clean:

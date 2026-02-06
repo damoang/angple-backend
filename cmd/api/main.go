@@ -525,6 +525,10 @@ func main() {
 		v2routes.SetupMemo(router, v2MemoHandler, jwtManager)
 		v2routes.SetupMessage(router, v2MessageHandler, jwtManager)
 
+		// Installation API (인증 없이 접근 가능)
+		v2InstallHandler := v2handler.NewInstallHandler(db)
+		v2routes.SetupInstall(router, v2InstallHandler)
+
 		// Tenant Management (멀티테넌트 관리)
 		adminTenants := router.Group("/api/v2/admin/tenants")
 		adminTenants.GET("", tenantHandler.ListTenants)
