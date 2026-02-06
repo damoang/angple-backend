@@ -125,6 +125,14 @@ func (h *InstallHandler) TestDB(c *gin.Context) {
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		common.V2Success(c, TestDBResponse{
+			Success: true,
+			Message: "연결 성공 (테이블 조회 중 오류 발생)",
+		})
+		return
+	}
+
 	hasExistingData := len(tables) > 0
 
 	common.V2Success(c, TestDBResponse{
