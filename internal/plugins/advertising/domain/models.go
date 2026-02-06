@@ -153,6 +153,7 @@ type CelebrationBanner struct {
 	Content     string    `gorm:"type:text" json:"content,omitempty"`
 	ImageURL    string    `gorm:"column:image_url;size:500" json:"image_url,omitempty"`
 	LinkURL     string    `gorm:"column:link_url;size:500" json:"link_url,omitempty"`
+	ExternalURL string    `gorm:"column:external_url;size:500" json:"external_url,omitempty"` // wr_link2 매핑
 	DisplayDate time.Time `gorm:"column:display_date;type:date;not null" json:"display_date"`
 	IsActive    bool      `gorm:"column:is_active;default:true" json:"is_active"`
 	CreatedAt   time.Time `gorm:"column:created_at" json:"created_at"`
@@ -200,25 +201,27 @@ func (u *AdUnit) ToResponse() *AdUnitResponse {
 
 // CelebrationBannerResponse 축하 배너 응답 DTO
 type CelebrationBannerResponse struct {
-	ID          uint64 `json:"id"`
-	Title       string `json:"title"`
-	Content     string `json:"content,omitempty"`
-	ImageURL    string `json:"image_url,omitempty"`
-	LinkURL     string `json:"link_url,omitempty"`
-	DisplayDate string `json:"display_date"`
-	IsActive    bool   `json:"is_active"`
+	ID           uint64 `json:"id"`
+	Title        string `json:"title"`
+	Content      string `json:"content,omitempty"`
+	ImageURL     string `json:"image_url,omitempty"`
+	LinkURL      string `json:"link_url,omitempty"`
+	ExternalLink string `json:"external_link,omitempty"` // 프론트엔드 호환
+	DisplayDate  string `json:"display_date"`
+	IsActive     bool   `json:"is_active"`
 }
 
 // ToResponse CelebrationBanner를 응답 DTO로 변환
 func (b *CelebrationBanner) ToResponse() *CelebrationBannerResponse {
 	return &CelebrationBannerResponse{
-		ID:          b.ID,
-		Title:       b.Title,
-		Content:     b.Content,
-		ImageURL:    b.ImageURL,
-		LinkURL:     b.LinkURL,
-		DisplayDate: b.DisplayDate.Format("2006-01-02"),
-		IsActive:    b.IsActive,
+		ID:           b.ID,
+		Title:        b.Title,
+		Content:      b.Content,
+		ImageURL:     b.ImageURL,
+		LinkURL:      b.LinkURL,
+		ExternalLink: b.ExternalURL,
+		DisplayDate:  b.DisplayDate.Format("2006-01-02"),
+		IsActive:     b.IsActive,
 	}
 }
 
@@ -310,4 +313,11 @@ type AdsenseSlotInfo struct {
 	ClientID string `json:"client_id"`
 	Slot     string `json:"slot"`
 	Style    string `json:"style,omitempty"`
+}
+
+// InfeedConfigResponse 인피드 광고 설정 응답
+type InfeedConfigResponse struct {
+	Enabled  bool   `json:"enabled"`
+	Interval int    `json:"interval"`
+	Position string `json:"position"`
 }

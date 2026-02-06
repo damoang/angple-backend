@@ -1,11 +1,23 @@
 package repository
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/plugins/advertising/domain"
 	"gorm.io/gorm"
 )
+
+// extractFirstImage HTML 콘텐츠에서 첫 번째 이미지 URL 추출
+func extractFirstImage(content string) string {
+	// <img src="..."> 패턴 찾기
+	imgRegex := regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
+	matches := imgRegex.FindStringSubmatch(content)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
 
 // AdRepository 광고 저장소 인터페이스
 type AdRepository interface {
@@ -183,13 +195,49 @@ func (r *adRepository) ListBanners(activeOnly bool) ([]*domain.CelebrationBanner
 	return banners, err
 }
 
-// ListBannersByDate 특정 날짜 배너 조회
+// ListBannersByDate g5_write_message 테이블에서 오늘 날짜 축하 배너 조회
+// PHP BannerHelper.php 로직 포팅: wr_subject가 오늘 날짜(Y.m.d 또는 Y-m-d)인 게시글 조회
 func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationBanner, error) {
+	// 두 가지 날짜 형식 지원 (그누보드 호환)
+	dateDot := date.Format("2006.01.02")
+	dateDash := date.Format("2006-01-02")
+
+	// g5_write_message 테이블 조회 결과를 담을 구조체
+	type MessageRow struct {
+		WrID      int    `gorm:"column:wr_id"`
+		WrSubject string `gorm:"column:wr_subject"`
+		WrContent string `gorm:"column:wr_content"`
+		WrLink2   string `gorm:"column:wr_link2"`
+	}
+
+	var results []MessageRow
+	err := r.db.Table("g5_write_message").
+		Select("wr_id, wr_subject, wr_content, wr_link2").
+		Where("wr_is_comment = 0 AND (wr_subject = ? OR wr_subject = ?)", dateDot, dateDash).
+		Order("wr_id DESC").
+		Find(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// MessageRow를 CelebrationBanner로 변환
 	var banners []*domain.CelebrationBanner
-	// 날짜만 비교 (시간 제외)
-	dateStr := date.Format("2006-01-02")
-	err := r.db.Where("DATE(display_date) = ? AND is_active = ?", dateStr, true).
-		Order("id DESC").
-		Find(&banners).Error
-	return banners, err
+	for _, row := range results {
+		imageURL := extractFirstImage(row.WrContent)
+
+		banner := &domain.CelebrationBanner{
+			ID:          uint64(row.WrID),
+			Title:       row.WrSubject,
+			Content:     row.WrContent,
+			ImageURL:    imageURL,
+			LinkURL:     "", // 기본 링크 (게시글 상세)
+			ExternalURL: row.WrLink2,
+			DisplayDate: date,
+			IsActive:    true,
+		}
+		banners = append(banners, banner)
+	}
+
+	return banners, nil
 }
