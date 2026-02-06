@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
+	"github.com/damoang/angple-backend/pkg/cache"
 
 	"gorm.io/gorm"
 )
@@ -18,16 +20,19 @@ import (
 type RecommendationService struct {
 	recRepo *repository.RecommendationRepository
 	db      *gorm.DB
+	cache   cache.Service
 }
 
 // NewRecommendationService creates a new RecommendationService
 func NewRecommendationService(
 	recRepo *repository.RecommendationRepository,
 	db *gorm.DB,
+	cacheService cache.Service,
 ) *RecommendationService {
 	return &RecommendationService{
 		recRepo: recRepo,
 		db:      db,
+		cache:   cacheService,
 	}
 }
 
@@ -93,6 +98,15 @@ func (s *RecommendationService) ExtractAndSaveTopics(ctx context.Context, boardI
 
 // GetPersonalizedFeed returns personalized post recommendations for a user
 func (s *RecommendationService) GetPersonalizedFeed(ctx context.Context, userID string, limit int) (*domain.PersonalizedFeedResponse, error) {
+	// Try cache first (short TTL for personalized content)
+	cacheKey := fmt.Sprintf("feed:%s:%d", userID, limit)
+	if s.cache != nil && s.cache.IsAvailable() {
+		var cached domain.PersonalizedFeedResponse
+		if err := s.cache.Get(ctx, cacheKey, &cached); err == nil {
+			return &cached, nil
+		}
+	}
+
 	// 1. Get user interests
 	interests, _ := s.recRepo.GetUserInterests(ctx, userID, 20)
 
@@ -158,15 +172,41 @@ func (s *RecommendationService) GetPersonalizedFeed(ctx context.Context, userID 
 		userTopics = append(userTopics, interest.Topic)
 	}
 
-	return &domain.PersonalizedFeedResponse{
+	response := &domain.PersonalizedFeedResponse{
 		Posts:  recommended,
 		Topics: userTopics,
-	}, nil
+	}
+
+	// Cache the result (short TTL for personalized content)
+	if s.cache != nil {
+		_ = s.cache.Set(ctx, cacheKey, response, cache.TTLShort)
+	}
+
+	return response, nil
 }
 
 // GetTrendingTopics returns trending topics for a given period
 func (s *RecommendationService) GetTrendingTopics(ctx context.Context, period string, limit int) ([]domain.TrendingTopic, error) {
-	return s.recRepo.GetTrendingTopics(ctx, period, limit)
+	// Try cache first
+	cacheKey := fmt.Sprintf("trending:%s:%d", period, limit)
+	if s.cache != nil && s.cache.IsAvailable() {
+		var cached []domain.TrendingTopic
+		if err := s.cache.Get(ctx, cacheKey, &cached); err == nil {
+			return cached, nil
+		}
+	}
+
+	topics, err := s.recRepo.GetTrendingTopics(ctx, period, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result
+	if s.cache != nil {
+		_ = s.cache.Set(ctx, cacheKey, topics, cache.TTLPopular)
+	}
+
+	return topics, nil
 }
 
 // RefreshTrending recalculates trending topics
@@ -182,8 +222,63 @@ func (s *RecommendationService) RefreshTrending(ctx context.Context) error {
 		if err := s.recRepo.RefreshTrendingTopics(ctx, period, since); err != nil {
 			return fmt.Errorf("트렌딩 갱신 실패 (%s): %w", period, err)
 		}
+		// Invalidate cached trending topics for this period
+		if s.cache != nil {
+			_ = s.cache.Delete(ctx, fmt.Sprintf("trending:%s:10", period), fmt.Sprintf("trending:%s:20", period))
+		}
 	}
 	return nil
+}
+
+// GetPopularPosts returns popular posts with caching
+func (s *RecommendationService) GetPopularPosts(ctx context.Context, boardID string, limit int) ([]domain.RecommendedPost, error) {
+	// Try cache first
+	if s.cache != nil && s.cache.IsAvailable() {
+		cached, err := s.cache.GetPopularPosts(ctx, boardID)
+		if err == nil {
+			var posts []domain.RecommendedPost
+			if json.Unmarshal(cached, &posts) == nil {
+				if len(posts) >= limit {
+					return posts[:limit], nil
+				}
+				return posts, nil
+			}
+		}
+	}
+
+	// Fetch from repository
+	since := time.Now().Add(-24 * time.Hour)
+	popular, err := s.recRepo.GetPopularPostIDs(ctx, since, limit*2) // Get extra for filtering
+	if err != nil {
+		return nil, err
+	}
+
+	posts := make([]domain.RecommendedPost, 0, len(popular))
+	for _, p := range popular {
+		// Filter by boardID if specified
+		if boardID != "" && p.BoardID != boardID {
+			continue
+		}
+		posts = append(posts, domain.RecommendedPost{
+			PostID:  p.PostID,
+			BoardID: p.BoardID,
+			Score:   float64(p.Score),
+			Reason:  "popular",
+		})
+		if len(posts) >= limit {
+			break
+		}
+	}
+
+	// Enrich with post details
+	s.enrichPosts(ctx, posts)
+
+	// Cache the result
+	if s.cache != nil {
+		_ = s.cache.SetPopularPosts(ctx, boardID, posts)
+	}
+
+	return posts, nil
 }
 
 // GetUserInterests returns a user's interest topics

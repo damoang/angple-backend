@@ -103,6 +103,7 @@ func Setup(
 		boardPosts.POST("/:id/like", middleware.JWTAuth(jwtManager), goodHandler.LikePost)
 		boardPosts.POST("/:id/dislike", middleware.JWTAuth(jwtManager), goodHandler.DislikePost)
 		boardPosts.GET("/:id/like-status", middleware.JWTAuth(jwtManager), goodHandler.GetLikeStatus)
+		boardPosts.GET("/:id/likers", goodHandler.GetLikers)
 
 		// 게시글 추천/비추천 (명시적 API)
 		boardPosts.POST("/:id/recommend", middleware.JWTAuth(jwtManager), goodHandler.RecommendPost)

@@ -167,8 +167,9 @@ func (h *CommentHandler) LikeComment(c *gin.Context) {
 
 	// Get authenticated user ID from JWT middleware
 	userID := middleware.GetUserID(c)
+	ip := c.ClientIP()
 
-	result, err := h.service.LikeComment(boardID, commentID, userID)
+	result, err := h.service.LikeComment(boardID, commentID, userID, ip)
 	if errors.Is(err, common.ErrPostNotFound) {
 		common.ErrorResponse(c, 404, "Comment not found", err)
 		return
@@ -198,8 +199,9 @@ func (h *CommentHandler) DislikeComment(c *gin.Context) {
 
 	// Get authenticated user ID from JWT middleware
 	userID := middleware.GetUserID(c)
+	ip := c.ClientIP()
 
-	result, err := h.service.DislikeComment(boardID, commentID, userID)
+	result, err := h.service.DislikeComment(boardID, commentID, userID, ip)
 	if errors.Is(err, common.ErrPostNotFound) {
 		common.ErrorResponse(c, 404, "Comment not found", err)
 		return

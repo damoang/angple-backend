@@ -36,7 +36,8 @@ func (h *GoodHandler) RecommendPost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.RecommendPost(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.RecommendPost(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -84,7 +85,8 @@ func (h *GoodHandler) DownvotePost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.DownvotePost(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.DownvotePost(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -132,7 +134,8 @@ func (h *GoodHandler) RecommendComment(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.RecommendComment(boardID, commentID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.RecommendComment(boardID, commentID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -180,7 +183,8 @@ func (h *GoodHandler) LikePost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ToggleLike(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.ToggleLike(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -204,7 +208,8 @@ func (h *GoodHandler) DislikePost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ToggleDislike(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.ToggleDislike(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -226,6 +231,27 @@ func (h *GoodHandler) GetLikeStatus(c *gin.Context) {
 	result, err := h.service.GetLikeStatus(boardID, wrID, userID)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "상태 조회 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{Data: result})
+}
+
+// GetLikers handles GET /boards/:board_id/posts/:id/likers
+func (h *GoodHandler) GetLikers(c *gin.Context) {
+	boardID := c.Param("board_id")
+	wrID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID입니다", err)
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	result, err := h.service.GetLikers(boardID, wrID, page, limit)
+	if err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "추천자 목록 조회 실패", err)
 		return
 	}
 
