@@ -107,7 +107,7 @@ func (r *postRepository) ListNotices(boardID string) ([]*domain.Post, error) {
 	}
 
 	// ID 문자열을 정수로 변환
-	var ids []int
+	ids := make([]int, 0, len(noticeIDs))
 	for _, idStr := range noticeIDs {
 		idStr = strings.TrimSpace(idStr)
 		if idStr == "" {
