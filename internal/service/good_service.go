@@ -8,16 +8,17 @@ import (
 
 // GoodService defines the interface for recommend/downvote business logic
 type GoodService interface {
-	RecommendPost(boardID string, wrID int, userID string) (*domain.RecommendResponse, error)
+	RecommendPost(boardID string, wrID int, userID, ip string) (*domain.RecommendResponse, error)
 	CancelRecommendPost(boardID string, wrID int, userID string) (*domain.RecommendResponse, error)
-	DownvotePost(boardID string, wrID int, userID string) (*domain.DownvoteResponse, error)
+	DownvotePost(boardID string, wrID int, userID, ip string) (*domain.DownvoteResponse, error)
 	CancelDownvotePost(boardID string, wrID int, userID string) (*domain.DownvoteResponse, error)
-	RecommendComment(boardID string, wrID int, userID string) (*domain.RecommendResponse, error)
+	RecommendComment(boardID string, wrID int, userID, ip string) (*domain.RecommendResponse, error)
 	CancelRecommendComment(boardID string, wrID int, userID string) (*domain.RecommendResponse, error)
 	// Frontend-compatible toggle methods
-	ToggleLike(boardID string, wrID int, userID string) (*domain.LikeResponse, error)
-	ToggleDislike(boardID string, wrID int, userID string) (*domain.LikeResponse, error)
+	ToggleLike(boardID string, wrID int, userID, ip string) (*domain.LikeResponse, error)
+	ToggleDislike(boardID string, wrID int, userID, ip string) (*domain.LikeResponse, error)
 	GetLikeStatus(boardID string, wrID int, userID string) (*domain.LikeResponse, error)
+	GetLikers(boardID string, wrID int, page, limit int) (*domain.LikersResponse, error)
 }
 
 type goodService struct {
@@ -44,7 +45,7 @@ func (s *goodService) checkAuthorAndReject(boardID string, wrID int, userID stri
 }
 
 // addVote adds a vote, optionally removing the opposite vote first
-func (s *goodService) addVote(boardID string, wrID int, userID, voteType, oppositeType string) error {
+func (s *goodService) addVote(boardID string, wrID int, userID, voteType, oppositeType, ip string) error {
 	has, err := s.goodRepo.HasGood(boardID, wrID, userID, voteType)
 	if err != nil {
 		return err
@@ -64,7 +65,7 @@ func (s *goodService) addVote(boardID string, wrID int, userID, voteType, opposi
 		}
 	}
 
-	return s.goodRepo.AddGood(boardID, wrID, userID, voteType)
+	return s.goodRepo.AddGood(boardID, wrID, userID, voteType, ip)
 }
 
 // cancelVote removes a vote and returns the updated count
@@ -89,7 +90,7 @@ func (s *goodService) cancelVote(boardID string, wrID int, userID, voteType stri
 }
 
 // toggleVote toggles a vote type, removing opposite if needed
-func (s *goodService) toggleVote(boardID string, wrID int, userID, voteType, oppositeType string) (*domain.LikeResponse, error) {
+func (s *goodService) toggleVote(boardID string, wrID int, userID, voteType, oppositeType, ip string) (*domain.LikeResponse, error) {
 	if err := s.checkAuthorAndReject(boardID, wrID, userID); err != nil {
 		return nil, err
 	}
@@ -113,7 +114,7 @@ func (s *goodService) toggleVote(boardID string, wrID int, userID, voteType, opp
 				return nil, err
 			}
 		}
-		if err := s.goodRepo.AddGood(boardID, wrID, userID, voteType); err != nil {
+		if err := s.goodRepo.AddGood(boardID, wrID, userID, voteType, ip); err != nil {
 			return nil, err
 		}
 	}
@@ -121,12 +122,12 @@ func (s *goodService) toggleVote(boardID string, wrID int, userID, voteType, opp
 	return s.buildLikeResponse(boardID, wrID, userID)
 }
 
-func (s *goodService) RecommendPost(boardID string, wrID int, userID string) (*domain.RecommendResponse, error) {
+func (s *goodService) RecommendPost(boardID string, wrID int, userID, ip string) (*domain.RecommendResponse, error) {
 	if err := s.checkAuthorAndReject(boardID, wrID, userID); err != nil {
 		return nil, err
 	}
 
-	if err := s.addVote(boardID, wrID, userID, "good", "nogood"); err != nil {
+	if err := s.addVote(boardID, wrID, userID, "good", "nogood", ip); err != nil {
 		return nil, err
 	}
 
@@ -152,12 +153,12 @@ func (s *goodService) CancelRecommendPost(boardID string, wrID int, userID strin
 	}, nil
 }
 
-func (s *goodService) DownvotePost(boardID string, wrID int, userID string) (*domain.DownvoteResponse, error) {
+func (s *goodService) DownvotePost(boardID string, wrID int, userID, ip string) (*domain.DownvoteResponse, error) {
 	if err := s.checkAuthorAndReject(boardID, wrID, userID); err != nil {
 		return nil, err
 	}
 
-	if err := s.addVote(boardID, wrID, userID, "nogood", "good"); err != nil {
+	if err := s.addVote(boardID, wrID, userID, "nogood", "good", ip); err != nil {
 		return nil, err
 	}
 
@@ -183,7 +184,7 @@ func (s *goodService) CancelDownvotePost(boardID string, wrID int, userID string
 	}, nil
 }
 
-func (s *goodService) RecommendComment(boardID string, wrID int, userID string) (*domain.RecommendResponse, error) {
+func (s *goodService) RecommendComment(boardID string, wrID int, userID, ip string) (*domain.RecommendResponse, error) {
 	authorID, err := s.goodRepo.GetWriteAuthorID(boardID, wrID)
 	if err != nil {
 		return nil, common.ErrCommentNotFound
@@ -192,7 +193,7 @@ func (s *goodService) RecommendComment(boardID string, wrID int, userID string) 
 		return nil, common.ErrSelfRecommend
 	}
 
-	if err := s.addVote(boardID, wrID, userID, "good", "nogood"); err != nil {
+	if err := s.addVote(boardID, wrID, userID, "good", "nogood", ip); err != nil {
 		return nil, err
 	}
 
@@ -219,18 +220,23 @@ func (s *goodService) CancelRecommendComment(boardID string, wrID int, userID st
 }
 
 // ToggleLike toggles like status for a post (frontend-compatible)
-func (s *goodService) ToggleLike(boardID string, wrID int, userID string) (*domain.LikeResponse, error) {
-	return s.toggleVote(boardID, wrID, userID, "good", "nogood")
+func (s *goodService) ToggleLike(boardID string, wrID int, userID, ip string) (*domain.LikeResponse, error) {
+	return s.toggleVote(boardID, wrID, userID, "good", "nogood", ip)
 }
 
 // ToggleDislike toggles dislike status for a post (frontend-compatible)
-func (s *goodService) ToggleDislike(boardID string, wrID int, userID string) (*domain.LikeResponse, error) {
-	return s.toggleVote(boardID, wrID, userID, "nogood", "good")
+func (s *goodService) ToggleDislike(boardID string, wrID int, userID, ip string) (*domain.LikeResponse, error) {
+	return s.toggleVote(boardID, wrID, userID, "nogood", "good", ip)
 }
 
 // GetLikeStatus returns the current like/dislike status for a post
 func (s *goodService) GetLikeStatus(boardID string, wrID int, userID string) (*domain.LikeResponse, error) {
 	return s.buildLikeResponse(boardID, wrID, userID)
+}
+
+// GetLikers returns the list of users who liked a post
+func (s *goodService) GetLikers(boardID string, wrID int, page, limit int) (*domain.LikersResponse, error) {
+	return s.goodRepo.GetLikers(boardID, wrID, page, limit)
 }
 
 // buildLikeResponse builds a frontend-compatible LikeResponse

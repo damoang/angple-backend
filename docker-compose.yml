@@ -1,3 +1,17 @@
+# ============================================
+# Angple Backend Docker Compose Configuration
+# ============================================
+#
+# 사용법:
+#   개발: docker compose --env-file .env.local up -d
+#   프로덕션: docker compose --env-file .env.production up -d
+#
+# 설정 초기화:
+#   cp .env.example .env.local
+#   # .env.local 파일에서 값 수정
+#
+# ============================================
+
 services:
   # MySQL Database
   mysql:
@@ -32,7 +46,7 @@ services:
     ports:
       - "8081:8081"
     env_file:
-      - .env
+      - .env.local
     environment:
       - APP_ENV=${APP_ENV:-prod}  # 환경 선택: local, dev, staging, prod
       - DB_HOST=${DB_HOST:-mysql}  # 로컬: mysql 컨테이너, 운영: 외부 DB

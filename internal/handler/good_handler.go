@@ -23,7 +23,7 @@ func NewGoodHandler(service service.GoodService) *GoodHandler {
 
 // RecommendPost handles POST /boards/:board_id/posts/:id/recommend
 func (h *GoodHandler) RecommendPost(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -36,7 +36,8 @@ func (h *GoodHandler) RecommendPost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.RecommendPost(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.RecommendPost(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -47,7 +48,7 @@ func (h *GoodHandler) RecommendPost(c *gin.Context) {
 
 // CancelRecommendPost handles DELETE /boards/:board_id/posts/:id/recommend
 func (h *GoodHandler) CancelRecommendPost(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -71,7 +72,7 @@ func (h *GoodHandler) CancelRecommendPost(c *gin.Context) {
 
 // DownvotePost handles POST /boards/:board_id/posts/:id/downvote
 func (h *GoodHandler) DownvotePost(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -84,7 +85,8 @@ func (h *GoodHandler) DownvotePost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.DownvotePost(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.DownvotePost(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -95,7 +97,7 @@ func (h *GoodHandler) DownvotePost(c *gin.Context) {
 
 // CancelDownvotePost handles DELETE /boards/:board_id/posts/:id/downvote
 func (h *GoodHandler) CancelDownvotePost(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -119,7 +121,7 @@ func (h *GoodHandler) CancelDownvotePost(c *gin.Context) {
 
 // RecommendComment handles POST /boards/:board_id/posts/:id/comments/:comment_id/recommend
 func (h *GoodHandler) RecommendComment(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -132,7 +134,8 @@ func (h *GoodHandler) RecommendComment(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.RecommendComment(boardID, commentID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.RecommendComment(boardID, commentID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -143,7 +146,7 @@ func (h *GoodHandler) RecommendComment(c *gin.Context) {
 
 // CancelRecommendComment handles DELETE /boards/:board_id/posts/:id/comments/:comment_id/recommend
 func (h *GoodHandler) CancelRecommendComment(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -167,7 +170,7 @@ func (h *GoodHandler) CancelRecommendComment(c *gin.Context) {
 
 // LikePost handles POST /boards/:board_id/posts/:id/like (frontend-compatible toggle)
 func (h *GoodHandler) LikePost(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -180,7 +183,8 @@ func (h *GoodHandler) LikePost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ToggleLike(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.ToggleLike(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -191,7 +195,7 @@ func (h *GoodHandler) LikePost(c *gin.Context) {
 
 // DislikePost handles POST /boards/:board_id/posts/:id/dislike (frontend-compatible toggle)
 func (h *GoodHandler) DislikePost(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
 		return
@@ -204,7 +208,8 @@ func (h *GoodHandler) DislikePost(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ToggleDislike(boardID, wrID, userID)
+	ip := c.ClientIP()
+	result, err := h.service.ToggleDislike(boardID, wrID, userID, ip)
 	if err != nil {
 		handleGoodError(c, err)
 		return
@@ -222,10 +227,31 @@ func (h *GoodHandler) GetLikeStatus(c *gin.Context) {
 		return
 	}
 
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	result, err := h.service.GetLikeStatus(boardID, wrID, userID)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "상태 조회 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{Data: result})
+}
+
+// GetLikers handles GET /boards/:board_id/posts/:id/likers
+func (h *GoodHandler) GetLikers(c *gin.Context) {
+	boardID := c.Param("board_id")
+	wrID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID입니다", err)
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	result, err := h.service.GetLikers(boardID, wrID, page, limit)
+	if err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "추천자 목록 조회 실패", err)
 		return
 	}
 

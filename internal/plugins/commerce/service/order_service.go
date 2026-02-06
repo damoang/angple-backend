@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"log"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/plugins/commerce/domain"
@@ -187,7 +188,7 @@ func (s *orderService) CreateOrder(userID uint64, req *domain.CreateOrderRequest
 	// 장바구니 비우기
 	if err := s.cartRepo.DeleteByUserID(userID); err != nil {
 		// 장바구니 삭제 실패는 로그만 남기고 진행
-		// TODO: 로깅 추가
+		log.Printf("[WARN] Failed to clear cart for user %d after order creation: %v", userID, err)
 	}
 
 	// 주문 다시 조회 (아이템 포함)

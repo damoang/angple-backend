@@ -11,10 +11,11 @@ import (
 // GoodRepository defines the interface for recommend/downvote operations
 type GoodRepository interface {
 	HasGood(boTable string, wrID int, mbID string, flag string) (bool, error)
-	AddGood(boTable string, wrID int, mbID string, flag string) error
+	AddGood(boTable string, wrID int, mbID string, flag string, ip string) error
 	RemoveGood(boTable string, wrID int, mbID string, flag string) error
 	GetGoodCount(boTable string, wrID int) (good int, nogood int, err error)
 	GetWriteAuthorID(boTable string, wrID int) (string, error)
+	GetLikers(boTable string, wrID int, page, limit int) (*domain.LikersResponse, error)
 }
 
 type goodRepository struct {
@@ -43,7 +44,7 @@ func (r *goodRepository) HasGood(boTable string, wrID int, mbID string, flag str
 }
 
 // AddGood adds a recommend/downvote record and increments wr_good/wr_nogood in a transaction
-func (r *goodRepository) AddGood(boTable string, wrID int, mbID string, flag string) error {
+func (r *goodRepository) AddGood(boTable string, wrID int, mbID string, flag string, ip string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		// Insert into g5_board_good
 		good := &domain.BoardGood{
@@ -52,6 +53,7 @@ func (r *goodRepository) AddGood(boTable string, wrID int, mbID string, flag str
 			MbID:       mbID,
 			BgFlag:     flag,
 			BgDatetime: time.Now(),
+			BgIP:       ip,
 		}
 		if err := tx.Create(good).Error; err != nil {
 			return err
@@ -125,4 +127,57 @@ func (r *goodRepository) GetWriteAuthorID(boTable string, wrID int) (string, err
 		return "", err
 	}
 	return result.AuthorID, nil
+}
+
+// GetLikers returns the list of users who liked a post
+func (r *goodRepository) GetLikers(boTable string, wrID int, page, limit int) (*domain.LikersResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	// Get total count
+	var total int64
+	if err := r.db.Model(&domain.BoardGood{}).
+		Where("bo_table = ? AND wr_id = ? AND bg_flag = ?", boTable, wrID, "good").
+		Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	// Get likers with member info
+	var likers []struct {
+		MbID       string    `gorm:"column:mb_id"`
+		MbName     string    `gorm:"column:mb_name"`
+		BgDatetime time.Time `gorm:"column:bg_datetime"`
+	}
+
+	err := r.db.Table("g5_board_good AS bg").
+		Select("bg.mb_id, COALESCE(m.mb_name, bg.mb_id) AS mb_name, bg.bg_datetime").
+		Joins("LEFT JOIN g5_member AS m ON bg.mb_id = m.mb_id").
+		Where("bg.bo_table = ? AND bg.wr_id = ? AND bg.bg_flag = ?", boTable, wrID, "good").
+		Order("bg.bg_datetime DESC").
+		Offset(offset).
+		Limit(limit).
+		Scan(&likers).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := &domain.LikersResponse{
+		Likers: make([]domain.LikerInfo, len(likers)),
+		Total:  int(total),
+	}
+
+	for i, liker := range likers {
+		result.Likers[i] = domain.LikerInfo{
+			MbID:    liker.MbID,
+			MbName:  liker.MbName,
+			LikedAt: liker.BgDatetime.Format("2006-01-02 15:04:05"),
+		}
+	}
+
+	return result, nil
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/damoang/angple-backend/internal/service"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	"github.com/damoang/angple-backend/internal/ws"
+	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
 	"github.com/damoang/angple-backend/pkg/i18n"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -147,6 +148,13 @@ func main() {
 		redisClient = nil
 	} else {
 		pkglogger.Info("✅ Connected to Redis")
+	}
+
+	// Cache Service 초기화
+	var cacheService pkgcache.Service
+	if redisClient != nil {
+		cacheService = pkgcache.NewService(redisClient)
+		pkglogger.Info("✅ Cache service initialized")
 	}
 
 	// Elasticsearch 연결
@@ -273,12 +281,12 @@ func main() {
 		galleryRepo := repository.NewGalleryRepository(db)
 
 		// Services
-		authService := service.NewAuthService(memberRepo, jwtManager, hookManager)
+		authService := service.NewAuthService(memberRepo, jwtManager, hookManager, cacheService)
 		postService := service.NewPostService(postRepo, hookManager)
 		commentService := service.NewCommentService(commentRepo, goodRepo, hookManager)
 		menuService := service.NewMenuService(menuRepo)
 		siteService := service.NewSiteService(siteRepo)
-		boardService := service.NewBoardService(boardRepo)
+		boardService := service.NewBoardService(boardRepo, cacheService)
 		boardPermissionChecker = boardService // implements middleware.BoardPermissionChecker
 		memberValidationService := service.NewMemberValidationService(memberRepo)
 		autosaveService := service.NewAutosaveService(autosaveRepo)
@@ -289,7 +297,7 @@ func main() {
 		bannerService := service.NewBannerService(bannerRepo)
 		goodService := service.NewGoodService(goodRepo)
 		notificationService := service.NewNotificationService(notificationRepo, wsHub)
-		memberProfileService := service.NewMemberProfileService(memberRepo, pointRepo, db)
+		memberProfileService := service.NewMemberProfileService(memberRepo, pointRepo, db, cacheService)
 
 		scrapService := service.NewScrapService(scrapRepo)
 		blockService := service.NewBlockService(blockRepo, memberRepo)
@@ -307,12 +315,12 @@ func main() {
 
 		// Handlers
 		authHandler = handler.NewAuthHandler(authService, cfg)
-		postHandler = handler.NewPostHandler(postService)
+		postHandler = handler.NewPostHandler(postService, boardRepo)
 		commentHandler = handler.NewCommentHandler(commentService)
 		menuHandler = handler.NewMenuHandler(menuService)
 		siteHandler = handler.NewSiteHandler(siteService)
 		boardHandler = handler.NewBoardHandler(boardService)
-		memberHandler = handler.NewMemberHandler(memberValidationService)
+		memberHandler = handler.NewMemberHandler(memberValidationService, memberRepo)
 		autosaveHandler = handler.NewAutosaveHandler(autosaveService)
 		filterHandler = handler.NewFilterHandler(nil) // TODO: Load filter words from DB
 		tokenHandler = handler.NewTokenHandler()
@@ -329,7 +337,7 @@ func main() {
 		scrapHandler = handler.NewScrapHandler(scrapService)
 		blockHandler = handler.NewBlockHandler(blockService)
 		messageHandler = handler.NewMessageHandler(messageService)
-		wsHandler = handler.NewWSHandler(wsHub)
+		wsHandler = handler.NewWSHandler(wsHub, cfg.CORS.AllowOrigins)
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
 		adminHandler = handler.NewAdminHandler(adminMemberService)
@@ -348,7 +356,7 @@ func main() {
 		// AI Recommendation
 		recRepo := repository.NewRecommendationRepository(db)
 		_ = recRepo.AutoMigrate()
-		recSvc := service.NewRecommendationService(recRepo, db)
+		recSvc := service.NewRecommendationService(recRepo, db, cacheService)
 		recommendationHandler = handler.NewRecommendationHandler(recSvc)
 
 		// Audit Logger
@@ -515,16 +523,38 @@ func main() {
 		v2AdminHandler := v2handler.NewAdminHandler(v2AdminSvc)
 		v2routes.SetupAdmin(router, v2AdminHandler, jwtManager)
 
-		// v2 Scrap, Memo, Message
+		// v2 Scrap, Memo, Block, Message
 		v2ScrapRepo := v2repo.NewScrapRepository(db)
 		v2MemoRepo := v2repo.NewMemoRepository(db)
+		v2BlockRepo := v2repo.NewBlockRepository(db)
 		v2MessageRepo := v2repo.NewMessageRepository(db)
 		v2ScrapHandler := v2handler.NewScrapHandler(v2ScrapRepo)
 		v2MemoHandler := v2handler.NewMemoHandler(v2MemoRepo)
+		v2BlockHandler := v2handler.NewBlockHandler(v2BlockRepo)
 		v2MessageHandler := v2handler.NewMessageHandler(v2MessageRepo)
 		v2routes.SetupScrap(router, v2ScrapHandler, jwtManager)
 		v2routes.SetupMemo(router, v2MemoHandler, jwtManager)
+		v2routes.SetupBlock(router, v2BlockHandler, jwtManager)
 		v2routes.SetupMessage(router, v2MessageHandler, jwtManager)
+
+		// Installation API (인증 없이 접근 가능)
+		v2InstallHandler := v2handler.NewInstallHandler(db)
+		v2routes.SetupInstall(router, v2InstallHandler)
+
+		// ============================================
+		// v2 → v1 통합: v2 전용 기능을 v1에서도 제공
+		// API 버전 단일화를 위한 전환 작업 (2026-02)
+		// ============================================
+
+		// v1에 auth/exchange 라우트 추가 (damoang_jwt → angple JWT 교환)
+		v1Auth := router.Group("/api/v1/auth")
+		v1Auth.POST("/exchange", v2AuthHandler.ExchangeGnuboardJWT)
+
+		// v1에 install 라우트 추가 (설치 마법사)
+		v1Install := router.Group("/api/v1/install")
+		v1Install.GET("/status", v2InstallHandler.CheckInstallStatus)
+		v1Install.POST("/test-db", v2InstallHandler.TestDB)
+		v1Install.POST("/create-admin", v2InstallHandler.CreateAdmin)
 
 		// Tenant Management (멀티테넌트 관리)
 		adminTenants := router.Group("/api/v2/admin/tenants")

@@ -13,37 +13,37 @@ Current,1,✅,GET,/api/v2/boards/{board_id}/posts/{post_id}/comments/{id},댓글
 Current,1,✅,POST,/api/v2/boards/{board_id}/posts/{post_id}/comments,댓글 작성,Yes,"{""content"":""댓글 내용"",""author"":""user1""}","{""data"":{""id"":139,...}}",
 Current,1,✅,PUT,/api/v2/boards/{board_id}/posts/{post_id}/comments/{id},댓글 수정,Yes,"{""content"":""수정된 댓글""}","HTTP 204 No Content",본인만 수정 가능
 Current,1,✅,DELETE,/api/v2/boards/{board_id}/posts/{post_id}/comments/{id},댓글 삭제,Yes,,"HTTP 204 No Content",본인만 삭제 가능
-Phase 1,1,❌,POST,/api/v2/boards/{board_id}/posts/{id}/recommend,게시글 추천,Yes,,"{""data"":{""recommend_count"":10}}",두 번 누르면 취소
-Phase 1,1,❌,DELETE,/api/v2/boards/{board_id}/posts/{id}/recommend,게시글 추천 취소,Yes,,"HTTP 204 No Content",
-Phase 1,1,❌,POST,/api/v2/boards/{board_id}/posts/{id}/downvote,게시글 비추천,Yes,,"{""data"":{""downvote_count"":2}}",관리자 설정에 따라 표시
-Phase 1,1,❌,DELETE,/api/v2/boards/{board_id}/posts/{id}/downvote,게시글 비추천 취소,Yes,,"HTTP 204 No Content",
-Phase 1,1,❌,POST,/api/v2/boards/{board_id}/posts/{post_id}/comments/{id}/recommend,댓글 추천,Yes,,"{""data"":{""recommend_count"":5}}",
-Phase 1,1,❌,DELETE,/api/v2/boards/{board_id}/posts/{post_id}/comments/{id}/recommend,댓글 추천 취소,Yes,,"HTTP 204 No Content",
-Phase 1,2,❌,GET,/api/v2/members/{user_id},회원 프로필 조회,No,,"{""data"":{""user_id"":""user1"",""nickname"":""닉네임"",""level"":2,""point"":1000,""profile"":""자기소개""}}",사이드바 표시용
-Phase 1,2,❌,GET,/api/v2/members/{user_id}/posts,회원 작성글 목록,No,,"{""data"":[...],""meta"":{...}}",최근 5개 표시
-Phase 1,2,❌,GET,/api/v2/members/{user_id}/comments,회원 작성댓글 목록,No,,"{""data"":[...],""meta"":{...}}",최근 5개 표시
-Phase 1,2,❌,GET,/api/v2/members/{user_id}/points/history,포인트 내역,Yes,,"{""data"":[{""point"":100,""content"":""로그인"",""datetime"":""...""}]}",본인만 조회 가능
-Phase 1,2,❌,POST,/api/v2/auth/register,일반 회원가입,No,"{""user_id"":""newuser"",""password"":""pass1234"",""email"":""user@example.com"",""nickname"":""닉네임""}","{""data"":{""user_id"":""newuser"",""level"":2}}",가입시 포인트 지급
-Phase 1,2,❌,POST,/api/v2/auth/social/{provider},소셜 로그인,No,"{""code"":""auth_code"",""redirect_uri"":""...""}","{""data"":{""access_token"":""..."",""user"":{...}}}","provider: naver, kakao, google, twitter, payco, facebook, apple"
-Phase 1,2,❌,DELETE,/api/v2/members/me,회원 탈퇴,Yes,"{""password"":""확인용 비밀번호""}","HTTP 204 No Content","id는 남기고, 댓글/게시글/포인트/소셜가입 삭제"
-Phase 1,3,❌,POST,/api/v2/upload/editor,에디터 이미지 업로드,Yes,multipart/form-data,"{""data"":{""url"":""https://cdn.damoang.net/data/editor/2508/xxx.webp""}}","data/editor/yymm/ 저장, gif->mp4, webp 변환, 중복 체크"
-Phase 1,3,❌,POST,/api/v2/upload/attachment,첨부파일 업로드,Yes,multipart/form-data,"{""data"":{""file_id"":123,""url"":""..."",""size"":1024,""filename"":""test.pdf""}}","data/file/게시판명 저장, 포인트 체크, 중복 체크"
-Phase 1,3,❌,GET,/api/v2/files/{file_id}/download,파일 다운로드,No,,"File Stream","다운로드 권한 체크, 포인트 차감"
-Phase 2,1,❌,POST,/api/v2/boards/{board_id}/posts/{id}/scrap,스크랩,Yes,,"{""data"":{""scrap_id"":456}}",
-Phase 2,1,❌,DELETE,/api/v2/boards/{board_id}/posts/{id}/scrap,스크랩 취소,Yes,,"HTTP 204 No Content",
-Phase 2,1,❌,GET,/api/v2/members/me/scraps,내 스크랩 목록,Yes,,"{""data"":[...],""meta"":{...}}",페이지네이션
-Phase 2,2,❌,POST,/api/v2/members/{user_id}/memo,메모 작성,Yes,"{""content"":""메모 내용""}","{""data"":{""memo_id"":789,""content"":""...""}}",특정 회원에 대한 나만의 메모
-Phase 2,2,❌,GET,/api/v2/members/{user_id}/memo,메모 조회,Yes,,"{""data"":{""content"":""메모 내용""}}",
-Phase 2,2,❌,PUT,/api/v2/members/{user_id}/memo,메모 수정,Yes,"{""content"":""수정된 메모""}","HTTP 204 No Content",
-Phase 2,2,❌,DELETE,/api/v2/members/{user_id}/memo,메모 삭제,Yes,,"HTTP 204 No Content",
-Phase 2,3,❌,POST,/api/v2/members/{user_id}/block,회원 차단,Yes,,"{""data"":{""block_id"":101}}",차단된 회원의 글/댓글 숨김
-Phase 2,3,❌,DELETE,/api/v2/members/{user_id}/block,차단 해제,Yes,,"HTTP 204 No Content",
-Phase 2,3,❌,GET,/api/v2/members/me/blocks,차단 목록,Yes,,"{""data"":[{""user_id"":""user2"",""blocked_at"":""...""}]}",
-Phase 2,4,❌,POST,/api/v2/messages,쪽지 보내기,Yes,"{""to_user_id"":""user2"",""subject"":""제목"",""content"":""내용""}","{""data"":{""message_id"":202}}",이용제한시 쪽지 발송
-Phase 2,4,❌,GET,/api/v2/messages/inbox,받은 쪽지함,Yes,,"{""data"":[...],""meta"":{...}}",
-Phase 2,4,❌,GET,/api/v2/messages/sent,보낸 쪽지함,Yes,,"{""data"":[...],""meta"":{...}}",
-Phase 2,4,❌,GET,/api/v2/messages/{id},쪽지 상세,Yes,,"{""data"":{""subject"":""제목"",""content"":""내용"",""read_at"":""...""}}",읽음 상태 업데이트
-Phase 2,4,❌,DELETE,/api/v2/messages/{id},쪽지 삭제,Yes,,"HTTP 204 No Content",
+Phase 1,1,✅,POST,/api/v2/boards/{board_id}/posts/{id}/recommend,게시글 추천,Yes,,"{""data"":{""recommend_count"":10}}",두 번 누르면 취소
+Phase 1,1,✅,DELETE,/api/v2/boards/{board_id}/posts/{id}/recommend,게시글 추천 취소,Yes,,"HTTP 204 No Content",
+Phase 1,1,✅,POST,/api/v2/boards/{board_id}/posts/{id}/downvote,게시글 비추천,Yes,,"{""data"":{""downvote_count"":2}}",관리자 설정에 따라 표시
+Phase 1,1,✅,DELETE,/api/v2/boards/{board_id}/posts/{id}/downvote,게시글 비추천 취소,Yes,,"HTTP 204 No Content",
+Phase 1,1,✅,POST,/api/v2/boards/{board_id}/posts/{post_id}/comments/{id}/recommend,댓글 추천,Yes,,"{""data"":{""recommend_count"":5}}",
+Phase 1,1,✅,DELETE,/api/v2/boards/{board_id}/posts/{post_id}/comments/{id}/recommend,댓글 추천 취소,Yes,,"HTTP 204 No Content",
+Phase 1,2,✅,GET,/api/v2/members/{user_id},회원 프로필 조회,No,,"{""data"":{""user_id"":""user1"",""nickname"":""닉네임"",""level"":2,""point"":1000,""profile"":""자기소개""}}",사이드바 표시용
+Phase 1,2,✅,GET,/api/v2/members/{user_id}/posts,회원 작성글 목록,No,,"{""data"":[...],""meta"":{...}}",최근 5개 표시
+Phase 1,2,✅,GET,/api/v2/members/{user_id}/comments,회원 작성댓글 목록,No,,"{""data"":[...],""meta"":{...}}",최근 5개 표시
+Phase 1,2,✅,GET,/api/v2/members/{user_id}/points/history,포인트 내역,Yes,,"{""data"":[{""point"":100,""content"":""로그인"",""datetime"":""...""}]}",본인만 조회 가능
+Phase 1,2,✅,POST,/api/v2/auth/register,일반 회원가입,No,"{""user_id"":""newuser"",""password"":""pass1234"",""email"":""user@example.com"",""nickname"":""닉네임""}","{""data"":{""user_id"":""newuser"",""level"":2}}",가입시 포인트 지급
+Phase 1,2,✅,POST,/api/v2/auth/social/{provider},소셜 로그인,No,"{""code"":""auth_code"",""redirect_uri"":""...""}","{""data"":{""access_token"":""..."",""user"":{...}}}","provider: naver, kakao, google, twitter, payco, facebook, apple"
+Phase 1,2,✅,DELETE,/api/v2/members/me,회원 탈퇴,Yes,"{""password"":""확인용 비밀번호""}","HTTP 204 No Content","id는 남기고, 댓글/게시글/포인트/소셜가입 삭제"
+Phase 1,3,✅,POST,/api/v2/upload/editor,에디터 이미지 업로드,Yes,multipart/form-data,"{""data"":{""url"":""https://cdn.damoang.net/data/editor/2508/xxx.webp""}}","data/editor/yymm/ 저장, gif->mp4, webp 변환, 중복 체크"
+Phase 1,3,✅,POST,/api/v2/upload/attachment,첨부파일 업로드,Yes,multipart/form-data,"{""data"":{""file_id"":123,""url"":""..."",""size"":1024,""filename"":""test.pdf""}}","data/file/게시판명 저장, 포인트 체크, 중복 체크"
+Phase 1,3,✅,GET,/api/v2/files/{file_id}/download,파일 다운로드,No,,"File Stream","다운로드 권한 체크, 포인트 차감"
+Phase 2,1,✅,POST,/api/v2/boards/{board_id}/posts/{id}/scrap,스크랩,Yes,,"{""data"":{""scrap_id"":456}}",
+Phase 2,1,✅,DELETE,/api/v2/boards/{board_id}/posts/{id}/scrap,스크랩 취소,Yes,,"HTTP 204 No Content",
+Phase 2,1,✅,GET,/api/v2/members/me/scraps,내 스크랩 목록,Yes,,"{""data"":[...],""meta"":{...}}",페이지네이션
+Phase 2,2,✅,POST,/api/v2/members/{user_id}/memo,메모 작성,Yes,"{""content"":""메모 내용""}","{""data"":{""memo_id"":789,""content"":""...""}}",특정 회원에 대한 나만의 메모
+Phase 2,2,✅,GET,/api/v2/members/{user_id}/memo,메모 조회,Yes,,"{""data"":{""content"":""메모 내용""}}",
+Phase 2,2,✅,PUT,/api/v2/members/{user_id}/memo,메모 수정,Yes,"{""content"":""수정된 메모""}","HTTP 204 No Content",
+Phase 2,2,✅,DELETE,/api/v2/members/{user_id}/memo,메모 삭제,Yes,,"HTTP 204 No Content",
+Phase 2,3,✅,POST,/api/v2/members/{user_id}/block,회원 차단,Yes,,"{""data"":{""block_id"":101}}",차단된 회원의 글/댓글 숨김
+Phase 2,3,✅,DELETE,/api/v2/members/{user_id}/block,차단 해제,Yes,,"HTTP 204 No Content",
+Phase 2,3,✅,GET,/api/v2/members/me/blocks,차단 목록,Yes,,"{""data"":[{""user_id"":""user2"",""blocked_at"":""...""}]}",
+Phase 2,4,✅,POST,/api/v2/messages,쪽지 보내기,Yes,"{""to_user_id"":""user2"",""subject"":""제목"",""content"":""내용""}","{""data"":{""message_id"":202}}",이용제한시 쪽지 발송
+Phase 2,4,✅,GET,/api/v2/messages/inbox,받은 쪽지함,Yes,,"{""data"":[...],""meta"":{...}}",
+Phase 2,4,✅,GET,/api/v2/messages/sent,보낸 쪽지함,Yes,,"{""data"":[...],""meta"":{...}}",
+Phase 2,4,✅,GET,/api/v2/messages/{id},쪽지 상세,Yes,,"{""data"":{""subject"":""제목"",""content"":""내용"",""read_at"":""...""}}",읽음 상태 업데이트
+Phase 2,4,✅,DELETE,/api/v2/messages/{id},쪽지 삭제,Yes,,"HTTP 204 No Content",
 Phase 3,1,❌,GET,/api/v2/notifications,알림 목록,Yes,,"{""data"":[{""type"":""comment"",""content"":""..."",""created_at"":""...""}]}",페이지네이션
 Phase 3,1,❌,GET,/api/v2/notifications/unread,읽지 않은 알림,Yes,,"{""data"":[...],""meta"":{""unread_count"":5}}",
 Phase 3,1,❌,PUT,/api/v2/notifications/{id}/read,알림 읽음 처리,Yes,,"HTTP 204 No Content",

@@ -95,6 +95,20 @@ func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Man
 	memo.DELETE("", h.DeleteMemo)
 }
 
+// SetupBlock configures v2 block routes
+func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	// Block/Unblock member
+	members := router.Group("/api/v2/members")
+	members.POST("/:id/block", auth, h.BlockMember)
+	members.DELETE("/:id/block", auth, h.UnblockMember)
+
+	// List blocked members
+	me := router.Group("/api/v2/members/me", auth)
+	me.GET("/blocks", h.ListBlocks)
+}
+
 // SetupMessage configures v2 message routes
 func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
@@ -105,4 +119,13 @@ func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *j
 	messages.GET("/sent", h.GetSent)
 	messages.GET("/:id", h.GetMessage)
 	messages.DELETE("/:id", h.DeleteMessage)
+}
+
+// SetupInstall configures v2 installation routes (no authentication required)
+func SetupInstall(router *gin.Engine, h *v2handler.InstallHandler) {
+	install := router.Group("/api/v2/install")
+
+	install.GET("/status", h.CheckInstallStatus)
+	install.POST("/test-db", h.TestDB)
+	install.POST("/create-admin", h.CreateAdmin)
 }
