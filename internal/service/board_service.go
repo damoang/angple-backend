@@ -1,20 +1,24 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
+	"github.com/damoang/angple-backend/pkg/cache"
 )
 
 type BoardService struct {
-	repo *repository.BoardRepository
+	repo  *repository.BoardRepository
+	cache cache.Service
 }
 
-func NewBoardService(repo *repository.BoardRepository) *BoardService {
-	return &BoardService{repo: repo}
+func NewBoardService(repo *repository.BoardRepository, cacheService cache.Service) *BoardService {
+	return &BoardService{repo: repo, cache: cacheService}
 }
 
 // CreateBoard - 게시판 생성 (관리자만 가능)
@@ -107,9 +111,32 @@ func (s *BoardService) CreateBoard(req *domain.CreateBoardRequest, adminID strin
 	return board, nil
 }
 
-// GetBoard - 게시판 정보 조회
+// GetBoard - 게시판 정보 조회 (캐시 사용)
 func (s *BoardService) GetBoard(boardID string) (*domain.Board, error) {
-	return s.repo.FindByID(boardID)
+	ctx := context.Background()
+
+	// 캐시에서 먼저 조회
+	if s.cache != nil && s.cache.IsAvailable() {
+		if cached, err := s.cache.GetBoard(ctx, boardID); err == nil {
+			var board domain.Board
+			if json.Unmarshal(cached, &board) == nil {
+				return &board, nil
+			}
+		}
+	}
+
+	// 캐시 미스: DB에서 조회
+	board, err := s.repo.FindByID(boardID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 캐시에 저장
+	if s.cache != nil {
+		_ = s.cache.SetBoard(ctx, boardID, board)
+	}
+
+	return board, nil
 }
 
 // ListBoards - 게시판 목록 조회
@@ -148,7 +175,16 @@ func (s *BoardService) UpdateBoard(boardID string, req *domain.UpdateBoardReques
 	s.addFieldUpdates(updates, req)
 
 	// 4. 업데이트 실행
-	return s.repo.Update(boardID, updates)
+	if err := s.repo.Update(boardID, updates); err != nil {
+		return err
+	}
+
+	// 5. 캐시 무효화
+	if s.cache != nil {
+		_ = s.cache.InvalidateBoard(context.Background(), boardID)
+	}
+
+	return nil
 }
 
 // addFieldUpdates - 필드 업데이트를 위한 헬퍼 메서드 (복잡도 감소)
@@ -179,7 +215,16 @@ func addUpdate[T any](updates map[string]interface{}, key string, value *T) {
 
 // DeleteBoard - 게시판 삭제 (관리자만 가능)
 func (s *BoardService) DeleteBoard(boardID string) error {
-	return s.repo.Delete(boardID)
+	if err := s.repo.Delete(boardID); err != nil {
+		return err
+	}
+
+	// 캐시 무효화
+	if s.cache != nil {
+		_ = s.cache.InvalidateBoard(context.Background(), boardID)
+	}
+
+	return nil
 }
 
 // CanList - 목록 보기 권한 확인

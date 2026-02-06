@@ -10,6 +10,7 @@ type BoardGood struct {
 	MbID       string    `gorm:"column:mb_id" json:"mb_id"`
 	BgFlag     string    `gorm:"column:bg_flag" json:"bg_flag"` // "good" or "nogood"
 	BgDatetime time.Time `gorm:"column:bg_datetime" json:"bg_datetime"`
+	BgIP       string    `gorm:"column:bg_ip" json:"bg_ip"`
 }
 
 // TableName returns the table name for GORM
@@ -35,4 +36,17 @@ type RecommendResponse struct {
 type DownvoteResponse struct {
 	DownvoteCount int  `json:"downvote_count"`
 	UserDownvoted bool `json:"user_downvoted"`
+}
+
+// LikerInfo represents a user who liked a post
+type LikerInfo struct {
+	MbID    string `json:"mb_id"`
+	MbName  string `json:"mb_name"`
+	LikedAt string `json:"liked_at"`
+}
+
+// LikersResponse is the response DTO for likers list
+type LikersResponse struct {
+	Likers []LikerInfo `json:"likers"`
+	Total  int         `json:"total"`
 }

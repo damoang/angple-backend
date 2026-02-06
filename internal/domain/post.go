@@ -65,6 +65,7 @@ type PostResponse struct {
 	ID            int       `json:"id"`
 	Views         int       `json:"views"`
 	Likes         int       `json:"likes"`
+	Dislikes      int       `json:"dislikes"`
 	CommentsCount int       `json:"comments_count"`
 	HasFile       bool      `json:"has_file"`
 }
@@ -79,6 +80,7 @@ func (p *Post) ToResponse() *PostResponse {
 		AuthorID:      p.AuthorID,
 		Views:         p.Views,
 		Likes:         p.Likes,
+		Dislikes:      p.Dislikes,
 		CommentsCount: p.CommentCount,
 		CreatedAt:     p.CreatedAt,
 		HasFile:       p.HasFile > 0,

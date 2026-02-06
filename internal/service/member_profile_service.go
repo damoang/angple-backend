@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
+	"github.com/damoang/angple-backend/pkg/cache"
 	"gorm.io/gorm"
 )
 
@@ -16,25 +19,41 @@ type MemberProfileService interface {
 	GetRecentPosts(userID string, limit int) ([]*domain.MemberPostSummary, error)
 	GetRecentComments(userID string, limit int) ([]*domain.MemberCommentSummary, error)
 	GetPointHistory(userID string, limit int) ([]*domain.PointHistory, error)
+	InvalidateProfileCache(userID string) error
 }
 
 type memberProfileService struct {
 	memberRepo repository.MemberRepository
 	pointRepo  repository.PointRepository
 	db         *gorm.DB
+	cache      cache.Service
 }
 
 // NewMemberProfileService creates a new MemberProfileService
-func NewMemberProfileService(memberRepo repository.MemberRepository, pointRepo repository.PointRepository, db *gorm.DB) MemberProfileService {
+func NewMemberProfileService(memberRepo repository.MemberRepository, pointRepo repository.PointRepository, db *gorm.DB, cacheService cache.Service) MemberProfileService {
 	return &memberProfileService{
 		memberRepo: memberRepo,
 		pointRepo:  pointRepo,
 		db:         db,
+		cache:      cacheService,
 	}
 }
 
 // GetProfile returns a member's public profile
 func (s *memberProfileService) GetProfile(userID string) (*domain.MemberProfileResponse, error) {
+	ctx := context.Background()
+
+	// Try cache first
+	if s.cache != nil && s.cache.IsAvailable() {
+		cached, err := s.cache.GetUser(ctx, userID)
+		if err == nil {
+			var profile domain.MemberProfileResponse
+			if json.Unmarshal(cached, &profile) == nil {
+				return &profile, nil
+			}
+		}
+	}
+
 	member, err := s.memberRepo.FindByUserID(userID)
 	if err != nil {
 		return nil, err
@@ -42,7 +61,23 @@ func (s *memberProfileService) GetProfile(userID string) (*domain.MemberProfileR
 	if member.LeaveDate != "" {
 		return nil, fmt.Errorf("탈퇴한 회원입니다")
 	}
-	return member.ToProfileResponse(), nil
+
+	profile := member.ToProfileResponse()
+
+	// Cache the profile
+	if s.cache != nil {
+		_ = s.cache.SetUser(ctx, userID, profile)
+	}
+
+	return profile, nil
+}
+
+// InvalidateProfileCache invalidates the cached profile for a user
+func (s *memberProfileService) InvalidateProfileCache(userID string) error {
+	if s.cache == nil {
+		return nil
+	}
+	return s.cache.InvalidateUser(context.Background(), userID)
 }
 
 // GetRecentPosts returns a member's recent posts across all boards

@@ -30,6 +30,7 @@ import (
 	"github.com/damoang/angple-backend/internal/service"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	"github.com/damoang/angple-backend/internal/ws"
+	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
 	"github.com/damoang/angple-backend/pkg/i18n"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -146,6 +147,13 @@ func main() {
 		redisClient = nil
 	} else {
 		pkglogger.Info("✅ Connected to Redis")
+	}
+
+	// Cache Service 초기화
+	var cacheService pkgcache.Service
+	if redisClient != nil {
+		cacheService = pkgcache.NewService(redisClient)
+		pkglogger.Info("✅ Cache service initialized")
 	}
 
 	// Elasticsearch 연결
@@ -272,12 +280,12 @@ func main() {
 		galleryRepo := repository.NewGalleryRepository(db)
 
 		// Services
-		authService := service.NewAuthService(memberRepo, jwtManager, hookManager)
+		authService := service.NewAuthService(memberRepo, jwtManager, hookManager, cacheService)
 		postService := service.NewPostService(postRepo, hookManager)
 		commentService := service.NewCommentService(commentRepo, goodRepo, hookManager)
 		menuService := service.NewMenuService(menuRepo)
 		siteService := service.NewSiteService(siteRepo)
-		boardService := service.NewBoardService(boardRepo)
+		boardService := service.NewBoardService(boardRepo, cacheService)
 		boardPermissionChecker = boardService // implements middleware.BoardPermissionChecker
 		memberValidationService := service.NewMemberValidationService(memberRepo)
 		autosaveService := service.NewAutosaveService(autosaveRepo)
@@ -288,7 +296,7 @@ func main() {
 		bannerService := service.NewBannerService(bannerRepo)
 		goodService := service.NewGoodService(goodRepo)
 		notificationService := service.NewNotificationService(notificationRepo, wsHub)
-		memberProfileService := service.NewMemberProfileService(memberRepo, pointRepo, db)
+		memberProfileService := service.NewMemberProfileService(memberRepo, pointRepo, db, cacheService)
 
 		scrapService := service.NewScrapService(scrapRepo)
 		blockService := service.NewBlockService(blockRepo, memberRepo)
@@ -306,12 +314,12 @@ func main() {
 
 		// Handlers
 		authHandler = handler.NewAuthHandler(authService, cfg)
-		postHandler = handler.NewPostHandler(postService)
+		postHandler = handler.NewPostHandler(postService, boardRepo)
 		commentHandler = handler.NewCommentHandler(commentService)
 		menuHandler = handler.NewMenuHandler(menuService)
 		siteHandler = handler.NewSiteHandler(siteService)
 		boardHandler = handler.NewBoardHandler(boardService)
-		memberHandler = handler.NewMemberHandler(memberValidationService)
+		memberHandler = handler.NewMemberHandler(memberValidationService, memberRepo)
 		autosaveHandler = handler.NewAutosaveHandler(autosaveService)
 		filterHandler = handler.NewFilterHandler(nil) // TODO: Load filter words from DB
 		tokenHandler = handler.NewTokenHandler()
@@ -328,7 +336,7 @@ func main() {
 		scrapHandler = handler.NewScrapHandler(scrapService)
 		blockHandler = handler.NewBlockHandler(blockService)
 		messageHandler = handler.NewMessageHandler(messageService)
-		wsHandler = handler.NewWSHandler(wsHub)
+		wsHandler = handler.NewWSHandler(wsHub, cfg.CORS.AllowOrigins)
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
 		adminHandler = handler.NewAdminHandler(adminMemberService)
@@ -347,7 +355,7 @@ func main() {
 		// AI Recommendation
 		recRepo := repository.NewRecommendationRepository(db)
 		_ = recRepo.AutoMigrate()
-		recSvc := service.NewRecommendationService(recRepo, db)
+		recSvc := service.NewRecommendationService(recRepo, db, cacheService)
 		recommendationHandler = handler.NewRecommendationHandler(recSvc)
 
 		// Audit Logger

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/damoang/angple-backend/internal/common"
+	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -11,12 +12,14 @@ import (
 // MemberHandler handles member validation requests
 type MemberHandler struct {
 	validationService service.MemberValidationService
+	memberRepo        repository.MemberRepository
 }
 
 // NewMemberHandler creates a new MemberHandler
-func NewMemberHandler(validationService service.MemberValidationService) *MemberHandler {
+func NewMemberHandler(validationService service.MemberValidationService, memberRepo repository.MemberRepository) *MemberHandler {
 	return &MemberHandler{
 		validationService: validationService,
+		memberRepo:        memberRepo,
 	}
 }
 
@@ -142,14 +145,19 @@ func (h *MemberHandler) CheckPhone(c *gin.Context) {
 // @Failure 404 {object} common.APIResponse
 // @Router /members/{id}/nickname [get]
 func (h *MemberHandler) GetNickname(c *gin.Context) {
-	// 이 기능은 MemberRepository를 직접 사용해야 하므로 별도 서비스 메서드 필요
-	// 현재는 ValidationService만 있으므로 추후 확장
 	memberID := c.Param("id")
+
+	nickname := ""
+	if h.memberRepo != nil {
+		if member, err := h.memberRepo.FindByUserID(memberID); err == nil && member != nil {
+			nickname = member.Nickname
+		}
+	}
 
 	c.JSON(http.StatusOK, common.APIResponse{
 		Data: gin.H{
 			"user_id":  memberID,
-			"nickname": "", // TODO: 실제 조회 구현
+			"nickname": nickname,
 		},
 	})
 }

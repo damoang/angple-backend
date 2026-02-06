@@ -13,8 +13,8 @@ type CommentService interface {
 	CreateComment(boardID string, postID int, req *domain.CreateCommentRequest, authorID string) (*domain.CommentResponse, error)
 	UpdateComment(boardID string, id int, req *domain.UpdateCommentRequest, authorID string) error
 	DeleteComment(boardID string, id int, authorID string) error
-	LikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error)
-	DislikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error)
+	LikeComment(boardID string, id int, userID, ip string) (*domain.CommentLikeResponse, error)
+	DislikeComment(boardID string, id int, userID, ip string) (*domain.CommentLikeResponse, error)
 }
 
 type commentService struct {
@@ -233,7 +233,7 @@ func (s *commentService) DeleteComment(boardID string, id int, authorID string) 
 // DB UNIQUE KEY: (bo_table, wr_id, mb_id) — 한 사용자당 하나의 액션만 허용
 //
 //nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 서비스 메서드
-func (s *commentService) LikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error) {
+func (s *commentService) LikeComment(boardID string, id int, userID, ip string) (*domain.CommentLikeResponse, error) {
 	_, err := s.repo.FindByID(boardID, id)
 	if err != nil {
 		return nil, common.ErrPostNotFound
@@ -258,7 +258,7 @@ func (s *commentService) LikeComment(boardID string, id int, userID string) (*do
 				return nil, err
 			}
 		}
-		if err := s.goodRepo.AddGood(boardID, id, userID, "good"); err != nil {
+		if err := s.goodRepo.AddGood(boardID, id, userID, "good", ip); err != nil {
 			return nil, err
 		}
 	} else {
@@ -284,7 +284,7 @@ func (s *commentService) LikeComment(boardID string, id int, userID string) (*do
 // DB UNIQUE KEY: (bo_table, wr_id, mb_id) — 한 사용자당 하나의 액션만 허용
 //
 //nolint:dupl // Like와 Dislike는 구조가 유사하나 의미적으로 다른 서비스 메서드
-func (s *commentService) DislikeComment(boardID string, id int, userID string) (*domain.CommentLikeResponse, error) {
+func (s *commentService) DislikeComment(boardID string, id int, userID, ip string) (*domain.CommentLikeResponse, error) {
 	_, err := s.repo.FindByID(boardID, id)
 	if err != nil {
 		return nil, common.ErrPostNotFound
@@ -309,7 +309,7 @@ func (s *commentService) DislikeComment(boardID string, id int, userID string) (
 				return nil, err
 			}
 		}
-		if err := s.goodRepo.AddGood(boardID, id, userID, "nogood"); err != nil {
+		if err := s.goodRepo.AddGood(boardID, id, userID, "nogood", ip); err != nil {
 			return nil, err
 		}
 	} else {

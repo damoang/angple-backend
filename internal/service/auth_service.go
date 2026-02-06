@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/pkg/auth"
+	"github.com/damoang/angple-backend/pkg/cache"
 	"github.com/damoang/angple-backend/pkg/jwt"
 )
 
@@ -33,6 +35,7 @@ type authService struct {
 	memberRepo repository.MemberRepository
 	jwtManager *jwt.Manager
 	hooks      *plugin.HookManager
+	cache      cache.Service
 }
 
 // LoginResponse login response
@@ -49,11 +52,12 @@ type TokenPair struct {
 }
 
 // NewAuthService creates a new AuthService
-func NewAuthService(memberRepo repository.MemberRepository, jwtManager *jwt.Manager, hooks *plugin.HookManager) AuthService {
+func NewAuthService(memberRepo repository.MemberRepository, jwtManager *jwt.Manager, hooks *plugin.HookManager, cacheService cache.Service) AuthService {
 	return &authService{
 		memberRepo: memberRepo,
 		jwtManager: jwtManager,
 		hooks:      hooks,
+		cache:      cacheService,
 	}
 }
 
@@ -84,7 +88,20 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 	// 4. Update login time (async)
 	go s.memberRepo.UpdateLoginTime(member.UserID) //nolint:errcheck // 비동기 로그인 시간 업데이트, 실패해도 무시
 
-	// 5. Fire after_login hook
+	// 5. Cache user session info
+	if s.cache != nil {
+		sessionData := map[string]interface{}{
+			"user_id":  member.UserID,
+			"nickname": member.Nickname,
+			"level":    member.Level,
+			"email":    member.Email,
+		}
+		_ = s.cache.SetSession(context.Background(), member.UserID, sessionData)
+		// Also cache user profile for faster profile lookups
+		_ = s.cache.SetUser(context.Background(), member.UserID, member.ToProfileResponse())
+	}
+
+	// 6. Fire after_login hook
 	if s.hooks != nil {
 		s.hooks.Do(plugin.HookUserAfterLogin, map[string]interface{}{
 			"user_id":  member.UserID,
