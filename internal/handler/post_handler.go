@@ -49,6 +49,28 @@ func (h *PostHandler) ListPosts(c *gin.Context) {
 	common.SuccessResponse(c, data, meta)
 }
 
+// ListNotices godoc
+// @Summary      공지사항 목록 조회
+// @Description  특정 게시판의 공지사항 목록을 조회합니다
+// @Tags         posts
+// @Accept       json
+// @Produce      json
+// @Param        board_id  path      string  true   "게시판 ID"
+// @Success      200  {object}  common.APIResponse{data=[]domain.Post}
+// @Failure      500  {object}  common.APIResponse
+// @Router       /boards/{board_id}/notices [get]
+func (h *PostHandler) ListNotices(c *gin.Context) {
+	boardID := c.Param("board_id")
+
+	data, err := h.service.ListNotices(boardID)
+	if err != nil {
+		common.ErrorResponse(c, 500, "Failed to fetch notices", err)
+		return
+	}
+
+	common.SuccessResponse(c, data, nil)
+}
+
 // GetPost godoc
 // @Summary      게시글 상세 조회
 // @Description  특정 게시판의 특정 게시글 상세 정보를 조회합니다

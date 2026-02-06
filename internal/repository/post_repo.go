@@ -2,6 +2,8 @@ package repository
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain"
@@ -12,6 +14,7 @@ import (
 type PostRepository interface {
 	// 조회
 	ListByBoard(boardID string, page, limit int) ([]*domain.Post, int64, error)
+	ListNotices(boardID string) ([]*domain.Post, error)
 	FindByID(boardID string, id int) (*domain.Post, error)
 	Search(boardID string, keyword string, page, limit int) ([]*domain.Post, int64, error)
 
@@ -77,6 +80,65 @@ func (r *postRepository) ListByBoard(boardID string, page, limit int) ([]*domain
 	}
 
 	return posts, board.CountWrite, nil
+}
+
+// ListNotices 공지사항 목록 조회 (g5_board.bo_notice에서 ID 목록 가져옴)
+func (r *postRepository) ListNotices(boardID string) ([]*domain.Post, error) {
+	// 1. g5_board에서 bo_notice 조회 (쉼표로 구분된 게시글 ID 목록)
+	var board struct {
+		Notice string `gorm:"column:bo_notice"`
+	}
+	if err := r.db.Table("g5_board").
+		Select("bo_notice").
+		Where("bo_table = ?", boardID).
+		First(&board).Error; err != nil {
+		return nil, err
+	}
+
+	// 공지사항이 없는 경우
+	if board.Notice == "" {
+		return []*domain.Post{}, nil
+	}
+
+	// 2. 쉼표로 구분된 ID 파싱
+	noticeIDs := strings.Split(board.Notice, ",")
+	if len(noticeIDs) == 0 {
+		return []*domain.Post{}, nil
+	}
+
+	// ID 문자열을 정수로 변환
+	var ids []int
+	for _, idStr := range noticeIDs {
+		idStr = strings.TrimSpace(idStr)
+		if idStr == "" {
+			continue
+		}
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			continue // 숫자가 아닌 값은 무시
+		}
+		ids = append(ids, id)
+	}
+
+	if len(ids) == 0 {
+		return []*domain.Post{}, nil
+	}
+
+	// 3. 해당 ID의 게시글 조회
+	var posts []*domain.Post
+	tableName := r.getTableName(boardID)
+
+	err := r.db.Table(tableName).
+		Where("wr_id IN ?", ids).
+		Where("wr_is_comment = ?", 0).
+		Order("FIELD(wr_id, " + strings.Join(noticeIDs, ",") + ")"). // bo_notice 순서 유지
+		Find(&posts).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return posts, nil
 }
 
 // FindByID 게시글 상세 조회

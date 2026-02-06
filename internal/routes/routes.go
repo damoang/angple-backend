@@ -85,6 +85,9 @@ func Setup(
 	// Board Posts (중첩 그룹 사용으로 Gin 라우팅 충돌 해결)
 	boards := api.Group("/boards")
 
+	// 공지사항 라우트 (먼저 등록해야 :board_id/posts보다 우선 매칭)
+	boards.GET("/:board_id/notices", postHandler.ListNotices)
+
 	// 게시판별 게시글 그룹
 	boardPosts := boards.Group("/:board_id/posts")
 	{

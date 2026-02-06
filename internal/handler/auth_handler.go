@@ -120,6 +120,7 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 
 // GetCurrentUser handles GET /api/v2/auth/me
 // Returns current user info from damoang_jwt cookie (no JWT required)
+// Includes mb_point and mb_exp from database
 func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	// Check if user is authenticated via damoang_jwt cookie
 	if !middleware.IsDamoangAuthenticated(c) {
@@ -129,14 +130,25 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		return
 	}
 
-	// Return user info from damoang_jwt cookie
+	userID := middleware.GetDamoangUserID(c)
+
+	// Fetch user info from database (includes point, exp)
+	userInfo, err := h.service.GetUserInfo(userID)
+	if err != nil {
+		// Fallback to JWT cookie info if database fetch fails
+		c.JSON(http.StatusOK, common.APIResponse{
+			Data: gin.H{
+				"mb_id":    userID,
+				"mb_name":  middleware.GetDamoangUserName(c),
+				"mb_level": middleware.GetDamoangUserLevel(c),
+				"mb_email": middleware.GetDamoangUserEmail(c),
+			},
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, common.APIResponse{
-		Data: gin.H{
-			"mb_id":    middleware.GetDamoangUserID(c),
-			"mb_name":  middleware.GetDamoangUserName(c),
-			"mb_level": middleware.GetDamoangUserLevel(c),
-			"mb_email": middleware.GetDamoangUserEmail(c),
-		},
+		Data: userInfo,
 	})
 }
 
