@@ -106,3 +106,12 @@ func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *j
 	messages.GET("/:id", h.GetMessage)
 	messages.DELETE("/:id", h.DeleteMessage)
 }
+
+// SetupInstall configures v2 installation routes (no authentication required)
+func SetupInstall(router *gin.Engine, h *v2handler.InstallHandler) {
+	install := router.Group("/api/v2/install")
+
+	install.GET("/status", h.CheckInstallStatus)
+	install.POST("/test-db", h.TestDB)
+	install.POST("/create-admin", h.CreateAdmin)
+}
