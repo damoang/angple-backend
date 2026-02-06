@@ -43,14 +43,23 @@
   - 영향 범위: GetProfile, GetPosts, GetComments, GetPointHistory
 - **Phase 1 완료**: 모든 API 정상 동작 확인
 
+### 2026-02-06 (Phase 2 작업)
+- api-roadmap.csv 업데이트
+  - Phase 1 (16개 API): ❌ → ✅
+  - Phase 2 (15개 API): ❌ → ✅
+- v2 Block API 신규 구현
+  - `internal/repository/v2/block_repo.go` 생성
+  - `internal/handler/v2/block_handler.go` 생성
+  - `internal/routes/v2/routes.go`에 SetupBlock 추가
+  - `cmd/api/main.go`에 Block DI 추가
+- **Phase 2 완료**: 스크랩, 메모, 차단, 쪽지 (15개 API)
+
 ## Summary
 
 | Phase | 상태 | API 수 |
 |-------|------|--------|
-| Phase 1: 코드베이스 분석 | ✅ 완료 | - |
-| Phase 2: 추천/비추천 | ✅ 완료 | 9개 |
-| Phase 3: 회원 시스템 | ✅ 완료 | 7개+ |
-| Phase 4: 파일 업로드 | ✅ 완료 | 3개 |
-| Phase 5: 통합 테스트 | ✅ 완료 | - |
+| Phase 1: 추천/비추천, 회원, 파일 | ✅ 완료 | 16개 |
+| Phase 2: 스크랩, 메모, 차단, 쪽지 | ✅ 완료 | 15개 |
+| Phase 3~6 | ❌ 미구현 | 31개 |
 
-**총 19개+ API 구현 완료** (목표 16개 초과 달성)
+**총 31개 API 구현 완료**
