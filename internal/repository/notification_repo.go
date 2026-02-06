@@ -21,7 +21,7 @@ func NewNotificationRepository(db *gorm.DB) *NotificationRepository {
 func (r *NotificationRepository) GetUnreadCount(memberID string) (int64, error) {
 	var count int64
 	err := r.db.Model(&domain.Notification{}).
-		Where("mb_id = ? AND nt_is_read = 0", memberID).
+		Where("mb_id = ? AND ph_readed = 'N'", memberID).
 		Count(&count).Error
 	return count, err
 }
@@ -38,7 +38,7 @@ func (r *NotificationRepository) GetList(memberID string, offset, limit int) ([]
 	}
 
 	if err := r.db.Where("mb_id = ?", memberID).
-		Order("nt_created_at DESC").
+		Order("ph_datetime DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&notifications).Error; err != nil {
@@ -51,7 +51,7 @@ func (r *NotificationRepository) GetList(memberID string, offset, limit int) ([]
 // FindByID returns a notification by ID
 func (r *NotificationRepository) FindByID(id int) (*domain.Notification, error) {
 	var notification domain.Notification
-	err := r.db.Where("nt_id = ?", id).First(&notification).Error
+	err := r.db.Where("ph_id = ?", id).First(&notification).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -64,15 +64,15 @@ func (r *NotificationRepository) FindByID(id int) (*domain.Notification, error) 
 // MarkAsRead marks a notification as read
 func (r *NotificationRepository) MarkAsRead(id int) error {
 	return r.db.Model(&domain.Notification{}).
-		Where("nt_id = ?", id).
-		Update("nt_is_read", 1).Error
+		Where("ph_id = ?", id).
+		Update("ph_readed", "Y").Error
 }
 
 // MarkAllAsRead marks all notifications as read for a member
 func (r *NotificationRepository) MarkAllAsRead(memberID string) error {
 	return r.db.Model(&domain.Notification{}).
-		Where("mb_id = ? AND nt_is_read = 0", memberID).
-		Update("nt_is_read", 1).Error
+		Where("mb_id = ? AND ph_readed = 'N'", memberID).
+		Update("ph_readed", "Y").Error
 }
 
 // Create inserts a new notification
@@ -82,5 +82,5 @@ func (r *NotificationRepository) Create(notification *domain.Notification) error
 
 // Delete deletes a notification by ID
 func (r *NotificationRepository) Delete(id int) error {
-	return r.db.Where("nt_id = ?", id).Delete(&domain.Notification{}).Error
+	return r.db.Where("ph_id = ?", id).Delete(&domain.Notification{}).Error
 }
