@@ -226,8 +226,9 @@ func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationB
 	for _, row := range results {
 		imageURL := extractFirstImage(row.WrContent)
 
+		// #nosec G115 - WrID는 DB primary key로 항상 양수
 		banner := &domain.CelebrationBanner{
-			ID:          uint64(row.WrID),
+			ID:          uint64(row.WrID), // nolint:gosec
 			Title:       row.WrSubject,
 			Content:     row.WrContent,
 			ImageURL:    imageURL,

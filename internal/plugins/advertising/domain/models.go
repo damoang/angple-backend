@@ -165,19 +165,19 @@ func (CelebrationBanner) TableName() string {
 
 // AdUnitResponse 광고 단위 응답 DTO
 type AdUnitResponse struct {
-	ID                    uint64           `json:"id"`
-	Name                  string           `json:"name"`
-	AdType                AdType           `json:"ad_type"`
-	GAMUnitPath           string           `json:"gam_unit_path,omitempty"`
-	AdsenseSlot           string           `json:"adsense_slot,omitempty"`
-	AdsenseClient         string           `json:"adsense_client,omitempty"`
-	Sizes                 [][]int          `json:"sizes,omitempty"`
-	ResponsiveBreakpoints [][]interface{}  `json:"responsive_breakpoints,omitempty"`
-	Position              string           `json:"position"`
-	Priority              int              `json:"priority"`
-	IsActive              bool             `json:"is_active"`
-	CreatedAt             time.Time        `json:"created_at"`
-	UpdatedAt             time.Time        `json:"updated_at"`
+	ID                    uint64          `json:"id"`
+	Name                  string          `json:"name"`
+	AdType                AdType          `json:"ad_type"`
+	GAMUnitPath           string          `json:"gam_unit_path,omitempty"`
+	AdsenseSlot           string          `json:"adsense_slot,omitempty"`
+	AdsenseClient         string          `json:"adsense_client,omitempty"`
+	Sizes                 [][]int         `json:"sizes,omitempty"`
+	ResponsiveBreakpoints [][]interface{} `json:"responsive_breakpoints,omitempty"`
+	Position              string          `json:"position"`
+	Priority              int             `json:"priority"`
+	IsActive              bool            `json:"is_active"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 // ToResponse AdUnit을 AdUnitResponse로 변환
@@ -275,11 +275,11 @@ type UpdateBannerRequest struct {
 
 // GAMConfigResponse GAM 전역 설정 응답
 type GAMConfigResponse struct {
-	NetworkCode     string                    `json:"network_code"`
-	EnableGAM       bool                      `json:"enable_gam"`
-	EnableFallback  bool                      `json:"enable_fallback"`
-	AdUnits         map[string]*AdUnitConfig  `json:"ad_units"`
-	PositionMap     map[string]string         `json:"position_map"`
+	NetworkCode    string                   `json:"network_code"`
+	EnableGAM      bool                     `json:"enable_gam"`
+	EnableFallback bool                     `json:"enable_fallback"`
+	AdUnits        map[string]*AdUnitConfig `json:"ad_units"`
+	PositionMap    map[string]string        `json:"position_map"`
 }
 
 // AdUnitConfig 단일 광고 단위 설정
@@ -302,10 +302,10 @@ type AdsenseSlotGroup struct {
 
 // AdPositionResponse 특정 위치 광고 응답
 type AdPositionResponse struct {
-	Position       string           `json:"position"`
-	GAM            *AdUnitConfig    `json:"gam,omitempty"`
-	Adsense        *AdsenseSlotInfo `json:"adsense,omitempty"`
-	RotationIndex  int              `json:"rotation_index"`
+	Position      string           `json:"position"`
+	GAM           *AdUnitConfig    `json:"gam,omitempty"`
+	Adsense       *AdsenseSlotInfo `json:"adsense,omitempty"`
+	RotationIndex int              `json:"rotation_index"`
 }
 
 // AdsenseSlotInfo AdSense 슬롯 정보

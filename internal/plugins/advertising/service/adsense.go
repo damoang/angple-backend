@@ -1,9 +1,9 @@
 package service
 
 import (
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 - MD5 사용은 광고 슬롯 로테이션용 (보안 무관)
 	"encoding/binary"
-	"math/rand"
+	"math/rand" // #nosec G404 - 광고 로테이션에는 암호학적 랜덤 불필요
 
 	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/plugins/advertising/domain"
@@ -90,7 +90,7 @@ func (s *adsenseService) GetSlotByPosition(position string, sessionKey string) (
 	var slot string
 	switch rotationConfig.RotationStrategy {
 	case domain.RotationRandom:
-		slot = rotationConfig.SlotPool[rand.Intn(len(rotationConfig.SlotPool))]
+		slot = rotationConfig.SlotPool[rand.Intn(len(rotationConfig.SlotPool))] // #nosec G404
 	case domain.RotationSequential:
 		fallthrough
 	default:
@@ -112,14 +112,15 @@ func (s *adsenseService) GetRotationIndex(sessionKey string, maxSlots int) int {
 	}
 
 	if sessionKey == "" {
-		return rand.Intn(maxSlots)
+		return rand.Intn(maxSlots) // #nosec G404
 	}
 
-	// MD5 해시 기반 결정적 인덱스
-	hash := md5.Sum([]byte(sessionKey))
+	// MD5 해시 기반 결정적 인덱스 (보안 무관, 광고 로테이션용)
+	hash := md5.Sum([]byte(sessionKey)) // #nosec G401
 	// 처음 8바이트를 uint64로 변환
 	num := binary.BigEndian.Uint64(hash[:8])
-	return int(num % uint64(maxSlots))
+	// #nosec G115 - maxSlots는 항상 작은 양수
+	return int(num % uint64(maxSlots)) // nolint:gosec
 }
 
 // getConfigString 설정에서 문자열 값 조회
@@ -168,18 +169,18 @@ func (s *adsenseService) getDefaultSlotsForPosition(position string) []string {
 
 	// 위치를 슬롯 그룹에 매핑
 	positionToGroup := map[string]string{
-		"banner-horizontal":    "banner_horizontal",
-		"banner-responsive":    "banner_responsive",
-		"banner-square":        "banner_square",
-		"banner-vertical":      "banner_vertical",
-		"banner-small":         "banner_small",
-		"banner-compact":       "banner_responsive",
-		"banner-medium":        "banner_horizontal",
-		"banner-large":         "banner_horizontal",
-		"banner-large-728":     "banner_horizontal",
-		"banner-view-content":  "banner_horizontal",
-		"banner-halfpage":      "banner_vertical",
-		"infeed":               "infeed",
+		"banner-horizontal":   "banner_horizontal",
+		"banner-responsive":   "banner_responsive",
+		"banner-square":       "banner_square",
+		"banner-vertical":     "banner_vertical",
+		"banner-small":        "banner_small",
+		"banner-compact":      "banner_responsive",
+		"banner-medium":       "banner_horizontal",
+		"banner-large":        "banner_horizontal",
+		"banner-large-728":    "banner_horizontal",
+		"banner-view-content": "banner_horizontal",
+		"banner-halfpage":     "banner_vertical",
+		"infeed":              "infeed",
 	}
 
 	groupName := positionToGroup[position]
