@@ -323,12 +323,17 @@ func (h *SettlementHandler) getSellerID(c *gin.Context) (uint64, error) {
 	return id, nil
 }
 
-// getAdminID JWT에서 관리자 ID 추출
+// getAdminID JWT에서 관리자 ID 추출 및 권한 확인
 func (h *SettlementHandler) getAdminID(c *gin.Context) (uint64, error) {
-	// TODO: 관리자 권한 확인 로직 추가
 	userIDStr := middleware.GetUserID(c)
 	if userIDStr == "" {
 		return 0, errors.New("user not authenticated")
+	}
+
+	// Check admin permission (level >= 10)
+	level := middleware.GetUserLevel(c)
+	if level < 10 {
+		return 0, errors.New("admin permission required")
 	}
 
 	id, err := strconv.ParseUint(userIDStr, 10, 64)

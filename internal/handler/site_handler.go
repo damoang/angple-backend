@@ -6,10 +6,14 @@ import (
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
+	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/service"
 	"github.com/damoang/angple-backend/pkg/ginutil"
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
+
+var siteValidator = validator.New()
 
 type SiteHandler struct {
 	service *service.SiteService
@@ -74,8 +78,11 @@ func (h *SiteHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// TODO: 향후 validator 적용 필요
-	// if err := validate.Struct(&req); err != nil { ... }
+	// Validate request fields
+	if err := siteValidator.Struct(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "Validation failed", err)
+		return
+	}
 
 	site, err := h.service.Create(c.Request.Context(), &req)
 	if err != nil {
@@ -143,12 +150,23 @@ func (h *SiteHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
-	// TODO: 향후 인증 추가 필요 (site owner/admin만 수정 가능)
-	// userID := middleware.GetUserID(c)
-	// hasPermission, _ := h.service.CheckUserPermission(c.Request.Context(), siteID, userID, "admin")
-	// if !hasPermission { return Forbidden }
+	// Check user permission (site owner/admin only)
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		common.ErrorResponse(c, http.StatusUnauthorized, "Authentication required", nil)
+		return
+	}
+	hasPermission, err := h.service.CheckUserPermission(c.Request.Context(), siteID, userID, "admin")
+	if err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to check permission", err)
+		return
+	}
+	if !hasPermission {
+		common.ErrorResponse(c, http.StatusForbidden, "Insufficient permission", nil)
+		return
+	}
 
-	err := h.service.UpdateSettings(c.Request.Context(), siteID, &req)
+	err = h.service.UpdateSettings(c.Request.Context(), siteID, &req)
 	if err != nil {
 		if errors.Is(err, service.ErrSiteNotFound) {
 			common.ErrorResponse(c, http.StatusNotFound, "Site not found", err)

@@ -100,19 +100,19 @@ func Setup(
 		boardPosts.DELETE("/:id", middleware.JWTAuth(jwtManager), postHandler.DeletePost)
 
 		// 게시글 추천/비추천 (프론트엔드 호환 토글 API)
-		boardPosts.POST("/:id/like", goodHandler.LikePost)
-		boardPosts.POST("/:id/dislike", goodHandler.DislikePost)
-		boardPosts.GET("/:id/like-status", goodHandler.GetLikeStatus)
+		boardPosts.POST("/:id/like", middleware.JWTAuth(jwtManager), goodHandler.LikePost)
+		boardPosts.POST("/:id/dislike", middleware.JWTAuth(jwtManager), goodHandler.DislikePost)
+		boardPosts.GET("/:id/like-status", middleware.JWTAuth(jwtManager), goodHandler.GetLikeStatus)
 
 		// 게시글 추천/비추천 (명시적 API)
-		boardPosts.POST("/:id/recommend", goodHandler.RecommendPost)
-		boardPosts.DELETE("/:id/recommend", goodHandler.CancelRecommendPost)
-		boardPosts.POST("/:id/downvote", goodHandler.DownvotePost)
-		boardPosts.DELETE("/:id/downvote", goodHandler.CancelDownvotePost)
+		boardPosts.POST("/:id/recommend", middleware.JWTAuth(jwtManager), goodHandler.RecommendPost)
+		boardPosts.DELETE("/:id/recommend", middleware.JWTAuth(jwtManager), goodHandler.CancelRecommendPost)
+		boardPosts.POST("/:id/downvote", middleware.JWTAuth(jwtManager), goodHandler.DownvotePost)
+		boardPosts.DELETE("/:id/downvote", middleware.JWTAuth(jwtManager), goodHandler.CancelDownvotePost)
 
 		// 스크랩
-		boardPosts.POST("/:id/scrap", scrapHandler.AddScrap)
-		boardPosts.DELETE("/:id/scrap", scrapHandler.RemoveScrap)
+		boardPosts.POST("/:id/scrap", middleware.JWTAuth(jwtManager), scrapHandler.AddScrap)
+		boardPosts.DELETE("/:id/scrap", middleware.JWTAuth(jwtManager), scrapHandler.RemoveScrap)
 
 		// 댓글 관련 (파라미터 이름 통일: post_id -> id)
 		comments := boardPosts.Group("/:id/comments")

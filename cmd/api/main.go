@@ -306,12 +306,12 @@ func main() {
 
 		// Handlers
 		authHandler = handler.NewAuthHandler(authService, cfg)
-		postHandler = handler.NewPostHandler(postService)
+		postHandler = handler.NewPostHandler(postService, boardRepo)
 		commentHandler = handler.NewCommentHandler(commentService)
 		menuHandler = handler.NewMenuHandler(menuService)
 		siteHandler = handler.NewSiteHandler(siteService)
 		boardHandler = handler.NewBoardHandler(boardService)
-		memberHandler = handler.NewMemberHandler(memberValidationService)
+		memberHandler = handler.NewMemberHandler(memberValidationService, memberRepo)
 		autosaveHandler = handler.NewAutosaveHandler(autosaveService)
 		filterHandler = handler.NewFilterHandler(nil) // TODO: Load filter words from DB
 		tokenHandler = handler.NewTokenHandler()
@@ -328,7 +328,7 @@ func main() {
 		scrapHandler = handler.NewScrapHandler(scrapService)
 		blockHandler = handler.NewBlockHandler(blockService)
 		messageHandler = handler.NewMessageHandler(messageService)
-		wsHandler = handler.NewWSHandler(wsHub)
+		wsHandler = handler.NewWSHandler(wsHub, cfg.CORS.AllowOrigins)
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
 		adminHandler = handler.NewAdminHandler(adminMemberService)
