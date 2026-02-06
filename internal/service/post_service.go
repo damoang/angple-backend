@@ -10,6 +10,7 @@ import (
 // PostService business logic for posts
 type PostService interface {
 	ListPosts(boardID string, page, limit int) ([]*domain.PostResponse, *common.Meta, error)
+	ListNotices(boardID string) ([]*domain.PostResponse, error)
 	GetPost(boardID string, id int) (*domain.PostResponse, error)
 	CreatePost(boardID string, req *domain.CreatePostRequest, authorID string) (*domain.PostResponse, error)
 	UpdatePost(boardID string, id int, req *domain.UpdatePostRequest, authorID string) error
@@ -58,6 +59,22 @@ func (s *postService) ListPosts(boardID string, page, limit int) ([]*domain.Post
 	}
 
 	return responses, meta, nil
+}
+
+// ListNotices retrieves notice posts
+func (s *postService) ListNotices(boardID string) ([]*domain.PostResponse, error) {
+	posts, err := s.repo.ListNotices(boardID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to response
+	responses := make([]*domain.PostResponse, len(posts))
+	for i, post := range posts {
+		responses[i] = post.ToResponse()
+	}
+
+	return responses, nil
 }
 
 // GetPost retrieves a single post by ID

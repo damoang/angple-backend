@@ -23,12 +23,26 @@ type RegisterRequest struct {
 	Email    string `json:"email" binding:"required"`
 }
 
+// UserInfo 사용자 정보 (포인트, 경험치 포함)
+type UserInfo struct {
+	MbID    string `json:"mb_id"`
+	MbName  string `json:"mb_name"`
+	MbLevel int    `json:"mb_level"`
+	MbEmail string `json:"mb_email"`
+	MbPoint int    `json:"mb_point"`
+	MbExp   int    `json:"mb_exp"`
+	AsLevel int    `json:"as_level"`
+	AsMax   int    `json:"as_max"`
+	MbImage string `json:"mb_image,omitempty"` // 프로필 이미지 URL
+}
+
 // AuthService authentication business logic
 type AuthService interface {
 	Login(userID, password string) (*LoginResponse, error)
 	RefreshToken(refreshToken string) (*TokenPair, error)
 	Register(req *RegisterRequest) (*domain.MemberResponse, error)
 	Withdraw(userID string) error
+	GetUserInfo(userID string) (*UserInfo, error)
 }
 
 type authService struct {
@@ -212,5 +226,32 @@ func (s *authService) RefreshToken(refreshToken string) (*TokenPair, error) {
 	return &TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
+	}, nil
+}
+
+// GetUserInfo returns user info including point and exp
+func (s *authService) GetUserInfo(userID string) (*UserInfo, error) {
+	member, err := s.memberRepo.FindByUserID(userID)
+	if err != nil {
+		return nil, common.ErrUserNotFound
+	}
+
+	// 프로필 이미지 URL 생성 (그누보드 형식: data/member/xx/user_id.gif)
+	// xx는 user_id의 처음 2글자
+	mbImage := ""
+	if len(userID) >= 2 {
+		mbImage = fmt.Sprintf("https://damoang.net/data/member/%s/%s.gif", userID[:2], userID)
+	}
+
+	return &UserInfo{
+		MbID:    member.UserID,
+		MbName:  member.Name,
+		MbLevel: member.Level,
+		MbEmail: member.Email,
+		MbPoint: member.Point,
+		MbExp:   member.AsExp,
+		AsLevel: member.AsLevel,
+		AsMax:   member.AsMax,
+		MbImage: mbImage,
 	}, nil
 }

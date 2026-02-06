@@ -64,6 +64,14 @@ func (m *mockPostRepo) DecrementLike(boardID string, id int) error {
 	return m.Called(boardID, id).Error(0)
 }
 
+func (m *mockPostRepo) ListNotices(boardID string) ([]*domain.Post, error) {
+	args := m.Called(boardID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.Post), args.Error(1)
+}
+
 // --- Tests ---
 
 func TestListPosts_Success(t *testing.T) {
