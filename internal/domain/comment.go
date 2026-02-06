@@ -56,6 +56,7 @@ type CommentResponse struct {
 	Content   string    `json:"content"`
 	Author    string    `json:"author"`
 	AuthorID  string    `json:"author_id"`
+	AuthorIP  string    `json:"author_ip,omitempty"` // 마스킹된 IP (예: 123.456.*.*)
 	ID        int       `json:"id"`
 	ParentID  int       `json:"parent_id"`
 	Depth     int       `json:"depth"`    // 댓글 depth (1=일반 댓글, 2=대댓글, ...)
@@ -78,6 +79,7 @@ func (c *Comment) ToResponse() *CommentResponse {
 		Content:   c.Content,
 		Author:    c.Author,
 		AuthorID:  c.AuthorID,
+		AuthorIP:  maskIP(c.IP), // 마스킹된 IP
 		CreatedAt: c.CreatedAt,
 		Depth:     len(c.CommentReply), // wr_comment_reply 문자열 길이가 depth (PHP 원본과 동일)
 		Likes:     c.Likes,

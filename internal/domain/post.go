@@ -62,6 +62,7 @@ type PostResponse struct {
 	Category      string    `json:"category,omitempty"`
 	Author        string    `json:"author"`
 	AuthorID      string    `json:"author_id"`
+	AuthorIP      string    `json:"author_ip,omitempty"` // 마스킹된 IP (예: 123.456.*.*)
 	ID            int       `json:"id"`
 	Views         int       `json:"views"`
 	Likes         int       `json:"likes"`
@@ -78,6 +79,7 @@ func (p *Post) ToResponse() *PostResponse {
 		Category:      p.Category,
 		Author:        p.Author,
 		AuthorID:      p.AuthorID,
+		AuthorIP:      maskIP(p.IP),
 		Views:         p.Views,
 		Likes:         p.Likes,
 		Dislikes:      p.Dislikes,
@@ -85,6 +87,34 @@ func (p *Post) ToResponse() *PostResponse {
 		CreatedAt:     p.CreatedAt,
 		HasFile:       p.HasFile > 0,
 	}
+}
+
+// maskIP masks the last two octets of an IP address (e.g., "123.45.67.89" -> "123.45.*.*")
+func maskIP(ip string) string {
+	if ip == "" {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	start := 0
+	dotCount := 0
+	for i, c := range ip {
+		if c == '.' {
+			parts = append(parts, ip[start:i])
+			start = i + 1
+			dotCount++
+		}
+	}
+	parts = append(parts, ip[start:])
+
+	if len(parts) == 4 {
+		// IPv4: mask last two octets
+		return parts[0] + "." + parts[1] + ".*.*"
+	}
+	// IPv6 or other: just return first 8 chars with mask
+	if len(ip) > 8 {
+		return ip[:8] + "..."
+	}
+	return ip
 }
 
 type CreatePostRequest struct {

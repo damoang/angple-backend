@@ -42,6 +42,8 @@ type DownvoteResponse struct {
 type LikerInfo struct {
 	MbID    string `json:"mb_id"`
 	MbName  string `json:"mb_name"`
+	MbNick  string `json:"mb_nick"`            // 닉네임
+	BgIP    string `json:"bg_ip,omitempty"`    // 마스킹된 IP (로그인 사용자만)
 	LikedAt string `json:"liked_at"`
 }
 

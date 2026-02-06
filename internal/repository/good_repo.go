@@ -151,11 +151,13 @@ func (r *goodRepository) GetLikers(boTable string, wrID int, page, limit int) (*
 	var likers []struct {
 		MbID       string    `gorm:"column:mb_id"`
 		MbName     string    `gorm:"column:mb_name"`
+		MbNick     string    `gorm:"column:mb_nick"`
+		BgIP       string    `gorm:"column:bg_ip"`
 		BgDatetime time.Time `gorm:"column:bg_datetime"`
 	}
 
 	err := r.db.Table("g5_board_good AS bg").
-		Select("bg.mb_id, COALESCE(m.mb_name, bg.mb_id) AS mb_name, bg.bg_datetime").
+		Select("bg.mb_id, COALESCE(m.mb_name, bg.mb_id) AS mb_name, COALESCE(m.mb_nick, m.mb_name, bg.mb_id) AS mb_nick, bg.bg_ip, bg.bg_datetime").
 		Joins("LEFT JOIN g5_member AS m ON bg.mb_id = m.mb_id").
 		Where("bg.bo_table = ? AND bg.wr_id = ? AND bg.bg_flag = ?", boTable, wrID, "good").
 		Order("bg.bg_datetime DESC").
@@ -175,6 +177,8 @@ func (r *goodRepository) GetLikers(boTable string, wrID int, page, limit int) (*
 		result.Likers[i] = domain.LikerInfo{
 			MbID:    liker.MbID,
 			MbName:  liker.MbName,
+			MbNick:  liker.MbNick,
+			BgIP:    maskIP(liker.BgIP),
 			LikedAt: liker.BgDatetime.Format("2006-01-02 15:04:05"),
 		}
 	}
