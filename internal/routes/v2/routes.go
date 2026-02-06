@@ -95,6 +95,20 @@ func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Man
 	memo.DELETE("", h.DeleteMemo)
 }
 
+// SetupBlock configures v2 block routes
+func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	// Block/Unblock member
+	members := router.Group("/api/v2/members")
+	members.POST("/:id/block", auth, h.BlockMember)
+	members.DELETE("/:id/block", auth, h.UnblockMember)
+
+	// List blocked members
+	me := router.Group("/api/v2/members/me", auth)
+	me.GET("/blocks", h.ListBlocks)
+}
+
 // SetupMessage configures v2 message routes
 func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)

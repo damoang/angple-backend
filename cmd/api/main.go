@@ -514,20 +514,38 @@ func main() {
 		v2AdminHandler := v2handler.NewAdminHandler(v2AdminSvc)
 		v2routes.SetupAdmin(router, v2AdminHandler, jwtManager)
 
-		// v2 Scrap, Memo, Message
+		// v2 Scrap, Memo, Block, Message
 		v2ScrapRepo := v2repo.NewScrapRepository(db)
 		v2MemoRepo := v2repo.NewMemoRepository(db)
+		v2BlockRepo := v2repo.NewBlockRepository(db)
 		v2MessageRepo := v2repo.NewMessageRepository(db)
 		v2ScrapHandler := v2handler.NewScrapHandler(v2ScrapRepo)
 		v2MemoHandler := v2handler.NewMemoHandler(v2MemoRepo)
+		v2BlockHandler := v2handler.NewBlockHandler(v2BlockRepo)
 		v2MessageHandler := v2handler.NewMessageHandler(v2MessageRepo)
 		v2routes.SetupScrap(router, v2ScrapHandler, jwtManager)
 		v2routes.SetupMemo(router, v2MemoHandler, jwtManager)
+		v2routes.SetupBlock(router, v2BlockHandler, jwtManager)
 		v2routes.SetupMessage(router, v2MessageHandler, jwtManager)
 
 		// Installation API (인증 없이 접근 가능)
 		v2InstallHandler := v2handler.NewInstallHandler(db)
 		v2routes.SetupInstall(router, v2InstallHandler)
+
+		// ============================================
+		// v2 → v1 통합: v2 전용 기능을 v1에서도 제공
+		// API 버전 단일화를 위한 전환 작업 (2026-02)
+		// ============================================
+
+		// v1에 auth/exchange 라우트 추가 (damoang_jwt → angple JWT 교환)
+		v1Auth := router.Group("/api/v1/auth")
+		v1Auth.POST("/exchange", v2AuthHandler.ExchangeGnuboardJWT)
+
+		// v1에 install 라우트 추가 (설치 마법사)
+		v1Install := router.Group("/api/v1/install")
+		v1Install.GET("/status", v2InstallHandler.CheckInstallStatus)
+		v1Install.POST("/test-db", v2InstallHandler.TestDB)
+		v1Install.POST("/create-admin", v2InstallHandler.CreateAdmin)
 
 		// Tenant Management (멀티테넌트 관리)
 		adminTenants := router.Group("/api/v2/admin/tenants")
