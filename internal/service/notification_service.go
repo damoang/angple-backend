@@ -25,14 +25,15 @@ func NewNotificationService(repo *repository.NotificationRepository, hub *ws.Hub
 func (s *NotificationService) CreateAndBroadcast(memberID, nType, title, content, url, senderID, senderName string) error {
 	n := &domain.Notification{
 		MemberID:   memberID,
-		Type:       nType,
-		Title:      title,
-		Content:    content,
-		URL:        url,
-		SenderID:   senderID,
-		SenderName: senderName,
-		IsRead:     false,
-		CreatedAt:  time.Now(),
+		FromCase:   nType,      // ph_from_case
+		ToCase:     "board",    // ph_to_case (default)
+		Title:      title,      // parent_subject
+		Message:    content,    // rel_msg
+		URL:        url,        // rel_url
+		SenderID:   senderID,   // rel_mb_id
+		SenderName: senderName, // rel_mb_nick
+		IsReadChar: "N",        // ph_readed
+		CreatedAt:  time.Now(), // ph_datetime
 	}
 
 	if err := s.repo.Create(n); err != nil {
@@ -46,9 +47,9 @@ func (s *NotificationService) CreateAndBroadcast(memberID, nType, title, content
 			Type: "notification",
 			Payload: map[string]interface{}{
 				"id":          n.ID,
-				"type":        n.Type,
+				"type":        n.Type(),
 				"title":       n.Title,
-				"content":     n.Content,
+				"content":     n.Content(),
 				"url":         n.URL,
 				"sender_id":   n.SenderID,
 				"sender_name": n.SenderName,
@@ -97,13 +98,13 @@ func (s *NotificationService) GetList(memberID string, page, limit int) (*domain
 	for i, n := range notifications {
 		items[i] = domain.NotificationItem{
 			ID:         n.ID,
-			Type:       n.Type,
+			Type:       n.Type(),
 			Title:      n.Title,
-			Content:    n.Content,
+			Content:    n.Content(),
 			URL:        n.URL,
 			SenderID:   n.SenderID,
 			SenderName: n.SenderName,
-			IsRead:     n.IsRead,
+			IsRead:     n.IsRead(),
 			CreatedAt:  n.CreatedAt.Format(time.RFC3339),
 		}
 	}
