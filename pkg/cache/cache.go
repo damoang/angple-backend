@@ -11,11 +11,11 @@ import (
 
 // TTL 상수 정의
 const (
-	TTLBoard      = 10 * time.Minute // 게시판 설정 (변경 빈도 낮음)
-	TTLPopular    = 5 * time.Minute  // 인기 게시글
-	TTLSession    = 30 * time.Minute // 세션
-	TTLShort      = 1 * time.Minute  // 짧은 캐시 (실시간성 필요)
-	TTLDefault    = 5 * time.Minute  // 기본값
+	TTLBoard   = 10 * time.Minute // 게시판 설정 (변경 빈도 낮음)
+	TTLPopular = 5 * time.Minute  // 인기 게시글
+	TTLSession = 30 * time.Minute // 세션
+	TTLShort   = 1 * time.Minute  // 짧은 캐시 (실시간성 필요)
+	TTLDefault = 5 * time.Minute  // 기본값
 )
 
 // 캐시 키 접두사

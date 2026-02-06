@@ -16,6 +16,7 @@ import (
 	"github.com/damoang/angple-backend/internal/migration"
 	"github.com/damoang/angple-backend/internal/plugin"
 	// 플러그인 자동 등록을 위한 import (init()에서 Factory 등록됨)
+	_ "github.com/damoang/angple-backend/internal/plugins/advertising"
 	_ "github.com/damoang/angple-backend/internal/plugins/commerce"
 	_ "github.com/damoang/angple-backend/internal/plugins/embed"
 	_ "github.com/damoang/angple-backend/internal/plugins/imagelink"
@@ -710,7 +711,7 @@ func main() {
 		settingHandler := pluginstoreHandler.NewSettingHandler(settingSvc, pluginManager)
 		permHandler := pluginstoreHandler.NewPermissionHandler(permSvc)
 
-		// Admin Plugin Store 라우트 등록
+		// Admin Plugin Store 라우트 등록 (v2 API - Bearer 토큰 인증)
 		adminPlugins := router.Group("/api/v2/admin/plugins")
 		adminPlugins.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		{
