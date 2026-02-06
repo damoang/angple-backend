@@ -30,7 +30,7 @@ func NewMemberProfileHandler(service service.MemberProfileService) *MemberProfil
 // @Failure 404 {object} common.APIResponse
 // @Router /members/{user_id} [get]
 func (h *MemberProfileHandler) GetProfile(c *gin.Context) {
-	userID := c.Param("user_id")
+	userID := c.Param("id")
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusBadRequest, "회원 ID를 입력해 주세요", nil)
 		return
@@ -56,7 +56,7 @@ func (h *MemberProfileHandler) GetProfile(c *gin.Context) {
 // @Failure 404 {object} common.APIResponse
 // @Router /members/{user_id}/posts [get]
 func (h *MemberProfileHandler) GetPosts(c *gin.Context) {
-	userID := c.Param("user_id")
+	userID := c.Param("id")
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusBadRequest, "회원 ID를 입력해 주세요", nil)
 		return
@@ -87,7 +87,7 @@ func (h *MemberProfileHandler) GetPosts(c *gin.Context) {
 // @Failure 404 {object} common.APIResponse
 // @Router /members/{user_id}/comments [get]
 func (h *MemberProfileHandler) GetComments(c *gin.Context) {
-	userID := c.Param("user_id")
+	userID := c.Param("id")
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusBadRequest, "회원 ID를 입력해 주세요", nil)
 		return
@@ -119,7 +119,7 @@ func (h *MemberProfileHandler) GetComments(c *gin.Context) {
 // @Failure 403 {object} common.APIResponse
 // @Router /members/{user_id}/points/history [get]
 func (h *MemberProfileHandler) GetPointHistory(c *gin.Context) {
-	userID := c.Param("user_id")
+	userID := c.Param("id")
 	if userID == "" {
 		common.ErrorResponse(c, http.StatusBadRequest, "회원 ID를 입력해 주세요", nil)
 		return
