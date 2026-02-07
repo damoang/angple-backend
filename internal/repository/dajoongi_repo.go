@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/damoang/angple-backend/internal/domain"
@@ -65,25 +64,23 @@ func (r *DajoongiRepository) GetDuplicateAccounts(days int) ([]domain.DajoongiIt
 	return items, nil
 }
 
-// maskIP masks the IP address for privacy
+// maskIP masks the 2nd octet of an IPv4 address with ♡ (e.g., "123.45.67.89" -> "123.♡.67.89")
+// Matches legacy PHP: G5_IP_DISPLAY_v4 = '\\1.♡.\\3.\\4'
 func maskIP(ip string) string {
-	// IPv4: xxx.xxx.xxx.xxx -> xxx.xxx.***.***
-	ipv4Regex := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
-	if ipv4Regex.MatchString(ip) {
-		parts := strings.Split(ip, ".")
-		if len(parts) == 4 {
-			return parts[0] + "." + parts[1] + ".***.***"
-		}
+	// IPv4: mask 2nd octet with ♡
+	parts := strings.Split(ip, ".")
+	if len(parts) == 4 {
+		return parts[0] + ".♡." + parts[2] + "." + parts[3]
 	}
 
-	// IPv6: mask last 4 segments
+	// IPv6: mask 2nd, 4th, 6th groups with ♡
 	if strings.Contains(ip, ":") {
-		parts := strings.Split(ip, ":")
-		if len(parts) >= 4 {
-			for i := len(parts) - 4; i < len(parts); i++ {
-				parts[i] = "****"
-			}
-			return strings.Join(parts, ":")
+		v6parts := strings.Split(ip, ":")
+		if len(v6parts) >= 8 {
+			v6parts[1] = "♡"
+			v6parts[3] = "♡"
+			v6parts[5] = "♡"
+			return strings.Join(v6parts, ":")
 		}
 	}
 

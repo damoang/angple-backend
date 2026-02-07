@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 )
 
@@ -89,30 +90,35 @@ func (p *Post) ToResponse() *PostResponse {
 	}
 }
 
-// maskIP masks the last two octets of an IP address (e.g., "123.45.67.89" -> "123.45.*.*")
+// maskIP masks the 2nd octet of an IPv4 address with ♡ (e.g., "123.45.67.89" -> "123.♡.67.89")
+// Matches legacy PHP: G5_IP_DISPLAY_v4 = '\\1.♡.\\3.\\4'
 func maskIP(ip string) string {
 	if ip == "" {
 		return ""
 	}
 	parts := make([]string, 0, 4)
 	start := 0
-	dotCount := 0
 	for i, c := range ip {
 		if c == '.' {
 			parts = append(parts, ip[start:i])
 			start = i + 1
-			dotCount++
 		}
 	}
 	parts = append(parts, ip[start:])
 
 	if len(parts) == 4 {
-		// IPv4: mask last two octets
-		return parts[0] + "." + parts[1] + ".*.*"
+		// IPv4: mask 2nd octet with ♡
+		return parts[0] + ".♡." + parts[2] + "." + parts[3]
 	}
-	// IPv6 or other: just return first 8 chars with mask
-	if len(ip) > 8 {
-		return ip[:8] + "..."
+	// IPv6: mask 2nd, 4th, 6th groups with ♡
+	if strings.Contains(ip, ":") {
+		v6parts := strings.Split(ip, ":")
+		if len(v6parts) >= 8 {
+			v6parts[1] = "♡"
+			v6parts[3] = "♡"
+			v6parts[5] = "♡"
+			return strings.Join(v6parts, ":")
+		}
 	}
 	return ip
 }
