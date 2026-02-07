@@ -80,3 +80,8 @@ func (s *AIEvaluationService) GetByReport(table string, parent int) (*domain.AIE
 	}
 	return eval, nil
 }
+
+// ListByReport retrieves all AI evaluations for a report
+func (s *AIEvaluationService) ListByReport(table string, parent int) ([]domain.AIEvaluation, error) {
+	return s.repo.ListByReport(table, parent)
+}
