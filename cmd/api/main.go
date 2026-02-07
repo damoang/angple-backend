@@ -255,6 +255,7 @@ func main() {
 	var searchHandler *handler.SearchHandler
 	var mediaHandler *handler.MediaHandler
 	var paymentHandler *handler.PaymentHandler
+	var aiEvalHandler *handler.AIEvaluationHandler
 	var boardPermissionChecker middleware.BoardPermissionChecker
 
 	if db != nil {
@@ -281,6 +282,7 @@ func main() {
 		messageRepo := repository.NewMessageRepository(db)
 		disciplineRepo := repository.NewDisciplineRepository(db)
 		galleryRepo := repository.NewGalleryRepository(db)
+		aiEvalRepo := repository.NewAIEvaluationRepository(db)
 
 		// Services
 		authService := service.NewAuthService(memberRepo, jwtManager, hookManager, cacheService)
@@ -307,6 +309,7 @@ func main() {
 		messageService := service.NewMessageService(messageRepo, memberRepo, blockRepo)
 		disciplineService := service.NewDisciplineService(disciplineRepo)
 		galleryService := service.NewGalleryService(galleryRepo, redisClient)
+		aiEvalService := service.NewAIEvaluationService(aiEvalRepo)
 		adminMemberService := service.NewAdminMemberService(memberRepo, db)
 
 		// File upload path
@@ -343,6 +346,7 @@ func main() {
 		wsHandler = handler.NewWSHandler(wsHub, cfg.CORS.AllowOrigins)
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
+		aiEvalHandler = handler.NewAIEvaluationHandler(aiEvalService)
 		adminHandler = handler.NewAdminHandler(adminMemberService)
 
 		// Tenant Management
@@ -649,6 +653,15 @@ func main() {
 			media.POST("/attachments", mediaHandler.UploadAttachment)
 			media.POST("/videos", mediaHandler.UploadVideo)
 			media.DELETE("/files", mediaHandler.DeleteFile)
+		}
+
+		// AI Evaluation API (v2 - 관리자 전용, damoang_jwt 쿠키 인증)
+		if aiEvalHandler != nil {
+			aiEvalRoutes := router.Group("/api/v2/reports/ai-evaluation",
+				middleware.DamoangCookieAuth(damoangJWT, cfg))
+			aiEvalRoutes.POST("", aiEvalHandler.SaveEvaluation)
+			aiEvalRoutes.GET("", aiEvalHandler.GetEvaluation)
+			aiEvalRoutes.GET("/list", aiEvalHandler.ListEvaluation)
 		}
 
 		// Elasticsearch Search API

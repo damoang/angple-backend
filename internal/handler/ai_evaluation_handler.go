@@ -64,7 +64,7 @@ func (h *AIEvaluationHandler) SaveEvaluation(c *gin.Context) {
 	})
 }
 
-// GetEvaluation handles GET /api/v1/reports/ai-evaluation
+// GetEvaluation handles GET /api/v2/reports/ai-evaluation
 // @Summary AI 평가 결과 조회
 // @Description 신고에 대한 최신 AI 평가 결과를 조회합니다 (관리자 전용)
 // @Tags ai-evaluation
@@ -103,5 +103,47 @@ func (h *AIEvaluationHandler) GetEvaluation(c *gin.Context) {
 
 	c.JSON(http.StatusOK, common.APIResponse{
 		Data: eval,
+	})
+}
+
+// ListEvaluation handles GET /api/v2/reports/ai-evaluation/list
+// @Summary AI 평가 결과 목록 조회
+// @Description 신고에 대한 모든 AI 평가 결과를 조회합니다 (관리자 전용)
+// @Tags ai-evaluation
+// @Produce json
+// @Param sg_table query string true "게시판 테이블명"
+// @Param sg_parent query int true "게시글 번호"
+// @Success 200 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Failure 403 {object} common.APIResponse
+// @Security BearerAuth
+// @Router /reports/ai-evaluation/list [get]
+func (h *AIEvaluationHandler) ListEvaluation(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+
+	level := middleware.GetDamoangUserLevel(c)
+	if level < 10 {
+		common.ErrorResponse(c, http.StatusForbidden, "관리자 권한이 필요합니다", nil)
+		return
+	}
+
+	table := c.Query("sg_table")
+	parent, err := strconv.Atoi(c.Query("sg_parent"))
+	if err != nil || table == "" {
+		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 요청입니다", nil)
+		return
+	}
+
+	evals, err := h.service.ListByReport(table, parent)
+	if err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "AI 평가 목록 조회 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: evals,
 	})
 }
