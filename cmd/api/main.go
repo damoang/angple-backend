@@ -15,12 +15,6 @@ import (
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/migration"
 	"github.com/damoang/angple-backend/internal/plugin"
-	// 플러그인 자동 등록을 위한 import (init()에서 Factory 등록됨)
-	_ "github.com/damoang/angple-backend/internal/plugins/advertising"
-	_ "github.com/damoang/angple-backend/internal/plugins/commerce"
-	_ "github.com/damoang/angple-backend/internal/plugins/embed"
-	_ "github.com/damoang/angple-backend/internal/plugins/imagelink"
-	_ "github.com/damoang/angple-backend/internal/plugins/marketplace"
 	pluginstoreHandler "github.com/damoang/angple-backend/internal/pluginstore/handler"
 	pluginstoreRepo "github.com/damoang/angple-backend/internal/pluginstore/repository"
 	pluginstoreSvc "github.com/damoang/angple-backend/internal/pluginstore/service"
@@ -38,6 +32,14 @@ import (
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
 	pkgstorage "github.com/damoang/angple-backend/pkg/storage"
+
+	// 플러그인 자동 등록을 위한 import (init()에서 Factory 등록됨)
+	_ "github.com/damoang/angple-backend/internal/plugins/advertising"
+	_ "github.com/damoang/angple-backend/internal/plugins/commerce"
+	_ "github.com/damoang/angple-backend/internal/plugins/embed"
+	_ "github.com/damoang/angple-backend/internal/plugins/imagelink"
+	_ "github.com/damoang/angple-backend/internal/plugins/marketplace"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -349,13 +351,17 @@ func main() {
 
 		// SaaS Provisioning
 		subRepo := repository.NewSubscriptionRepository(db)
-		_ = subRepo.AutoMigrate()
+		if err := subRepo.AutoMigrate(); err != nil {
+			log.Printf("warning: subscription AutoMigrate failed: %v", err)
+		}
 		provisioningSvc := service.NewProvisioningService(siteRepo, subRepo, tenantDBResolver, db, "angple.com")
 		provisioningHandler = handler.NewProvisioningHandler(provisioningSvc)
 
 		// AI Recommendation
 		recRepo := repository.NewRecommendationRepository(db)
-		_ = recRepo.AutoMigrate()
+		if err := recRepo.AutoMigrate(); err != nil {
+			log.Printf("warning: recommendation AutoMigrate failed: %v", err)
+		}
 		recSvc := service.NewRecommendationService(recRepo, db, cacheService)
 		recommendationHandler = handler.NewRecommendationHandler(recSvc)
 
@@ -450,7 +456,9 @@ func main() {
 	}
 	// JSON 파일이 있으면 오버라이드
 	if _, err := os.Stat("i18n"); err == nil {
-		_ = i18nBundle.LoadDir("i18n")
+		if err := i18nBundle.LoadDir("i18n"); err != nil {
+			log.Printf("warning: i18n LoadDir failed: %v", err)
+		}
 	}
 	_ = i18nBundle // available for handlers via context
 

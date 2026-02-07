@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -133,7 +134,9 @@ func (s *BoardService) GetBoard(boardID string) (*domain.Board, error) {
 
 	// 캐시에 저장
 	if s.cache != nil {
-		_ = s.cache.SetBoard(ctx, boardID, board)
+		if err := s.cache.SetBoard(ctx, boardID, board); err != nil {
+			log.Printf("cache warning: failed to set board: %v", err)
+		}
 	}
 
 	return board, nil
@@ -181,7 +184,9 @@ func (s *BoardService) UpdateBoard(boardID string, req *domain.UpdateBoardReques
 
 	// 5. 캐시 무효화
 	if s.cache != nil {
-		_ = s.cache.InvalidateBoard(context.Background(), boardID)
+		if err := s.cache.InvalidateBoard(context.Background(), boardID); err != nil {
+			log.Printf("cache warning: failed to invalidate board: %v", err)
+		}
 	}
 
 	return nil
@@ -221,7 +226,9 @@ func (s *BoardService) DeleteBoard(boardID string) error {
 
 	// 캐시 무효화
 	if s.cache != nil {
-		_ = s.cache.InvalidateBoard(context.Background(), boardID)
+		if err := s.cache.InvalidateBoard(context.Background(), boardID); err != nil {
+			log.Printf("cache warning: failed to invalidate board: %v", err)
+		}
 	}
 
 	return nil

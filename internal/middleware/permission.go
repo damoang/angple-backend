@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -70,7 +71,7 @@ func BoardPermission(checker BoardPermissionChecker, action PermissionAction) gi
 
 		if err != nil {
 			// Board not found or other error
-			if err == common.ErrNotFound {
+			if errors.Is(err, common.ErrNotFound) {
 				common.ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
 			} else {
 				common.ErrorResponse(c, http.StatusInternalServerError, "권한 확인 중 오류가 발생했습니다", err)

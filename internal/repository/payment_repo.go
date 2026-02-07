@@ -14,7 +14,9 @@ type PaymentRepository struct {
 
 // NewPaymentRepository creates a new PaymentRepository
 func NewPaymentRepository(db *gorm.DB) *PaymentRepository {
-	_ = db.AutoMigrate(&domain.Payment{})
+	if err := db.AutoMigrate(&domain.Payment{}); err != nil {
+		panic("failed to auto-migrate Payment: " + err.Error())
+	}
 	return &PaymentRepository{db: db}
 }
 

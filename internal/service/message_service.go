@@ -70,6 +70,8 @@ func (s *messageService) SendMessage(senderID string, req *domain.SendMessageReq
 }
 
 // GetInbox returns received messages
+//
+//nolint:dupl // GetInbox and GetSent share the same pagination structure but query different data
 func (s *messageService) GetInbox(mbID string, page, limit int) ([]*domain.MessageResponse, *common.Meta, error) {
 	if page < 1 {
 		page = 1
@@ -98,6 +100,8 @@ func (s *messageService) GetInbox(mbID string, page, limit int) ([]*domain.Messa
 }
 
 // GetSent returns sent messages
+//
+//nolint:dupl // GetSent and GetInbox share the same pagination structure but query different data
 func (s *messageService) GetSent(mbID string, page, limit int) ([]*domain.MessageResponse, *common.Meta, error) {
 	if page < 1 {
 		page = 1

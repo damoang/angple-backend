@@ -30,8 +30,14 @@ func (h *SearchHandler) Search(c *gin.Context) {
 
 	boardID := c.Query("board_id")
 	searchType := c.DefaultQuery("type", "all") // all, posts, comments
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page := 1
+	if val, err := strconv.Atoi(c.DefaultQuery("page", "1")); err == nil {
+		page = val
+	}
+	perPage := 20
+	if val, err := strconv.Atoi(c.DefaultQuery("per_page", "20")); err == nil {
+		perPage = val
+	}
 
 	if page < 1 {
 		page = 1
@@ -68,7 +74,10 @@ func (h *SearchHandler) Autocomplete(c *gin.Context) {
 		return
 	}
 
-	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
+	size := 10
+	if val, err := strconv.Atoi(c.DefaultQuery("size", "10")); err == nil {
+		size = val
+	}
 	suggestions, err := h.searchService.Autocomplete(c.Request.Context(), prefix, size)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "Autocomplete failed", nil)

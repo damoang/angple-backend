@@ -246,8 +246,14 @@ func (h *GoodHandler) GetLikers(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	page := 1
+	if val, err := strconv.Atoi(c.DefaultQuery("page", "1")); err == nil {
+		page = val
+	}
+	limit := 20
+	if val, err := strconv.Atoi(c.DefaultQuery("limit", "20")); err == nil {
+		limit = val
+	}
 
 	result, err := h.service.GetLikers(boardID, wrID, page, limit)
 	if err != nil {

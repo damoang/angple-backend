@@ -131,6 +131,8 @@ func (m *Manager) RegisterAllFactories() error {
 }
 
 // Enable 플러그인 활성화
+//
+//nolint:gocyclo // plugin activation requires many sequential steps
 func (m *Manager) Enable(name string) error {
 	m.mu.Lock()
 	info, exists := m.plugins[name]

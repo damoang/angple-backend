@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -160,7 +161,10 @@ func (s *MediaService) UploadAttachment(ctx context.Context, file *multipart.Fil
 
 	// Detect content type from first 512 bytes
 	buf := make([]byte, 512)
-	n, _ := src.Read(buf)
+	n, readErr := src.Read(buf)
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return nil, fmt.Errorf("failed to read file header: %w", readErr)
+	}
 	contentType := http.DetectContentType(buf[:n])
 
 	// Check for dangerous content types
@@ -169,7 +173,9 @@ func (s *MediaService) UploadAttachment(ctx context.Context, file *multipart.Fil
 	}
 
 	// Reset reader
-	src.Seek(0, io.SeekStart)
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to reset file reader: %w", err)
+	}
 
 	key := storage.GenerateKey("attachments", sanitizeFilename(file.Filename, ext))
 

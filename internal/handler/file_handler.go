@@ -54,7 +54,9 @@ func (h *FileHandler) UploadEditorImage(c *gin.Context) {
 
 	wrID := 0
 	if id := c.PostForm("wr_id"); id != "" {
-		wrID, _ = strconv.Atoi(id)
+		if val, err := strconv.Atoi(id); err == nil {
+			wrID = val
+		}
 	}
 
 	result, err := h.service.UploadEditorImage(file, boardID, wrID)
@@ -100,7 +102,9 @@ func (h *FileHandler) UploadAttachment(c *gin.Context) {
 
 	wrID := 0
 	if id := c.PostForm("wr_id"); id != "" {
-		wrID, _ = strconv.Atoi(id)
+		if val, err := strconv.Atoi(id); err == nil {
+			wrID = val
+		}
 	}
 
 	result, err := h.service.UploadAttachment(file, boardID, wrID)

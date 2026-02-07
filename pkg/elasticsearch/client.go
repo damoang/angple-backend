@@ -69,7 +69,10 @@ func (c *Client) IndexDocument(ctx context.Context, index, docID string, body in
 	defer res.Body.Close()
 
 	if res.IsError() {
-		body, _ := io.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("index error [%s]: failed to read response body: %w", res.Status(), err)
+		}
 		return fmt.Errorf("index error [%s]: %s", res.Status(), string(body))
 	}
 	return nil
@@ -90,7 +93,10 @@ func (c *Client) DeleteDocument(ctx context.Context, index, docID string) error 
 
 	// 404 is ok (document already gone)
 	if res.IsError() && res.StatusCode != 404 {
-		body, _ := io.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("delete error [%s]: failed to read response body: %w", res.Status(), err)
+		}
 		return fmt.Errorf("delete error [%s]: %s", res.Status(), string(body))
 	}
 	return nil
@@ -110,10 +116,16 @@ func (c *Client) BulkIndex(ctx context.Context, index string, docs map[string]in
 				"_id":    id,
 			},
 		}
-		metaLine, _ := json.Marshal(meta)
+		metaLine, err := json.Marshal(meta)
+		if err != nil {
+			return fmt.Errorf("failed to marshal bulk meta for id %s: %w", id, err)
+		}
 		buf.Write(metaLine)
 		buf.WriteByte('\n')
-		dataLine, _ := json.Marshal(doc)
+		dataLine, err := json.Marshal(doc)
+		if err != nil {
+			return fmt.Errorf("failed to marshal bulk doc for id %s: %w", id, err)
+		}
 		buf.Write(dataLine)
 		buf.WriteByte('\n')
 	}
@@ -125,7 +137,10 @@ func (c *Client) BulkIndex(ctx context.Context, index string, docs map[string]in
 	defer res.Body.Close()
 
 	if res.IsError() {
-		body, _ := io.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("bulk error [%s]: failed to read response body: %w", res.Status(), err)
+		}
 		return fmt.Errorf("bulk error [%s]: %s", res.Status(), string(body))
 	}
 	return nil
@@ -167,7 +182,10 @@ func (c *Client) Search(ctx context.Context, index string, query map[string]inte
 	defer res.Body.Close()
 
 	if res.IsError() {
-		body, _ := io.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return nil, fmt.Errorf("search error [%s]: failed to read response body: %w", res.Status(), err)
+		}
 		return nil, fmt.Errorf("search error [%s]: %s", res.Status(), string(body))
 	}
 
@@ -196,7 +214,9 @@ func (c *Client) Suggest(ctx context.Context, index, field, text string, size in
 	}
 
 	var buf bytes.Buffer
-	json.NewEncoder(&buf).Encode(query)
+	if err := json.NewEncoder(&buf).Encode(query); err != nil {
+		return nil, fmt.Errorf("failed to encode suggest query: %w", err)
+	}
 
 	res, err := c.es.Search(
 		c.es.Search.WithContext(ctx),
@@ -209,7 +229,9 @@ func (c *Client) Suggest(ctx context.Context, index, field, text string, size in
 	defer res.Body.Close()
 
 	var raw map[string]interface{}
-	json.NewDecoder(res.Body).Decode(&raw)
+	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("failed to decode suggest response: %w", err)
+	}
 
 	var suggestions []string
 	if suggest, ok := raw["suggest"].(map[string]interface{}); ok {
@@ -244,7 +266,9 @@ func (c *Client) CreateIndex(ctx context.Context, index string, mapping map[stri
 	}
 
 	var buf bytes.Buffer
-	json.NewEncoder(&buf).Encode(mapping)
+	if err := json.NewEncoder(&buf).Encode(mapping); err != nil {
+		return fmt.Errorf("failed to encode index mapping: %w", err)
+	}
 
 	res, err = c.es.Indices.Create(index, c.es.Indices.Create.WithBody(&buf), c.es.Indices.Create.WithContext(ctx))
 	if err != nil {
@@ -253,7 +277,10 @@ func (c *Client) CreateIndex(ctx context.Context, index string, mapping map[stri
 	defer res.Body.Close()
 
 	if res.IsError() {
-		body, _ := io.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("create index error [%s]: failed to read response body: %w", res.Status(), err)
+		}
 		// Ignore "already exists" error
 		if !strings.Contains(string(body), "resource_already_exists_exception") {
 			return fmt.Errorf("create index error: %s", string(body))

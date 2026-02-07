@@ -222,7 +222,7 @@ func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationB
 	}
 
 	// MessageRow를 CelebrationBanner로 변환
-	var banners []*domain.CelebrationBanner
+	banners := make([]*domain.CelebrationBanner, 0, len(results))
 	for _, row := range results {
 		imageURL := extractFirstImage(row.WrContent)
 

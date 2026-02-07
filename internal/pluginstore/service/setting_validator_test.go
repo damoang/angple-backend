@@ -21,8 +21,8 @@ func TestValidateSetting_Textarea(t *testing.T) {
 }
 
 func TestValidateSetting_Number_Valid(t *testing.T) {
-	min, max := 0, 100
-	schema := plugin.SettingConfig{Key: "count", Type: "number", Min: &min, Max: &max}
+	minVal, maxVal := 0, 100
+	schema := plugin.SettingConfig{Key: "count", Type: "number", Min: &minVal, Max: &maxVal}
 
 	tests := []struct {
 		value string

@@ -13,6 +13,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// DB strategy and plan constants
+const (
+	dbStrategySchema    = "schema"
+	dbStrategyShared    = "shared"
+	dbStrategyDedicated = "dedicated"
+	planFree            = "free"
+	planPro             = "pro"
+	planBusiness        = "business"
+	planEnterprise      = "enterprise"
+)
+
 // ProvisioningService handles one-click community creation and subscription management
 type ProvisioningService struct {
 	siteRepo   *repository.SiteRepository
@@ -41,13 +52,15 @@ func NewProvisioningService(
 
 // planPricing holds pricing configuration
 var planPricing = map[string]domain.PlanPricing{
-	"free":       {Plan: "free", MonthlyKRW: 0, YearlyKRW: 0, TrialDays: 0},
-	"pro":        {Plan: "pro", MonthlyKRW: 29000, YearlyKRW: 290000, TrialDays: 14},
-	"business":   {Plan: "business", MonthlyKRW: 99000, YearlyKRW: 990000, TrialDays: 14},
-	"enterprise": {Plan: "enterprise", MonthlyKRW: 299000, YearlyKRW: 2990000, TrialDays: 30},
+	planFree:       {Plan: planFree, MonthlyKRW: 0, YearlyKRW: 0, TrialDays: 0},
+	planPro:        {Plan: planPro, MonthlyKRW: 29000, YearlyKRW: 290000, TrialDays: 14},
+	planBusiness:   {Plan: planBusiness, MonthlyKRW: 99000, YearlyKRW: 990000, TrialDays: 14},
+	planEnterprise: {Plan: planEnterprise, MonthlyKRW: 299000, YearlyKRW: 2990000, TrialDays: 30},
 }
 
 // ProvisionCommunity creates a new community site with all required infrastructure
+//
+//nolint:gocyclo // orchestration function with necessary sequential steps
 func (s *ProvisioningService) ProvisionCommunity(ctx context.Context, req *domain.ProvisionRequest) (*domain.ProvisionResponse, error) {
 	// 1. Check subdomain availability
 	available, err := s.siteRepo.CheckSubdomainAvailability(ctx, req.Subdomain)
@@ -118,13 +131,15 @@ func (s *ProvisioningService) ProvisionCommunity(ctx context.Context, req *domai
 	}
 
 	// 7. Create schema if needed
-	if dbStrategy == "schema" && s.dbResolver != nil {
+	if dbStrategy == dbStrategySchema && s.dbResolver != nil {
 		schemaName := fmt.Sprintf("tenant_%s", siteID[:8])
 		if err := s.dbResolver.CreateSchema(schemaName); err != nil {
 			return nil, fmt.Errorf("스키마 생성 실패: %w", err)
 		}
 		site.DBSchemaName = &schemaName
-		_ = s.siteRepo.Update(ctx, site)
+		if err := s.siteRepo.Update(ctx, site); err != nil {
+			return nil, fmt.Errorf("사이트 스키마 업데이트 실패: %w", err)
+		}
 	}
 
 	// 8. Create subscription
@@ -141,9 +156,11 @@ func (s *ProvisioningService) ProvisionCommunity(ctx context.Context, req *domai
 		sub.Status = "trialing"
 		sub.CurrentPeriodEnd = now.AddDate(0, 0, pricing.TrialDays)
 	} else {
-		sub.Status = "active"
+		sub.Status = paymentStatusActive
 	}
-	_ = s.subRepo.Create(ctx, sub)
+	if err := s.subRepo.Create(ctx, sub); err != nil {
+		return nil, fmt.Errorf("구독 생성 실패: %w", err)
+	}
 
 	resp := &domain.ProvisionResponse{
 		SiteID:     siteID,
@@ -227,13 +244,15 @@ func (s *ProvisioningService) ChangePlan(ctx context.Context, siteID string, req
 	}
 
 	// Create schema if upgrading from shared to schema
-	if oldStrategy == "shared" && newStrategy == "schema" && s.dbResolver != nil {
+	if oldStrategy == dbStrategyShared && newStrategy == dbStrategySchema && s.dbResolver != nil {
 		schemaName := fmt.Sprintf("tenant_%s", siteID[:8])
 		if err := s.dbResolver.CreateSchema(schemaName); err != nil {
 			return fmt.Errorf("스키마 생성 실패: %w", err)
 		}
 		site.DBSchemaName = &schemaName
-		_ = s.siteRepo.Update(ctx, site)
+		if err := s.siteRepo.Update(ctx, site); err != nil {
+			return fmt.Errorf("사이트 스키마 업데이트 실패: %w", err)
+		}
 	}
 
 	return nil
@@ -245,13 +264,13 @@ func (s *ProvisioningService) CancelSubscription(ctx context.Context, siteID str
 	if err != nil || sub == nil {
 		return errors.New("구독 정보를 찾을 수 없습니다")
 	}
-	if sub.Status == "canceled" {
+	if sub.Status == paymentStatusCanceled {
 		return errors.New("이미 취소된 구독입니다")
 	}
 
 	now := time.Now()
 	sub.CanceledAt = &now
-	sub.Status = "canceled"
+	sub.Status = paymentStatusCanceled
 	return s.subRepo.Update(ctx, sub)
 }
 
@@ -264,10 +283,10 @@ func (s *ProvisioningService) GetInvoices(ctx context.Context, siteID string, pa
 // GetPricing returns plan pricing info
 func (s *ProvisioningService) GetPricing() []domain.PlanPricing {
 	return []domain.PlanPricing{
-		planPricing["free"],
-		planPricing["pro"],
-		planPricing["business"],
-		planPricing["enterprise"],
+		planPricing[planFree],
+		planPricing[planPro],
+		planPricing[planBusiness],
+		planPricing[planEnterprise],
 	}
 }
 
@@ -279,12 +298,17 @@ func (s *ProvisioningService) DeleteCommunity(ctx context.Context, siteID string
 	}
 
 	// Cancel subscription
-	sub, _ := s.subRepo.FindBySiteID(ctx, siteID)
-	if sub != nil && sub.Status != "canceled" {
+	sub, err := s.subRepo.FindBySiteID(ctx, siteID)
+	if err != nil {
+		return fmt.Errorf("구독 조회 실패: %w", err)
+	}
+	if sub != nil && sub.Status != paymentStatusCanceled {
 		now := time.Now()
 		sub.CanceledAt = &now
-		sub.Status = "canceled"
-		_ = s.subRepo.Update(ctx, sub)
+		sub.Status = paymentStatusCanceled
+		if err := s.subRepo.Update(ctx, sub); err != nil {
+			return fmt.Errorf("구독 취소 업데이트 실패: %w", err)
+		}
 	}
 
 	// Deactivate site
@@ -293,13 +317,13 @@ func (s *ProvisioningService) DeleteCommunity(ctx context.Context, siteID string
 
 func getDBStrategyByPlan(plan string) string {
 	switch plan {
-	case "free":
-		return "shared"
-	case "pro", "business":
-		return "schema"
-	case "enterprise":
-		return "dedicated"
+	case planFree:
+		return dbStrategyShared
+	case planPro, planBusiness:
+		return dbStrategySchema
+	case planEnterprise:
+		return dbStrategyDedicated
 	default:
-		return "shared"
+		return dbStrategyShared
 	}
 }

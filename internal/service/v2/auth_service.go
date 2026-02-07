@@ -49,7 +49,7 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		return nil, common.ErrInvalidCredentials
 	}
 
-	if user.Status == "banned" {
+	if user.Status == userStatusBanned {
 		return nil, errors.New("account is banned")
 	}
 	if user.Status == "inactive" {
@@ -162,7 +162,7 @@ func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, er
 			Nickname: mbName,
 			Email:    claims.MbEmail,
 			Level:    uint8(level), // #nosec G115 - bounds checked above
-			Status:   "active",
+			Status:   userStatusActive,
 		}
 		if createErr := s.userRepo.Create(user); createErr != nil {
 			return nil, fmt.Errorf("failed to create user: %w", createErr)
@@ -170,7 +170,7 @@ func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, er
 		log.Printf("[ExchangeJWT] Created user %s with ID %d", mbID, user.ID)
 	}
 
-	if user.Status == "banned" {
+	if user.Status == userStatusBanned {
 		return nil, errors.New("account is banned")
 	}
 	if user.Status == "inactive" {

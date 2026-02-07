@@ -94,7 +94,9 @@ func (h *PublicHandler) GetAdByPosition(c *gin.Context) {
 	if sessionKey == "" {
 		// JWT에서 jti 추출 시도
 		if jti, exists := c.Get("jti"); exists {
-			sessionKey = jti.(string)
+			if s, ok := jti.(string); ok {
+				sessionKey = s
+			}
 		}
 	}
 
@@ -173,7 +175,9 @@ func (h *PublicHandler) GetRotationIndex(c *gin.Context) {
 	sessionKey := c.Query("session_key")
 	if sessionKey == "" {
 		if jti, exists := c.Get("jti"); exists {
-			sessionKey = jti.(string)
+			if s, ok := jti.(string); ok {
+				sessionKey = s
+			}
 		}
 	}
 

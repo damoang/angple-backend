@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const planFree = "free"
+
 // TenantContext holds tenant-specific information
 type TenantContext struct {
 	SiteID     string `json:"site_id"`
@@ -147,12 +149,12 @@ func GetTenantDBStrategy(c *gin.Context) string {
 func GetTenantPlan(c *gin.Context) string {
 	plan, exists := c.Get("tenant_plan")
 	if !exists {
-		return "free"
+		return planFree
 	}
 	if str, ok := plan.(string); ok {
 		return str
 	}
-	return "free"
+	return planFree
 }
 
 // shouldSkipTenant returns true for paths that don't need tenant resolution
@@ -226,7 +228,7 @@ func RequireTenant() gin.HandlerFunc {
 // RequirePlan middleware ensures the tenant has a specific plan or higher
 func RequirePlan(minPlan string) gin.HandlerFunc {
 	planOrder := map[string]int{
-		"free":       0,
+		planFree:     0,
 		"pro":        1,
 		"business":   2,
 		"enterprise": 3,

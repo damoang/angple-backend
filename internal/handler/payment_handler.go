@@ -171,8 +171,14 @@ func (h *PaymentHandler) ListPayments(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page := 1
+	if val, err := strconv.Atoi(c.DefaultQuery("page", "1")); err == nil {
+		page = val
+	}
+	perPage := 20
+	if val, err := strconv.Atoi(c.DefaultQuery("per_page", "20")); err == nil {
+		perPage = val
+	}
 	if page < 1 {
 		page = 1
 	}

@@ -29,7 +29,7 @@ func (s *MarketplaceService) Browse(page, perPage int, category, keyword string)
 
 	items := make([]domain.MarketplaceListItem, len(subs))
 	for i, sub := range subs {
-		avgRating, reviewCount, _ := s.repo.GetAverageRating(sub.PluginName)
+		avgRating, reviewCount, _ := s.repo.GetAverageRating(sub.PluginName) //nolint:errcheck // rating lookup is best-effort
 		// developer name lookup
 		devName := ""
 		if dev, err := s.repo.FindDeveloperByID(sub.DeveloperID); err == nil {
@@ -56,7 +56,7 @@ func (s *MarketplaceService) GetPlugin(pluginName string) (*domain.PluginSubmiss
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	avgRating, reviewCount, _ := s.repo.GetAverageRating(pluginName)
+	avgRating, reviewCount, _ := s.repo.GetAverageRating(pluginName) //nolint:errcheck // rating lookup is best-effort
 	return sub, avgRating, reviewCount, nil
 }
 
