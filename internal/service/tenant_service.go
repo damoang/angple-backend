@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain"
@@ -50,7 +51,9 @@ func (s *TenantService) ListTenants(ctx context.Context, page, perPage int, stat
 	case "inactive":
 		query = query.Where("active = ?", false)
 	}
-	query.Count(&total)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
 	err := query.Order("created_at DESC").
 		Offset((page - 1) * perPage).Limit(perPage).
@@ -61,7 +64,10 @@ func (s *TenantService) ListTenants(ctx context.Context, page, perPage int, stat
 
 	responses := make([]domain.SiteResponse, len(sites))
 	for i, site := range sites {
-		settings, _ := s.siteRepo.FindSettingsBySiteID(ctx, site.ID)
+		settings, err := s.siteRepo.FindSettingsBySiteID(ctx, site.ID)
+		if err != nil {
+			log.Printf("warning: failed to get settings for site %s: %v", site.ID, err)
+		}
 		responses[i] = *site.ToResponse(settings)
 	}
 	return responses, total, nil
@@ -74,8 +80,14 @@ func (s *TenantService) GetTenantDetail(ctx context.Context, siteID string) (*Te
 		return nil, errors.New("테넌트를 찾을 수 없습니다")
 	}
 
-	settings, _ := s.siteRepo.FindSettingsBySiteID(ctx, siteID)
-	users, _ := s.siteRepo.ListSiteUsers(ctx, siteID)
+	settings, err := s.siteRepo.FindSettingsBySiteID(ctx, siteID)
+	if err != nil {
+		log.Printf("warning: failed to get settings for site %s: %v", siteID, err)
+	}
+	users, err := s.siteRepo.ListSiteUsers(ctx, siteID)
+	if err != nil {
+		log.Printf("warning: failed to list users for site %s: %v", siteID, err)
+	}
 	limits := middleware.GetPlanLimits(site.Plan)
 
 	return &TenantDetail{
@@ -87,7 +99,7 @@ func (s *TenantService) GetTenantDetail(ctx context.Context, siteID string) (*Te
 }
 
 // SuspendTenant suspends a tenant
-func (s *TenantService) SuspendTenant(ctx context.Context, siteID, reason string) error {
+func (s *TenantService) SuspendTenant(ctx context.Context, siteID, _ string) error {
 	site, err := s.siteRepo.FindByID(ctx, siteID)
 	if err != nil || site == nil {
 		return errors.New("테넌트를 찾을 수 없습니다")
@@ -142,7 +154,7 @@ func (s *TenantService) ChangePlan(ctx context.Context, siteID, newPlan string) 
 	}
 
 	// schema 전략으로 업그레이드 시 스키마 생성
-	if oldStrategy == "shared" && newStrategy == "schema" && s.dbResolver != nil {
+	if oldStrategy == dbStrategyShared && newStrategy == dbStrategySchema && s.dbResolver != nil {
 		schemaName := fmt.Sprintf("tenant_%s", siteID)
 		if err := s.dbResolver.CreateSchema(schemaName); err != nil {
 			return fmt.Errorf("스키마 생성 실패: %w", err)
@@ -206,13 +218,13 @@ func (s *TenantService) GetUsage(ctx context.Context, siteID string, days int) (
 
 func (s *TenantService) getDBStrategyByPlan(plan string) string {
 	switch plan {
-	case "free":
-		return "shared"
-	case "pro", "business":
-		return "schema"
-	case "enterprise":
-		return "dedicated"
+	case planFree:
+		return dbStrategyShared
+	case planPro, planBusiness:
+		return dbStrategySchema
+	case planEnterprise:
+		return dbStrategyDedicated
 	default:
-		return "shared"
+		return dbStrategyShared
 	}
 }

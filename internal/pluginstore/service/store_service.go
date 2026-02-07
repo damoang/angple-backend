@@ -45,7 +45,7 @@ func (s *StoreService) Install(name, actorID string, manager *plugin.Manager) er
 	}
 
 	// 이미 설치되었는지 확인
-	existing, _ := s.installRepo.FindByName(name)
+	existing, _ := s.installRepo.FindByName(name) //nolint:errcheck // not found is expected
 	if existing != nil {
 		return fmt.Errorf("plugin %s is already installed", name)
 	}
@@ -81,7 +81,7 @@ func (s *StoreService) Install(name, actorID string, manager *plugin.Manager) er
 		errMsg := err.Error()
 		inst.Status = domain.StatusError
 		inst.ErrorMessage = &errMsg
-		_ = s.installRepo.Update(inst)
+		_ = s.installRepo.Update(inst) //nolint:errcheck // best-effort rollback
 		s.logEvent(name, domain.EventError, map[string]string{"error": errMsg}, actorID)
 		return fmt.Errorf("failed to enable plugin: %w", err)
 	}
@@ -117,7 +117,7 @@ func (s *StoreService) Enable(name, actorID string, manager *plugin.Manager) err
 		errMsg := err.Error()
 		inst.Status = domain.StatusError
 		inst.ErrorMessage = &errMsg
-		_ = s.installRepo.Update(inst)
+		_ = s.installRepo.Update(inst) //nolint:errcheck // best-effort rollback
 		s.logEvent(name, domain.EventError, map[string]string{"error": errMsg}, actorID)
 		return fmt.Errorf("failed to enable plugin: %w", err)
 	}
@@ -221,7 +221,7 @@ func (s *StoreService) BootEnabledPlugins(manager *plugin.Manager) error {
 			errMsg := err.Error()
 			inst.Status = domain.StatusError
 			inst.ErrorMessage = &errMsg
-			_ = s.installRepo.Update(&inst)
+			_ = s.installRepo.Update(&inst) //nolint:errcheck // best-effort error status update
 			continue
 		}
 		s.logger.Info("Booted plugin: %s", inst.PluginName)
@@ -256,7 +256,7 @@ func (s *StoreService) GetDashboard(manager *plugin.Manager) (*DashboardData, er
 	allPlugins := manager.GetAllPlugins()
 
 	// 설치 상태 조회
-	installations, _ := s.installRepo.FindAll()
+	installations, _ := s.installRepo.FindAll() //nolint:errcheck // empty list is acceptable fallback
 	installMap := make(map[string]*domain.PluginInstallation, len(installations))
 	for i := range installations {
 		installMap[installations[i].PluginName] = &installations[i]
@@ -293,7 +293,7 @@ func (s *StoreService) GetDashboard(manager *plugin.Manager) (*DashboardData, er
 	}
 
 	// 최근 이벤트 (전체, 10건)
-	dash.RecentEvents, _ = s.eventRepo.ListRecent(10)
+	dash.RecentEvents, _ = s.eventRepo.ListRecent(10) //nolint:errcheck // empty events is acceptable fallback
 
 	// 헬스 체크
 	dash.Health = manager.CheckAllHealth()
@@ -402,7 +402,7 @@ func (s *StoreService) checkReverseDependencies(name string, manager *plugin.Man
 func (s *StoreService) logEvent(pluginName, eventType string, details map[string]string, actorID string) {
 	var detailsJSON *string
 	if details != nil {
-		b, _ := json.Marshal(details)
+		b, _ := json.Marshal(details) //nolint:errcheck // marshal of map[string]string always succeeds
 		str := string(b)
 		detailsJSON = &str
 	}

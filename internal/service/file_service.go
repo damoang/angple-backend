@@ -37,7 +37,7 @@ func NewFileService(repo repository.FileRepository, uploadPath string) FileServi
 func (s *fileService) UploadEditorImage(file *multipart.FileHeader, boardID string, wrID int) (*domain.FileUploadResponse, error) {
 	// 이미지 파일 검증
 	ext := strings.ToLower(filepath.Ext(file.Filename))
-	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".bmp": true}
+	allowedExts := map[string]bool{extJPG: true, extJPEG: true, extPNG: true, extGIF: true, extWebP: true, ".bmp": true}
 	if !allowedExts[ext] {
 		return nil, fmt.Errorf("허용되지 않는 이미지 형식입니다: %s", ext)
 	}
@@ -158,22 +158,34 @@ func (s *fileService) saveFile(file *multipart.FileHeader, boardID string, wrID 
 	}, nil
 }
 
+// File extension constants
+const (
+	extJPG  = ".jpg"
+	extJPEG = ".jpeg"
+	extPNG  = ".png"
+	extGIF  = ".gif"
+	extWebP = ".webp"
+	extPDF  = ".pdf"
+	extZip  = ".zip"
+	extTxt  = ".txt"
+)
+
 // detectContentType returns content type from file extension
 func detectContentType(ext string) string {
 	switch strings.ToLower(ext) {
-	case ".jpg", ".jpeg":
+	case extJPG, extJPEG:
 		return "image/jpeg"
-	case ".png":
+	case extPNG:
 		return "image/png"
-	case ".gif":
+	case extGIF:
 		return "image/gif"
-	case ".webp":
+	case extWebP:
 		return "image/webp"
-	case ".pdf":
+	case extPDF:
 		return "application/pdf"
-	case ".zip":
+	case extZip:
 		return "application/zip"
-	case ".txt":
+	case extTxt:
 		return "text/plain"
 	default:
 		return "application/octet-stream"

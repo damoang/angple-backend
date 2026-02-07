@@ -84,7 +84,7 @@ func (r *GalleryRepository) FindGalleryAll(boardIDs []string, page, limit int) (
 	offset := (page - 1) * limit
 
 	// Build UNION ALL for count
-	var countParts []string
+	countParts := make([]string, 0, len(boardIDs))
 	for _, bid := range boardIDs {
 		countParts = append(countParts, fmt.Sprintf(
 			"SELECT wr_id FROM `g5_write_%s` WHERE wr_is_comment = 0 AND wr_parent = wr_id AND wr_file > 0",
@@ -98,7 +98,7 @@ func (r *GalleryRepository) FindGalleryAll(boardIDs []string, page, limit int) (
 	}
 
 	// Build UNION ALL for data
-	var dataParts []string
+	dataParts := make([]string, 0, len(boardIDs))
 	for _, bid := range boardIDs {
 		dataParts = append(dataParts, fmt.Sprintf(
 			"SELECT '%s' AS bo_table, wr_id, wr_subject, wr_name, mb_id, wr_hit, wr_good, wr_comment, wr_datetime "+
@@ -158,7 +158,7 @@ func (r *GalleryRepository) UnifiedSearch(boardIDs []string, keyword string, pag
 	likeKeyword := "%" + keyword + "%"
 
 	// Count
-	var countParts []string
+	countParts := make([]string, 0, len(boardIDs))
 	for _, bid := range boardIDs {
 		countParts = append(countParts, fmt.Sprintf(
 			"SELECT wr_id FROM `g5_write_%s` WHERE wr_is_comment = 0 AND wr_parent = wr_id AND (wr_subject LIKE ? OR wr_content LIKE ?)",
@@ -179,7 +179,7 @@ func (r *GalleryRepository) UnifiedSearch(boardIDs []string, keyword string, pag
 	}
 
 	// Data
-	var dataParts []string
+	dataParts := make([]string, 0, len(boardIDs))
 	for _, bid := range boardIDs {
 		dataParts = append(dataParts, fmt.Sprintf(
 			"SELECT '%s' AS bo_table, wr_id, wr_subject, SUBSTRING(wr_content, 1, 200) AS wr_content, wr_name, mb_id, wr_hit, wr_good, wr_datetime "+

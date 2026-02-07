@@ -7,6 +7,12 @@ import (
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 )
 
+// User status constants
+const (
+	userStatusBanned = "banned"
+	userStatusActive = "active"
+)
+
 // AdminService handles v2 admin business logic
 type AdminService struct {
 	userRepo    v2repo.UserRepository
@@ -82,9 +88,9 @@ func (s *AdminService) BanMember(id uint64, ban bool) error {
 		return err
 	}
 	if ban {
-		user.Status = "banned"
+		user.Status = userStatusBanned
 	} else {
-		user.Status = "active"
+		user.Status = userStatusActive
 	}
 	return s.userRepo.Update(user)
 }

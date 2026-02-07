@@ -10,6 +10,7 @@ func DefaultMessages() map[Locale]map[string]string {
 	}
 }
 
+//nolint:dupl // i18n message maps for different languages intentionally share the same keys
 var koMessages = map[string]string{
 	// Common errors
 	"error.not_found":         "요청한 리소스를 찾을 수 없습니다",
@@ -66,6 +67,7 @@ var koMessages = map[string]string{
 	"search.query_required": "검색어를 입력해주세요",
 }
 
+//nolint:dupl // i18n message maps for different languages intentionally share the same keys
 var enMessages = map[string]string{
 	// Common errors
 	"error.not_found":         "The requested resource was not found",
@@ -122,6 +124,7 @@ var enMessages = map[string]string{
 	"search.query_required": "Search query is required",
 }
 
+//nolint:dupl // i18n message maps for different languages intentionally share the same keys
 var jaMessages = map[string]string{
 	// Common errors
 	"error.not_found":         "リクエストされたリソースが見つかりません",

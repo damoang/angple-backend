@@ -36,13 +36,15 @@ type AuditLogger struct {
 // NewAuditLogger creates a new AuditLogger
 func NewAuditLogger(db *gorm.DB) *AuditLogger {
 	if db != nil {
-		_ = db.AutoMigrate(&AuditLog{})
+		if err := db.AutoMigrate(&AuditLog{}); err != nil {
+			logger.GetLogger().Error().Err(err).Msg("audit_logs AutoMigrate failed")
+		}
 	}
 	return &AuditLogger{db: db}
 }
 
 // Log writes an audit entry to the database
-func (a *AuditLogger) Log(ctx context.Context, userID, action, resource, resourceID, details, clientIP, userAgent, requestID string) {
+func (a *AuditLogger) Log(_ context.Context, userID, action, resource, resourceID, details, clientIP, userAgent, requestID string) {
 	if a.db == nil {
 		return
 	}

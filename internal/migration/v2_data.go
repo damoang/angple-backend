@@ -153,7 +153,7 @@ func migratePostsAndComments(db *gorm.DB) error {
 	return nil
 }
 
-func migrateFiles(db *gorm.DB) error {
+func migrateFiles(_ *gorm.DB) error {
 	// g5_board_file migration is complex due to dynamic table references
 	// For now, we log a placeholder - full implementation requires board_id context
 	log.Println("[v2-migration] File migration requires board-level iteration (skipped in auto-migration)")

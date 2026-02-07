@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -66,7 +67,9 @@ func (s *memberProfileService) GetProfile(userID string) (*domain.MemberProfileR
 
 	// Cache the profile
 	if s.cache != nil {
-		_ = s.cache.SetUser(ctx, userID, profile)
+		if err := s.cache.SetUser(ctx, userID, profile); err != nil {
+			log.Printf("cache warning: failed to set user: %v", err)
+		}
 	}
 
 	return profile, nil
@@ -94,8 +97,8 @@ func (s *memberProfileService) GetRecentPosts(userID string, limit int) ([]*doma
 		return []*domain.MemberPostSummary{}, nil
 	}
 
-	var unions []string
-	var args []interface{}
+	unions := make([]string, 0, len(boardIDs))
+	args := make([]interface{}, 0, len(boardIDs))
 	for _, bid := range boardIDs {
 		tableName := fmt.Sprintf("g5_write_%s", bid)
 		unions = append(unions, fmt.Sprintf(
@@ -151,8 +154,8 @@ func (s *memberProfileService) GetRecentComments(userID string, limit int) ([]*d
 		return []*domain.MemberCommentSummary{}, nil
 	}
 
-	var unions []string
-	var args []interface{}
+	unions := make([]string, 0, len(boardIDs))
+	args := make([]interface{}, 0, len(boardIDs))
 	for _, bid := range boardIDs {
 		tableName := fmt.Sprintf("g5_write_%s", bid)
 		unions = append(unions, fmt.Sprintf(
@@ -207,7 +210,7 @@ func (s *memberProfileService) GetPointHistory(userID string, limit int) ([]*dom
 
 	history := make([]*domain.PointHistory, len(points))
 	for i, p := range points {
-		relID, _ := strconv.Atoi(p.RelID)
+		relID, _ := strconv.Atoi(p.RelID) //nolint:errcheck // best-effort conversion, 0 on failure is acceptable
 		history[i] = &domain.PointHistory{
 			ID:        p.ID,
 			Point:     p.Point,

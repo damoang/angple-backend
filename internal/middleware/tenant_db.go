@@ -22,7 +22,7 @@ func NewTenantDBResolver(defaultDB *gorm.DB) *TenantDBResolver {
 }
 
 // ResolveDB returns the appropriate *gorm.DB for a tenant
-func (r *TenantDBResolver) ResolveDB(tenantID, dbStrategy, schemaName string) *gorm.DB {
+func (r *TenantDBResolver) ResolveDB(_, dbStrategy, schemaName string) *gorm.DB {
 	switch dbStrategy {
 	case "schema":
 		return r.resolveSchema(schemaName)
@@ -42,12 +42,16 @@ func (r *TenantDBResolver) resolveSchema(schemaName string) *gorm.DB {
 
 	// 캐시된 세션 확인
 	if db, ok := r.schemaDbs.Load(schemaName); ok {
-		return db.(*gorm.DB)
+		if gormDB, assertOK := db.(*gorm.DB); assertOK {
+			return gormDB
+		}
 	}
 
 	// 새 세션 생성 (USE schema_name)
 	db := r.defaultDB.Session(&gorm.Session{})
-	db.Exec(fmt.Sprintf("USE `%s`", schemaName))
+	if err := db.Exec(fmt.Sprintf("USE `%s`", schemaName)).Error; err != nil {
+		return r.defaultDB
+	}
 	r.schemaDbs.Store(schemaName, db)
 	return db
 }

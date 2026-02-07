@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -67,9 +68,14 @@ func (s *RecommendationService) TrackActivity(ctx context.Context, userID, actio
 			scoreDelta = 1.0
 		}
 
-		topics, _ := s.recRepo.GetPostTopics(ctx, targetID)
+		topics, err := s.recRepo.GetPostTopics(ctx, targetID)
+		if err != nil {
+			log.Printf("warning: failed to get post topics for %s: %v", targetID, err)
+		}
 		for _, t := range topics {
-			_ = s.recRepo.UpsertUserInterest(ctx, userID, t.Topic, scoreDelta*t.Score)
+			if err := s.recRepo.UpsertUserInterest(ctx, userID, t.Topic, scoreDelta*t.Score); err != nil {
+				log.Printf("warning: failed to upsert user interest: %v", err)
+			}
 		}
 	}
 
@@ -97,6 +103,8 @@ func (s *RecommendationService) ExtractAndSaveTopics(ctx context.Context, boardI
 }
 
 // GetPersonalizedFeed returns personalized post recommendations for a user
+//
+//nolint:gocyclo // complex recommendation logic with necessary sequential steps
 func (s *RecommendationService) GetPersonalizedFeed(ctx context.Context, userID string, limit int) (*domain.PersonalizedFeedResponse, error) {
 	// Try cache first (short TTL for personalized content)
 	cacheKey := fmt.Sprintf("feed:%s:%d", userID, limit)
@@ -108,10 +116,16 @@ func (s *RecommendationService) GetPersonalizedFeed(ctx context.Context, userID 
 	}
 
 	// 1. Get user interests
-	interests, _ := s.recRepo.GetUserInterests(ctx, userID, 20)
+	interests, err := s.recRepo.GetUserInterests(ctx, userID, 20)
+	if err != nil {
+		log.Printf("warning: failed to get user interests for %s: %v", userID, err)
+	}
 
 	// 2. Get recently viewed posts to exclude
-	viewedIDs, _ := s.recRepo.GetUserViewedPostIDs(ctx, userID, time.Now().AddDate(0, 0, -7), 200)
+	viewedIDs, err := s.recRepo.GetUserViewedPostIDs(ctx, userID, time.Now().AddDate(0, 0, -7), 200)
+	if err != nil {
+		log.Printf("warning: failed to get viewed post IDs for %s: %v", userID, err)
+	}
 
 	var recommended []domain.RecommendedPost
 
@@ -122,7 +136,10 @@ func (s *RecommendationService) GetPersonalizedFeed(ctx context.Context, userID 
 			topicNames[i] = interest.Topic
 		}
 
-		matches, _ := s.recRepo.FindPostsByTopics(ctx, topicNames, viewedIDs, limit)
+		matches, err := s.recRepo.FindPostsByTopics(ctx, topicNames, viewedIDs, limit)
+		if err != nil {
+			log.Printf("warning: failed to find posts by topics: %v", err)
+		}
 		for _, m := range matches {
 			recommended = append(recommended, domain.RecommendedPost{
 				PostID:  m.PostID,
@@ -136,7 +153,10 @@ func (s *RecommendationService) GetPersonalizedFeed(ctx context.Context, userID 
 	// 4. Fill with trending/popular if not enough
 	if len(recommended) < limit {
 		remaining := limit - len(recommended)
-		popular, _ := s.recRepo.GetPopularPostIDs(ctx, time.Now().Add(-24*time.Hour), remaining*2)
+		popular, err := s.recRepo.GetPopularPostIDs(ctx, time.Now().Add(-24*time.Hour), remaining*2)
+		if err != nil {
+			log.Printf("warning: failed to get popular post IDs: %v", err)
+		}
 		for _, p := range popular {
 			if len(recommended) >= limit {
 				break
@@ -179,7 +199,9 @@ func (s *RecommendationService) GetPersonalizedFeed(ctx context.Context, userID 
 
 	// Cache the result (short TTL for personalized content)
 	if s.cache != nil {
-		_ = s.cache.Set(ctx, cacheKey, response, cache.TTLShort)
+		if err := s.cache.Set(ctx, cacheKey, response, cache.TTLShort); err != nil {
+			log.Printf("cache warning: failed to set feed cache: %v", err)
+		}
 	}
 
 	return response, nil
@@ -203,7 +225,9 @@ func (s *RecommendationService) GetTrendingTopics(ctx context.Context, period st
 
 	// Cache the result
 	if s.cache != nil {
-		_ = s.cache.Set(ctx, cacheKey, topics, cache.TTLPopular)
+		if err := s.cache.Set(ctx, cacheKey, topics, cache.TTLPopular); err != nil {
+			log.Printf("cache warning: failed to set trending cache: %v", err)
+		}
 	}
 
 	return topics, nil
@@ -224,7 +248,9 @@ func (s *RecommendationService) RefreshTrending(ctx context.Context) error {
 		}
 		// Invalidate cached trending topics for this period
 		if s.cache != nil {
-			_ = s.cache.Delete(ctx, fmt.Sprintf("trending:%s:10", period), fmt.Sprintf("trending:%s:20", period))
+			if err := s.cache.Delete(ctx, fmt.Sprintf("trending:%s:10", period), fmt.Sprintf("trending:%s:20", period)); err != nil {
+				log.Printf("cache warning: failed to delete trending cache: %v", err)
+			}
 		}
 	}
 	return nil
@@ -275,7 +301,9 @@ func (s *RecommendationService) GetPopularPosts(ctx context.Context, boardID str
 
 	// Cache the result
 	if s.cache != nil {
-		_ = s.cache.SetPopularPosts(ctx, boardID, posts)
+		if err := s.cache.SetPopularPosts(ctx, boardID, posts); err != nil {
+			log.Printf("cache warning: failed to set popular posts cache: %v", err)
+		}
 	}
 
 	return posts, nil
@@ -316,7 +344,10 @@ func (s *RecommendationService) enrichPosts(ctx context.Context, posts []domain.
 		}
 
 		// Attach topics
-		topics, _ := s.recRepo.GetPostTopics(ctx, posts[i].PostID)
+		topics, err := s.recRepo.GetPostTopics(ctx, posts[i].PostID)
+		if err != nil {
+			log.Printf("warning: failed to get post topics for %s: %v", posts[i].PostID, err)
+		}
 		for _, t := range topics {
 			posts[i].Topics = append(posts[i].Topics, t.Topic)
 		}
@@ -362,7 +393,7 @@ func extractKeywords(title, content string) map[string]float64 {
 		key   string
 		score float64
 	}
-	var sorted []kv
+	sorted := make([]kv, 0, len(freq))
 	for k, c := range freq {
 		sorted = append(sorted, kv{k, float64(c) / float64(maxFreq)})
 	}

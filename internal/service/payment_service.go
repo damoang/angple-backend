@@ -18,6 +18,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// Payment status constants
+const (
+	paymentStatusConfirmed = "confirmed"
+	paymentStatusCanceled  = "canceled"
+	paymentStatusActive    = "active"
+)
+
 // PaymentService handles payment processing with Toss and Stripe
 type PaymentService struct {
 	paymentRepo *repository.PaymentRepository
@@ -85,7 +92,7 @@ func (s *PaymentService) ConfirmTossPayment(ctx context.Context, req *domain.Tos
 	}
 
 	// Idempotency: already confirmed
-	if payment.Status == "confirmed" {
+	if payment.Status == paymentStatusConfirmed {
 		return payment, nil
 	}
 
@@ -101,14 +108,16 @@ func (s *PaymentService) ConfirmTossPayment(ctx context.Context, req *domain.Tos
 		payment.Status = "failed"
 		payment.FailReason = err.Error()
 		s.scheduleRetry(payment)
-		s.paymentRepo.Update(ctx, payment)
+		if updateErr := s.paymentRepo.Update(ctx, payment); updateErr != nil {
+			return nil, fmt.Errorf("toss confirm failed: %w; update also failed: %w", err, updateErr)
+		}
 		return nil, fmt.Errorf("toss confirm failed: %w", err)
 	}
 
 	// Update payment
 	now := time.Now()
 	payment.ExternalPayID = req.PaymentKey
-	payment.Status = "confirmed"
+	payment.Status = paymentStatusConfirmed
 	payment.ConfirmedAt = &now
 	if method, ok := tossResp["method"].(string); ok {
 		payment.Method = method
@@ -147,8 +156,8 @@ func (s *PaymentService) HandleTossWebhook(ctx context.Context, payload *domain.
 }
 
 func (s *PaymentService) handleTossStatusChange(ctx context.Context, data map[string]interface{}) error {
-	paymentKey, _ := data["paymentKey"].(string)
-	status, _ := data["status"].(string)
+	paymentKey, _ := data["paymentKey"].(string) //nolint:errcheck // type assertion, not error
+	status, _ := data["status"].(string)         //nolint:errcheck // type assertion, not error
 
 	if paymentKey == "" {
 		return fmt.Errorf("missing paymentKey in webhook")
@@ -162,11 +171,11 @@ func (s *PaymentService) handleTossStatusChange(ctx context.Context, data map[st
 	switch status {
 	case "DONE":
 		now := time.Now()
-		payment.Status = "confirmed"
+		payment.Status = paymentStatusConfirmed
 		payment.ConfirmedAt = &now
 		s.onPaymentConfirmed(ctx, payment)
 	case "CANCELED":
-		payment.Status = "canceled"
+		payment.Status = paymentStatusCanceled
 	case "ABORTED", "EXPIRED":
 		payment.Status = "failed"
 		payment.FailReason = status
@@ -207,8 +216,8 @@ func (s *PaymentService) CreateStripeCheckout(ctx context.Context, req *domain.S
 		return nil, fmt.Errorf("stripe checkout creation failed: %w", err)
 	}
 
-	sessionID, _ := resp["id"].(string)
-	sessionURL, _ := resp["url"].(string)
+	sessionID, _ := resp["id"].(string)   //nolint:errcheck // type assertion, not error
+	sessionURL, _ := resp["url"].(string) //nolint:errcheck // type assertion, not error
 
 	return map[string]string{
 		"session_id":   sessionID,
@@ -237,8 +246,8 @@ func (s *PaymentService) HandleStripeWebhook(ctx context.Context, eventType stri
 }
 
 func (s *PaymentService) handleStripeCheckoutCompleted(ctx context.Context, data map[string]interface{}) error {
-	metadata, _ := data["metadata"].(map[string]interface{})
-	orderID, _ := metadata["order_id"].(string)
+	metadata, _ := data["metadata"].(map[string]interface{}) //nolint:errcheck // type assertion, not error
+	orderID, _ := metadata["order_id"].(string)              //nolint:errcheck // type assertion, not error
 
 	if orderID == "" {
 		return nil
@@ -250,7 +259,7 @@ func (s *PaymentService) handleStripeCheckoutCompleted(ctx context.Context, data
 	}
 
 	now := time.Now()
-	payment.Status = "confirmed"
+	payment.Status = paymentStatusConfirmed
 	payment.ConfirmedAt = &now
 	if subID, ok := data["subscription"].(string); ok {
 		payment.ExternalPayID = subID
@@ -260,8 +269,8 @@ func (s *PaymentService) handleStripeCheckoutCompleted(ctx context.Context, data
 	return s.paymentRepo.Update(ctx, payment)
 }
 
-func (s *PaymentService) handleStripeInvoicePaid(ctx context.Context, data map[string]interface{}) error {
-	subID, _ := data["subscription"].(string)
+func (s *PaymentService) handleStripeInvoicePaid(_ context.Context, data map[string]interface{}) error {
+	subID, _ := data["subscription"].(string) //nolint:errcheck // type assertion, not error
 	if subID == "" {
 		return nil
 	}
@@ -272,14 +281,14 @@ func (s *PaymentService) handleStripeInvoicePaid(ctx context.Context, data map[s
 		return nil
 	}
 
-	sub.Status = "active"
+	sub.Status = paymentStatusActive
 	sub.CurrentPeriodStart = time.Now()
 	sub.CurrentPeriodEnd = time.Now().AddDate(0, 1, 0)
 	return s.db.Save(&sub).Error
 }
 
-func (s *PaymentService) handleStripePaymentFailed(ctx context.Context, data map[string]interface{}) error {
-	subID, _ := data["subscription"].(string)
+func (s *PaymentService) handleStripePaymentFailed(_ context.Context, data map[string]interface{}) error {
+	subID, _ := data["subscription"].(string) //nolint:errcheck // type assertion, not error
 	if subID == "" {
 		return nil
 	}
@@ -293,8 +302,8 @@ func (s *PaymentService) handleStripePaymentFailed(ctx context.Context, data map
 	return s.db.Save(&sub).Error
 }
 
-func (s *PaymentService) handleStripeSubscriptionCanceled(ctx context.Context, data map[string]interface{}) error {
-	subID, _ := data["id"].(string)
+func (s *PaymentService) handleStripeSubscriptionCanceled(_ context.Context, data map[string]interface{}) error {
+	subID, _ := data["id"].(string) //nolint:errcheck // type assertion, not error
 	if subID == "" {
 		return nil
 	}
@@ -305,7 +314,7 @@ func (s *PaymentService) handleStripeSubscriptionCanceled(ctx context.Context, d
 	}
 
 	now := time.Now()
-	sub.Status = "canceled"
+	sub.Status = paymentStatusCanceled
 	sub.CanceledAt = &now
 	return s.db.Save(&sub).Error
 }
@@ -319,7 +328,7 @@ func (s *PaymentService) RefundPayment(ctx context.Context, req *domain.RefundRe
 		return nil, fmt.Errorf("payment not found")
 	}
 
-	if payment.Status != "confirmed" {
+	if payment.Status != paymentStatusConfirmed {
 		return nil, fmt.Errorf("can only refund confirmed payments")
 	}
 
@@ -381,20 +390,20 @@ func (s *PaymentService) GetPayment(ctx context.Context, orderID string) (*domai
 
 // --- Internal helpers ---
 
-func (s *PaymentService) onPaymentConfirmed(ctx context.Context, payment *domain.Payment) {
+func (s *PaymentService) onPaymentConfirmed(_ context.Context, payment *domain.Payment) {
 	// Update related invoice if exists
 	if payment.InvoiceID != nil {
-		s.db.Model(&domain.Invoice{}).Where("id = ?", *payment.InvoiceID).Updates(map[string]interface{}{
+		_ = s.db.Model(&domain.Invoice{}).Where("id = ?", *payment.InvoiceID).Updates(map[string]interface{}{
 			"status":  "paid",
 			"paid_at": time.Now(),
-		})
+		}).Error
 	}
 
 	// Activate subscription
-	s.db.Model(&domain.Subscription{}).Where("site_id = ?", payment.SiteID).Updates(map[string]interface{}{
-		"status":           "active",
+	_ = s.db.Model(&domain.Subscription{}).Where("site_id = ?", payment.SiteID).Updates(map[string]interface{}{
+		"status":           paymentStatusActive,
 		"payment_provider": string(payment.Provider),
-	})
+	}).Error
 }
 
 func (s *PaymentService) scheduleRetry(payment *domain.Payment) {
@@ -408,8 +417,8 @@ func (s *PaymentService) scheduleRetry(payment *domain.Payment) {
 }
 
 func (s *PaymentService) tossRequest(method, path, body string) (map[string]interface{}, error) {
-	url := s.tossBaseURL + path
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	reqURL := s.tossBaseURL + path
+	req, err := http.NewRequestWithContext(context.Background(), method, reqURL, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -424,12 +433,17 @@ func (s *PaymentService) tossRequest(method, path, body string) (map[string]inte
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read toss response body: %w", err)
+	}
 	var result map[string]interface{}
-	json.Unmarshal(respBody, &result)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("parse toss response: %w", err)
+	}
 
 	if resp.StatusCode >= 400 {
-		errMsg, _ := result["message"].(string)
+		errMsg, _ := result["message"].(string) //nolint:errcheck // type assertion, not error
 		return nil, fmt.Errorf("toss API error (%d): %s", resp.StatusCode, errMsg)
 	}
 
@@ -437,8 +451,8 @@ func (s *PaymentService) tossRequest(method, path, body string) (map[string]inte
 }
 
 func (s *PaymentService) stripeRequest(method, path, body string) (map[string]interface{}, error) {
-	url := "https://api.stripe.com" + path
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	reqURL := "https://api.stripe.com" + path
+	req, err := http.NewRequestWithContext(context.Background(), method, reqURL, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -453,13 +467,18 @@ func (s *PaymentService) stripeRequest(method, path, body string) (map[string]in
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read stripe response body: %w", err)
+	}
 	var result map[string]interface{}
-	json.Unmarshal(respBody, &result)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("parse stripe response: %w", err)
+	}
 
 	if resp.StatusCode >= 400 {
 		if errObj, ok := result["error"].(map[string]interface{}); ok {
-			msg, _ := errObj["message"].(string)
+			msg, _ := errObj["message"].(string) //nolint:errcheck // type assertion, not error
 			return nil, fmt.Errorf("stripe API error (%d): %s", resp.StatusCode, msg)
 		}
 		return nil, fmt.Errorf("stripe API error (%d)", resp.StatusCode)
@@ -470,13 +489,19 @@ func (s *PaymentService) stripeRequest(method, path, body string) (map[string]in
 
 func generateOrderID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: use timestamp-only order ID if crypto/rand fails
+		return fmt.Sprintf("ORD_%d", time.Now().UnixNano())
+	}
 	return fmt.Sprintf("ORD_%s_%d", hex.EncodeToString(b[:8]), time.Now().UnixMilli())
 }
 
 func generateIdempotencyKey() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: use timestamp-based key if crypto/rand fails
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)
 }
 

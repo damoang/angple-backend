@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
@@ -39,7 +40,10 @@ func (s *scrapService) AddScrap(mbID string, boardID string, wrID int) (*domain.
 		return nil, err
 	}
 
-	title, author, _ := s.repo.GetPostTitle(boardID, wrID)
+	title, author, err := s.repo.GetPostTitle(boardID, wrID)
+	if err != nil {
+		log.Printf("warning: failed to get post title for board=%s wr=%d: %v", boardID, wrID, err)
+	}
 
 	return &domain.ScrapResponse{
 		ScrapID:   scrap.ID,
@@ -72,7 +76,10 @@ func (s *scrapService) ListScraps(mbID string, page, limit int) ([]*domain.Scrap
 
 	responses := make([]*domain.ScrapResponse, len(scraps))
 	for i, sc := range scraps {
-		title, author, _ := s.repo.GetPostTitle(sc.BoTable, sc.WrID)
+		title, author, err := s.repo.GetPostTitle(sc.BoTable, sc.WrID)
+		if err != nil {
+			log.Printf("warning: failed to get post title for board=%s wr=%d: %v", sc.BoTable, sc.WrID, err)
+		}
 		responses[i] = &domain.ScrapResponse{
 			ScrapID:   sc.ID,
 			BoardID:   sc.BoTable,

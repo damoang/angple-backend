@@ -75,7 +75,8 @@ func (h *TenantHandler) SuspendTenant(c *gin.Context) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	// Reason is optional; ignore bind errors (body may be empty)
+	_ = c.ShouldBindJSON(&req) //nolint:errcheck // optional body
 
 	if err := h.tenantService.SuspendTenant(c.Request.Context(), siteID, req.Reason); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)

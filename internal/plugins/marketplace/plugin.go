@@ -143,7 +143,7 @@ func (p *Plugin) GetManifest() *plugin.PluginManifest {
 }
 
 // Migrate DB 마이그레이션 실행
-func (p *Plugin) Migrate(db *gorm.DB) error {
+func (p *Plugin) Migrate(_ *gorm.DB) error {
 	// 마이그레이션은 SQL 파일로 처리
 	return nil
 }

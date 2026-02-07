@@ -28,7 +28,10 @@ func (h *MediaHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	maxWidth, _ := strconv.Atoi(c.DefaultPostForm("max_width", "1920"))
+	maxWidth := 1920
+	if val, err := strconv.Atoi(c.DefaultPostForm("max_width", "1920")); err == nil {
+		maxWidth = val
+	}
 
 	result, err := h.mediaService.UploadImage(c.Request.Context(), file, maxWidth)
 	if err != nil {

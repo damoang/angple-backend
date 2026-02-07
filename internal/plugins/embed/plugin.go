@@ -3,7 +3,6 @@ package embed
 import (
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/gin-gonic/gin"
@@ -134,12 +133,12 @@ func (p *Plugin) GetManifest() *plugin.PluginManifest {
 }
 
 // Migrate DB 마이그레이션 (필요 없음)
-func (p *Plugin) Migrate(db *gorm.DB) error {
+func (p *Plugin) Migrate(_ *gorm.DB) error {
 	return nil
 }
 
 // RegisterRoutes 라우트 등록 (필요 없음)
-func (p *Plugin) RegisterRoutes(router gin.IRouter) {
+func (p *Plugin) RegisterRoutes(_ gin.IRouter) {
 }
 
 // RegisterHooks Hook 등록 (HookAware 인터페이스)
@@ -252,13 +251,4 @@ func (p *Plugin) calculateHeight() int {
 	default: // 16:9
 		return p.maxWidth * 9 / 16
 	}
-}
-
-// escapeHTML HTML 특수문자 이스케이프
-func escapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, `"`, "&quot;")
-	return s
 }

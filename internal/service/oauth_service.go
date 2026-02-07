@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,7 +29,9 @@ type OAuthService struct {
 // NewOAuthService creates a new OAuthService
 func NewOAuthService(db *gorm.DB, jwtManager *jwt.Manager) *OAuthService {
 	if db != nil {
-		_ = db.AutoMigrate(&domain.OAuthAccount{})
+		if err := db.AutoMigrate(&domain.OAuthAccount{}); err != nil {
+			pkglogger.GetLogger().Warn().Err(err).Msg("failed to auto-migrate OAuthAccount")
+		}
 	}
 	return &OAuthService{
 		db:         db,
@@ -98,7 +101,11 @@ func (s *OAuthService) HandleCallback(ctx context.Context, provider domain.OAuth
 	}
 
 	// Get user info from provider
-	userInfo, err := s.getUserInfo(provider, tokenResp["access_token"].(string))
+	accessTokenVal, ok := tokenResp["access_token"].(string)
+	if !ok {
+		return nil, fmt.Errorf("access_token not found or not a string in token response")
+	}
+	userInfo, err := s.getUserInfo(provider, accessTokenVal)
 	if err != nil {
 		return nil, fmt.Errorf("get user info failed: %w", err)
 	}
@@ -108,7 +115,7 @@ func (s *OAuthService) HandleCallback(ctx context.Context, provider domain.OAuth
 	result := s.db.WithContext(ctx).Where("provider = ? AND provider_uid = ?", provider, userInfo.ProviderUID).First(&oauthAccount)
 
 	isNewUser := false
-	if result.Error == gorm.ErrRecordNotFound {
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		// New OAuth user — create account
 		isNewUser = true
 		oauthAccount = domain.OAuthAccount{
@@ -118,7 +125,7 @@ func (s *OAuthService) HandleCallback(ctx context.Context, provider domain.OAuth
 			Email:        userInfo.Email,
 			Name:         userInfo.Name,
 			ProfileImage: userInfo.ProfileImage,
-			AccessToken:  tokenResp["access_token"].(string),
+			AccessToken:  accessTokenVal,
 		}
 		if rt, ok := tokenResp["refresh_token"].(string); ok {
 			oauthAccount.RefreshToken = rt
@@ -138,7 +145,9 @@ func (s *OAuthService) HandleCallback(ctx context.Context, provider domain.OAuth
 		if rt, ok := tokenResp["refresh_token"].(string); ok && rt != "" {
 			updates["refresh_token"] = rt
 		}
-		s.db.WithContext(ctx).Model(&oauthAccount).Updates(updates)
+		if err := s.db.WithContext(ctx).Model(&oauthAccount).Updates(updates).Error; err != nil {
+			return nil, fmt.Errorf("update oauth account failed: %w", err)
+		}
 	}
 
 	// Generate JWT tokens
@@ -170,31 +179,41 @@ func (s *OAuthService) exchangeCode(provider domain.OAuthProvider, cfg *domain.O
 
 	switch provider {
 	case domain.OAuthProviderNaver:
-		tokenURL = "https://nid.naver.com/oauth2.0/token"
+		tokenURL = "https://nid.naver.com/oauth2.0/token" //nolint:gosec // credential variable name, not actual credentials
 		params.Set("client_id", cfg.ClientID)
-		params.Set("client_secret", cfg.ClientSecret)
+		params.Set("client_secret", cfg.ClientSecret) //nolint:gosec // credential variable name, not actual credentials
 
 	case domain.OAuthProviderKakao:
-		tokenURL = "https://kauth.kakao.com/oauth/token"
+		tokenURL = "https://kauth.kakao.com/oauth/token" //nolint:gosec // credential variable name, not actual credentials
 		params.Set("client_id", cfg.ClientID)
-		params.Set("client_secret", cfg.ClientSecret)
+		params.Set("client_secret", cfg.ClientSecret) //nolint:gosec // credential variable name, not actual credentials
 
 	case domain.OAuthProviderGoogle:
-		tokenURL = "https://oauth2.googleapis.com/token"
+		tokenURL = "https://oauth2.googleapis.com/token" //nolint:gosec // credential variable name, not actual credentials
 		params.Set("client_id", cfg.ClientID)
-		params.Set("client_secret", cfg.ClientSecret)
+		params.Set("client_secret", cfg.ClientSecret) //nolint:gosec // credential variable name, not actual credentials
 
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
 
-	resp, err := http.PostForm(tokenURL, params)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenURL, strings.NewReader(params.Encode())) //nolint:gosec // URL is from OAuth provider config, not user input
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read token response body failed: %w", err)
+	}
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("parse token response failed: %w", err)
@@ -222,7 +241,10 @@ func (s *OAuthService) getUserInfo(provider domain.OAuthProvider, accessToken st
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
 
-	req, _ := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, apiURL, nil) //nolint:gosec // URL is from OAuth provider config, not user input
+	if err != nil {
+		return nil, fmt.Errorf("create user info request failed: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -232,7 +254,10 @@ func (s *OAuthService) getUserInfo(provider domain.OAuthProvider, accessToken st
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read user info response body failed: %w", err)
+	}
 	var raw map[string]interface{}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, err
@@ -252,27 +277,27 @@ func (s *OAuthService) parseUserInfo(provider domain.OAuthProvider, raw map[stri
 			return nil, fmt.Errorf("invalid naver response")
 		}
 		info.ProviderUID = fmt.Sprintf("%v", response["id"])
-		info.Email, _ = response["email"].(string)
-		info.Name, _ = response["name"].(string)
-		info.Nickname, _ = response["nickname"].(string)
-		info.ProfileImage, _ = response["profile_image"].(string)
+		info.Email, _ = response["email"].(string)                //nolint:errcheck // type assertion, not error
+		info.Name, _ = response["name"].(string)                  //nolint:errcheck // type assertion, not error
+		info.Nickname, _ = response["nickname"].(string)          //nolint:errcheck // type assertion, not error
+		info.ProfileImage, _ = response["profile_image"].(string) //nolint:errcheck // type assertion, not error
 
 	case domain.OAuthProviderKakao:
 		info.ProviderUID = fmt.Sprintf("%v", raw["id"])
 		if account, ok := raw["kakao_account"].(map[string]interface{}); ok {
-			info.Email, _ = account["email"].(string)
+			info.Email, _ = account["email"].(string) //nolint:errcheck // type assertion, not error
 			if profile, ok := account["profile"].(map[string]interface{}); ok {
-				info.Nickname, _ = profile["nickname"].(string)
-				info.ProfileImage, _ = profile["profile_image_url"].(string)
+				info.Nickname, _ = profile["nickname"].(string)              //nolint:errcheck // type assertion, not error
+				info.ProfileImage, _ = profile["profile_image_url"].(string) //nolint:errcheck // type assertion, not error
 			}
 		}
 		info.Name = info.Nickname
 
 	case domain.OAuthProviderGoogle:
 		info.ProviderUID = fmt.Sprintf("%v", raw["id"])
-		info.Email, _ = raw["email"].(string)
-		info.Name, _ = raw["name"].(string)
-		info.ProfileImage, _ = raw["picture"].(string)
+		info.Email, _ = raw["email"].(string)          //nolint:errcheck // type assertion, not error
+		info.Name, _ = raw["name"].(string)            //nolint:errcheck // type assertion, not error
+		info.ProfileImage, _ = raw["picture"].(string) //nolint:errcheck // type assertion, not error
 	}
 
 	if info.ProviderUID == "" {
@@ -289,7 +314,9 @@ func (s *OAuthService) GenerateAPIKey(ctx context.Context, userID, name, scopes 
 	if s.db == nil {
 		return nil, fmt.Errorf("database not available")
 	}
-	_ = s.db.AutoMigrate(&domain.APIKey{})
+	if err := s.db.AutoMigrate(&domain.APIKey{}); err != nil {
+		pkglogger.GetLogger().Warn().Err(err).Msg("failed to auto-migrate APIKey")
+	}
 
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -335,7 +362,9 @@ func (s *OAuthService) ValidateAPIKey(ctx context.Context, key string) (*domain.
 
 	// Update last used
 	now := time.Now()
-	s.db.WithContext(ctx).Model(&apiKey).Update("last_used_at", now)
+	if err := s.db.WithContext(ctx).Model(&apiKey).Update("last_used_at", now).Error; err != nil {
+		return nil, fmt.Errorf("update last used: %w", err)
+	}
 
 	return &apiKey, nil
 }

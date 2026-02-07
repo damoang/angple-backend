@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"log"
 	"math"
 	"time"
 
@@ -42,7 +43,10 @@ func (s *NotificationService) CreateAndBroadcast(memberID, nType, title, content
 
 	// Push via WebSocket if hub is available
 	if s.hub != nil {
-		unreadCount, _ := s.repo.GetUnreadCount(memberID)
+		unreadCount, err := s.repo.GetUnreadCount(memberID)
+		if err != nil {
+			log.Printf("cache warning: failed to get unread count: %v", err)
+		}
 		s.hub.SendToMember(memberID, &ws.Event{
 			Type: "notification",
 			Payload: map[string]interface{}{

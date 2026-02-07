@@ -146,7 +146,7 @@ func (b *Bundle) SupportedLocales() []Locale {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	var locales []Locale
+	locales := make([]Locale, 0, len(b.translations))
 	for l := range b.translations {
 		locales = append(locales, l)
 	}

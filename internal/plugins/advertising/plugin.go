@@ -19,7 +19,7 @@ func init() {
 }
 
 // AdvertisingPlugin 광고 관리 플러그인
-type AdvertisingPlugin struct {
+type AdvertisingPlugin struct { //nolint:revive // plugin identifier naming convention
 	db            *gorm.DB
 	redis         *redis.Client
 	logger        plugin.Logger

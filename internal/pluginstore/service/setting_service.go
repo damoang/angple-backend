@@ -121,7 +121,7 @@ func (s *SettingService) SaveSettings(pluginName string, settings map[string]str
 	}
 
 	// 이벤트 로그
-	detailsJSON, _ := json.Marshal(settings)
+	detailsJSON, _ := json.Marshal(settings) //nolint:errcheck // marshal of map[string]string always succeeds
 	detailsStr := string(detailsJSON)
 	event := &domain.PluginEvent{
 		PluginName: pluginName,
@@ -129,7 +129,7 @@ func (s *SettingService) SaveSettings(pluginName string, settings map[string]str
 		Details:    &detailsStr,
 		ActorID:    &actorID,
 	}
-	_ = s.eventRepo.Create(event)
+	_ = s.eventRepo.Create(event) //nolint:errcheck // event logging is best-effort
 
 	// 설정 변경 후 플러그인 자동 리로드
 	if s.reloader != nil {
@@ -209,7 +209,8 @@ func (s *SettingService) ExportSettings(pluginName string) (*PluginConfigExport,
 
 // ImportSettings 플러그인 설정 가져오기
 func (s *SettingService) ImportSettings(exports []PluginConfigExport, actorID string) ([]string, []string) {
-	var imported, skipped []string
+	imported := make([]string, 0, len(exports))
+	var skipped []string
 
 	for _, export := range exports {
 		manifest := s.catalogSvc.GetManifest(export.PluginName)

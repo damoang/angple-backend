@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -110,9 +111,13 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 			"level":    member.Level,
 			"email":    member.Email,
 		}
-		_ = s.cache.SetSession(context.Background(), member.UserID, sessionData)
+		if err := s.cache.SetSession(context.Background(), member.UserID, sessionData); err != nil {
+			log.Printf("cache warning: failed to set session: %v", err)
+		}
 		// Also cache user profile for faster profile lookups
-		_ = s.cache.SetUser(context.Background(), member.UserID, member.ToProfileResponse())
+		if err := s.cache.SetUser(context.Background(), member.UserID, member.ToProfileResponse()); err != nil {
+			log.Printf("cache warning: failed to set user: %v", err)
+		}
 	}
 
 	// 6. Fire after_login hook

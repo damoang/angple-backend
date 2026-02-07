@@ -55,11 +55,11 @@ type mockPlugin struct {
 	shutdown    bool
 }
 
-func (m *mockPlugin) Name() string                               { return m.name }
-func (m *mockPlugin) Migrate(db *gorm.DB) error                  { return nil }
-func (m *mockPlugin) Initialize(ctx *plugin.PluginContext) error { m.initialized = true; return nil }
-func (m *mockPlugin) RegisterRoutes(router gin.IRouter)          {}
-func (m *mockPlugin) Shutdown() error                            { m.shutdown = true; return nil }
+func (m *mockPlugin) Name() string                             { return m.name }
+func (m *mockPlugin) Migrate(_ *gorm.DB) error                 { return nil }
+func (m *mockPlugin) Initialize(_ *plugin.PluginContext) error { m.initialized = true; return nil }
+func (m *mockPlugin) RegisterRoutes(_ gin.IRouter)             {}
+func (m *mockPlugin) Shutdown() error                          { m.shutdown = true; return nil }
 
 func TestInstallPlugin(t *testing.T) {
 	storeSvc, _, manager := setupStoreService(t)

@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -82,7 +82,10 @@ func Cache(redisClient *redis.Client, cfg CacheConfig) gin.HandlerFunc {
 				Headers: headers,
 				Body:    string(w.body),
 			}
-			data, _ := json.Marshal(cached)
+			data, err := json.Marshal(cached)
+			if err != nil {
+				return
+			}
 			redisClient.Set(ctx, key, data, cfg.TTL)
 		}
 
@@ -114,7 +117,7 @@ func cacheKey(path, query string) string {
 	if query != "" {
 		raw += "?" + query
 	}
-	return fmt.Sprintf("%x", md5.Sum([]byte(raw)))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
 }
 
 // responseWriter captures the response body

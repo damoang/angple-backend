@@ -129,7 +129,7 @@ func (h *AdminHandler) CreateAdUnit(c *gin.Context) {
 // @Failure      404  {object}  common.APIResponse
 // @Failure      500  {object}  common.APIResponse
 // @Router       /plugins/advertising/admin/units/{id} [put]
-func (h *AdminHandler) UpdateAdUnit(c *gin.Context) {
+func (h *AdminHandler) UpdateAdUnit(c *gin.Context) { //nolint:dupl
 	id, err := h.parseID(c, "id")
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid ad unit ID", err)
@@ -292,7 +292,7 @@ func (h *AdminHandler) CreateBanner(c *gin.Context) {
 // @Failure      404  {object}  common.APIResponse
 // @Failure      500  {object}  common.APIResponse
 // @Router       /plugins/advertising/admin/banners/{id} [put]
-func (h *AdminHandler) UpdateBanner(c *gin.Context) {
+func (h *AdminHandler) UpdateBanner(c *gin.Context) { //nolint:dupl
 	id, err := h.parseID(c, "id")
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid banner ID", err)
