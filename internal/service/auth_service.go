@@ -236,11 +236,12 @@ func (s *authService) GetUserInfo(userID string) (*UserInfo, error) {
 		return nil, common.ErrUserNotFound
 	}
 
-	// 프로필 이미지 URL 생성 (그누보드 형식: data/member/xx/user_id.gif)
-	// xx는 user_id의 처음 2글자
+	// 프로필 이미지 URL: S3 URL(mb_image_url) 우선, 없으면 레거시 경로 폴백
 	mbImage := ""
-	if len(userID) >= 2 {
-		mbImage = fmt.Sprintf("https://damoang.net/data/member/%s/%s.gif", userID[:2], userID)
+	if member.ImageURL != "" {
+		mbImage = "https://s3.damoang.net/" + member.ImageURL
+	} else if len(userID) >= 2 {
+		mbImage = fmt.Sprintf("https://damoang.net/data/member_image/%s/%s.gif", userID[:2], userID)
 	}
 
 	return &UserInfo{

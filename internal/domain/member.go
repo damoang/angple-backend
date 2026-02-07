@@ -51,6 +51,7 @@ type Member struct {
 	AsExp         int       `gorm:"column:as_exp" json:"as_exp"`
 	AsLevel       int       `gorm:"column:as_level" json:"as_level"`
 	AsMax         int       `gorm:"column:as_max" json:"as_max"`
+	ImageURL      string    `gorm:"column:mb_image_url" json:"mb_image_url,omitempty"`
 }
 
 func (Member) TableName() string {
