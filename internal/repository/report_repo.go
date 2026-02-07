@@ -127,6 +127,20 @@ func (r *ReportRepository) UpdateStatus(id int, status, processedBy string) erro
 		Updates(updates).Error
 }
 
+// UpdateStatusApproved updates report to approved status with discipline_log_id in one atomic update
+func (r *ReportRepository) UpdateStatusApproved(id int, processedBy string, disciplineLogID int) error {
+	return r.db.Model(&domain.Report{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"processed":          true,
+			"admin_approved":     true,
+			"admin_datetime":     gorm.Expr("NOW()"),
+			"processed_datetime": gorm.Expr("NOW()"),
+			"admin_users":        processedBy,
+			"discipline_log_id":  disciplineLogID,
+		}).Error
+}
+
 // Delete deletes a report
 func (r *ReportRepository) Delete(id int) error {
 	return r.db.Where("id = ?", id).Delete(&domain.Report{}).Error

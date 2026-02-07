@@ -73,12 +73,18 @@ type SubmitReportRequest struct {
 
 // ReportActionRequest represents request for report action
 type ReportActionRequest struct {
-	Action  string   `json:"action"` // submitOpinion, cancelOpinion, adminApprove, adminDismiss
+	Action  string   `json:"action"` // submitOpinion, cancelOpinion, adminApprove, adminDismiss, adminHold
 	Table   string   `json:"sg_table"`
-	ID      int      `json:"sg_id"`
+	SGID    int      `json:"sg_id"`
 	Parent  int      `json:"sg_parent"`
 	Reasons []string `json:"reasons,omitempty"`
 	Days    int      `json:"days,omitempty"`
 	Type    string   `json:"type,omitempty"`
 	Detail  string   `json:"detail,omitempty"`
+	// Frontend fields (singo 앱에서 전송하는 필드)
+	ReportID       int      `json:"id,omitempty"`              // 신고 primary key (g5_na_singo.id)
+	AdminMemo      string   `json:"adminMemo,omitempty"`       // 관리자 메모
+	PenaltyDays    int      `json:"penalty_days,omitempty"`    // 제한 일수: 0=주의, 9999=영구
+	PenaltyType    []string `json:"penalty_type,omitempty"`    // ["level", "intercept"]
+	PenaltyReasons []string `json:"penalty_reasons,omitempty"` // 사유 코드 (21-40)
 }

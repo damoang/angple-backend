@@ -195,6 +195,7 @@ func (h *ReportHandler) ProcessReport(c *gin.Context) {
 	}
 
 	adminID := middleware.GetDamoangUserID(c)
+	clientIP := c.ClientIP()
 
 	var req domain.ReportActionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -203,7 +204,7 @@ func (h *ReportHandler) ProcessReport(c *gin.Context) {
 	}
 
 	// Process report
-	if err := h.service.Process(adminID, &req); err != nil {
+	if err := h.service.Process(adminID, clientIP, &req); err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
 		return
 	}

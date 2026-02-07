@@ -209,7 +209,7 @@ func TestReportActionRequestFields(t *testing.T) {
 		req := &domain.ReportActionRequest{
 			Action:  "adminApprove",
 			Table:   "free",
-			ID:      1,
+			SGID:    1,
 			Parent:  100,
 			Reasons: []string{"spam"},
 			Days:    7,
@@ -218,7 +218,7 @@ func TestReportActionRequestFields(t *testing.T) {
 		}
 		assert.Equal(t, "adminApprove", req.Action)
 		assert.Equal(t, "free", req.Table)
-		assert.Equal(t, 1, req.ID)
+		assert.Equal(t, 1, req.SGID)
 		assert.Equal(t, 100, req.Parent)
 		assert.Equal(t, []string{"spam"}, req.Reasons)
 		assert.Equal(t, 7, req.Days)
