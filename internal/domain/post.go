@@ -64,6 +64,8 @@ type PostResponse struct {
 	Author        string    `json:"author"`
 	AuthorID      string    `json:"author_id"`
 	AuthorIP      string    `json:"author_ip,omitempty"` // 마스킹된 IP (예: 123.456.*.*)
+	Link1         string    `json:"link1,omitempty"`
+	Link2         string    `json:"link2,omitempty"`
 	ID            int       `json:"id"`
 	Views         int       `json:"views"`
 	Likes         int       `json:"likes"`
@@ -81,6 +83,8 @@ func (p *Post) ToResponse() *PostResponse {
 		Author:        p.Author,
 		AuthorID:      p.AuthorID,
 		AuthorIP:      maskIP(p.IP),
+		Link1:         p.Link1,
+		Link2:         p.Link2,
 		Views:         p.Views,
 		Likes:         p.Likes,
 		Dislikes:      p.Dislikes,
