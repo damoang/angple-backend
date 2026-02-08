@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -64,6 +65,7 @@ type PostResponse struct {
 	Author        string    `json:"author"`
 	AuthorID      string    `json:"author_id"`
 	AuthorIP      string    `json:"author_ip,omitempty"` // 마스킹된 IP (예: 123.456.*.*)
+	Thumbnail     string    `json:"thumbnail,omitempty"` // 본문 첫 번째 이미지 URL
 	Link1         string    `json:"link1,omitempty"`
 	Link2         string    `json:"link2,omitempty"`
 	ID            int       `json:"id"`
@@ -72,6 +74,18 @@ type PostResponse struct {
 	Dislikes      int       `json:"dislikes"`
 	CommentsCount int       `json:"comments_count"`
 	HasFile       bool      `json:"has_file"`
+}
+
+// imgSrcRegex extracts src from <img> tags
+var imgSrcRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
+
+// extractFirstImage extracts the first image URL from HTML content
+func extractFirstImage(html string) string {
+	matches := imgSrcRegex.FindStringSubmatch(html)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+	return ""
 }
 
 func (p *Post) ToResponse() *PostResponse {
@@ -83,6 +97,7 @@ func (p *Post) ToResponse() *PostResponse {
 		Author:        p.Author,
 		AuthorID:      p.AuthorID,
 		AuthorIP:      maskIP(p.IP),
+		Thumbnail:     extractFirstImage(p.Content),
 		Link1:         p.Link1,
 		Link2:         p.Link2,
 		Views:         p.Views,

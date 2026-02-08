@@ -8,7 +8,9 @@ type BoardFile struct {
 	BoardID  string    `gorm:"column:bo_table;primaryKey;size:20" json:"board_id"`
 	Source   string    `gorm:"column:bf_source;size:255" json:"source"`
 	File     string    `gorm:"column:bf_file;size:255" json:"file"`
+	FileURL  string    `gorm:"column:bf_fileurl;size:255" json:"file_url"`
 	Content  string    `gorm:"column:bf_content;type:text" json:"content"`
+	Storage  string    `gorm:"column:bf_storage;size:50" json:"storage"`
 	WriteID  int       `gorm:"column:wr_id;primaryKey" json:"write_id"`
 	FileNo   int       `gorm:"column:bf_no;primaryKey" json:"file_no"`
 	Download int       `gorm:"column:bf_download;default:0" json:"download"`

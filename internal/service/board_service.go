@@ -218,6 +218,67 @@ func addUpdate[T any](updates map[string]interface{}, key string, value *T) {
 	}
 }
 
+// GetBoardDisplaySettings - 게시판 표시 설정 조회 (v2_board_display_settings 테이블)
+// v2 별도 테이블에서 설정을 조회하며, 없으면 기본값 반환
+func (s *BoardService) GetBoardDisplaySettings(boardID string) domain.BoardDisplaySettings {
+	settings, err := s.repo.FindDisplaySettings(boardID)
+	if err != nil || settings == nil {
+		return domain.DefaultBoardDisplaySettings()
+	}
+	return settings.ToDisplaySettings()
+}
+
+// SaveBoardDisplaySettings - 게시판 표시 설정 저장 (upsert)
+func (s *BoardService) SaveBoardDisplaySettings(boardID string, req *domain.UpdateDisplaySettingsRequest) (domain.BoardDisplaySettings, error) {
+	// 기존 설정 조회 (없으면 기본값으로 새로 생성)
+	existing, err := s.repo.FindDisplaySettings(boardID)
+	if err != nil {
+		return domain.BoardDisplaySettings{}, err
+	}
+
+	var model *domain.BoardDisplaySettingsModel
+	if existing != nil {
+		model = existing
+	} else {
+		model = &domain.BoardDisplaySettingsModel{
+			BoardID:       boardID,
+			ListLayout:    "compact",
+			ViewLayout:    "basic",
+			PreviewLength: 150,
+		}
+	}
+
+	// 요청 필드가 있으면 업데이트
+	if req.ListLayout != nil {
+		model.ListLayout = *req.ListLayout
+	}
+	if req.ViewLayout != nil {
+		model.ViewLayout = *req.ViewLayout
+	}
+	if req.ShowPreview != nil {
+		model.ShowPreview = *req.ShowPreview
+	}
+	if req.PreviewLength != nil {
+		model.PreviewLength = *req.PreviewLength
+	}
+	if req.ShowThumbnail != nil {
+		model.ShowThumbnail = *req.ShowThumbnail
+	}
+
+	if err := s.repo.SaveDisplaySettings(model); err != nil {
+		return domain.BoardDisplaySettings{}, err
+	}
+
+	// 게시판 캐시 무효화 (display settings가 변경되었으므로)
+	if s.cache != nil {
+		if err := s.cache.InvalidateBoard(context.Background(), boardID); err != nil {
+			log.Printf("cache warning: failed to invalidate board: %v", err)
+		}
+	}
+
+	return model.ToDisplaySettings(), nil
+}
+
 // DeleteBoard - 게시판 삭제 (관리자만 가능)
 func (s *BoardService) DeleteBoard(boardID string) error {
 	if err := s.repo.Delete(boardID); err != nil {

@@ -19,13 +19,18 @@ type PostService interface {
 }
 
 type postService struct {
-	repo  repository.PostRepository
-	hooks *plugin.HookManager
+	repo     repository.PostRepository
+	fileRepo repository.FileRepository
+	hooks    *plugin.HookManager
 }
 
 // NewPostService creates a new PostService
-func NewPostService(repo repository.PostRepository, hooks *plugin.HookManager) PostService {
-	return &postService{repo: repo, hooks: hooks}
+func NewPostService(repo repository.PostRepository, hooks *plugin.HookManager, fileRepo ...repository.FileRepository) PostService {
+	s := &postService{repo: repo, hooks: hooks}
+	if len(fileRepo) > 0 {
+		s.fileRepo = fileRepo[0]
+	}
+	return s
 }
 
 // ListPosts retrieves paginated posts
@@ -50,6 +55,9 @@ func (s *postService) ListPosts(boardID string, page, limit int) ([]*domain.Post
 		responses[i] = post.ToResponse()
 	}
 
+	// Batch-fill thumbnails from g5_board_file for posts missing inline images
+	s.fillThumbnailsFromFiles(boardID, posts, responses)
+
 	// Build metadata
 	meta := &common.Meta{
 		BoardID: boardID,
@@ -59,6 +67,40 @@ func (s *postService) ListPosts(boardID string, page, limit int) ([]*domain.Post
 	}
 
 	return responses, meta, nil
+}
+
+// fillThumbnailsFromFiles batch-loads thumbnails from g5_board_file
+// for posts that have attached files but no inline <img> in content
+func (s *postService) fillThumbnailsFromFiles(boardID string, posts []*domain.Post, responses []*domain.PostResponse) {
+	if s.fileRepo == nil {
+		return
+	}
+
+	// Collect post IDs that need file-based thumbnails
+	var needFileIDs []int
+	needFileIdx := map[int]int{} // postID -> index in responses
+	for i, post := range posts {
+		if responses[i].Thumbnail == "" && post.HasFile > 0 {
+			needFileIDs = append(needFileIDs, post.ID)
+			needFileIdx[post.ID] = i
+		}
+	}
+
+	if len(needFileIDs) == 0 {
+		return
+	}
+
+	// Single batch query (N+1 방지)
+	fileURLs, err := s.fileRepo.FindFirstFileURLs(boardID, needFileIDs)
+	if err != nil {
+		return // 파일 조회 실패해도 목록은 정상 반환
+	}
+
+	for postID, url := range fileURLs {
+		if idx, ok := needFileIdx[postID]; ok {
+			responses[idx].Thumbnail = url
+		}
+	}
 }
 
 // ListNotices retrieves notice posts
@@ -73,6 +115,9 @@ func (s *postService) ListNotices(boardID string) ([]*domain.PostResponse, error
 	for i, post := range posts {
 		responses[i] = post.ToResponse()
 	}
+
+	// Batch-fill thumbnails from g5_board_file
+	s.fillThumbnailsFromFiles(boardID, posts, responses)
 
 	return responses, nil
 }
@@ -261,6 +306,9 @@ func (s *postService) SearchPosts(boardID string, keyword string, page, limit in
 	for i, post := range posts {
 		responses[i] = post.ToResponse()
 	}
+
+	// Batch-fill thumbnails from g5_board_file
+	s.fillThumbnailsFromFiles(boardID, posts, responses)
 
 	// Build metadata
 	meta := &common.Meta{

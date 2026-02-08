@@ -78,6 +78,10 @@ func Setup(
 	boardsManagement.PUT("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.UpdateBoard)      // 게시판 수정 (관리자)
 	boardsManagement.DELETE("/:board_id", middleware.JWTAuth(jwtManager), boardHandler.DeleteBoard)   // 게시판 삭제 (관리자)
 
+	// 게시판 표시 설정 (Board Display Settings)
+	boardsManagement.GET("/:board_id/display-settings", boardHandler.GetDisplaySettings)                                    // 표시 설정 조회 (공개)
+	boardsManagement.PUT("/:board_id/display-settings", middleware.JWTAuth(jwtManager), boardHandler.UpdateDisplaySettings) // 표시 설정 수정 (관리자)
+
 	// Group별 게시판
 	groups := api.Group("/groups")
 	groups.GET("/:group_id/boards", boardHandler.ListBoardsByGroup)

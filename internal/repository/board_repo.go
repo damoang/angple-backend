@@ -180,6 +180,26 @@ func (r *BoardRepository) Delete(boardID string) error {
 	})
 }
 
+// FindDisplaySettings - 별도 테이블에서 게시판 표시 설정 조회 (SELECT only)
+func (r *BoardRepository) FindDisplaySettings(boardID string) (*domain.BoardDisplaySettingsModel, error) {
+	var settings domain.BoardDisplaySettingsModel
+	err := r.db.Where("board_id = ?", boardID).First(&settings).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil // 설정 없으면 nil (기본값 사용)
+		}
+		return nil, err
+	}
+
+	return &settings, nil
+}
+
+// SaveDisplaySettings - 게시판 표시 설정 저장 (upsert)
+func (r *BoardRepository) SaveDisplaySettings(settings *domain.BoardDisplaySettingsModel) error {
+	return r.db.Save(settings).Error
+}
+
 // Exists - 게시판 존재 여부 확인
 func (r *BoardRepository) Exists(boardID string) (bool, error) {
 	var count int64

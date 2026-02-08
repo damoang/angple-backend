@@ -286,7 +286,7 @@ func main() {
 
 		// Services
 		authService := service.NewAuthService(memberRepo, jwtManager, hookManager, cacheService)
-		postService := service.NewPostService(postRepo, hookManager)
+		postService := service.NewPostService(postRepo, hookManager, fileRepo)
 		commentService := service.NewCommentService(commentRepo, goodRepo, hookManager)
 		menuService := service.NewMenuService(menuRepo)
 		siteService := service.NewSiteService(siteRepo)

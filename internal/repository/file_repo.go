@@ -11,6 +11,9 @@ type FileRepository interface {
 	Create(file *domain.BoardFile) error
 	IncrementDownload(boardID string, wrID int, fileNo int) error
 	GetNextFileNo(boardID string, wrID int) (int, error)
+	// FindFirstFileURLs returns a map of postID -> first file URL for the given post IDs
+	// Uses bf_no=0 (first attached file) and prefers bf_fileurl over constructing from bf_file
+	FindFirstFileURLs(boardID string, postIDs []int) (map[int]string, error)
 }
 
 type fileRepository struct {
@@ -59,4 +62,30 @@ func (r *fileRepository) GetNextFileNo(boardID string, wrID int) (int, error) {
 		return 0, nil
 	}
 	return *maxNo + 1, nil
+}
+
+// FindFirstFileURLs batch-loads the first file URL for multiple posts (N+1 방지)
+func (r *fileRepository) FindFirstFileURLs(boardID string, postIDs []int) (map[int]string, error) {
+	if len(postIDs) == 0 {
+		return map[int]string{}, nil
+	}
+
+	var files []domain.BoardFile
+	err := r.db.Where("bo_table = ? AND wr_id IN ? AND bf_no = 0", boardID, postIDs).
+		Select("wr_id, bf_file, bf_fileurl").
+		Find(&files).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int]string, len(files))
+	for _, f := range files {
+		if f.FileURL != "" {
+			result[f.WriteID] = f.FileURL
+		} else if f.File != "" {
+			// Fallback: construct S3 URL from bf_file
+			result[f.WriteID] = "https://s3.damoang.net/data/file/" + boardID + "/" + f.File
+		}
+	}
+	return result, nil
 }
