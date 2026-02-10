@@ -1,0 +1,20 @@
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''vendor/''',
+  '''docs/swagger\.json$''',
+  '''docs/docs\.go$''',
+  '''\.env\.example$''',
+  '''\.env$''',
+  '''docker-compose.*\.yml$''',
+  '''configs/config\..*\.yaml$''',
+  '''k8s/''',
+  '''tests/''',
+  '''\.docker/''',
+  '''cmd/generate_token/''',
+  '''README\.md$''',
+  '''CLAUDE\.md$''',
+  '''process\.md$''',
+]
