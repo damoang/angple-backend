@@ -102,6 +102,13 @@ type ReportDetailResponse struct {
 	ProcessResult *ProcessResultResponse `json:"process_result,omitempty"` // 처리 결과 (승인/미조치 시에만)
 }
 
+// ReportDetailEnhancedResponse extends ReportDetailResponse with optional data (Phase 2: 통합 API)
+type ReportDetailEnhancedResponse struct {
+	ReportDetailResponse
+	AIEvaluations    []AIEvaluation   `json:"ai_evaluations,omitempty"`    // AI 평가 목록 (?include=ai)
+	DisciplineHistory []DisciplineLog `json:"discipline_history,omitempty"` // 징계 이력 (?include=history)
+}
+
 // ReportListResponse represents report list response
 type ReportListResponse struct {
 	ID                int    `json:"id"`

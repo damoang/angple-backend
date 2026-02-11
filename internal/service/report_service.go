@@ -41,14 +41,15 @@ var (
 
 // ReportService handles report business logic
 type ReportService struct {
-	repo           *repository.ReportRepository
-	opinionRepo    *repository.OpinionRepository
-	historyRepo    *repository.HistoryRepository
-	disciplineRepo *repository.DisciplineRepository
-	memoRepo       *repository.G5MemoRepository
-	memberRepo     repository.MemberRepository
-	boardRepo      *repository.BoardRepository
-	singoUserRepo  *repository.SingoUserRepository
+	repo            *repository.ReportRepository
+	opinionRepo     *repository.OpinionRepository
+	historyRepo     *repository.HistoryRepository
+	disciplineRepo  *repository.DisciplineRepository
+	aiEvaluationRepo *repository.AIEvaluationRepository // Phase 2: 통합 API용
+	memoRepo        *repository.G5MemoRepository
+	memberRepo      repository.MemberRepository
+	boardRepo       *repository.BoardRepository
+	singoUserRepo   *repository.SingoUserRepository
 
 	// singoUserRepo.FindAll() cache (5분 TTL)
 	singoUsersMu     sync.RWMutex
@@ -89,6 +90,11 @@ func (s *ReportService) SetHistoryRepo(historyRepo *repository.HistoryRepository
 // SetSingoUserRepo sets the singo user repository (optional dependency)
 func (s *ReportService) SetSingoUserRepo(singoUserRepo *repository.SingoUserRepository) {
 	s.singoUserRepo = singoUserRepo
+}
+
+// SetAIEvaluationRepo sets the AI evaluation repository (Phase 2: 통합 API용)
+func (s *ReportService) SetAIEvaluationRepo(aiEvaluationRepo *repository.AIEvaluationRepository) {
+	s.aiEvaluationRepo = aiEvaluationRepo
 }
 
 // getTotalReviewerCount returns the cached count of all singo users (5-minute TTL)
@@ -377,9 +383,14 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 		if ops, ok := opinionsMap[opKey]; ok && len(ops) > 0 {
 			opResponses := make([]domain.OpinionResponse, 0, len(ops))
 			for _, op := range ops {
+				// 닉네임을 찾을 수 없는 경우 (탈퇴한 사용자 등) 기본값 설정
+				reviewerNick := reviewerNickMap[op.ReviewerID]
+				if reviewerNick == "" {
+					reviewerNick = "(알 수 없음)"
+				}
 				opResponses = append(opResponses, domain.OpinionResponse{
 					ReviewerID:   op.ReviewerID,
-					ReviewerNick: reviewerNickMap[op.ReviewerID],
+					ReviewerNick: reviewerNick,
 					OpinionType:  op.OpinionType,
 					Reasons:      op.DisciplineReasons,
 					Days:         op.DisciplineDays,
@@ -512,6 +523,46 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 		Status:        status,
 		ProcessResult: processResult,
 	}, nil
+}
+
+// GetDataEnhanced retrieves report data with optional includes (Phase 2: 통합 API)
+// includes: "ai" (AI 평가), "history" (징계 이력)
+// Example: ?include=ai,history
+func (s *ReportService) GetDataEnhanced(table string, parent int, requestingUserID, singoRole string, includes []string) (*domain.ReportDetailEnhancedResponse, error) {
+	// 1. 기본 데이터 조회 (기존 GetData 호출)
+	detail, err := s.GetData(table, parent, requestingUserID, singoRole)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Enhanced response 구성
+	enhanced := &domain.ReportDetailEnhancedResponse{
+		ReportDetailResponse: *detail,
+	}
+
+	// 3. 옵셔널 데이터 조회 (includes 파라미터 기반)
+	for _, include := range includes {
+		switch include {
+		case "ai":
+			// AI 평가 목록 조회
+			if s.aiEvaluationRepo != nil {
+				if aiEvals, err := s.aiEvaluationRepo.ListByReport(table, parent); err == nil {
+					enhanced.AIEvaluations = aiEvals
+				}
+			}
+
+		case "history":
+			// 징계 이력 조회 (피신고자 기준)
+			if s.disciplineRepo != nil && detail.Report.TargetID != "" {
+				// 페이지네이션 없이 최근 10건만 조회
+				if history, _, err := s.disciplineRepo.FindByTargetMember(detail.Report.TargetID, 1, 10); err == nil {
+					enhanced.DisciplineHistory = history
+				}
+			}
+		}
+	}
+
+	return enhanced, nil
 }
 
 // buildProcessResult constructs ProcessResultResponse from the discipline log
@@ -761,6 +812,14 @@ func (s *ReportService) processApprove(report *domain.Report, adminID, clientIP 
 // processScheduledApprove sets admin_discipline_* fields and marks admin_approved=1, processed=0.
 // PHP cron (매시 정각) processes these records. Cancellable until cron execution.
 func (s *ReportService) processScheduledApprove(report *domain.Report, adminID string, req *domain.ReportActionRequest) error {
+	// 검증: 승인 시 필수 항목 확인
+	if req.PenaltyDays <= 0 {
+		return fmt.Errorf("승인 시 이용제한 일수는 필수입니다 (1일 이상 또는 9999=영구)")
+	}
+	if len(req.PenaltyReasons) == 0 {
+		return fmt.Errorf("승인 시 제재 사유는 필수입니다")
+	}
+
 	// Convert penalty_reasons to JSON integer array for PHP compatibility
 	sgTypes := make([]int, 0, len(req.PenaltyReasons))
 	for _, reasonKey := range req.PenaltyReasons {
@@ -824,6 +883,14 @@ func (s *ReportService) processScheduledApprove(report *domain.Report, adminID s
 // 3. Apply member restrictions (level, intercept_date)
 // 4. Send memo to target member
 func (s *ReportService) processImmediateApprove(report *domain.Report, adminID, clientIP string, req *domain.ReportActionRequest) error {
+	// 검증: 승인 시 필수 항목 확인
+	if req.PenaltyDays <= 0 {
+		return fmt.Errorf("승인 시 이용제한 일수는 필수입니다 (1일 이상 또는 9999=영구)")
+	}
+	if len(req.PenaltyReasons) == 0 {
+		return fmt.Errorf("승인 시 제재 사유는 필수입니다")
+	}
+
 	// Look up admin member (for display name)
 	adminMember, err := s.memberRepo.FindByUserID(adminID)
 	if err != nil {
@@ -1066,6 +1133,14 @@ func (s *ReportService) processImmediateBulkApprove(
 ) error {
 	if len(reports) == 0 {
 		return nil
+	}
+
+	// 검증: 승인 시 필수 항목 확인
+	if req.PenaltyDays <= 0 {
+		return fmt.Errorf("승인 시 이용제한 일수는 필수입니다 (1일 이상 또는 9999=영구)")
+	}
+	if len(req.PenaltyReasons) == 0 {
+		return fmt.Errorf("승인 시 제재 사유는 필수입니다")
 	}
 
 	// Single report: delegate to existing method for simplicity
@@ -1480,7 +1555,8 @@ func (s *ReportService) processAdminDismiss(report *domain.Report, adminID strin
 	return nil
 }
 
-// checkAutoApproval checks if 2+ action opinions match on reasons+days, triggering auto-approval
+// checkAutoApproval checks if 2+ action opinions match on reasons+days, logging for admin review
+// NOTE: 자동 승인 기능 제거됨. 최고 관리자가 직접 승인해야 함.
 func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 	if s.opinionRepo == nil {
 		return nil
@@ -1497,22 +1573,25 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 		Days    int
 	}
 	counts := make(map[opKey]int)
+	var matchedKey opKey
 	for _, op := range opinions {
 		key := opKey{Reasons: op.DisciplineReasons, Days: op.DisciplineDays}
 		counts[key]++
+		if counts[key] >= 2 {
+			matchedKey = key
+		}
 	}
 
 	for _, count := range counts {
 		if count >= 2 {
-			// Auto-approve: update all related reports
-			log.Printf("[INFO] 자동 승인: table=%s, parent=%d (action 의견 %d건 일치)", report.Table, report.Parent, count)
-			allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
-			for _, r := range allReports {
-				if !r.Processed {
-					_ = s.repo.UpdateStatus(r.ID, ReportStatusApproved, "system")
-				}
-			}
-			return nil
+			// 변경: 자동 승인 제거, 로그만 남김
+			log.Printf("[INFO] ⚠️  승인 가능 상태: table=%s, parent=%d (action 의견 %d건 일치, 사유=%s, 일수=%d) - 최고 관리자 승인 대기",
+				report.Table, report.Parent, count, matchedKey.Reasons, matchedKey.Days)
+
+			// TODO: 향후 알림 시스템 추가 시 최고 관리자에게 알림 전송
+			// 예: s.notificationService.NotifyAdminForApproval(report, count)
+
+			return nil // 자동 승인 안 함
 		}
 	}
 
@@ -1542,11 +1621,26 @@ func (s *ReportService) checkAutoDismiss(report *domain.Report) error {
 	return nil
 }
 
-// revertToPending reverts all related reports to pending state, deleting opinions
+// revertToPending reverts all related reports to pending or monitoring state
+// If opinions exist, reverts to monitoring (keeps opinions)
+// If no opinions, reverts to pending (deletes any stray opinions)
 func (s *ReportService) revertToPending(report *domain.Report, adminID string) error {
 	prevStatus := report.Status()
 
-	// Delete all opinions for this content
+	// Check if opinions exist
+	opinionCount := 0
+	if s.opinionRepo != nil {
+		opinions, _ := s.opinionRepo.GetByReportGrouped(report.Table, report.Parent)
+		opinionCount = len(opinions)
+	}
+
+	// If opinions exist, revert to monitoring (keep opinions)
+	if opinionCount > 0 {
+		log.Printf("[INFO] 의견이 있어 모니터링으로 되돌림: table=%s, parent=%d, opinions=%d", report.Table, report.Parent, opinionCount)
+		return s.revertToMonitoring(report, adminID)
+	}
+
+	// No opinions: delete any stray opinions and revert to pending
 	if s.opinionRepo != nil {
 		_ = s.opinionRepo.DeleteByReportGrouped(report.Table, report.Parent)
 	}
@@ -1610,6 +1704,11 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 	responses := make([]domain.OpinionResponse, len(opinions))
 	for i, op := range opinions {
 		reviewerNick := nickMap[op.ReviewerID]
+
+		// 닉네임을 찾을 수 없는 경우 (탈퇴한 사용자 등) 기본값 설정
+		if reviewerNick == "" {
+			reviewerNick = "(알 수 없음)"
+		}
 
 		if maskReviewerNick {
 			if op.ReviewerID == requestingUserID {

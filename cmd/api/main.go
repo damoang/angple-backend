@@ -271,6 +271,8 @@ func main() {
 		memoRepo := repository.NewMemoRepository(db)
 		reactionRepo := repository.NewReactionRepository(db)
 		reportRepo := repository.NewReportRepository(db)
+		opinionRepo := repository.NewOpinionRepository(db)
+		historyRepo := repository.NewHistoryRepository(db)
 		promotionRepo := repository.NewPromotionRepository(db)
 		bannerRepo := repository.NewBannerRepository(db)
 		goodRepo := repository.NewGoodRepository(db)
@@ -297,7 +299,12 @@ func main() {
 		memoService := service.NewMemoService(memoRepo, memberRepo)
 		reactionService := service.NewReactionService(reactionRepo)
 		g5MemoRepo := repository.NewG5MemoRepository(db)
-		reportService := service.NewReportService(reportRepo, disciplineRepo, g5MemoRepo, memberRepo)
+		singoUserRepo := repository.NewSingoUserRepository(db)
+		reportService := service.NewReportService(reportRepo, disciplineRepo, g5MemoRepo, memberRepo, boardRepo)
+		reportService.SetOpinionRepo(opinionRepo)
+		reportService.SetHistoryRepo(historyRepo)
+		reportService.SetSingoUserRepo(singoUserRepo)
+		reportService.SetAIEvaluationRepo(aiEvalRepo) // Phase 2: 통합 API용
 		promotionService := service.NewPromotionService(promotionRepo)
 		bannerService := service.NewBannerService(bannerRepo)
 		goodService := service.NewGoodService(goodRepo)
@@ -333,6 +340,7 @@ func main() {
 		memoHandler = handler.NewMemoHandler(memoService)
 		reactionHandler = handler.NewReactionHandler(reactionService)
 		reportHandler = handler.NewReportHandler(reportService)
+		reportHandler.SetSingoUserRepo(singoUserRepo)
 		dajoongiHandler = handler.NewDajoongiHandler(dajoongiRepo)
 		promotionHandler = handler.NewPromotionHandler(promotionService)
 		bannerHandler = handler.NewBannerHandler(bannerService)
@@ -658,10 +666,17 @@ func main() {
 		// AI Evaluation API (v2 - 관리자 전용, damoang_jwt 쿠키 인증)
 		if aiEvalHandler != nil {
 			aiEvalRoutes := router.Group("/api/v2/reports/ai-evaluation",
-				middleware.DamoangCookieAuth(damoangJWT, cfg))
+				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
 			aiEvalRoutes.POST("", aiEvalHandler.SaveEvaluation)
 			aiEvalRoutes.GET("", aiEvalHandler.GetEvaluation)
 			aiEvalRoutes.GET("/list", aiEvalHandler.ListEvaluation)
+
+			// v1 호환 (singo 앱에서 사용)
+			aiEvalV1 := router.Group("/api/v1/ai-evaluations",
+				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
+			aiEvalV1.POST("", aiEvalHandler.SaveEvaluation)
+			aiEvalV1.GET("", aiEvalHandler.GetEvaluation)
+			aiEvalV1.GET("/list", aiEvalHandler.ListEvaluation)
 		}
 
 		// Elasticsearch Search API
