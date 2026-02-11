@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/damoang/angple-backend/internal/domain"
 	"gorm.io/gorm"
@@ -315,17 +316,47 @@ type AggregatedReportRow struct {
 func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDate, toDate, sort string, minOpinions int, excludeReviewer, requestingUserID string) ([]AggregatedReportRow, int64, error) {
 	// Build HAVING clause using SELECT aliases (MySQL 8 supports aliases in HAVING)
 	havingClause := ""
-	switch status {
-	case ReportStatusPending:
-		havingClause = "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
-	case ReportStatusMonitoring:
-		havingClause = "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
-	case ReportStatusHold:
-		havingClause = "HAVING hold = 1 AND processed = 0"
-	case ReportStatusApproved:
-		havingClause = "HAVING admin_approved = 1"
-	case ReportStatusDismissed:
-		havingClause = "HAVING admin_approved = 0 AND processed = 1"
+
+	// Support comma-separated statuses (e.g., "approved,scheduled")
+	if strings.Contains(status, ",") {
+		statuses := strings.Split(status, ",")
+		var conditions []string
+		for _, st := range statuses {
+			st = strings.TrimSpace(st)
+			switch st {
+			case ReportStatusPending:
+				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case ReportStatusMonitoring:
+				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case ReportStatusHold:
+				conditions = append(conditions, "(hold = 1 AND processed = 0)")
+			case ReportStatusApproved:
+				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
+			case "scheduled":
+				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
+			case ReportStatusDismissed:
+				conditions = append(conditions, "(admin_approved = 0 AND processed = 1)")
+			}
+		}
+		if len(conditions) > 0 {
+			havingClause = "HAVING (" + strings.Join(conditions, " OR ") + ")"
+		}
+	} else {
+		// Single status
+		switch status {
+		case ReportStatusPending:
+			havingClause = "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+		case ReportStatusMonitoring:
+			havingClause = "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+		case ReportStatusHold:
+			havingClause = "HAVING hold = 1 AND processed = 0"
+		case ReportStatusApproved:
+			havingClause = "HAVING admin_approved = 1 AND processed = 1"
+		case "scheduled":
+			havingClause = "HAVING admin_approved = 1 AND processed = 0"
+		case ReportStatusDismissed:
+			havingClause = "HAVING admin_approved = 0 AND processed = 1"
+		}
 	}
 
 	// min_opinions 필터: HAVING 절에 opinion_count >= N 추가
@@ -368,12 +399,14 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 				IFNULL(op.opinion_count, 0) as opinion_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT sg_table, sg_parent,
+				SELECT o.sg_table, o.sg_parent,
 					   COUNT(*) as opinion_count,
-					   SUM(CASE WHEN opinion_type='action' THEN 1 ELSE 0 END) as action_count,
-					   SUM(CASE WHEN opinion_type='dismiss' THEN 1 ELSE 0 END) as dismiss_count
-				FROM g5_na_singo_opinions
-				GROUP BY sg_table, sg_parent
+					   SUM(CASE WHEN o.opinion_type='action' THEN 1 ELSE 0 END) as action_count,
+					   SUM(CASE WHEN o.opinion_type='dismiss' THEN 1 ELSE 0 END) as dismiss_count
+				FROM g5_na_singo_opinions o
+				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NULL
+				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.sg_table, s.sg_parent
@@ -436,13 +469,15 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			` + myReviewSelect + `
 		FROM g5_na_singo s
 		LEFT JOIN (
-			SELECT sg_table, sg_parent,
-				   COUNT(DISTINCT reviewer_id) as opinion_count,
-				   COUNT(DISTINCT CASE WHEN opinion_type='action' THEN reviewer_id END) as action_count,
-				   COUNT(DISTINCT CASE WHEN opinion_type='dismiss' THEN reviewer_id END) as dismiss_count,
-				   GROUP_CONCAT(DISTINCT reviewer_id) as reviewer_ids
-			FROM g5_na_singo_opinions
-			GROUP BY sg_table, sg_parent
+			SELECT o.sg_table, o.sg_parent,
+				   COUNT(DISTINCT o.reviewer_id) as opinion_count,
+				   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
+				   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count,
+				   GROUP_CONCAT(DISTINCT o.reviewer_id) as reviewer_ids
+			FROM g5_na_singo_opinions o
+			LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+			WHERE su.mb_id IS NULL
+			GROUP BY o.sg_table, o.sg_parent
 		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent` + myReviewJoin + `
 		WHERE 1=1` + dateFilter + excludeFilter + `
 		GROUP BY s.sg_table, s.sg_parent
@@ -486,9 +521,11 @@ func (r *ReportRepository) CountByStatusAggregated(status string) (int64, error)
 				IFNULL(op.opinion_count, 0) as opinion_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT sg_table, sg_parent, COUNT(*) as opinion_count
-				FROM g5_na_singo_opinions
-				GROUP BY sg_table, sg_parent
+				SELECT o.sg_table, o.sg_parent, COUNT(*) as opinion_count
+				FROM g5_na_singo_opinions o
+				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NULL
+				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			GROUP BY s.sg_table, s.sg_parent
 			` + havingClause + `
@@ -537,9 +574,11 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				IFNULL(op.opinion_count, 0) as opinion_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT sg_table, sg_parent, COUNT(*) as opinion_count
-				FROM g5_na_singo_opinions
-				GROUP BY sg_table, sg_parent
+				SELECT o.sg_table, o.sg_parent, COUNT(*) as opinion_count
+				FROM g5_na_singo_opinions o
+				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NULL
+				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
@@ -587,9 +626,11 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				IFNULL(op.opinion_count, 0) as opinion_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT sg_table, sg_parent, COUNT(*) as opinion_count
-				FROM g5_na_singo_opinions
-				GROUP BY sg_table, sg_parent
+				SELECT o.sg_table, o.sg_parent, COUNT(*) as opinion_count
+				FROM g5_na_singo_opinions o
+				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NULL
+				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
@@ -653,13 +694,15 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 			IFNULL(op.reviewer_ids, '') as reviewer_ids
 		FROM g5_na_singo s
 		LEFT JOIN (
-			SELECT sg_table, sg_parent,
-				   COUNT(DISTINCT reviewer_id) as opinion_count,
-				   COUNT(DISTINCT CASE WHEN opinion_type='action' THEN reviewer_id END) as action_count,
-				   COUNT(DISTINCT CASE WHEN opinion_type='dismiss' THEN reviewer_id END) as dismiss_count,
-				   GROUP_CONCAT(DISTINCT reviewer_id) as reviewer_ids
-			FROM g5_na_singo_opinions
-			GROUP BY sg_table, sg_parent
+			SELECT o.sg_table, o.sg_parent,
+				   COUNT(DISTINCT o.reviewer_id) as opinion_count,
+				   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
+				   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count,
+				   GROUP_CONCAT(DISTINCT o.reviewer_id) as reviewer_ids
+			FROM g5_na_singo_opinions o
+			LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+			WHERE su.mb_id IS NULL
+			GROUP BY o.sg_table, o.sg_parent
 		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 		WHERE s.target_mb_id IN (?)` + dateFilter + `
 		GROUP BY s.sg_table, s.sg_parent
@@ -676,6 +719,34 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 
 // buildStatusHaving generates HAVING clause for status filtering (shared between methods)
 func (r *ReportRepository) buildStatusHaving(status string) string {
+	// Support comma-separated statuses (e.g., "approved,scheduled")
+	if strings.Contains(status, ",") {
+		statuses := strings.Split(status, ",")
+		var conditions []string
+		for _, st := range statuses {
+			st = strings.TrimSpace(st)
+			switch st {
+			case ReportStatusPending:
+				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case ReportStatusMonitoring:
+				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case ReportStatusHold:
+				conditions = append(conditions, "(hold = 1 AND processed = 0)")
+			case ReportStatusApproved:
+				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
+			case "scheduled":
+				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
+			case ReportStatusDismissed:
+				conditions = append(conditions, "(admin_approved = 0 AND processed = 1)")
+			}
+		}
+		if len(conditions) > 0 {
+			return "HAVING (" + strings.Join(conditions, " OR ") + ")"
+		}
+		return ""
+	}
+
+	// Single status
 	switch status {
 	case ReportStatusPending:
 		return "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
@@ -684,7 +755,9 @@ func (r *ReportRepository) buildStatusHaving(status string) string {
 	case ReportStatusHold:
 		return "HAVING hold = 1 AND processed = 0"
 	case ReportStatusApproved:
-		return "HAVING admin_approved = 1"
+		return "HAVING admin_approved = 1 AND processed = 1"
+	case "scheduled":
+		return "HAVING admin_approved = 1 AND processed = 0"
 	case ReportStatusDismissed:
 		return "HAVING admin_approved = 0 AND processed = 1"
 	default:
@@ -745,9 +818,11 @@ func (r *ReportRepository) GetAllStatusCounts() (map[string]int64, error) {
 				IFNULL(op.opinion_count, 0) as opinion_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT sg_table, sg_parent, COUNT(*) as opinion_count
-				FROM g5_na_singo_opinions
-				GROUP BY sg_table, sg_parent
+				SELECT o.sg_table, o.sg_parent, COUNT(*) as opinion_count
+				FROM g5_na_singo_opinions o
+				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NULL
+				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			GROUP BY s.sg_table, s.sg_parent
 		) t`
