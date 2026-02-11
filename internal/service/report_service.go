@@ -160,6 +160,9 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 	userIDs := make(map[string]bool)
 	boardIDs := make(map[string]bool)
 	for _, r := range rows {
+		if r.ReporterID != "" {
+			userIDs[r.ReporterID] = true
+		}
 		if r.TargetID != "" {
 			userIDs[r.TargetID] = true
 		}
@@ -227,6 +230,8 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 			Type:              reportType,
 			ReportCount:       row.ReportCount,
 			ReporterCount:     row.ReporterCount,
+			ReporterID:        row.ReporterID,
+			ReporterNickname:  nickMap[row.ReporterID],
 			TargetID:          row.TargetID,
 			TargetNickname:    nickMap[row.TargetID],
 			TargetTitle:       truncateUTF8(row.TargetTitle, 50),
@@ -1597,15 +1602,20 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 		return nil
 	}
 
-	// Check if at least 2 action opinions have matching reasons and days
+	// Check if at least 2 action opinions have matching reasons, days, and type
 	type opKey struct {
 		Reasons string
 		Days    int
+		Type    string
 	}
 	counts := make(map[opKey]int)
 	var matchedKey opKey
 	for _, op := range opinions {
-		key := opKey{Reasons: op.DisciplineReasons, Days: op.DisciplineDays}
+		key := opKey{
+			Reasons: op.DisciplineReasons,
+			Days:    op.DisciplineDays,
+			Type:    op.DisciplineType,
+		}
 		counts[key]++
 		if counts[key] >= 2 {
 			matchedKey = key
@@ -1614,14 +1624,26 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 
 	for _, count := range counts {
 		if count >= 2 {
-			// 변경: 자동 승인 제거, 로그만 남김
-			log.Printf("[INFO] ⚠️  승인 가능 상태: table=%s, parent=%d (action 의견 %d건 일치, 사유=%s, 일수=%d) - 최고 관리자 승인 대기",
-				report.Table, report.Parent, count, matchedKey.Reasons, matchedKey.Days)
+			// 최종처리 탭으로 이동 (admin_approved=1, processed=0)
+			log.Printf("[INFO] 최종처리 탭으로 이동: table=%s, parent=%d (action 의견 %d건 일치, 사유=%s, 일수=%d, 유형=%s)",
+				report.Table, report.Parent, count, matchedKey.Reasons, matchedKey.Days, matchedKey.Type)
 
-			// TODO: 향후 알림 시스템 추가 시 최고 관리자에게 알림 전송
-			// 예: s.notificationService.NotifyAdminForApproval(report, count)
+			// admin_approved=1 설정 + 처벌 정보 자동 설정
+			allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+			for _, r := range allReports {
+				if !r.Processed && !r.AdminApproved {
+					_ = s.repo.UpdateStatusScheduledApprove(
+						r.ID,
+						"system",           // admin_users
+						matchedKey.Reasons, // reasonsJSON (이미 JSON 문자열)
+						matchedKey.Days,
+						matchedKey.Type,
+						"2명 이상 조치 의견 일치 (자동)",
+					)
+				}
+			}
 
-			return nil // 자동 승인 안 함
+			return nil
 		}
 	}
 
@@ -1634,8 +1656,20 @@ func (s *ReportService) checkAutoDismiss(report *domain.Report) error {
 		return nil
 	}
 
-	_, dismissCount, err := s.opinionRepo.CountByReportGrouped(report.Table, report.Parent)
-	if err != nil || dismissCount < 2 {
+	actionCount, dismissCount, err := s.opinionRepo.CountByReportGrouped(report.Table, report.Parent)
+	if err != nil {
+		return nil
+	}
+
+	// 의견 갈림 체크: actionCount와 dismissCount 모두 1 이상이면 자동 처리 안 함
+	if actionCount > 0 && dismissCount > 0 {
+		log.Printf("[INFO] 의견 갈림 감지: table=%s, parent=%d (action=%d, dismiss=%d) - 모니터링 유지",
+			report.Table, report.Parent, actionCount, dismissCount)
+		return nil
+	}
+
+	// dismissCount >= 2 AND actionCount == 0인 경우만 자동 기각
+	if dismissCount < 2 {
 		return nil
 	}
 
