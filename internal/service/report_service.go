@@ -1624,21 +1624,20 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 
 	for _, count := range counts {
 		if count >= 2 {
-			// 최종처리 탭으로 이동 (admin_approved=1, processed=0)
-			log.Printf("[INFO] 최종처리 탭으로 이동: table=%s, parent=%d (action 의견 %d건 일치, 사유=%s, 일수=%d, 유형=%s)",
+			// 최종처리 탭으로 이동 (scheduled 상태: action_count >= 2, admin_approved=0)
+			log.Printf("[INFO] 최종처리 탭으로 이동: table=%s, parent=%d (action 의견 %d건 일치, 사유=%s, 일수=%d, 유형=%s) - 최고관리자 승인 대기",
 				report.Table, report.Parent, count, matchedKey.Reasons, matchedKey.Days, matchedKey.Type)
 
-			// admin_approved=1 설정 + 처벌 정보 자동 설정
+			// 모니터링 권고 사항만 저장 (admin_approved는 최고관리자가 직접 승인할 때 설정)
 			allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
 			for _, r := range allReports {
 				if !r.Processed && !r.AdminApproved {
-					_ = s.repo.UpdateStatusScheduledApprove(
+					_ = s.repo.UpdateMonitoringRecommendation(
 						r.ID,
-						"system",           // admin_users
 						matchedKey.Reasons, // reasonsJSON (이미 JSON 문자열)
 						matchedKey.Days,
 						matchedKey.Type,
-						"2명 이상 조치 의견 일치 (자동)",
+						"2명 이상 조치 의견 일치 (시스템 권고)",
 					)
 				}
 			}

@@ -137,6 +137,8 @@ type AggregatedReportResponse struct {
 	Type              int8              `json:"type"`             // 1=post, 2=comment
 	ReportCount       int               `json:"report_count"`
 	ReporterCount     int               `json:"reporter_count"`
+	ReporterID        string            `json:"reporter_id"`
+	ReporterNickname  string            `json:"reporter_nickname"`
 	TargetID          string            `json:"target_id"`
 	TargetNickname    string            `json:"target_nickname"`
 	TargetTitle       string            `json:"target_title"`

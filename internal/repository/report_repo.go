@@ -342,6 +342,7 @@ type AggregatedReportRow struct {
 	Parent            int    `gorm:"column:sg_parent"`
 	ReportCount       int    `gorm:"column:report_count"`
 	ReporterCount     int    `gorm:"column:reporter_count"`
+	ReporterID        string `gorm:"column:reporter_mb_id"`
 	TargetID          string `gorm:"column:target_mb_id"`
 	TargetTitle       string `gorm:"column:target_title"`
 	TargetContent     string `gorm:"column:target_content"`
@@ -376,13 +377,18 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			case ReportStatusPending:
 				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
 			case ReportStatusMonitoring:
-				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+				// 진행중: dismiss 의견만 있음 (action 없음)
+				conditions = append(conditions, "(opinion_count > 0 AND action_count = 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case "needs_review":
+				// 검토필요: 의견 갈림 OR 조치 1개만 (최고관리자 직접 판단 필요)
+				conditions = append(conditions, "((action_count > 0 AND dismiss_count > 0) OR (action_count = 1 AND dismiss_count = 0)) AND admin_approved = 0 AND processed = 0")
 			case ReportStatusHold:
 				conditions = append(conditions, "(hold = 1 AND processed = 0)")
 			case ReportStatusApproved:
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
 			case "scheduled":
-				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
+				// 최종처리 탭: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
+				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
 			case ReportStatusDismissed:
 				conditions = append(conditions, "(admin_approved = 0 AND processed = 1)")
 			}
@@ -396,13 +402,18 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 		case ReportStatusPending:
 			havingClause = "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
 		case ReportStatusMonitoring:
-			havingClause = "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+			// 진행중: dismiss 의견만 있음 (action 없음)
+			havingClause = "HAVING opinion_count > 0 AND action_count = 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+		case "needs_review":
+			// 검토필요: 의견 갈림 OR 조치 1개만 (최고관리자 직접 판단 필요)
+			havingClause = "HAVING ((action_count > 0 AND dismiss_count > 0) OR (action_count = 1 AND dismiss_count = 0)) AND admin_approved = 0 AND processed = 0"
 		case ReportStatusHold:
 			havingClause = "HAVING hold = 1 AND processed = 0"
 		case ReportStatusApproved:
 			havingClause = "HAVING admin_approved = 1 AND processed = 1"
 		case "scheduled":
-			havingClause = "HAVING admin_approved = 1 AND processed = 0"
+			// 최종처리 탭: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
+			havingClause = "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
 		case ReportStatusDismissed:
 			havingClause = "HAVING admin_approved = 0 AND processed = 1"
 		}
@@ -445,13 +456,15 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 				MAX(s.admin_approved) as admin_approved,
 				MAX(s.processed) as processed,
 				MAX(s.hold) as hold,
-				IFNULL(op.opinion_count, 0) as opinion_count
+				IFNULL(op.opinion_count, 0) as opinion_count,
+				IFNULL(op.action_count, 0) as action_count,
+				IFNULL(op.dismiss_count, 0) as dismiss_count
 			FROM g5_na_singo s
 			LEFT JOIN (
 				SELECT o.sg_table, o.sg_id,
-					   COUNT(*) as opinion_count,
-					   SUM(CASE WHEN o.opinion_type='action' THEN 1 ELSE 0 END) as action_count,
-					   SUM(CASE WHEN o.opinion_type='dismiss' THEN 1 ELSE 0 END) as dismiss_count
+					   COUNT(DISTINCT o.reviewer_id) as opinion_count,
+					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
+					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
 				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NULL
@@ -501,6 +514,7 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			MAX(s.sg_parent) as sg_parent,
 			COUNT(*) as report_count,
 			COUNT(DISTINCT s.mb_id) as reporter_count,
+			MAX(s.mb_id) as reporter_mb_id,
 			MAX(s.target_mb_id) as target_mb_id,
 			MAX(s.target_title) as target_title,
 			MAX(s.target_content) as target_content,
@@ -729,6 +743,7 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 			MAX(s.sg_parent) as sg_parent,
 			COUNT(*) as report_count,
 			COUNT(DISTINCT s.mb_id) as reporter_count,
+			MAX(s.mb_id) as reporter_mb_id,
 			MAX(s.target_mb_id) as target_mb_id,
 			MAX(s.target_title) as target_title,
 			MAX(s.target_content) as target_content,
@@ -850,6 +865,19 @@ func (r *ReportRepository) ClearAdminDisciplineFields(id int) error {
 			"admin_discipline_days":    0,
 			"admin_discipline_type":    "",
 			"admin_discipline_detail":  "",
+		}).Error
+}
+
+// UpdateMonitoringRecommendation updates monitoring_discipline_* fields for scheduled reports
+// (does NOT set admin_approved, only stores recommendation for super_admin review)
+func (r *ReportRepository) UpdateMonitoringRecommendation(id int, reasonsJSON string, days int, disciplineType, detail string) error {
+	return r.db.Model(&domain.Report{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"monitoring_discipline_reasons": reasonsJSON,
+			"monitoring_discipline_days":    days,
+			"monitoring_discipline_type":    disciplineType,
+			"monitoring_discipline_detail":  detail,
 		}).Error
 }
 
