@@ -663,6 +663,11 @@ func main() {
 			media.DELETE("/files", mediaHandler.DeleteFile)
 		}
 
+		// v2 Reports API (신고 시스템)
+		if reportHandler != nil {
+			v2routes.SetupReports(router, reportHandler, damoangJWT, cfg, jwtManager)
+		}
+
 		// AI Evaluation API (v2 - 관리자 전용, damoang_jwt 쿠키 인증)
 		if aiEvalHandler != nil {
 			aiEvalRoutes := router.Group("/api/v2/reports/ai-evaluation",

@@ -206,20 +206,22 @@ func (u *AdUnit) ToResponse() *AdUnitResponse {
 
 // CelebrationBannerResponse 축하 배너 응답 DTO
 type CelebrationBannerResponse struct {
-	ID             uint64 `json:"id"`
-	Title          string `json:"title"`
-	Content        string `json:"content,omitempty"`
-	ImageURL       string `json:"image_url,omitempty"`
-	LinkURL        string `json:"link_url,omitempty"`
-	ExternalLink   string `json:"external_link,omitempty"`
-	DisplayDate    string `json:"display_date"`
-	YearlyRepeat   bool   `json:"yearly_repeat"`
-	LinkTarget     string `json:"link_target"`
-	SortOrder      int    `json:"sort_order"`
-	TargetMemberID string `json:"target_member_id,omitempty"`
-	IsActive       bool   `json:"is_active"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	ID                uint64 `json:"id"`
+	Title             string `json:"title"`
+	Content           string `json:"content,omitempty"`
+	ImageURL          string `json:"image_url,omitempty"`
+	LinkURL           string `json:"link_url,omitempty"`
+	ExternalLink      string `json:"external_link,omitempty"`
+	DisplayDate       string `json:"display_date"`
+	YearlyRepeat      bool   `json:"yearly_repeat"`
+	LinkTarget        string `json:"link_target"`
+	SortOrder         int    `json:"sort_order"`
+	TargetMemberID    string `json:"target_member_id,omitempty"`
+	TargetMemberNick  string `json:"target_member_nick,omitempty"`
+	TargetMemberPhoto string `json:"target_member_photo,omitempty"`
+	IsActive          bool   `json:"is_active"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // ToResponse CelebrationBanner를 응답 DTO로 변환

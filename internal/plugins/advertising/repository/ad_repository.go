@@ -18,6 +18,12 @@ func extractFirstImage(content string) string {
 	return ""
 }
 
+// MemberInfo 멤버 정보 (축하 배너용)
+type MemberInfo struct {
+	Nickname string
+	ImageURL string
+}
+
 // AdRepository 광고 저장소 인터페이스
 type AdRepository interface {
 	// AdUnit CRUD
@@ -43,6 +49,9 @@ type AdRepository interface {
 	FindBannerByID(id uint64) (*domain.CelebrationBanner, error)
 	ListBanners(activeOnly bool) ([]*domain.CelebrationBanner, error)
 	ListBannersByDate(date time.Time) ([]*domain.CelebrationBanner, error)
+
+	// Member lookup (축하 배너용)
+	FindMemberByID(memberID string) (*MemberInfo, error)
 }
 
 // adRepository GORM 구현체
@@ -228,12 +237,14 @@ func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationB
 		WrID      int    `gorm:"column:wr_id"`
 		WrSubject string `gorm:"column:wr_subject"`
 		WrContent string `gorm:"column:wr_content"`
+		WrLink1   string `gorm:"column:wr_link1"`
 		WrLink2   string `gorm:"column:wr_link2"`
+		MbID      string `gorm:"column:mb_id"`
 	}
 
 	var results []MessageRow
 	err = r.db.Table("g5_write_message").
-		Select("wr_id, wr_subject, wr_content, wr_link2").
+		Select("wr_id, wr_subject, wr_content, wr_link1, wr_link2, mb_id").
 		Where("wr_is_comment = 0 AND (wr_subject = ? OR wr_subject = ?)", dateDot, dateFmt).
 		Order("wr_id DESC").
 		Find(&results).Error
@@ -246,16 +257,51 @@ func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationB
 		imageURL := extractFirstImage(row.WrContent)
 		// #nosec G115 - WrID는 DB primary key로 항상 양수
 		banner := &domain.CelebrationBanner{
-			ID:          uint64(row.WrID), //nolint:gosec
-			Title:       row.WrSubject,
-			Content:     row.WrContent,
-			ImageURL:    imageURL,
-			ExternalURL: row.WrLink2,
-			DisplayDate: date,
-			IsActive:    true,
+			ID:             uint64(row.WrID), //nolint:gosec
+			Title:          row.WrSubject,
+			Content:        row.WrContent,
+			ImageURL:       imageURL,
+			LinkURL:        row.WrLink1,
+			ExternalURL:    row.WrLink2,
+			DisplayDate:    date,
+			TargetMemberID: row.MbID,
+			IsActive:       true,
 		}
 		banners = append(banners, banner)
 	}
 
 	return banners, nil
+}
+
+// FindMemberByID 회원 ID로 닉네임과 프로필 사진 조회
+func (r *adRepository) FindMemberByID(memberID string) (*MemberInfo, error) {
+	if memberID == "" {
+		return nil, nil
+	}
+
+	type memberRow struct {
+		Nickname string `gorm:"column:mb_nick"`
+		ImageURL string `gorm:"column:mb_image_url"`
+	}
+
+	var row memberRow
+	err := r.db.Table("g5_member").
+		Select("mb_nick, mb_image_url").
+		Where("mb_id = ?", memberID).
+		First(&row).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 이미지 URL이 상대 경로인 경우 전체 URL로 변환
+	imageURL := row.ImageURL
+	if imageURL != "" && !regexp.MustCompile(`^https?://`).MatchString(imageURL) {
+		imageURL = "https://damoang.net/" + imageURL
+	}
+
+	return &MemberInfo{
+		Nickname: row.Nickname,
+		ImageURL: imageURL,
+	}, nil
 }
