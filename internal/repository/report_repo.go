@@ -132,10 +132,17 @@ func (r *ReportRepository) GetAllByTableAndParent(table string, parent int) ([]d
 
 // GetByTableAndSgID retrieves the primary report by table and sg_id.
 // Returns the report with matching sg_id (unique identifier for specific report).
+// If parent is 0, it's ignored (used for URL-based lookups without parent info).
 func (r *ReportRepository) GetByTableAndSgID(table string, sgID, parent int) (*domain.Report, error) {
 	var report domain.Report
-	if err := r.db.Where("sg_table = ? AND sg_id = ? AND sg_parent = ?", table, sgID, parent).
-		First(&report).Error; err != nil {
+	query := r.db.Where("sg_table = ? AND sg_id = ?", table, sgID)
+
+	// Only add parent condition if it's provided (non-zero)
+	if parent > 0 {
+		query = query.Where("sg_parent = ?", parent)
+	}
+
+	if err := query.First(&report).Error; err != nil {
 		return nil, err
 	}
 	return &report, nil
