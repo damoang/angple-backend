@@ -91,8 +91,17 @@ func (r *ReportRepository) GetByID(id int) (*domain.Report, error) {
 
 // GetByTableAndParent retrieves the most relevant report by table and parent.
 // Prioritizes unprocessed (processed=0) reports, then most recent.
+// Searches by sg_id first (for sg_id-based grouping), then sg_parent (legacy).
 func (r *ReportRepository) GetByTableAndParent(table string, parent int) (*domain.Report, error) {
 	var report domain.Report
+	// Try sg_id first (post reports: sg_id = sg_parent, comment reports: sg_id = comment_id)
+	if err := r.db.Where("sg_table = ? AND sg_id = ?", table, parent).
+		Order("processed ASC, sg_time DESC").
+		First(&report).Error; err == nil {
+		return &report, nil
+	}
+
+	// Fallback to sg_parent (legacy compatibility)
 	if err := r.db.Where("sg_table = ? AND sg_parent = ?", table, parent).
 		Order("processed ASC, sg_time DESC").
 		First(&report).Error; err != nil {
@@ -102,8 +111,17 @@ func (r *ReportRepository) GetByTableAndParent(table string, parent int) (*domai
 }
 
 // GetAllByTableAndParent retrieves all reports for a given table and parent
+// First tries to find by sg_id, then falls back to sg_parent for backward compatibility
 func (r *ReportRepository) GetAllByTableAndParent(table string, parent int) ([]domain.Report, error) {
 	var reports []domain.Report
+	// Try sg_id first
+	if err := r.db.Where("sg_table = ? AND sg_id = ?", table, parent).
+		Order("sg_time DESC").
+		Find(&reports).Error; err == nil && len(reports) > 0 {
+		return reports, nil
+	}
+
+	// Fallback to sg_parent
 	if err := r.db.Where("sg_table = ? AND sg_parent = ?", table, parent).
 		Order("sg_time DESC").
 		Find(&reports).Error; err != nil {
