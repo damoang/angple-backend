@@ -496,8 +496,9 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 	offset := (page - 1) * limit
 	mainSQL := `
 		SELECT
-			s.sg_table, s.sg_parent,
+			s.sg_table,
 			MAX(s.sg_id) as sg_id,
+			MAX(s.sg_parent) as sg_parent,
 			COUNT(*) as report_count,
 			COUNT(DISTINCT s.mb_id) as reporter_count,
 			MAX(s.target_mb_id) as target_mb_id,
@@ -723,8 +724,9 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 
 	mainSQL := `
 		SELECT
-			s.sg_table, s.sg_parent,
+			s.sg_table,
 			MAX(s.sg_id) as sg_id,
+			MAX(s.sg_parent) as sg_parent,
 			COUNT(*) as report_count,
 			COUNT(DISTINCT s.mb_id) as reporter_count,
 			MAX(s.target_mb_id) as target_mb_id,
