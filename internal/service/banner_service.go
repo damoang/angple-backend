@@ -11,18 +11,18 @@ type BannerService interface {
 	GetAllBanners() ([]domain.BannerResponse, error)
 	GetActiveBanners() ([]domain.BannerResponse, error)
 	GetBannersByPosition(position domain.BannerPosition) (*domain.BannerListResponse, error)
-	GetBannerByID(id int64) (*domain.BannerResponse, error)
+	GetBannerByID(id string) (*domain.BannerResponse, error)
 	CreateBanner(req *domain.CreateBannerRequest) (*domain.BannerResponse, error)
-	UpdateBanner(id int64, req *domain.UpdateBannerRequest) (*domain.BannerResponse, error)
-	DeleteBanner(id int64) error
+	UpdateBanner(id string, req *domain.UpdateBannerRequest) (*domain.BannerResponse, error)
+	DeleteBanner(id string) error
 
 	// Click and view tracking
-	TrackClick(id int64, req *domain.BannerClickRequest) error
-	TrackView(id int64) error
-	IncrementViewCount(id int64) error
+	TrackClick(id string, req *domain.BannerClickRequest) error
+	TrackView(id string) error
+	IncrementViewCount(id string) error
 
 	// Statistics
-	GetBannerStats(id int64) (*domain.BannerStatsResponse, error)
+	GetBannerStats(id string) (*domain.BannerStatsResponse, error)
 }
 
 type bannerService struct {
@@ -84,7 +84,7 @@ func (s *bannerService) GetBannersByPosition(position domain.BannerPosition) (*d
 }
 
 // GetBannerByID retrieves a banner by ID
-func (s *bannerService) GetBannerByID(id int64) (*domain.BannerResponse, error) {
+func (s *bannerService) GetBannerByID(id string) (*domain.BannerResponse, error) {
 	banner, err := s.repo.FindBannerByID(id)
 	if err != nil {
 		return nil, err
@@ -125,7 +125,7 @@ func (s *bannerService) CreateBanner(req *domain.CreateBannerRequest) (*domain.B
 }
 
 // UpdateBanner updates a banner
-func (s *bannerService) UpdateBanner(id int64, req *domain.UpdateBannerRequest) (*domain.BannerResponse, error) {
+func (s *bannerService) UpdateBanner(id string, req *domain.UpdateBannerRequest) (*domain.BannerResponse, error) {
 	banner, err := s.repo.FindBannerByID(id)
 	if err != nil {
 		return nil, err
@@ -164,12 +164,12 @@ func (s *bannerService) UpdateBanner(id int64, req *domain.UpdateBannerRequest) 
 }
 
 // DeleteBanner deletes a banner
-func (s *bannerService) DeleteBanner(id int64) error {
+func (s *bannerService) DeleteBanner(id string) error {
 	return s.repo.DeleteBanner(id)
 }
 
 // TrackClick tracks a banner click
-func (s *bannerService) TrackClick(id int64, req *domain.BannerClickRequest) error {
+func (s *bannerService) TrackClick(id string, req *domain.BannerClickRequest) error {
 	// Increment click count
 	if err := s.repo.IncrementClickCount(id); err != nil {
 		return err
@@ -188,33 +188,27 @@ func (s *bannerService) TrackClick(id int64, req *domain.BannerClickRequest) err
 }
 
 // TrackView tracks a banner view (alias for IncrementViewCount)
-func (s *bannerService) TrackView(id int64) error {
+func (s *bannerService) TrackView(id string) error {
 	return s.repo.IncrementViewCount(id)
 }
 
 // IncrementViewCount increments the view count of a banner
-func (s *bannerService) IncrementViewCount(id int64) error {
+func (s *bannerService) IncrementViewCount(id string) error {
 	return s.repo.IncrementViewCount(id)
 }
 
 // GetBannerStats retrieves statistics for a banner
-func (s *bannerService) GetBannerStats(id int64) (*domain.BannerStatsResponse, error) {
+func (s *bannerService) GetBannerStats(id string) (*domain.BannerStatsResponse, error) {
 	banner, err := s.repo.FindBannerByID(id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Calculate CTR (Click-through rate)
-	var ctr float64
-	if banner.ViewCount > 0 {
-		ctr = float64(banner.ClickCount) / float64(banner.ViewCount) * 100
-	}
-
 	return &domain.BannerStatsResponse{
 		BannerID:   banner.ID,
-		Title:      banner.Title,
-		ClickCount: banner.ClickCount,
-		ViewCount:  banner.ViewCount,
-		CTR:        ctr,
+		Name:       banner.Name,
+		ClickCount: 0, // 실제 DB에는 없음
+		ViewCount:  0, // 실제 DB에는 없음
+		CTR:        0,
 	}, nil
 }

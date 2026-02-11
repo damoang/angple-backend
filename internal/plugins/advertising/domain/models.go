@@ -148,15 +148,20 @@ func (AdRotationConfig) TableName() string {
 
 // CelebrationBanner 축하 배너
 type CelebrationBanner struct {
-	ID          uint64    `gorm:"primaryKey" json:"id"`
-	Title       string    `gorm:"size:255;not null" json:"title"`
-	Content     string    `gorm:"type:text" json:"content,omitempty"`
-	ImageURL    string    `gorm:"column:image_url;size:500" json:"image_url,omitempty"`
-	LinkURL     string    `gorm:"column:link_url;size:500" json:"link_url,omitempty"`
-	ExternalURL string    `gorm:"column:external_url;size:500" json:"external_url,omitempty"` // wr_link2 매핑
-	DisplayDate time.Time `gorm:"column:display_date;type:date;not null" json:"display_date"`
-	IsActive    bool      `gorm:"column:is_active;default:true" json:"is_active"`
-	CreatedAt   time.Time `gorm:"column:created_at" json:"created_at"`
+	ID             uint64    `gorm:"primaryKey" json:"id"`
+	Title          string    `gorm:"size:255;not null" json:"title"`
+	Content        string    `gorm:"type:text" json:"content,omitempty"`
+	ImageURL       string    `gorm:"column:image_url;size:500" json:"image_url,omitempty"`
+	LinkURL        string    `gorm:"column:link_url;size:500" json:"link_url,omitempty"`
+	ExternalURL    string    `gorm:"column:external_url;size:500" json:"external_url,omitempty"`
+	DisplayDate    time.Time `gorm:"column:display_date;type:date;not null" json:"display_date"`
+	YearlyRepeat   bool      `gorm:"column:yearly_repeat;default:false" json:"yearly_repeat"`
+	LinkTarget     string    `gorm:"column:link_target;size:20;default:_blank" json:"link_target"`
+	SortOrder      int       `gorm:"column:sort_order;default:0" json:"sort_order"`
+	TargetMemberID string    `gorm:"column:target_member_id;size:20" json:"target_member_id,omitempty"`
+	IsActive       bool      `gorm:"column:is_active;default:true" json:"is_active"`
+	CreatedAt      time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"column:updated_at" json:"updated_at"`
 }
 
 func (CelebrationBanner) TableName() string {
@@ -201,27 +206,39 @@ func (u *AdUnit) ToResponse() *AdUnitResponse {
 
 // CelebrationBannerResponse 축하 배너 응답 DTO
 type CelebrationBannerResponse struct {
-	ID           uint64 `json:"id"`
-	Title        string `json:"title"`
-	Content      string `json:"content,omitempty"`
-	ImageURL     string `json:"image_url,omitempty"`
-	LinkURL      string `json:"link_url,omitempty"`
-	ExternalLink string `json:"external_link,omitempty"` // 프론트엔드 호환
-	DisplayDate  string `json:"display_date"`
-	IsActive     bool   `json:"is_active"`
+	ID             uint64 `json:"id"`
+	Title          string `json:"title"`
+	Content        string `json:"content,omitempty"`
+	ImageURL       string `json:"image_url,omitempty"`
+	LinkURL        string `json:"link_url,omitempty"`
+	ExternalLink   string `json:"external_link,omitempty"`
+	DisplayDate    string `json:"display_date"`
+	YearlyRepeat   bool   `json:"yearly_repeat"`
+	LinkTarget     string `json:"link_target"`
+	SortOrder      int    `json:"sort_order"`
+	TargetMemberID string `json:"target_member_id,omitempty"`
+	IsActive       bool   `json:"is_active"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 // ToResponse CelebrationBanner를 응답 DTO로 변환
 func (b *CelebrationBanner) ToResponse() *CelebrationBannerResponse {
 	return &CelebrationBannerResponse{
-		ID:           b.ID,
-		Title:        b.Title,
-		Content:      b.Content,
-		ImageURL:     b.ImageURL,
-		LinkURL:      b.LinkURL,
-		ExternalLink: b.ExternalURL,
-		DisplayDate:  b.DisplayDate.Format("2006-01-02"),
-		IsActive:     b.IsActive,
+		ID:             b.ID,
+		Title:          b.Title,
+		Content:        b.Content,
+		ImageURL:       b.ImageURL,
+		LinkURL:        b.LinkURL,
+		ExternalLink:   b.ExternalURL,
+		DisplayDate:    b.DisplayDate.Format("2006-01-02"),
+		YearlyRepeat:   b.YearlyRepeat,
+		LinkTarget:     b.LinkTarget,
+		SortOrder:      b.SortOrder,
+		TargetMemberID: b.TargetMemberID,
+		IsActive:       b.IsActive,
+		CreatedAt:      b.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:      b.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -255,22 +272,30 @@ type UpdateAdUnitRequest struct {
 
 // CreateBannerRequest 축하 배너 생성 요청
 type CreateBannerRequest struct {
-	Title       string `json:"title" binding:"required,max=255"`
-	Content     string `json:"content,omitempty"`
-	ImageURL    string `json:"image_url,omitempty"`
-	LinkURL     string `json:"link_url,omitempty"`
-	DisplayDate string `json:"display_date" binding:"required"` // YYYY-MM-DD
-	IsActive    *bool  `json:"is_active"`
+	Title          string `json:"title" binding:"required,max=255"`
+	Content        string `json:"content,omitempty"`
+	ImageURL       string `json:"image_url,omitempty"`
+	LinkURL        string `json:"link_url,omitempty"`
+	DisplayDate    string `json:"display_date" binding:"required"` // YYYY-MM-DD
+	YearlyRepeat   bool   `json:"yearly_repeat"`
+	LinkTarget     string `json:"link_target,omitempty"`
+	SortOrder      int    `json:"sort_order"`
+	TargetMemberID string `json:"target_member_id,omitempty"`
+	IsActive       *bool  `json:"is_active"`
 }
 
 // UpdateBannerRequest 축하 배너 수정 요청
 type UpdateBannerRequest struct {
-	Title       *string `json:"title,omitempty"`
-	Content     *string `json:"content,omitempty"`
-	ImageURL    *string `json:"image_url,omitempty"`
-	LinkURL     *string `json:"link_url,omitempty"`
-	DisplayDate *string `json:"display_date,omitempty"`
-	IsActive    *bool   `json:"is_active,omitempty"`
+	Title          *string `json:"title,omitempty"`
+	Content        *string `json:"content,omitempty"`
+	ImageURL       *string `json:"image_url,omitempty"`
+	LinkURL        *string `json:"link_url,omitempty"`
+	DisplayDate    *string `json:"display_date,omitempty"`
+	YearlyRepeat   *bool   `json:"yearly_repeat,omitempty"`
+	LinkTarget     *string `json:"link_target,omitempty"`
+	SortOrder      *int    `json:"sort_order,omitempty"`
+	TargetMemberID *string `json:"target_member_id,omitempty"`
+	IsActive       *bool   `json:"is_active,omitempty"`
 }
 
 // GAMConfigResponse GAM 전역 설정 응답

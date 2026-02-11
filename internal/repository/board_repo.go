@@ -100,6 +100,23 @@ func (r *BoardRepository) FindByID(boardID string) (*domain.Board, error) {
 	return &board, nil
 }
 
+// FindByIDs - 여러 게시판 ID로 일괄 조회 (N+1 방지)
+func (r *BoardRepository) FindByIDs(boardIDs []string) (map[string]string, error) {
+	if len(boardIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	var boards []domain.Board
+	err := r.db.Where("bo_table IN ?", boardIDs).Select("bo_table, bo_subject").Find(&boards).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(boards))
+	for _, b := range boards {
+		result[b.BoardID] = b.Subject
+	}
+	return result, nil
+}
+
 // FindAll - 모든 게시판 목록 조회
 func (r *BoardRepository) FindAll(offset, limit int) ([]domain.Board, int64, error) {
 	var boards []domain.Board

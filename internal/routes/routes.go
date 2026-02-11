@@ -55,7 +55,7 @@ func Setup(
 	v1Redirect := middleware.V1ToV2Redirect(middleware.V1RedirectConfig{Enabled: false})
 
 	// 레거시 API (그누보드 DB 기반) → /api/v1 으로 이동, Deprecation 헤더 + 사용량 추적 + v2 리다이렉트 힌트
-	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg), deprecationMW, v1Redirect, v1UsageTracker.Track())
+	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager), deprecationMW, v1Redirect, v1UsageTracker.Track())
 
 	// Authentication endpoints (no auth required)
 	auth := api.Group("/auth")
@@ -233,8 +233,13 @@ func Setup(
 	reports.GET("", reportHandler.ListReports)             // 신고 목록 (관리자)
 	reports.GET("/data", reportHandler.GetReportData)      // 신고 데이터 조회 (관리자)
 	reports.GET("/recent", reportHandler.GetRecentReports) // 최근 신고 목록 (관리자)
-	reports.GET("/stats", reportHandler.GetStats)          // 신고 통계 (관리자)
-	reports.POST("/process", reportHandler.ProcessReport)  // 신고 처리 (관리자)
+	reports.GET("/stats", reportHandler.GetStats)             // 신고 통계 (관리자)
+	reports.GET("/opinions", reportHandler.GetOpinions)       // 의견 목록 (관리자)
+	reports.POST("/process", reportHandler.ProcessReport)           // 신고 처리 (관리자)
+	reports.POST("/batch-process", reportHandler.BatchProcessReport) // 신고 일괄 처리 (관리자)
+
+	// Singo Users (검토자 목록)
+	api.GET("/singo-users", reportHandler.ListSingoUsers)
 
 	// Disciplines (이용제한 API)
 	disciplines := api.Group("/disciplines")
@@ -263,7 +268,7 @@ func Setup(
 	notifications.DELETE("/:id", notificationHandler.Delete)
 
 	// WebSocket (실시간 알림 스트림 - 로그인 필요)
-	wsGroup := router.Group("/ws", middleware.DamoangCookieAuth(damoangJWT, cfg))
+	wsGroup := router.Group("/ws", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
 	wsGroup.GET("/notifications", wsHandler.Connect)
 
 	// Upload (파일 업로드 API - 로그인 필요)
@@ -287,7 +292,7 @@ func Setup(
 	// ============================================
 	// Plugin Routes (/api/plugins/*)
 	// ============================================
-	plugins := router.Group("/api/plugins", middleware.DamoangCookieAuth(damoangJWT, cfg))
+	plugins := router.Group("/api/plugins", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
 
 	// Promotion Plugin (직홍게 플러그인)
 	promotion := plugins.Group("/promotion")
@@ -308,6 +313,7 @@ func Setup(
 	promotionAdmin.POST("/advertisers", promotionHandler.CreateAdvertiser)
 	promotionAdmin.PUT("/advertisers/:id", promotionHandler.UpdateAdvertiser)
 	promotionAdmin.DELETE("/advertisers/:id", promotionHandler.DeleteAdvertiser)
+	promotionAdmin.POST("/sync-widget", promotionHandler.SyncWidget)
 
 	// Banner Plugin (배너 플러그인)
 	banner := plugins.Group("/banner")

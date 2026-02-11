@@ -31,8 +31,8 @@ type DisciplineLog struct {
 	File         int8      `gorm:"column:wr_file" json:"file"`
 	Last         string    `gorm:"column:wr_last;size:19" json:"last"`
 	IP           string    `gorm:"column:wr_ip;size:255" json:"ip"`
-	Facebook     string    `gorm:"column:wr_facebook;size:255" json:"facebook"`
-	Twitter      string    `gorm:"column:wr_twitter;size:255" json:"twitter"`
+	Facebook     string    `gorm:"column:wr_facebook_user;size:255" json:"facebook"`
+	Twitter      string    `gorm:"column:wr_twitter_user;size:255" json:"twitter"`
 	Wr1          string    `gorm:"column:wr_1;size:255" json:"wr_1"`
 	Wr2          string    `gorm:"column:wr_2;size:255" json:"wr_2"`
 	Wr3          string    `gorm:"column:wr_3;size:255" json:"wr_3"`
@@ -46,19 +46,57 @@ type DisciplineLog struct {
 }
 
 // DisciplineLogContent represents the JSON content stored in discipline log
+// PHP disciplinelog 뷰 스킨과 호환되는 필드명 사용
 type DisciplineLogContent struct {
-	TargetID       string   `json:"target_id"`
-	TargetNickname string   `json:"target_nickname,omitempty"`
-	PenaltyDays    int      `json:"penalty_days"`    // 제한 일수 (0=주의, -1=영구)
-	PenaltyType    []string `json:"penalty_type"`    // ["level", "intercept"]
-	PenaltyReasons []string `json:"penalty_reasons"` // 신고 사유 코드
-	AdminMemo      string   `json:"admin_memo,omitempty"`
-	ReportID       int      `json:"report_id"`
-	ReportTable    string   `json:"report_table"`
-	TargetContent  string   `json:"target_content,omitempty"`
-	TargetTitle    string   `json:"target_title,omitempty"`
-	ProcessedAt    string   `json:"processed_at"`
-	ProcessedBy    string   `json:"processed_by"`
+	// PHP 필수 필드 (disciplinelog 목록/상세 스킨에서 사용)
+	PenaltyMbID    string          `json:"penalty_mb_id"`              // 피신고 회원 ID
+	PenaltyDateFrom string         `json:"penalty_date_from"`          // 제재 시작일
+	PenaltyPeriod  int             `json:"penalty_period"`             // 제한 일수 (0=주의, -1=영구)
+	PenaltyType    []string        `json:"penalty_type"`               // ["level", "access"]
+	SgTypes        []int           `json:"sg_types"`                   // 사유 정수 코드 배열 (PHP 표시용)
+	ReportedItems  []ReportedItem  `json:"reported_items"`             // 신고된 글/댓글 목록
+	ReportedURL    string          `json:"reported_url,omitempty"`     // 단일 신고 URL (하위 호환)
+	IsBulk         bool            `json:"is_bulk"`                    // 일괄 처리 여부
+	ReportCount    int             `json:"report_count"`               // 신고 건수
+	Content        string          `json:"content,omitempty"`          // 상세 내용 (하위 호환)
+	// Go 확장 필드 (PHP에서 무시됨, API 응답용)
+	TargetNickname string          `json:"target_nickname,omitempty"`
+	PenaltyReasons []string        `json:"penalty_reasons,omitempty"`  // 문자열 사유 코드 (Go API용)
+	AdminMemo      string          `json:"admin_memo,omitempty"`
+	ReportID       int             `json:"report_id"`
+	ReportTable    string          `json:"report_table"`
+	ProcessedBy    string          `json:"processed_by"`
+}
+
+// ReportedItem represents a reported post/comment in discipline log
+type ReportedItem struct {
+	Table  string `json:"table"`
+	ID     int    `json:"id"`
+	Parent int    `json:"parent"`
+}
+
+// ReasonKeyToCode maps string reason keys to integer codes (PHP SingoHelper 호환)
+var ReasonKeyToCode = map[string]int{
+	"member_insult":    1,
+	"no_manner":        2,
+	"inappropriate":    3,
+	"discrimination":   4,
+	"conflict":         5,
+	"manipulation":     6,
+	"deception":        7,
+	"service_abuse":    8,
+	"misuse":           9,
+	"trading":          10,
+	"begging":          11,
+	"rights_violation": 12,
+	"obscenity":        13,
+	"illegal":          14,
+	"advertising":      15,
+	"policy_denial":    16,
+	"multi_account":    17,
+	"other":            18,
+	"news_missing_info": 39,
+	"news_full_text":   40,
 }
 
 // DisciplineResponse represents a discipline log entry for API response

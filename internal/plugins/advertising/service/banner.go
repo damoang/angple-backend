@@ -76,13 +76,22 @@ func (s *bannerService) CreateBanner(req *domain.CreateBannerRequest) (*domain.C
 		isActive = *req.IsActive
 	}
 
+	linkTarget := req.LinkTarget
+	if linkTarget == "" {
+		linkTarget = "_blank"
+	}
+
 	banner := &domain.CelebrationBanner{
-		Title:       req.Title,
-		Content:     req.Content,
-		ImageURL:    req.ImageURL,
-		LinkURL:     req.LinkURL,
-		DisplayDate: displayDate,
-		IsActive:    isActive,
+		Title:          req.Title,
+		Content:        req.Content,
+		ImageURL:       req.ImageURL,
+		LinkURL:        req.LinkURL,
+		DisplayDate:    displayDate,
+		YearlyRepeat:   req.YearlyRepeat,
+		LinkTarget:     linkTarget,
+		SortOrder:      req.SortOrder,
+		TargetMemberID: req.TargetMemberID,
+		IsActive:       isActive,
 	}
 
 	if err := s.repo.CreateBanner(banner); err != nil {
@@ -122,6 +131,18 @@ func (s *bannerService) UpdateBanner(id uint64, req *domain.UpdateBannerRequest)
 			return nil, errors.New("invalid display_date format, expected YYYY-MM-DD")
 		}
 		existing.DisplayDate = displayDate
+	}
+	if req.YearlyRepeat != nil {
+		existing.YearlyRepeat = *req.YearlyRepeat
+	}
+	if req.LinkTarget != nil {
+		existing.LinkTarget = *req.LinkTarget
+	}
+	if req.SortOrder != nil {
+		existing.SortOrder = *req.SortOrder
+	}
+	if req.TargetMemberID != nil {
+		existing.TargetMemberID = *req.TargetMemberID
 	}
 	if req.IsActive != nil {
 		existing.IsActive = *req.IsActive

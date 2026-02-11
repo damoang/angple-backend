@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -295,6 +296,23 @@ func (h *PromotionHandler) GetMyRemaining(c *gin.Context) {
 
 // ============= Admin Endpoints =============
 
+// SyncWidget godoc
+// @Summary      위젯 JSON 수동 동기화
+// @Description  DB 광고주 데이터를 nariya 위젯 JSON 파일에 동기화합니다
+// @Tags         promotion
+// @Produce      json
+// @Success      200  {object}  common.APIResponse
+// @Failure      500  {object}  common.APIResponse
+// @Router       /admin/promotion/sync-widget [post]
+func (h *PromotionHandler) SyncWidget(c *gin.Context) {
+	if err := h.service.SyncWidgetJSON(); err != nil {
+		common.ErrorResponse(c, 500, "위젯 JSON 동기화 실패", err)
+		return
+	}
+
+	common.SuccessResponse(c, gin.H{"message": "위젯 JSON 동기화 완료"}, nil)
+}
+
 // ListAdvertisers godoc
 // @Summary      광고주 목록 조회 (관리자)
 // @Description  모든 광고주 목록을 조회합니다
@@ -347,6 +365,12 @@ func (h *PromotionHandler) CreateAdvertiser(c *gin.Context) {
 		return
 	}
 
+	// 위젯 JSON 동기화 (실패해도 응답은 성공)
+	if syncErr := h.service.SyncWidgetJSON(); syncErr != nil {
+		common.ErrorResponse(c, 201, "Advertiser created but widget sync failed", syncErr)
+		return
+	}
+
 	c.JSON(http.StatusCreated, common.APIResponse{Data: data})
 }
 
@@ -384,6 +408,11 @@ func (h *PromotionHandler) UpdateAdvertiser(c *gin.Context) {
 		return
 	}
 
+	// 위젯 JSON 동기화
+	if syncErr := h.service.SyncWidgetJSON(); syncErr != nil {
+		log.Printf("[Promotion] Widget sync failed after update: %v", syncErr)
+	}
+
 	common.SuccessResponse(c, data, nil)
 }
 
@@ -410,6 +439,11 @@ func (h *PromotionHandler) DeleteAdvertiser(c *gin.Context) {
 	if err := h.service.DeleteAdvertiser(id); err != nil {
 		common.ErrorResponse(c, 500, "Failed to delete advertiser", err)
 		return
+	}
+
+	// 위젯 JSON 동기화
+	if syncErr := h.service.SyncWidgetJSON(); syncErr != nil {
+		log.Printf("[Promotion] Widget sync failed after delete: %v", syncErr)
 	}
 
 	common.SuccessResponse(c, gin.H{"message": "Advertiser deleted successfully"}, nil)

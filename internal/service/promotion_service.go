@@ -1,8 +1,13 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"math"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain"
@@ -34,6 +39,9 @@ type PromotionService interface {
 	// Advertiser self-service
 	GetMyStats(memberID string) (*domain.AdvertiserStatsResponse, error)
 	GetMyRemaining(memberID string) (*domain.AdvertiserRemainingResponse, error)
+
+	// Widget JSON sync
+	SyncWidgetJSON() error
 }
 
 type promotionService struct {
@@ -374,4 +382,167 @@ func (s *promotionService) IsAdvertiser(memberID string) (bool, *domain.Advertis
 	}
 
 	return true, advertiser, nil
+}
+
+// ============= Widget JSON Sync =============
+
+// nariyaWidgetJSON은 nariya 위젯 JSON 파일의 최상위 구조
+type nariyaWidgetJSON struct {
+	BoardException       string                       `json:"board_exception"`
+	InsertIndex          int                          `json:"insert_index"`
+	MinCntForInsertIndex int                          `json:"min_cnt_for_insert_index"`
+	HowManyToDisplay     int                          `json:"how_many_to_display"`
+	Advertisers          map[string]nariyaAdvertiser   `json:"advertisers"`
+}
+
+// nariyaAdvertiser는 nariya 위젯 JSON의 광고주 항목
+type nariyaAdvertiser struct {
+	Name            string `json:"name"`
+	MemberID        string `json:"member_id"`
+	StartDate       string `json:"start_date"`
+	EndDate         string `json:"end_date"`
+	PostCount       int    `json:"post_count"`
+	PermissionGroup string `json:"permission_group"`
+	PinToTop        bool   `json:"pin_to_top"`
+	Order           int    `json:"order"`
+}
+
+const widgetJSONDir = "/home/damoang/www/data/nariya/widget"
+
+// SyncWidgetJSON은 DB의 광고주 데이터를 nariya 위젯 JSON 파일에 동기화
+func (s *promotionService) SyncWidgetJSON() error {
+	advertisers, err := s.repo.GetAllAdvertisers()
+	if err != nil {
+		return fmt.Errorf("광고주 목록 조회 실패: %w", err)
+	}
+
+	// 기존 JSON 파일에서 위젯 설정(board_exception 등)을 읽어옴
+	existingSettings := s.readExistingWidgetSettings()
+
+	// DB 데이터를 nariya JSON 형식으로 변환
+	widgetData := nariyaWidgetJSON{
+		BoardException:       existingSettings.BoardException,
+		InsertIndex:          existingSettings.InsertIndex,
+		MinCntForInsertIndex: existingSettings.MinCntForInsertIndex,
+		HowManyToDisplay:     existingSettings.HowManyToDisplay,
+		Advertisers:          make(map[string]nariyaAdvertiser),
+	}
+
+	// is_active인 광고주만 포함, created_at 순서로 order 부여
+	order := 0
+	for _, adv := range advertisers {
+		if !adv.IsActive {
+			continue
+		}
+
+		startDate := ""
+		if adv.StartDate != nil {
+			startDate = adv.StartDate.Format("2006-01-02")
+		}
+		endDate := ""
+		if adv.EndDate != nil {
+			endDate = adv.EndDate.Format("2006-01-02")
+		}
+
+		permGroup := "one"
+		if adv.PostCount >= 2 {
+			permGroup = "two"
+		}
+
+		widgetData.Advertisers[adv.MemberID] = nariyaAdvertiser{
+			Name:            adv.Name,
+			MemberID:        adv.MemberID,
+			StartDate:       startDate,
+			EndDate:         endDate,
+			PostCount:       adv.PostCount,
+			PermissionGroup: permGroup,
+			PinToTop:        adv.IsPinned,
+			Order:           order,
+		}
+		order++
+	}
+
+	// PC/MO 양 플랫폼에 동시 저장
+	platforms := []string{"pc", "mo"}
+	for _, platform := range platforms {
+		filename := fmt.Sprintf("w-promotion-ad-insertion-pai-%s.json", platform)
+		filePath := filepath.Join(widgetJSONDir, filename)
+
+		if err := s.writeWidgetJSON(filePath, &widgetData); err != nil {
+			log.Printf("[Promotion] 위젯 JSON 저장 실패 (%s): %v", platform, err)
+			return fmt.Errorf("위젯 JSON 저장 실패 (%s): %w", platform, err)
+		}
+	}
+
+	log.Printf("[Promotion] 위젯 JSON 동기화 완료 (광고주 %d명)", len(widgetData.Advertisers))
+	return nil
+}
+
+// readExistingWidgetSettings는 기존 JSON 파일에서 위젯 설정값을 읽어옴
+func (s *promotionService) readExistingWidgetSettings() nariyaWidgetJSON {
+	defaults := nariyaWidgetJSON{
+		BoardException:       "report,promotion,notice,banners,truthroom,advertiser,claim,disciplinelog,verification,angtt,angreport,nope,flag,gallery,flex,main,admin,angmap,giving,hello,keycaps,image,photo,message",
+		InsertIndex:          15,
+		MinCntForInsertIndex: 20,
+		HowManyToDisplay:     2,
+	}
+
+	filePath := filepath.Join(widgetJSONDir, "w-promotion-ad-insertion-pai-pc.json")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return defaults
+	}
+
+	var existing nariyaWidgetJSON
+	if err := json.Unmarshal(data, &existing); err != nil {
+		return defaults
+	}
+
+	// 설정값만 가져오고 advertisers는 무시
+	defaults.BoardException = existing.BoardException
+	defaults.InsertIndex = existing.InsertIndex
+	defaults.MinCntForInsertIndex = existing.MinCntForInsertIndex
+	defaults.HowManyToDisplay = existing.HowManyToDisplay
+	return defaults
+}
+
+// writeWidgetJSON은 백업 후 JSON 파일을 쓴다
+func (s *promotionService) writeWidgetJSON(filePath string, data *nariyaWidgetJSON) error {
+	// 기존 파일 백업
+	if _, err := os.Stat(filePath); err == nil {
+		backupPath := filePath + ".backup." + time.Now().Format("2006-01-02-15-04-05")
+		if err := copyFile(filePath, backupPath); err != nil {
+			log.Printf("[Promotion] 백업 실패: %v", err)
+		}
+	}
+
+	jsonBytes, err := json.MarshalIndent(data, "", "    ")
+	if err != nil {
+		return fmt.Errorf("JSON 인코딩 실패: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, jsonBytes, 0644); err != nil {
+		return fmt.Errorf("파일 쓰기 실패: %w", err)
+	}
+
+	// 쓰기 후 검증
+	verifyData, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("파일 검증 실패 (읽기): %w", err)
+	}
+	var verify nariyaWidgetJSON
+	if err := json.Unmarshal(verifyData, &verify); err != nil {
+		return fmt.Errorf("파일 검증 실패 (파싱): %w", err)
+	}
+
+	return nil
+}
+
+// copyFile은 src를 dst로 복사
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0644)
 }

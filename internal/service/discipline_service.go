@@ -59,7 +59,7 @@ func (s *disciplineService) GetDiscipline(id int, memberID string) (*domain.Disc
 	// Parse content to verify target_id matches
 	var content domain.DisciplineLogContent
 	if err := json.Unmarshal([]byte(log.Content), &content); err == nil {
-		if content.TargetID != memberID {
+		if content.PenaltyMbID != memberID {
 			return nil, fmt.Errorf("권한이 없습니다")
 		}
 	}
@@ -77,7 +77,7 @@ func (s *disciplineService) SubmitAppeal(disciplineID int, memberID, memberName,
 
 	var logContent domain.DisciplineLogContent
 	if err := json.Unmarshal([]byte(log.Content), &logContent); err == nil {
-		if logContent.TargetID != memberID {
+		if logContent.PenaltyMbID != memberID {
 			return 0, fmt.Errorf("권한이 없습니다")
 		}
 	}

@@ -6,7 +6,6 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/service"
-	"github.com/damoang/angple-backend/pkg/ginutil"
 	"github.com/gin-gonic/gin"
 )
 
@@ -66,11 +65,7 @@ func (h *BannerHandler) ListBanners(c *gin.Context) {
 // @Failure      404  {object}  common.APIResponse
 // @Router       /banners/{id} [get]
 func (h *BannerHandler) GetBanner(c *gin.Context) {
-	id, err := ginutil.ParamInt64(c, "id")
-	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid banner ID", err)
-		return
-	}
+	id := c.Param("id")
 
 	data, err := h.service.GetBannerByID(id)
 	if err != nil {
@@ -93,11 +88,7 @@ func (h *BannerHandler) GetBanner(c *gin.Context) {
 // @Failure      500  {object}  common.APIResponse
 // @Router       /banners/{id}/click [get]
 func (h *BannerHandler) TrackClick(c *gin.Context) {
-	id, err := ginutil.ParamInt64(c, "id")
-	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid banner ID", err)
-		return
-	}
+	id := c.Param("id")
 
 	// Create click request with client info
 	req := &domain.BannerClickRequest{
@@ -125,8 +116,8 @@ func (h *BannerHandler) TrackClick(c *gin.Context) {
 		return
 	}
 
-	if banner.LinkURL != "" {
-		c.Redirect(http.StatusFound, banner.LinkURL)
+	if banner.LandingURL != "" {
+		c.Redirect(http.StatusFound, banner.LandingURL)
 		return
 	}
 
@@ -145,11 +136,7 @@ func (h *BannerHandler) TrackClick(c *gin.Context) {
 // @Failure      500  {object}  common.APIResponse
 // @Router       /banners/{id}/view [post]
 func (h *BannerHandler) TrackView(c *gin.Context) {
-	id, err := ginutil.ParamInt64(c, "id")
-	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid banner ID", err)
-		return
-	}
+	id := c.Param("id")
 
 	if err := h.service.TrackView(id); err != nil {
 		common.ErrorResponse(c, 500, "Failed to track view", err)
@@ -227,11 +214,7 @@ func (h *BannerHandler) CreateBanner(c *gin.Context) {
 // @Failure      500  {object}  common.APIResponse
 // @Router       /admin/banners/{id} [put]
 func (h *BannerHandler) UpdateBanner(c *gin.Context) {
-	id, err := ginutil.ParamInt64(c, "id")
-	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid banner ID", err)
-		return
-	}
+	id := c.Param("id")
 
 	var req domain.UpdateBannerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -262,11 +245,7 @@ func (h *BannerHandler) UpdateBanner(c *gin.Context) {
 // @Failure      500  {object}  common.APIResponse
 // @Router       /admin/banners/{id} [delete]
 func (h *BannerHandler) DeleteBanner(c *gin.Context) {
-	id, err := ginutil.ParamInt64(c, "id")
-	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid banner ID", err)
-		return
-	}
+	id := c.Param("id")
 
 	if err := h.service.DeleteBanner(id); err != nil {
 		common.ErrorResponse(c, 500, "Failed to delete banner", err)
@@ -291,11 +270,7 @@ func (h *BannerHandler) DeleteBanner(c *gin.Context) {
 // @Failure      500  {object}  common.APIResponse
 // @Router       /admin/banners/{id}/stats [get]
 func (h *BannerHandler) GetBannerStats(c *gin.Context) {
-	id, err := ginutil.ParamInt64(c, "id")
-	if err != nil {
-		common.ErrorResponse(c, 400, "Invalid banner ID", err)
-		return
-	}
+	id := c.Param("id")
 
 	data, err := h.service.GetBannerStats(id)
 	if err != nil {

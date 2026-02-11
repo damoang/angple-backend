@@ -11,16 +11,16 @@ type BannerRepository interface {
 	GetAllBanners() ([]*domain.Banner, error)
 	GetActiveBanners() ([]*domain.Banner, error)
 	GetBannersByPosition(position domain.BannerPosition) ([]*domain.Banner, error)
-	FindBannerByID(id int64) (*domain.Banner, error)
+	FindBannerByID(id string) (*domain.Banner, error)
 	CreateBanner(banner *domain.Banner) error
 	UpdateBanner(banner *domain.Banner) error
-	DeleteBanner(id int64) error
-	IncrementClickCount(id int64) error
-	IncrementViewCount(id int64) error
+	DeleteBanner(id string) error
+	IncrementClickCount(id string) error
+	IncrementViewCount(id string) error
 
 	// Click log methods
 	CreateClickLog(log *domain.BannerClickLog) error
-	GetClickLogsByBanner(bannerID int64, limit int) ([]*domain.BannerClickLog, error)
+	GetClickLogsByBanner(bannerID string, limit int) ([]*domain.BannerClickLog, error)
 }
 
 // bannerRepository implements BannerRepository with GORM
@@ -53,10 +53,10 @@ func (r *bannerRepository) GetActiveBanners() ([]*domain.Banner, error) {
 	var banners []*domain.Banner
 
 	err := r.db.
-		Where("is_active = ?", true).
+		Where("status = ?", "active").
 		Where("(start_date IS NULL OR start_date <= CURDATE())").
 		Where("(end_date IS NULL OR end_date >= CURDATE())").
-		Order("priority DESC, created_at DESC").
+		Order("created_at DESC").
 		Find(&banners).Error
 
 	if err != nil {
@@ -71,11 +71,11 @@ func (r *bannerRepository) GetBannersByPosition(position domain.BannerPosition) 
 	var banners []*domain.Banner
 
 	err := r.db.
-		Where("is_active = ?", true).
+		Where("status = ?", "active").
 		Where("position = ?", position).
 		Where("(start_date IS NULL OR start_date <= CURDATE())").
 		Where("(end_date IS NULL OR end_date >= CURDATE())").
-		Order("priority DESC, created_at DESC").
+		Order("created_at DESC").
 		Find(&banners).Error
 
 	if err != nil {
@@ -86,7 +86,7 @@ func (r *bannerRepository) GetBannersByPosition(position domain.BannerPosition) 
 }
 
 // FindBannerByID finds a banner by ID
-func (r *bannerRepository) FindBannerByID(id int64) (*domain.Banner, error) {
+func (r *bannerRepository) FindBannerByID(id string) (*domain.Banner, error) {
 	var banner domain.Banner
 
 	err := r.db.
@@ -111,19 +111,19 @@ func (r *bannerRepository) UpdateBanner(banner *domain.Banner) error {
 }
 
 // DeleteBanner deletes a banner by ID
-func (r *bannerRepository) DeleteBanner(id int64) error {
+func (r *bannerRepository) DeleteBanner(id string) error {
 	return r.db.Delete(&domain.Banner{}, id).Error
 }
 
 // IncrementClickCount increments the click count of a banner
-func (r *bannerRepository) IncrementClickCount(id int64) error {
+func (r *bannerRepository) IncrementClickCount(id string) error {
 	return r.db.Model(&domain.Banner{}).
 		Where("id = ?", id).
 		UpdateColumn("click_count", gorm.Expr("click_count + 1")).Error
 }
 
 // IncrementViewCount increments the view count of a banner
-func (r *bannerRepository) IncrementViewCount(id int64) error {
+func (r *bannerRepository) IncrementViewCount(id string) error {
 	return r.db.Model(&domain.Banner{}).
 		Where("id = ?", id).
 		UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
@@ -135,7 +135,7 @@ func (r *bannerRepository) CreateClickLog(log *domain.BannerClickLog) error {
 }
 
 // GetClickLogsByBanner retrieves click logs for a specific banner
-func (r *bannerRepository) GetClickLogsByBanner(bannerID int64, limit int) ([]*domain.BannerClickLog, error) {
+func (r *bannerRepository) GetClickLogsByBanner(bannerID string, limit int) ([]*domain.BannerClickLog, error) {
 	var logs []*domain.BannerClickLog
 
 	query := r.db.

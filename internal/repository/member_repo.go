@@ -14,6 +14,7 @@ type MemberRepository interface {
 	FindByEmail(email string) (*domain.Member, error)
 	FindByID(id int) (*domain.Member, error)
 	FindByNickname(nickname string) (*domain.Member, error)
+	FindNicksByIDs(userIDs []string) (map[string]string, error)
 
 	// Write operations
 	Create(member *domain.Member) error
@@ -180,6 +181,30 @@ func (r *memberRepository) FindAll(page, limit int, keyword string) ([]*domain.M
 		return nil, 0, err
 	}
 	return members, total, nil
+}
+
+// FindNicksByIDs batch-loads nicknames for given user IDs (N+1 prevention)
+func (r *memberRepository) FindNicksByIDs(userIDs []string) (map[string]string, error) {
+	if len(userIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	type row struct {
+		MbID   string `gorm:"column:mb_id"`
+		MbNick string `gorm:"column:mb_nick"`
+	}
+	var rows []row
+	err := r.db.Table("g5_member").
+		Select("mb_id, mb_nick").
+		Where("mb_id IN ?", userIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		m[r.MbID] = r.MbNick
+	}
+	return m, nil
 }
 
 // UpdateFields updates specific fields of a member

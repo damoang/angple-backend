@@ -8,9 +8,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// extractFirstImage HTML 콘텐츠에서 첫 번째 이미지 URL 추출
+// extractFirstImage HTML 콘텐츠에서 첫 번째 이미지 URL 추출 (g5_write_message fallback용)
 func extractFirstImage(content string) string {
-	// <img src="..."> 패턴 찾기
 	imgRegex := regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
 	matches := imgRegex.FindStringSubmatch(content)
 	if len(matches) > 1 {
@@ -195,14 +194,36 @@ func (r *adRepository) ListBanners(activeOnly bool) ([]*domain.CelebrationBanner
 	return banners, err
 }
 
-// ListBannersByDate g5_write_message 테이블에서 오늘 날짜 축하 배너 조회
-// PHP BannerHelper.php 로직 포팅: wr_subject가 오늘 날짜(Y.m.d 또는 Y-m-d)인 게시글 조회
+// ListBannersByDate celebration_banners 테이블 우선 조회, 없으면 g5_write_message fallback
 func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationBanner, error) {
-	// 두 가지 날짜 형식 지원 (그누보드 호환)
-	dateDot := date.Format("2006.01.02")
-	dateDash := date.Format("2006-01-02")
+	var banners []*domain.CelebrationBanner
 
-	// g5_write_message 테이블 조회 결과를 담을 구조체
+	dateFmt := date.Format("2006-01-02")
+	month := int(date.Month())
+	day := date.Day()
+
+	// 1차: celebration_banners 테이블
+	err := r.db.Where("is_active = ?", true).
+		Where(
+			r.db.Where("display_date = ?", dateFmt).
+				Or("yearly_repeat = ? AND MONTH(display_date) = ? AND DAY(display_date) = ?",
+					true, month, day),
+		).
+		Order("sort_order ASC, id DESC").
+		Find(&banners).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// celebration_banners에 데이터가 있으면 바로 반환
+	if len(banners) > 0 {
+		return banners, nil
+	}
+
+	// 2차: g5_write_message fallback (마이그레이션 전까지)
+	dateDot := date.Format("2006.01.02")
+
 	type MessageRow struct {
 		WrID      int    `gorm:"column:wr_id"`
 		WrSubject string `gorm:"column:wr_subject"`
@@ -211,9 +232,9 @@ func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationB
 	}
 
 	var results []MessageRow
-	err := r.db.Table("g5_write_message").
+	err = r.db.Table("g5_write_message").
 		Select("wr_id, wr_subject, wr_content, wr_link2").
-		Where("wr_is_comment = 0 AND (wr_subject = ? OR wr_subject = ?)", dateDot, dateDash).
+		Where("wr_is_comment = 0 AND (wr_subject = ? OR wr_subject = ?)", dateDot, dateFmt).
 		Order("wr_id DESC").
 		Find(&results).Error
 
@@ -221,18 +242,14 @@ func (r *adRepository) ListBannersByDate(date time.Time) ([]*domain.CelebrationB
 		return nil, err
 	}
 
-	// MessageRow를 CelebrationBanner로 변환
-	banners := make([]*domain.CelebrationBanner, 0, len(results))
 	for _, row := range results {
 		imageURL := extractFirstImage(row.WrContent)
-
 		// #nosec G115 - WrID는 DB primary key로 항상 양수
 		banner := &domain.CelebrationBanner{
-			ID:          uint64(row.WrID), // nolint:gosec
+			ID:          uint64(row.WrID), //nolint:gosec
 			Title:       row.WrSubject,
 			Content:     row.WrContent,
 			ImageURL:    imageURL,
-			LinkURL:     "", // 기본 링크 (게시글 상세)
 			ExternalURL: row.WrLink2,
 			DisplayDate: date,
 			IsActive:    true,
