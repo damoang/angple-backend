@@ -134,6 +134,7 @@ type AggregatedReportResponse struct {
 	Table             string            `json:"table"`
 	SGID              int               `json:"sg_id"`
 	Parent            int               `json:"parent"`
+	Type              int8              `json:"type"`             // 1=post, 2=comment
 	ReportCount       int               `json:"report_count"`
 	ReporterCount     int               `json:"reporter_count"`
 	TargetID          string            `json:"target_id"`

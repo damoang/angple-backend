@@ -214,10 +214,17 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 			reviewerIDList = strings.Split(row.ReviewerIDs, ",")
 		}
 
+		// Determine type: 1=post (sg_id == sg_parent), 2=comment (sg_id != sg_parent)
+		reportType := int8(1) // default to post
+		if row.SGID != row.Parent {
+			reportType = 2 // comment
+		}
+
 		resp := domain.AggregatedReportResponse{
 			Table:             row.Table,
 			SGID:              row.SGID,
 			Parent:            row.Parent,
+			Type:              reportType,
 			ReportCount:       row.ReportCount,
 			ReporterCount:     row.ReporterCount,
 			TargetID:          row.TargetID,
@@ -353,10 +360,17 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 			reviewerIDList = strings.Split(cr.ReviewerIDs, ",")
 		}
 
+		// Determine type: 1=post, 2=comment
+		crType := int8(1)
+		if cr.SGID != cr.Parent {
+			crType = 2
+		}
+
 		resp := domain.AggregatedReportResponse{
 			Table:             cr.Table,
 			SGID:              cr.SGID,
 			Parent:            cr.Parent,
+			Type:              crType,
 			ReportCount:       cr.ReportCount,
 			ReporterCount:     cr.ReporterCount,
 			TargetID:          cr.TargetID,
