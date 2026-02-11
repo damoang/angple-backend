@@ -216,6 +216,7 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 
 		resp := domain.AggregatedReportResponse{
 			Table:             row.Table,
+			SGID:              row.SGID,
 			Parent:            row.Parent,
 			ReportCount:       row.ReportCount,
 			ReporterCount:     row.ReporterCount,
@@ -354,6 +355,7 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 
 		resp := domain.AggregatedReportResponse{
 			Table:             cr.Table,
+			SGID:              cr.SGID,
 			Parent:            cr.Parent,
 			ReportCount:       cr.ReportCount,
 			ReporterCount:     cr.ReporterCount,
@@ -453,17 +455,27 @@ func (s *ReportService) GetRecent(limit int) ([]domain.ReportListResponse, error
 	return responses, nil
 }
 
-// GetData retrieves report data by table and parent with all related reports
+// GetData retrieves report data by table and parent/sgID with all related reports
 // requestingUserID/singoRole: 닉네임 마스킹용 (빈 문자열이면 super_admin으로 간주)
-func (s *ReportService) GetData(table string, parent int, requestingUserID, singoRole string) (*domain.ReportDetailResponse, error) {
-	// Get primary report (unprocessed first, then most recent)
-	primaryReport, err := s.repo.GetByTableAndParent(table, parent)
+// sgID: 특정 신고 ID (0이면 parent만 사용하여 가장 최근 신고 조회)
+func (s *ReportService) GetData(table string, parent int, requestingUserID, singoRole string, sgID ...int) (*domain.ReportDetailResponse, error) {
+	var primaryReport *domain.Report
+	var err error
+
+	// sg_id 기준 조회 (새 방식)
+	if len(sgID) > 0 && sgID[0] > 0 {
+		primaryReport, err = s.repo.GetByTableAndSgID(table, sgID[0], parent)
+	} else {
+		// parent 기준 조회 (레거시 호환)
+		primaryReport, err = s.repo.GetByTableAndParent(table, parent)
+	}
+
 	if err != nil {
 		return nil, ErrReportNotFound
 	}
 
 	// Get all reports for this content
-	allReports, err := s.repo.GetAllByTableAndParent(table, parent)
+	allReports, err := s.repo.GetAllByTableAndParent(table, primaryReport.Parent)
 	if err != nil {
 		allReports = []domain.Report{*primaryReport}
 	}
@@ -508,7 +520,8 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 	}
 
 	// Load opinions from opinions table
-	opinions, _ := s.GetOpinions(table, primaryReport.SGID, parent, requestingUserID, singoRole)
+	// Use primaryReport.Parent instead of passed parent (which might be 0)
+	opinions, _ := s.GetOpinions(table, primaryReport.SGID, primaryReport.Parent, requestingUserID, singoRole)
 
 	// Build process result for processed reports
 	var processResult *domain.ProcessResultResponse
@@ -528,9 +541,10 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 // GetDataEnhanced retrieves report data with optional includes (Phase 2: 통합 API)
 // includes: "ai" (AI 평가), "history" (징계 이력)
 // Example: ?include=ai,history
-func (s *ReportService) GetDataEnhanced(table string, parent int, requestingUserID, singoRole string, includes []string) (*domain.ReportDetailEnhancedResponse, error) {
+// sgID: 특정 신고 ID (0이면 parent만 사용)
+func (s *ReportService) GetDataEnhanced(table string, parent int, requestingUserID, singoRole string, includes []string, sgID ...int) (*domain.ReportDetailEnhancedResponse, error) {
 	// 1. 기본 데이터 조회 (기존 GetData 호출)
-	detail, err := s.GetData(table, parent, requestingUserID, singoRole)
+	detail, err := s.GetData(table, parent, requestingUserID, singoRole, sgID...)
 	if err != nil {
 		return nil, err
 	}
@@ -541,12 +555,14 @@ func (s *ReportService) GetDataEnhanced(table string, parent int, requestingUser
 	}
 
 	// 3. 옵셔널 데이터 조회 (includes 파라미터 기반)
+	// Use detail.Report.Parent instead of passed parent (which might be 0)
+	actualParent := detail.Report.Parent
 	for _, include := range includes {
 		switch include {
 		case "ai":
 			// AI 평가 목록 조회
 			if s.aiEvaluationRepo != nil {
-				if aiEvals, err := s.aiEvaluationRepo.ListByReport(table, parent); err == nil {
+				if aiEvals, err := s.aiEvaluationRepo.ListByReport(table, actualParent); err == nil {
 					enhanced.AIEvaluations = aiEvals
 				}
 			}
