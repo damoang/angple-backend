@@ -112,6 +112,30 @@ func (r *ReportRepository) GetAllByTableAndParent(table string, parent int) ([]d
 	return reports, nil
 }
 
+// GetByTableAndSgID retrieves the primary report by table and sg_id.
+// Returns the report with matching sg_id (unique identifier for specific report).
+func (r *ReportRepository) GetByTableAndSgID(table string, sgID, parent int) (*domain.Report, error) {
+	var report domain.Report
+	if err := r.db.Where("sg_table = ? AND sg_id = ? AND sg_parent = ?", table, sgID, parent).
+		First(&report).Error; err != nil {
+		return nil, err
+	}
+	return &report, nil
+}
+
+// GetAllByTableAndSgID retrieves all reports for the same content based on sg_id.
+// Uses sg_id to find sg_parent, then returns all reports with matching table+parent.
+func (r *ReportRepository) GetAllByTableAndSgID(table string, sgID, parent int) ([]domain.Report, error) {
+	// First get the primary report to confirm sg_parent
+	primaryReport, err := r.GetByTableAndSgID(table, sgID, parent)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return all reports for this content (table + parent)
+	return r.GetAllByTableAndParent(table, primaryReport.Parent)
+}
+
 // GetRecent retrieves recent reports
 func (r *ReportRepository) GetRecent(limit int) ([]domain.Report, error) {
 	var reports []domain.Report
@@ -384,7 +408,7 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 	excludeFilter := ""
 	excludeArgs := []interface{}{}
 	if excludeReviewer != "" {
-		excludeFilter = " AND NOT EXISTS (SELECT 1 FROM g5_na_singo_opinions exc WHERE exc.sg_table = s.sg_table AND exc.sg_parent = s.sg_parent AND exc.reviewer_id = ?)"
+		excludeFilter = " AND NOT EXISTS (SELECT 1 FROM g5_na_singo_opinions exc WHERE exc.sg_table = s.sg_table AND exc.sg_id = s.sg_id AND exc.reviewer_id = ?)"
 		excludeArgs = append(excludeArgs, excludeReviewer)
 	}
 
@@ -406,10 +430,10 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 				FROM g5_na_singo_opinions o
 				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_parent
-			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
+				GROUP BY o.sg_table, o.sg_id
+			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
 			WHERE 1=1` + dateFilter + excludeFilter + `
-			GROUP BY s.sg_table, s.sg_parent
+			GROUP BY s.sg_table, s.sg_id
 			` + havingClause + `
 		) t`
 
@@ -435,10 +459,10 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 	myReviewArgs := []interface{}{}
 	if requestingUserID != "" {
 		myReviewJoin = ` LEFT JOIN (
-			SELECT DISTINCT sg_table, sg_parent
+			SELECT DISTINCT sg_table, sg_id
 			FROM g5_na_singo_opinions
 			WHERE reviewer_id = ?
-		) my_review ON s.sg_table = my_review.sg_table AND s.sg_parent = my_review.sg_parent`
+		) my_review ON s.sg_table = my_review.sg_table AND s.sg_id = my_review.sg_id`
 		myReviewSelect = "CASE WHEN my_review.sg_table IS NOT NULL THEN 1 ELSE 0 END as reviewed_by_me"
 		myReviewArgs = append(myReviewArgs, requestingUserID)
 	}
@@ -448,6 +472,7 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 	mainSQL := `
 		SELECT
 			s.sg_table, s.sg_parent,
+			MAX(s.sg_id) as sg_id,
 			COUNT(*) as report_count,
 			COUNT(DISTINCT s.mb_id) as reporter_count,
 			MAX(s.target_mb_id) as target_mb_id,
@@ -477,10 +502,10 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			FROM g5_na_singo_opinions o
 			LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 			WHERE su.mb_id IS NULL
-			GROUP BY o.sg_table, o.sg_parent
-		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent` + myReviewJoin + `
+			GROUP BY o.sg_table, o.sg_id
+		) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id` + myReviewJoin + `
 		WHERE 1=1` + dateFilter + excludeFilter + `
-		GROUP BY s.sg_table, s.sg_parent
+		GROUP BY s.sg_table, s.sg_id
 		` + havingClause + `
 		` + orderClause + `
 		LIMIT ? OFFSET ?`
@@ -525,9 +550,9 @@ func (r *ReportRepository) CountByStatusAggregated(status string) (int64, error)
 				FROM g5_na_singo_opinions o
 				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_parent
-			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
-			GROUP BY s.sg_table, s.sg_parent
+				GROUP BY o.sg_table, o.sg_id
+			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
+			GROUP BY s.sg_table, s.sg_id
 			` + havingClause + `
 		) t`
 
@@ -559,7 +584,7 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 	excludeFilter := ""
 	excludeArgs := []interface{}{}
 	if excludeReviewer != "" {
-		excludeFilter = " AND NOT EXISTS (SELECT 1 FROM g5_na_singo_opinions exc WHERE exc.sg_table = s.sg_table AND exc.sg_parent = s.sg_parent AND exc.reviewer_id = ?)"
+		excludeFilter = " AND NOT EXISTS (SELECT 1 FROM g5_na_singo_opinions exc WHERE exc.sg_table = s.sg_table AND exc.sg_id = s.sg_id AND exc.reviewer_id = ?)"
 		excludeArgs = append(excludeArgs, excludeReviewer)
 	}
 
@@ -578,8 +603,8 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				FROM g5_na_singo_opinions o
 				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_parent
-			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
+				GROUP BY o.sg_table, o.sg_id
+			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
@@ -630,8 +655,8 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				FROM g5_na_singo_opinions o
 				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_parent
-			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
+				GROUP BY o.sg_table, o.sg_id
+			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
@@ -674,6 +699,7 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 	mainSQL := `
 		SELECT
 			s.sg_table, s.sg_parent,
+			MAX(s.sg_id) as sg_id,
 			COUNT(*) as report_count,
 			COUNT(DISTINCT s.mb_id) as reporter_count,
 			MAX(s.target_mb_id) as target_mb_id,
@@ -702,10 +728,10 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 			FROM g5_na_singo_opinions o
 			LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 			WHERE su.mb_id IS NULL
-			GROUP BY o.sg_table, o.sg_parent
-		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
+			GROUP BY o.sg_table, o.sg_id
+		) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
 		WHERE s.target_mb_id IN (?)` + dateFilter + `
-		GROUP BY s.sg_table, s.sg_parent
+		GROUP BY s.sg_table, s.sg_id
 		` + statusHaving + `
 		ORDER BY MAX(s.sg_time) DESC`
 
@@ -822,9 +848,9 @@ func (r *ReportRepository) GetAllStatusCounts() (map[string]int64, error) {
 				FROM g5_na_singo_opinions o
 				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_parent
-			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
-			GROUP BY s.sg_table, s.sg_parent
+				GROUP BY o.sg_table, o.sg_id
+			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
+			GROUP BY s.sg_table, s.sg_id
 		) t`
 
 	var result struct {
