@@ -45,15 +45,15 @@ var (
 
 // ReportService handles report business logic
 type ReportService struct {
-	repo            *repository.ReportRepository
-	opinionRepo     *repository.OpinionRepository
-	historyRepo     *repository.HistoryRepository
-	disciplineRepo  *repository.DisciplineRepository
+	repo             *repository.ReportRepository
+	opinionRepo      *repository.OpinionRepository
+	historyRepo      *repository.HistoryRepository
+	disciplineRepo   *repository.DisciplineRepository
 	aiEvaluationRepo *repository.AIEvaluationRepository // Phase 2: 통합 API용
-	memoRepo        *repository.G5MemoRepository
-	memberRepo      repository.MemberRepository
-	boardRepo       *repository.BoardRepository
-	singoUserRepo   *repository.SingoUserRepository
+	memoRepo         *repository.G5MemoRepository
+	memberRepo       repository.MemberRepository
+	boardRepo        *repository.BoardRepository
+	singoUserRepo    *repository.SingoUserRepository
 
 	// singoUserRepo.FindAll() cache (5분 TTL)
 	singoUsersMu     sync.RWMutex
@@ -318,9 +318,15 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 	// Batch-load opinions for all sub-contents (1 query)
 	opinionsMap := make(map[string][]domain.Opinion)
 	if s.opinionRepo != nil && len(contentRows) > 0 {
-		keys := make([]struct{ Table string; Parent int }, 0, len(contentRows))
+		keys := make([]struct {
+			Table  string
+			Parent int
+		}, 0, len(contentRows))
 		for _, cr := range contentRows {
-			keys = append(keys, struct{ Table string; Parent int }{cr.Table, cr.Parent})
+			keys = append(keys, struct {
+				Table  string
+				Parent int
+			}{cr.Table, cr.Parent})
 		}
 		if opMap, err := s.opinionRepo.GetByMultipleReportsGrouped(keys); err == nil {
 			opinionsMap = opMap

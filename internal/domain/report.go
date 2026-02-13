@@ -95,17 +95,17 @@ type ProcessResultResponse struct {
 
 // ReportDetailResponse is the enhanced detail response
 type ReportDetailResponse struct {
-	Report        ReportListResponse    `json:"report"`
-	AllReports    []ReportListResponse  `json:"all_reports"`
-	Opinions      []OpinionResponse     `json:"opinions"`
-	Status        string                `json:"status"`
+	Report        ReportListResponse     `json:"report"`
+	AllReports    []ReportListResponse   `json:"all_reports"`
+	Opinions      []OpinionResponse      `json:"opinions"`
+	Status        string                 `json:"status"`
 	ProcessResult *ProcessResultResponse `json:"process_result,omitempty"` // 처리 결과 (승인/미조치 시에만)
 }
 
 // ReportDetailEnhancedResponse extends ReportDetailResponse with optional data (Phase 2: 통합 API)
 type ReportDetailEnhancedResponse struct {
 	ReportDetailResponse
-	AIEvaluations    []AIEvaluation   `json:"ai_evaluations,omitempty"`    // AI 평가 목록 (?include=ai)
+	AIEvaluations     []AIEvaluation  `json:"ai_evaluations,omitempty"`     // AI 평가 목록 (?include=ai)
 	DisciplineHistory []DisciplineLog `json:"discipline_history,omitempty"` // 징계 이력 (?include=history)
 }
 
@@ -114,14 +114,14 @@ type ReportListResponse struct {
 	ID                int    `json:"id"`
 	Table             string `json:"table"`
 	Parent            int    `json:"parent"`
-	Type              int8   `json:"type"`               // 1=post, 2=comment
-	BoardSubject      string `json:"bo_subject"`          // 게시판 이름
+	Type              int8   `json:"type"`       // 1=post, 2=comment
+	BoardSubject      string `json:"bo_subject"` // 게시판 이름
 	ReporterID        string `json:"reporter_id"`
-	ReporterNickname  string `json:"reporter_nickname"`   // 신고자 닉네임
+	ReporterNickname  string `json:"reporter_nickname"` // 신고자 닉네임
 	TargetID          string `json:"target_id"`
-	TargetNickname    string `json:"target_nickname"`     // 피신고자 닉네임
-	TargetTitle       string `json:"target_title"`        // 신고 대상 글 제목
-	TargetContent     string `json:"target_content"`      // 신고 대상 본문 미리보기
+	TargetNickname    string `json:"target_nickname"` // 피신고자 닉네임
+	TargetTitle       string `json:"target_title"`    // 신고 대상 글 제목
+	TargetContent     string `json:"target_content"`  // 신고 대상 본문 미리보기
 	Reason            string `json:"reason"`
 	Status            string `json:"status"`
 	CreatedAt         string `json:"created_at"`

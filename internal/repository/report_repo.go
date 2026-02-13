@@ -783,11 +783,11 @@ func (r *ReportRepository) UpdateStatusScheduledApprove(id int, processedBy, rea
 	return r.db.Model(&domain.Report{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"admin_approved":          true,
-			"processed":               false,
-			"admin_datetime":          gorm.Expr("NOW()"),
-			"admin_users":             processedBy,
-			"hold":                    false,
+			"admin_approved":           true,
+			"processed":                false,
+			"admin_datetime":           gorm.Expr("NOW()"),
+			"admin_users":              processedBy,
+			"hold":                     false,
 			"admin_discipline_reasons": reasonsJSON,
 			"admin_discipline_days":    days,
 			"admin_discipline_type":    disciplineType,
