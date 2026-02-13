@@ -39,6 +39,7 @@ import (
 	_ "github.com/damoang/angple-backend/internal/plugins/embed"
 	_ "github.com/damoang/angple-backend/internal/plugins/imagelink"
 	_ "github.com/damoang/angple-backend/internal/plugins/marketplace"
+	_ "github.com/damoang/angple-backend/plugins/giving"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
