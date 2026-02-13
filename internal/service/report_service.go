@@ -33,9 +33,12 @@ const (
 	ReportStatusApproved   = "approved"
 	ReportStatusDismissed  = "dismissed"
 
+	opinionTypeDismiss = "dismiss"
+	opinionTypeAction  = "action"
+
 	// Phase 6-1: 자동 잠금 설정 (1달 후 PHP 제거 시 활성화 예정)
-	AUTO_LOCK_ENABLED   = false // ⚠️ 지금은 false, 1달 후 true로 변경
-	AUTO_LOCK_THRESHOLD = 3     // N명 이상 신고 시 잠금
+	autoLockEnabled   = false // 지금은 false, 1달 후 true로 변경
+	autoLockThreshold = 3     // N명 이상 신고 시 잠금
 )
 
 var (
@@ -841,7 +844,7 @@ func getContentType(parent int) int8 {
 // Phase 6-1: 자동 잠금 기능 (비활성화 상태)
 func (s *ReportService) updatePostLockStatus(table string, sgID int) error {
 	// 비활성화 상태면 즉시 리턴
-	if !AUTO_LOCK_ENABLED {
+	if !autoLockEnabled {
 		return nil
 	}
 
@@ -853,7 +856,7 @@ func (s *ReportService) updatePostLockStatus(table string, sgID int) error {
 
 	// 2. wr_7 필드 값 결정
 	var wr7Value interface{}
-	if count >= AUTO_LOCK_THRESHOLD {
+	if count >= autoLockThreshold {
 		wr7Value = "lock" // 잠금
 	} else {
 		wr7Value = count // 신고 횟수 표시
@@ -1681,13 +1684,13 @@ func (s *ReportService) processSubmitOpinion(report *domain.Report, adminID stri
 	// If opinions table is available, use it
 	if s.opinionRepo != nil {
 		// Determine opinion type from request (우선: Opinion 필드, fallback: Type 필드)
-		opinionType := "action"
+		opinionType := opinionTypeAction
 		if req.Opinion == "no_action" {
-			opinionType = "dismiss"
-		} else if req.Opinion == "action" {
-			opinionType = "action"
-		} else if req.Type == "dismiss" || req.Type == "no_action" {
-			opinionType = "dismiss"
+			opinionType = opinionTypeDismiss
+		} else if req.Opinion == opinionTypeAction {
+			opinionType = opinionTypeAction
+		} else if req.Type == opinionTypeDismiss || req.Type == "no_action" {
+			opinionType = opinionTypeDismiss
 		}
 
 		// Build reasons string from penalty_reasons
@@ -1852,7 +1855,11 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 	log.Printf("[INFO] 자동 승인: table=%s, parent=%d (action 의견 %d건)", report.Table, report.Parent, actionCount)
 
 	// Update all related reports to admin_approved=1
-	allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	allReports, err := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	if err != nil {
+		log.Printf("[WARN] 관련 신고 조회 실패: %v", err)
+		return nil
+	}
 	for _, r := range allReports {
 		if !r.Processed && !r.AdminApproved {
 			// Use scheduled approve logic: sets admin_approved=1, processed=0

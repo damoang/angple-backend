@@ -17,4 +17,5 @@ paths = [
   '''README\.md$''',
   '''CLAUDE\.md$''',
   '''process\.md$''',
+  '''\.env\.readonly$''',
 ]
