@@ -73,7 +73,7 @@ type OpinionResponse struct {
 	ReviewerNick string `json:"reviewer_nick"`
 	OpinionType  string `json:"opinion_type"`
 	Reasons      string `json:"discipline_reasons,omitempty"`
-	Days         int    `json:"discipline_days,omitempty"`
+	Days         int    `json:"discipline_days"`
 	Type         string `json:"discipline_type,omitempty"`
 	Detail       string `json:"discipline_detail,omitempty"`
 	CreatedAt    string `json:"created_at"`
@@ -107,11 +107,13 @@ type ReportDetailEnhancedResponse struct {
 	ReportDetailResponse
 	AIEvaluations    []AIEvaluation   `json:"ai_evaluations,omitempty"`    // AI 평가 목록 (?include=ai)
 	DisciplineHistory []DisciplineLog `json:"discipline_history,omitempty"` // 징계 이력 (?include=history)
+	ContentHistory   []ContentHistory `json:"content_history,omitempty"`   // 콘텐츠 수정/삭제 이력 (?include=content_history)
 }
 
 // ReportListResponse represents report list response
 type ReportListResponse struct {
 	ID                int    `json:"id"`
+	SGID              int    `json:"sg_id"`
 	Table             string `json:"table"`
 	Parent            int    `json:"parent"`
 	Type              int8   `json:"type"`               // 1=post, 2=comment
@@ -131,33 +133,37 @@ type ReportListResponse struct {
 
 // AggregatedReportResponse represents an aggregated report group for list view
 type AggregatedReportResponse struct {
-	Table             string            `json:"table"`
-	SGID              int               `json:"sg_id"`
-	Parent            int               `json:"parent"`
-	Type              int8              `json:"type"`             // 1=post, 2=comment
-	ReportCount       int               `json:"report_count"`
-	ReporterCount     int               `json:"reporter_count"`
-	ReporterID        string            `json:"reporter_id"`
-	ReporterNickname  string            `json:"reporter_nickname"`
-	TargetID          string            `json:"target_id"`
-	TargetNickname    string            `json:"target_nickname"`
-	TargetTitle       string            `json:"target_title"`
-	TargetContent     string            `json:"target_content"`
-	BoardSubject      string            `json:"bo_subject"`
-	ReportTypes       string            `json:"report_types"`
-	OpinionCount      int               `json:"opinion_count"`
-	ActionCount       int               `json:"action_count"`
-	DismissCount      int               `json:"dismiss_count"`
-	Status            string            `json:"status"`
-	FirstReportTime   string            `json:"first_report_time"`
-	LatestReportTime  string            `json:"latest_report_time"`
-	ReviewerIDs       []string          `json:"reviewer_ids,omitempty"`
-	ReviewedCount     int               `json:"reviewed_count"`
-	TotalReviewers    int               `json:"total_reviewers"`
-	ReviewedByMe      bool              `json:"reviewed_by_me"`
-	Opinions          []OpinionResponse `json:"opinions,omitempty"`
-	AdminUsers        string            `json:"admin_users,omitempty"`
-	ProcessedDatetime string            `json:"processed_datetime,omitempty"`
+	Table                       string            `json:"table"`
+	SGID                        int               `json:"sg_id"`
+	Parent                      int               `json:"parent"`
+	Type                        int8              `json:"type"`             // 1=post, 2=comment
+	ReportCount                 int               `json:"report_count"`
+	ReporterCount               int               `json:"reporter_count"`
+	ReporterID                  string            `json:"reporter_id"`
+	ReporterNickname            string            `json:"reporter_nickname"`
+	TargetID                    string            `json:"target_id"`
+	TargetNickname              string            `json:"target_nickname"`
+	TargetTitle                 string            `json:"target_title"`
+	TargetContent               string            `json:"target_content"`
+	BoardSubject                string            `json:"bo_subject"`
+	ReportTypes                 string            `json:"report_types"`
+	OpinionCount                int               `json:"opinion_count"`
+	ActionCount                 int               `json:"action_count"`
+	DismissCount                int               `json:"dismiss_count"`
+	Status                      string            `json:"status"`
+	FirstReportTime             string            `json:"first_report_time"`
+	LatestReportTime            string            `json:"latest_report_time"`
+	ReviewerIDs                 []string          `json:"reviewer_ids,omitempty"`
+	ReviewedCount               int               `json:"reviewed_count"`
+	TotalReviewers              int               `json:"total_reviewers"`
+	ReviewedByMe                bool              `json:"reviewed_by_me"`
+	Opinions                    []OpinionResponse `json:"opinions,omitempty"`
+	AdminUsers                  string            `json:"admin_users,omitempty"`
+	ProcessedDatetime           string            `json:"processed_datetime,omitempty"`
+	MonitoringDisciplineReasons string            `json:"monitoring_discipline_reasons,omitempty"`
+	MonitoringDisciplineDays    *int              `json:"monitoring_discipline_days,omitempty"`
+	MonitoringDisciplineType    string            `json:"monitoring_discipline_type,omitempty"`
+	MonitoringDisciplineDetail  string            `json:"monitoring_discipline_detail,omitempty"`
 }
 
 // TargetAggregatedResponse represents reports grouped by target user (피신고자별 그룹핑)

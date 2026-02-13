@@ -235,6 +235,7 @@ func Setup(
 	reports.GET("/recent", reportHandler.GetRecentReports) // 최근 신고 목록 (관리자)
 	reports.GET("/stats", reportHandler.GetStats)             // 신고 통계 (관리자)
 	reports.GET("/opinions", reportHandler.GetOpinions)       // 의견 목록 (관리자)
+	reports.GET("/adjacent", reportHandler.GetAdjacentReport) // 인접 신고 조회 (관리자)
 	reports.POST("/process", reportHandler.ProcessReport)           // 신고 처리 (관리자)
 	reports.POST("/batch-process", reportHandler.BatchProcessReport) // 신고 일괄 처리 (관리자)
 

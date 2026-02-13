@@ -16,6 +16,7 @@ var (
 type Claims struct {
 	jwt.RegisteredClaims
 	UserID   string `json:"user_id"`
+	Username string `json:"username,omitempty"`
 	Nickname string `json:"nickname"`
 	Level    int    `json:"level"`
 }
@@ -37,9 +38,10 @@ func NewManager(secret string, accessExpiry, refreshExpiry int) *Manager {
 }
 
 // GenerateAccessToken generates an access token
-func (m *Manager) GenerateAccessToken(userID, nickname string, level int) (string, error) {
+func (m *Manager) GenerateAccessToken(userID, username, nickname string, level int) (string, error) {
 	claims := &Claims{
 		UserID:   userID,
+		Username: username,
 		Nickname: nickname,
 		Level:    level,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -102,5 +104,5 @@ func (m *Manager) RefreshAccessToken(refreshToken string, nickname string, level
 	}
 
 	// Generate new access token
-	return m.GenerateAccessToken(claims.UserID, nickname, level)
+	return m.GenerateAccessToken(claims.UserID, claims.Username, nickname, level)
 }

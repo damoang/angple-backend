@@ -51,8 +51,9 @@ type ReportService struct {
 	memoRepo        *repository.G5MemoRepository
 	memberRepo      repository.MemberRepository
 	boardRepo       *repository.BoardRepository
-	singoUserRepo   *repository.SingoUserRepository
-	redisClient     *redis.Client // Redis 클라이언트
+	singoUserRepo        *repository.SingoUserRepository
+	contentHistoryRepo   *repository.ContentHistoryRepository
+	redisClient          *redis.Client // Redis 클라이언트
 
 	// singoUserRepo.FindAll() cache (5분 TTL)
 	singoUsersMu     sync.RWMutex
@@ -98,6 +99,11 @@ func (s *ReportService) SetSingoUserRepo(singoUserRepo *repository.SingoUserRepo
 // SetAIEvaluationRepo sets the AI evaluation repository (Phase 2: 통합 API용)
 func (s *ReportService) SetAIEvaluationRepo(aiEvaluationRepo *repository.AIEvaluationRepository) {
 	s.aiEvaluationRepo = aiEvaluationRepo
+}
+
+// SetContentHistoryRepo sets the content history repository
+func (s *ReportService) SetContentHistoryRepo(contentHistoryRepo *repository.ContentHistoryRepository) {
+	s.contentHistoryRepo = contentHistoryRepo
 }
 
 // SetRedisClient sets Redis client for caching
@@ -173,7 +179,7 @@ func (s *ReportService) recordHistory(table string, sgID, parent int, prevStatus
 }
 
 // List retrieves paginated aggregated reports grouped by (table, parent)
-func (s *ReportService) List(status string, page, limit int, fromDate, toDate, sort, singoRole string, minOpinions int, excludeReviewer, requestingUserID string) ([]domain.AggregatedReportResponse, int64, error) {
+func (s *ReportService) List(status string, page, limit int, fromDate, toDate, sort, singoRole string, minOpinions int, excludeReviewer, requestingUserID, search string) ([]domain.AggregatedReportResponse, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -181,10 +187,10 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		limit = 20
 	}
 
-	// Redis 캐싱 (3분 TTL) - excludeReviewer 없는 경우만 캐싱
+	// Redis 캐싱 (3분 TTL) - excludeReviewer/search 없는 경우만 캐싱
 	const cacheTTL = 3 * time.Minute
 	var cacheKey string
-	canCache := excludeReviewer == "" && s.redisClient != nil
+	canCache := excludeReviewer == "" && search == "" && s.redisClient != nil
 
 	if canCache {
 		// 캐시 키: reports:list:{status}:{page}:{limit}:{from}:{to}:{sort}:{minOp}
@@ -207,7 +213,7 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 	}
 
 	// 2. 캐시 미스 → DB 조회
-	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewer, requestingUserID)
+	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewer, requestingUserID, search)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -398,7 +404,7 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 }
 
 // ListByTarget retrieves paginated reports grouped by target user (피신고자별 그룹핑)
-func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, toDate, sort, singoRole, excludeReviewer string) ([]domain.TargetAggregatedResponse, int64, error) {
+func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, toDate, sort, singoRole, excludeReviewer, search string) ([]domain.TargetAggregatedResponse, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -406,7 +412,7 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 		limit = 20
 	}
 
-	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewer)
+	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewer, search)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -606,6 +612,7 @@ func (s *ReportService) GetRecent(limit int) ([]domain.ReportListResponse, error
 	for i, report := range reports {
 		responses[i] = domain.ReportListResponse{
 			ID:         report.ID,
+			SGID:       report.SGID,
 			Table:      report.Table,
 			Parent:     report.Parent,
 			ReporterID: report.ReporterID,
@@ -739,6 +746,14 @@ func (s *ReportService) GetDataEnhanced(table string, parent int, requestingUser
 					enhanced.DisciplineHistory = history
 				}
 			}
+
+		case "content_history":
+			// 콘텐츠 수정/삭제 이력 조회
+			if s.contentHistoryRepo != nil {
+				if records, err := s.contentHistoryRepo.FindByTableAndID(table, actualParent); err == nil {
+					enhanced.ContentHistory = records
+				}
+			}
 		}
 	}
 
@@ -817,6 +832,7 @@ func (s *ReportService) buildProcessResult(primary *domain.Report, allReports []
 func toReportListResponse(report *domain.Report, nickMap, boardNameMap map[string]string) domain.ReportListResponse {
 	resp := domain.ReportListResponse{
 		ID:               report.ID,
+		SGID:             report.SGID,
 		Table:            report.Table,
 		Parent:           report.Parent,
 		Type:             report.Type,
@@ -1608,6 +1624,7 @@ func (s *ReportService) GetMyReports(userID string, limit int) ([]domain.ReportL
 	for i, report := range reports {
 		responses[i] = domain.ReportListResponse{
 			ID:         report.ID,
+			SGID:       report.SGID,
 			Table:      report.Table,
 			Parent:     report.Parent,
 			ReporterID: report.ReporterID,

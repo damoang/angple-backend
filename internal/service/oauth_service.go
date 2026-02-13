@@ -151,7 +151,7 @@ func (s *OAuthService) HandleCallback(ctx context.Context, provider domain.OAuth
 	}
 
 	// Generate JWT tokens
-	accessToken, err := s.jwtManager.GenerateAccessToken(oauthAccount.UserID, userInfo.Name, 1)
+	accessToken, err := s.jwtManager.GenerateAccessToken(oauthAccount.UserID, oauthAccount.UserID, userInfo.Name, 1)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token failed: %w", err)
 	}

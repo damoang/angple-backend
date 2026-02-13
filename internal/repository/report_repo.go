@@ -367,7 +367,7 @@ type AggregatedReportRow struct {
 }
 
 // ListAggregated retrieves paginated aggregated reports grouped by (table, parent)
-func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDate, toDate, sort string, minOpinions int, excludeReviewer, requestingUserID string) ([]AggregatedReportRow, int64, error) {
+func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDate, toDate, sort string, minOpinions int, excludeReviewer, requestingUserID, search string) ([]AggregatedReportRow, int64, error) {
 	// Build HAVING clause using SELECT aliases (MySQL 8 supports aliases in HAVING)
 	havingClause := ""
 
@@ -458,8 +458,17 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 		excludeArgs = append(excludeArgs, excludeReviewer)
 	}
 
+	// search filter: 콘텐츠/제목/닉네임 검색
+	searchFilter := ""
+	searchArgs := []interface{}{}
+	if search != "" {
+		searchFilter = " AND (s.target_content LIKE ? OR s.target_title LIKE ? OR s.target_mb_id LIKE ?)"
+		searchArgs = append(searchArgs, "%"+search+"%", "%"+search+"%", "%"+search+"%")
+	}
+
 	// Count query — inner SELECT must include all columns referenced by HAVING
 	countArgs := append(dateArgs, excludeArgs...)
+	countArgs = append(countArgs, searchArgs...)
 	countSQL := `
 		SELECT COUNT(*) FROM (
 			SELECT s.sg_table, s.sg_parent,
@@ -480,7 +489,7 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 				WHERE su.mb_id IS NULL
 				GROUP BY o.sg_table, o.sg_id
 			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
-			WHERE 1=1` + dateFilter + excludeFilter + `
+			WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
 			GROUP BY s.sg_table, s.sg_id
 			` + havingClause + `
 		) t`
@@ -558,7 +567,7 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			WHERE su.mb_id IS NULL
 			GROUP BY o.sg_table, o.sg_id
 		) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id` + myReviewJoin + `
-		WHERE 1=1` + dateFilter + excludeFilter + `
+		WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
 		GROUP BY s.sg_table, s.sg_id
 		` + havingClause + `
 		` + orderClause + `
@@ -566,6 +575,7 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 
 	mainArgs := append(myReviewArgs, dateArgs...)
 	mainArgs = append(mainArgs, excludeArgs...)
+	mainArgs = append(mainArgs, searchArgs...)
 	mainArgs = append(mainArgs, limit, offset)
 	var rows []AggregatedReportRow
 	if err := r.db.Raw(mainSQL, mainArgs...).Scan(&rows).Error; err != nil {
@@ -618,7 +628,7 @@ func (r *ReportRepository) CountByStatusAggregated(status string) (int64, error)
 }
 
 // ListAggregatedByTarget retrieves paginated reports grouped by target_mb_id (피신고자별 그룹핑)
-func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int, fromDate, toDate, sort, excludeReviewer string) ([]domain.TargetAggregatedRow, int64, error) {
+func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int, fromDate, toDate, sort, excludeReviewer, search string) ([]domain.TargetAggregatedRow, int64, error) {
 	// Build inner HAVING clause for status filter (same logic as ListAggregated but at content level)
 	statusHaving := r.buildStatusHaving(status)
 
@@ -642,8 +652,17 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 		excludeArgs = append(excludeArgs, excludeReviewer)
 	}
 
+	// search filter
+	searchFilter := ""
+	searchArgs := []interface{}{}
+	if search != "" {
+		searchFilter = " AND (s.target_content LIKE ? OR s.target_title LIKE ? OR s.target_mb_id LIKE ?)"
+		searchArgs = append(searchArgs, "%"+search+"%", "%"+search+"%", "%"+search+"%")
+	}
+
 	// Count query — count distinct target_mb_id
 	countArgs := append(dateArgs, excludeArgs...)
+	countArgs = append(countArgs, searchArgs...)
 	countSQL := `
 		SELECT COUNT(DISTINCT target_mb_id) FROM (
 			SELECT s.target_mb_id, s.sg_table, s.sg_parent,
@@ -659,7 +678,7 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				WHERE su.mb_id IS NULL
 				GROUP BY o.sg_table, o.sg_id
 			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
-			WHERE 1=1` + dateFilter + excludeFilter + `
+			WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
 		) t`
@@ -711,7 +730,7 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				WHERE su.mb_id IS NULL
 				GROUP BY o.sg_table, o.sg_id
 			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
-			WHERE 1=1` + dateFilter + excludeFilter + `
+			WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
 		) filtered
@@ -720,6 +739,7 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 		LIMIT ? OFFSET ?`
 
 	mainArgs := append(dateArgs, excludeArgs...)
+	mainArgs = append(mainArgs, searchArgs...)
 	mainArgs = append(mainArgs, limit, offset)
 	var rows []domain.TargetAggregatedRow
 	if err := r.db.Raw(mainSQL, mainArgs...).Scan(&rows).Error; err != nil {
@@ -1053,6 +1073,9 @@ func (r *ReportRepository) GetAdjacentReport(table string, sgID int, direction, 
 			orderBy = "sg_time DESC" // 가장 가까운 다음 건
 		}
 	}
+
+	// 같은 콘텐츠 그룹 건너뛰기 (sg_parent 기준 dedup)
+	query = query.Where("sg_parent != ?", currentReport.Parent)
 
 	var adjacentReport domain.Report
 	if err := query.Order(orderBy).Limit(1).First(&adjacentReport).Error; err != nil {

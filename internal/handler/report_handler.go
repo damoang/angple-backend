@@ -112,13 +112,14 @@ func (h *ReportHandler) ListReports(c *gin.Context) {
 	minOpinions, _ := strconv.Atoi(c.DefaultQuery("min_opinions", "0"))
 	groupBy := c.DefaultQuery("group_by", "content") // content (기본) or target
 	excludeReviewer := c.Query("exclude_reviewer")
+	search := c.Query("search")
 
 	// Get singo role for reviewer info visibility + requesting user ID
 	requestingUserID, singoRole := h.getSingoRole(c)
 
 	// group_by=target: 피신고자별 그룹핑
 	if groupBy == "target" {
-		reports, total, err := h.service.ListByTarget(status, page, limit, fromDate, toDate, sort, singoRole, excludeReviewer)
+		reports, total, err := h.service.ListByTarget(status, page, limit, fromDate, toDate, sort, singoRole, excludeReviewer, search)
 		if err != nil {
 			common.ErrorResponse(c, http.StatusInternalServerError, "신고 목록 조회 중 오류가 발생했습니다", err)
 			return
@@ -135,7 +136,7 @@ func (h *ReportHandler) ListReports(c *gin.Context) {
 	}
 
 	// Default: group_by=content (기존 방식)
-	reports, total, err := h.service.List(status, page, limit, fromDate, toDate, sort, singoRole, minOpinions, excludeReviewer, requestingUserID)
+	reports, total, err := h.service.List(status, page, limit, fromDate, toDate, sort, singoRole, minOpinions, excludeReviewer, requestingUserID, search)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "신고 목록 조회 중 오류가 발생했습니다", err)
 		return
@@ -229,6 +230,7 @@ func (h *ReportHandler) GetReportData(c *gin.Context) {
 				"process_result":     enhanced.ProcessResult,
 				"ai_evaluations":     enhanced.AIEvaluations,
 				"discipline_history": enhanced.DisciplineHistory,
+				"content_history":    enhanced.ContentHistory,
 			},
 		})
 	} else {
@@ -603,5 +605,83 @@ func (h *ReportHandler) GetStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, common.APIResponse{
 		Data: stats,
+	})
+}
+
+// GetAdjacentReport handles GET /api/v1/reports/adjacent
+// @Summary 인접 신고 조회 (이전/다음)
+// @Description 현재 신고 기준으로 이전 또는 다음 신고를 조회합니다 (관리자 전용)
+// @Tags reports
+// @Produce json
+// @Param sg_table query string true "신고 테이블"
+// @Param sg_id query int true "현재 신고 ID"
+// @Param direction query string true "방향 (prev 또는 next)"
+// @Param status query string false "상태 필터 (pending, monitoring, approved, dismissed)"
+// @Param sort query string false "정렬 기준 (newest, oldest)"
+// @Param from_date query string false "시작 날짜 (YYYY-MM-DD)"
+// @Param to_date query string false "종료 날짜 (YYYY-MM-DD)"
+// @Param search query string false "검색어"
+// @Success 200 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Failure 403 {object} common.APIResponse
+// @Failure 404 {object} common.APIResponse
+// @Security BearerAuth
+// @Router /reports/adjacent [get]
+func (h *ReportHandler) GetAdjacentReport(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+	if !h.requireSingoAccess(c) {
+		return
+	}
+
+	// Parse query parameters
+	table := c.Query("sg_table")
+	sgID, err := strconv.Atoi(c.Query("sg_id"))
+	if err != nil || table == "" || sgID == 0 {
+		common.ErrorResponse(c, http.StatusBadRequest, "sg_table과 sg_id가 필요합니다", nil)
+		return
+	}
+
+	direction := c.Query("direction")
+	if direction != "prev" && direction != "next" {
+		common.ErrorResponse(c, http.StatusBadRequest, "direction은 'prev' 또는 'next'여야 합니다", nil)
+		return
+	}
+
+	// Optional filters
+	status := c.Query("status")
+	sort := c.DefaultQuery("sort", "newest")
+	fromDate := c.Query("from_date")
+	toDate := c.Query("to_date")
+	search := c.Query("search")
+
+	// Get adjacent report
+	adjacentReport, err := h.service.GetAdjacentReport(table, sgID, direction, status, sort, fromDate, toDate, search)
+	if err != nil {
+		if err.Error() == "인접 신고를 찾을 수 없습니다" || err.Error() == "현재 신고를 찾을 수 없습니다" {
+			c.JSON(http.StatusOK, common.APIResponse{
+				Data: gin.H{
+					"success": true,
+					"data":    nil,
+				},
+			})
+			return
+		}
+		common.ErrorResponse(c, http.StatusInternalServerError, "인접 신고 조회 중 오류가 발생했습니다", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: gin.H{
+			"success": true,
+			"data": gin.H{
+				"sg_id":  adjacentReport.SGID,
+				"table":  adjacentReport.Table,
+				"parent": adjacentReport.Parent,
+				"type":   adjacentReport.Type,
+			},
+		},
 	})
 }

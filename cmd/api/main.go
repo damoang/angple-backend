@@ -305,6 +305,11 @@ func main() {
 		reportService.SetHistoryRepo(historyRepo)
 		reportService.SetSingoUserRepo(singoUserRepo)
 		reportService.SetAIEvaluationRepo(aiEvalRepo) // Phase 2: 통합 API용
+		contentHistoryRepo := repository.NewContentHistoryRepository(db)
+		reportService.SetContentHistoryRepo(contentHistoryRepo)
+		if redisClient != nil {
+			reportService.SetRedisClient(redisClient) // Redis 캐싱 활성화
+		}
 		promotionService := service.NewPromotionService(promotionRepo)
 		bannerService := service.NewBannerService(bannerRepo)
 		goodService := service.NewGoodService(goodRepo)

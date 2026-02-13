@@ -13,7 +13,7 @@ func main() {
 	jwtManager := pkgjwt.NewManager(secret, 900, 604800)
 
 	// Access Token 생성 (관리자 레벨 10)
-	token, err := jwtManager.GenerateAccessToken("admin", "관리자", 10)
+	token, err := jwtManager.GenerateAccessToken("admin", "admin", "관리자", 10)
 	if err != nil {
 		panic(err)
 	}
