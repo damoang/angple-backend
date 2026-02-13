@@ -337,29 +337,33 @@ func (r *ReportRepository) CountByStatus(status string) (int64, error) {
 
 // AggregatedReportRow holds a single row from the aggregated report query
 type AggregatedReportRow struct {
-	Table             string `gorm:"column:sg_table"`
-	SGID              int    `gorm:"column:sg_id"`
-	Parent            int    `gorm:"column:sg_parent"`
-	ReportCount       int    `gorm:"column:report_count"`
-	ReporterCount     int    `gorm:"column:reporter_count"`
-	ReporterID        string `gorm:"column:reporter_mb_id"`
-	TargetID          string `gorm:"column:target_mb_id"`
-	TargetTitle       string `gorm:"column:target_title"`
-	TargetContent     string `gorm:"column:target_content"`
-	ReportTypes       string `gorm:"column:report_types"`
-	FirstReportTime   string `gorm:"column:first_report_time"`
-	LatestReportTime  string `gorm:"column:latest_report_time"`
-	MonitoringChecked int    `gorm:"column:monitoring_checked"`
-	Hold              int    `gorm:"column:hold"`
-	AdminApproved     int    `gorm:"column:admin_approved"`
-	Processed         int    `gorm:"column:processed"`
-	OpinionCount      int    `gorm:"column:opinion_count"`
-	ActionCount       int    `gorm:"column:action_count"`
-	DismissCount      int    `gorm:"column:dismiss_count"`
-	ReviewerIDs       string `gorm:"column:reviewer_ids"`
-	ReviewedByMe      int    `gorm:"column:reviewed_by_me"`
-	AdminUsers        string `gorm:"column:admin_users"`
-	ProcessedDatetime string `gorm:"column:processed_datetime"`
+	Table                       string `gorm:"column:sg_table"`
+	SGID                        int    `gorm:"column:sg_id"`
+	Parent                      int    `gorm:"column:sg_parent"`
+	ReportCount                 int    `gorm:"column:report_count"`
+	ReporterCount               int    `gorm:"column:reporter_count"`
+	ReporterID                  string `gorm:"column:reporter_mb_id"`
+	TargetID                    string `gorm:"column:target_mb_id"`
+	TargetTitle                 string `gorm:"column:target_title"`
+	TargetContent               string `gorm:"column:target_content"`
+	ReportTypes                 string `gorm:"column:report_types"`
+	FirstReportTime             string `gorm:"column:first_report_time"`
+	LatestReportTime            string `gorm:"column:latest_report_time"`
+	MonitoringChecked           int    `gorm:"column:monitoring_checked"`
+	Hold                        int    `gorm:"column:hold"`
+	AdminApproved               int    `gorm:"column:admin_approved"`
+	Processed                   int    `gorm:"column:processed"`
+	OpinionCount                int    `gorm:"column:opinion_count"`
+	ActionCount                 int    `gorm:"column:action_count"`
+	DismissCount                int    `gorm:"column:dismiss_count"`
+	ReviewerIDs                 string `gorm:"column:reviewer_ids"`
+	ReviewedByMe                int    `gorm:"column:reviewed_by_me"`
+	AdminUsers                  string `gorm:"column:admin_users"`
+	ProcessedDatetime           string `gorm:"column:processed_datetime"`
+	MonitoringDisciplineReasons string `gorm:"column:monitoring_discipline_reasons"`
+	MonitoringDisciplineDays    *int   `gorm:"column:monitoring_discipline_days"`
+	MonitoringDisciplineType    string `gorm:"column:monitoring_discipline_type"`
+	MonitoringDisciplineDetail  string `gorm:"column:monitoring_discipline_detail"`
 }
 
 // ListAggregated retrieves paginated aggregated reports grouped by (table, parent)
@@ -377,18 +381,21 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			case ReportStatusPending:
 				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
 			case ReportStatusMonitoring:
-				// 진행중: dismiss 의견만 있음 (action 없음)
-				conditions = append(conditions, "(opinion_count > 0 AND action_count = 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+				// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
+				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0))")
 			case "needs_review":
-				// 검토필요: 의견 갈림 OR 조치 1개만 (최고관리자 직접 판단 필요)
-				conditions = append(conditions, "((action_count > 0 AND dismiss_count > 0) OR (action_count = 1 AND dismiss_count = 0)) AND admin_approved = 0 AND processed = 0")
+				// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
+				conditions = append(conditions, "(action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case "needs_final_approval":
+				// 최종승인 대기: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
+				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
 			case ReportStatusHold:
 				conditions = append(conditions, "(hold = 1 AND processed = 0)")
 			case ReportStatusApproved:
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
 			case "scheduled":
-				// 최종처리 탭: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
-				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
+				// 예약대기: 최고관리자가 승인함, 크론 처리 대기 중
+				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
 			case ReportStatusDismissed:
 				conditions = append(conditions, "(admin_approved = 0 AND processed = 1)")
 			}
@@ -402,18 +409,21 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 		case ReportStatusPending:
 			havingClause = "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
 		case ReportStatusMonitoring:
-			// 진행중: dismiss 의견만 있음 (action 없음)
-			havingClause = "HAVING opinion_count > 0 AND action_count = 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+			// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
+			havingClause = "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0)"
 		case "needs_review":
-			// 검토필요: 의견 갈림 OR 조치 1개만 (최고관리자 직접 판단 필요)
-			havingClause = "HAVING ((action_count > 0 AND dismiss_count > 0) OR (action_count = 1 AND dismiss_count = 0)) AND admin_approved = 0 AND processed = 0"
+			// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
+			havingClause = "HAVING action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+		case "needs_final_approval":
+			// 최종승인 대기: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
+			havingClause = "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
 		case ReportStatusHold:
 			havingClause = "HAVING hold = 1 AND processed = 0"
 		case ReportStatusApproved:
 			havingClause = "HAVING admin_approved = 1 AND processed = 1"
 		case "scheduled":
-			// 최종처리 탭: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
-			havingClause = "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
+			// 예약대기: 최고관리자가 승인함, 크론 처리 대기 중
+			havingClause = "HAVING admin_approved = 1 AND processed = 0"
 		case ReportStatusDismissed:
 			havingClause = "HAVING admin_approved = 0 AND processed = 1"
 		}
@@ -527,6 +537,10 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			MAX(s.processed) as processed,
 			MAX(s.admin_users) as admin_users,
 			MAX(s.processed_datetime) as processed_datetime,
+			MAX(s.monitoring_discipline_reasons) as monitoring_discipline_reasons,
+			MAX(s.monitoring_discipline_days) as monitoring_discipline_days,
+			MAX(s.monitoring_discipline_type) as monitoring_discipline_type,
+			MAX(s.monitoring_discipline_detail) as monitoring_discipline_detail,
 			IFNULL(op.opinion_count, 0) as opinion_count,
 			IFNULL(op.action_count, 0) as action_count,
 			IFNULL(op.dismiss_count, 0) as dismiss_count,
@@ -798,6 +812,8 @@ func (r *ReportRepository) buildStatusHaving(status string) string {
 				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
 			case ReportStatusMonitoring:
 				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case "needs_final_approval":
+				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
 			case ReportStatusHold:
 				conditions = append(conditions, "(hold = 1 AND processed = 0)")
 			case ReportStatusApproved:
@@ -820,6 +836,8 @@ func (r *ReportRepository) buildStatusHaving(status string) string {
 		return "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
 	case ReportStatusMonitoring:
 		return "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+	case "needs_final_approval":
+		return "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
 	case ReportStatusHold:
 		return "HAVING hold = 1 AND processed = 0"
 	case ReportStatusApproved:
@@ -886,20 +904,32 @@ func (r *ReportRepository) GetAllStatusCounts() (map[string]int64, error) {
 	sql := `
 		SELECT
 			SUM(CASE WHEN opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 THEN 1 ELSE 0 END) as pending_count,
-			SUM(CASE WHEN opinion_count > 0  AND admin_approved = 0 AND processed = 0 AND hold = 0 THEN 1 ELSE 0 END) as monitoring_count,
+			SUM(CASE WHEN opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0
+				AND NOT (action_count > 0 AND dismiss_count > 0)
+				AND NOT (action_count >= 2 AND dismiss_count = 0)
+				THEN 1 ELSE 0 END) as monitoring_count,
 			SUM(CASE WHEN hold = 1 AND processed = 0 THEN 1 ELSE 0 END) as hold_count,
 			SUM(CASE WHEN admin_approved = 1 THEN 1 ELSE 0 END) as approved_count,
 			SUM(CASE WHEN admin_approved = 0 AND processed = 1 THEN 1 ELSE 0 END) as dismissed_count,
+			SUM(CASE WHEN action_count > 0 AND dismiss_count > 0
+				AND admin_approved = 0 AND processed = 0 AND hold = 0 THEN 1 ELSE 0 END) as needs_review_count,
+			SUM(CASE WHEN action_count >= 2 AND dismiss_count = 0
+				AND admin_approved = 0 AND processed = 0 AND hold = 0 THEN 1 ELSE 0 END) as needs_final_approval_count,
 			COUNT(*) as total_count
 		FROM (
 			SELECT s.sg_table, s.sg_parent,
 				MAX(s.admin_approved) as admin_approved,
 				MAX(s.processed) as processed,
 				MAX(s.hold) as hold,
-				IFNULL(op.opinion_count, 0) as opinion_count
+				IFNULL(op.opinion_count, 0) as opinion_count,
+				IFNULL(op.action_count, 0) as action_count,
+				IFNULL(op.dismiss_count, 0) as dismiss_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT o.sg_table, o.sg_id, COUNT(*) as opinion_count
+				SELECT o.sg_table, o.sg_id,
+					COUNT(*) as opinion_count,
+					SUM(CASE WHEN o.opinion_type = 'action' THEN 1 ELSE 0 END) as action_count,
+					SUM(CASE WHEN o.opinion_type = 'dismiss' THEN 1 ELSE 0 END) as dismiss_count
 				FROM g5_na_singo_opinions o
 				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NULL
@@ -909,24 +939,28 @@ func (r *ReportRepository) GetAllStatusCounts() (map[string]int64, error) {
 		) t`
 
 	var result struct {
-		PendingCount    int64 `gorm:"column:pending_count"`
-		MonitoringCount int64 `gorm:"column:monitoring_count"`
-		HoldCount       int64 `gorm:"column:hold_count"`
-		ApprovedCount   int64 `gorm:"column:approved_count"`
-		DismissedCount  int64 `gorm:"column:dismissed_count"`
-		TotalCount      int64 `gorm:"column:total_count"`
+		PendingCount            int64 `gorm:"column:pending_count"`
+		MonitoringCount         int64 `gorm:"column:monitoring_count"`
+		HoldCount               int64 `gorm:"column:hold_count"`
+		ApprovedCount           int64 `gorm:"column:approved_count"`
+		DismissedCount          int64 `gorm:"column:dismissed_count"`
+		NeedsReviewCount        int64 `gorm:"column:needs_review_count"`
+		NeedsFinalApprovalCount int64 `gorm:"column:needs_final_approval_count"`
+		TotalCount              int64 `gorm:"column:total_count"`
 	}
 	if err := r.db.Raw(sql).Scan(&result).Error; err != nil {
 		return nil, err
 	}
 
 	stats := map[string]int64{
-		"pending":    result.PendingCount,
-		"monitoring": result.MonitoringCount,
-		"hold":       result.HoldCount,
-		"approved":   result.ApprovedCount,
-		"dismissed":  result.DismissedCount,
-		"total":      result.TotalCount,
+		"pending":              result.PendingCount,
+		"monitoring":           result.MonitoringCount,
+		"hold":                 result.HoldCount,
+		"approved":             result.ApprovedCount,
+		"dismissed":            result.DismissedCount,
+		"needs_review":         result.NeedsReviewCount,
+		"needs_final_approval": result.NeedsFinalApprovalCount,
+		"total":                result.TotalCount,
 	}
 	return stats, nil
 }
@@ -953,4 +987,80 @@ func (r *ReportRepository) GetByTarget(targetID string, limit int) ([]domain.Rep
 		return nil, err
 	}
 	return reports, nil
+}
+
+// GetAdjacentReport retrieves the adjacent report (previous or next) based on created_at timestamp
+// Supports filtering by status, date range, and search
+func (r *ReportRepository) GetAdjacentReport(table string, sgID int, direction, status, sort, fromDate, toDate, search string) (*domain.Report, error) {
+	// First, get the current report's created_at timestamp
+	var currentReport domain.Report
+	if err := r.db.Where("sg_table = ? AND sg_id = ?", table, sgID).First(&currentReport).Error; err != nil {
+		return nil, errors.New("현재 신고를 찾을 수 없습니다")
+	}
+
+	query := r.db.Model(&domain.Report{})
+
+	// Apply the same status filter as List
+	switch status {
+	case ReportStatusPending:
+		query = query.Where("processed = 0 AND monitoring_checked = 0 AND hold = 0")
+	case ReportStatusMonitoring:
+		query = query.Where("processed = 0 AND monitoring_checked = 1 AND hold = 0")
+	case ReportStatusHold:
+		query = query.Where("processed = 0 AND hold = 1")
+	case ReportStatusApproved:
+		query = query.Where("processed = 1 AND admin_approved = 1")
+	case ReportStatusDismissed:
+		query = query.Where("processed = 1 AND admin_approved = 0")
+	}
+
+	// Apply date range filter
+	if fromDate != "" {
+		query = query.Where("sg_time >= ?", fromDate+" 00:00:00")
+	}
+	if toDate != "" {
+		query = query.Where("sg_time <= ?", toDate+" 23:59:59")
+	}
+
+	// Apply search filter (search in target_content, target_title, target_mb_id)
+	if search != "" {
+		query = query.Where("target_content LIKE ? OR target_title LIKE ? OR target_mb_id LIKE ?",
+			"%"+search+"%", "%"+search+"%", "%"+search+"%")
+	}
+
+	// Apply direction filter and ordering
+	var orderBy string
+	if sort == "oldest" {
+		// oldest 정렬 (created_at ASC)
+		if direction == "prev" {
+			// 이전 건: created_at < current
+			query = query.Where("sg_time < ?", currentReport.CreatedAt)
+			orderBy = "sg_time DESC" // 가장 가까운 이전 건
+		} else {
+			// 다음 건: created_at > current
+			query = query.Where("sg_time > ?", currentReport.CreatedAt)
+			orderBy = "sg_time ASC" // 가장 가까운 다음 건
+		}
+	} else {
+		// newest 정렬 (created_at DESC) - 기본값
+		if direction == "prev" {
+			// 이전 건: created_at > current (더 최근)
+			query = query.Where("sg_time > ?", currentReport.CreatedAt)
+			orderBy = "sg_time ASC" // 가장 가까운 이전 건
+		} else {
+			// 다음 건: created_at < current (더 오래된)
+			query = query.Where("sg_time < ?", currentReport.CreatedAt)
+			orderBy = "sg_time DESC" // 가장 가까운 다음 건
+		}
+	}
+
+	var adjacentReport domain.Report
+	if err := query.Order(orderBy).Limit(1).First(&adjacentReport).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("인접 신고를 찾을 수 없습니다")
+		}
+		return nil, err
+	}
+
+	return &adjacentReport, nil
 }
