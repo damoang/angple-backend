@@ -32,6 +32,13 @@ const (
 	ReportStatusHold       = "hold"
 	ReportStatusApproved   = "approved"
 	ReportStatusDismissed  = "dismissed"
+
+	opinionTypeDismiss = "dismiss"
+	opinionTypeAction  = "action"
+
+	// Phase 6-1: 자동 잠금 설정 (1달 후 PHP 제거 시 활성화 예정)
+	autoLockEnabled   = false // 지금은 false, 1달 후 true로 변경
+	autoLockThreshold = 3     // N명 이상 신고 시 잠금
 )
 
 var (
@@ -43,16 +50,16 @@ var (
 
 // ReportService handles report business logic
 type ReportService struct {
-	repo            *repository.ReportRepository
-	opinionRepo     *repository.OpinionRepository
-	historyRepo     *repository.HistoryRepository
-	disciplineRepo  *repository.DisciplineRepository
+	repo             *repository.ReportRepository
+	opinionRepo      *repository.OpinionRepository
+	historyRepo      *repository.HistoryRepository
+	disciplineRepo   *repository.DisciplineRepository
 	aiEvaluationRepo *repository.AIEvaluationRepository // Phase 2: 통합 API용
-	memoRepo        *repository.G5MemoRepository
-	memberRepo      repository.MemberRepository
-	boardRepo       *repository.BoardRepository
-	singoUserRepo   *repository.SingoUserRepository
-	redisClient     *redis.Client // Redis 클라이언트
+	memoRepo         *repository.G5MemoRepository
+	memberRepo       repository.MemberRepository
+	boardRepo        *repository.BoardRepository
+	singoUserRepo    *repository.SingoUserRepository
+	redisClient      *redis.Client // Redis 클라이언트
 
 	// singoUserRepo.FindAll() cache (5분 TTL)
 	singoUsersMu     sync.RWMutex
@@ -250,9 +257,15 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 	// Batch-load opinions for all rows (1 query), then re-key by sg_id
 	opinionsMap := make(map[string][]domain.Opinion)
 	if s.opinionRepo != nil && len(rows) > 0 {
-		keys := make([]struct{ Table string; Parent int }, 0, len(rows))
+		keys := make([]struct {
+			Table  string
+			Parent int
+		}, 0, len(rows))
 		for _, r := range rows {
-			keys = append(keys, struct{ Table string; Parent int }{r.Table, r.Parent})
+			keys = append(keys, struct {
+				Table  string
+				Parent int
+			}{r.Table, r.Parent})
 		}
 		if opMap, err := s.opinionRepo.GetByMultipleReportsGrouped(keys); err == nil {
 			// Re-key by sg_id: 같은 parent 아래 다른 댓글의 의견이 섞이지 않도록
@@ -461,9 +474,15 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 	// Batch-load opinions for all sub-contents (1 query), then re-key by sg_id
 	opinionsMap := make(map[string][]domain.Opinion)
 	if s.opinionRepo != nil && len(contentRows) > 0 {
-		keys := make([]struct{ Table string; Parent int }, 0, len(contentRows))
+		keys := make([]struct {
+			Table  string
+			Parent int
+		}, 0, len(contentRows))
 		for _, cr := range contentRows {
-			keys = append(keys, struct{ Table string; Parent int }{cr.Table, cr.Parent})
+			keys = append(keys, struct {
+				Table  string
+				Parent int
+			}{cr.Table, cr.Parent})
 		}
 		if opMap, err := s.opinionRepo.GetByMultipleReportsGrouped(keys); err == nil {
 			// Re-key by sg_id: 같은 parent 아래 다른 댓글의 의견이 섞이지 않도록
@@ -813,13 +832,47 @@ func (s *ReportService) buildProcessResult(primary *domain.Report, allReports []
 	return result
 }
 
+// getContentType determines if the report target is a post or comment based on parent
+func getContentType(parent int) int8 {
+	if parent != 0 {
+		return 2 // comment (sg_parent > 0)
+	}
+	return 1 // post (sg_parent == 0)
+}
+
+// updatePostLockStatus checks report count and locks post if threshold exceeded
+// Phase 6-1: 자동 잠금 기능 (비활성화 상태)
+func (s *ReportService) updatePostLockStatus(table string, sgID int) error {
+	// 비활성화 상태면 즉시 리턴
+	if !autoLockEnabled {
+		return nil
+	}
+
+	// 1. 고유 신고자 수 집계 (취소되지 않은 신고만 카운트)
+	count, err := s.repo.CountDistinctReporters(table, sgID)
+	if err != nil {
+		return err
+	}
+
+	// 2. wr_7 필드 값 결정
+	var wr7Value interface{}
+	if count >= autoLockThreshold {
+		wr7Value = "lock" // 잠금
+	} else {
+		wr7Value = count // 신고 횟수 표시
+	}
+
+	// 3. 게시물 업데이트 (write_* 및 g5_board_new)
+	return s.repo.UpdatePostLockField(table, sgID, wr7Value)
+}
+
 // toReportListResponse converts a Report to ReportListResponse
 func toReportListResponse(report *domain.Report, nickMap, boardNameMap map[string]string) domain.ReportListResponse {
 	resp := domain.ReportListResponse{
 		ID:               report.ID,
 		Table:            report.Table,
 		Parent:           report.Parent,
-		Type:             report.Type,
+		Type:             getContentType(report.Parent),
 		BoardSubject:     boardNameMap[report.Table],
 		ReporterID:       report.ReporterID,
 		ReporterNickname: nickMap[report.ReporterID],
@@ -1623,12 +1676,21 @@ func (s *ReportService) GetMyReports(userID string, limit int) ([]domain.ReportL
 
 // processSubmitOpinion saves an opinion to the opinions table and checks for auto-approval/dismiss
 func (s *ReportService) processSubmitOpinion(report *domain.Report, adminID string, req *domain.ReportActionRequest) error {
+	// Phase 6-2: Optimistic Locking - Version 체크
+	if req.Version != nil && report.Version != *req.Version {
+		return fmt.Errorf("이 신고는 다른 관리자에 의해 수정되었습니다. 새로고침 후 다시 시도하세요")
+	}
+
 	// If opinions table is available, use it
 	if s.opinionRepo != nil {
-		// Determine opinion type from request
-		opinionType := "action"
-		if req.Type == "dismiss" || req.Type == "no_action" {
-			opinionType = "dismiss"
+		// Determine opinion type from request (우선: Opinion 필드, fallback: Type 필드)
+		opinionType := opinionTypeAction
+		if req.Opinion == "no_action" {
+			opinionType = opinionTypeDismiss
+		} else if req.Opinion == opinionTypeAction {
+			opinionType = opinionTypeAction
+		} else if req.Type == opinionTypeDismiss || req.Type == "no_action" {
+			opinionType = opinionTypeDismiss
 		}
 
 		// Build reasons string from penalty_reasons
@@ -1649,25 +1711,48 @@ func (s *ReportService) processSubmitOpinion(report *domain.Report, adminID stri
 			disciplineType = strings.Join(req.PenaltyType, ",")
 		}
 
+		// Detail: OpinionText 우선, fallback은 Detail
+		detailText := req.Detail
+		if req.OpinionText != "" {
+			detailText = req.OpinionText
+		}
+
+		// Convert adminID (mb_id) to mb_no for legacy compatibility
+		reviewerID := adminID
+		if s.memberRepo != nil {
+			member, err := s.memberRepo.FindByUserID(adminID)
+			if err == nil && member != nil {
+				reviewerID = fmt.Sprintf("%d", member.ID)
+			}
+		}
+
 		opinion := &domain.Opinion{
 			Table:             report.Table,
 			SGID:              report.SGID,
 			Parent:            report.Parent,
-			ReviewerID:        adminID,
+			ReviewerID:        reviewerID,
 			OpinionType:       opinionType,
 			DisciplineReasons: reasons,
 			DisciplineDays:    disciplineDays,
 			DisciplineType:    disciplineType,
-			DisciplineDetail:  req.Detail,
+			DisciplineDetail:  detailText,
 		}
 
 		if err := s.opinionRepo.Save(opinion); err != nil {
 			return fmt.Errorf("의견 저장 실패: %w", err)
 		}
 
-		// Update report status to monitoring
-		if err := s.repo.UpdateStatus(report.ID, ReportStatusMonitoring, adminID); err != nil {
-			return err
+		// Update report status to monitoring (Phase 6-2: version 체크 포함)
+		if req.Version != nil {
+			// Optimistic locking 활성화
+			if err := s.repo.UpdateStatusWithVersion(report.ID, ReportStatusMonitoring, adminID, report.Version); err != nil {
+				return err
+			}
+		} else {
+			// 기존 방식 (version 없는 요청 호환)
+			if err := s.repo.UpdateStatus(report.ID, ReportStatusMonitoring, adminID); err != nil {
+				return err
+			}
 		}
 
 		// Also update all other reports for the same content
@@ -1681,12 +1766,20 @@ func (s *ReportService) processSubmitOpinion(report *domain.Report, adminID stri
 		// Record history
 		s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), ReportStatusMonitoring, adminID, "의견 제출")
 
-		// Check for auto-approval or auto-dismiss
+		// Check for auto-approval (2+ action opinions → admin_approved=1)
 		if err := s.checkAutoApproval(report); err != nil {
 			log.Printf("[WARN] 자동 승인 체크 실패: %v", err)
 		}
+
+		// Check for auto-dismiss (2+ dismiss/no_action opinions → processed=1, admin_approved=0)
 		if err := s.checkAutoDismiss(report); err != nil {
 			log.Printf("[WARN] 자동 기각 체크 실패: %v", err)
+		}
+
+		// Phase 6-1: 자동 잠금 체크 (비활성화 상태면 실행 안됨)
+		if err := s.updatePostLockStatus(report.Table, report.SGID); err != nil {
+			// 로그만 남기고 에러는 무시 (Opinion 제출은 성공 처리)
+			log.Printf("[WARN] 자동 잠금 상태 업데이트 실패: %v", err)
 		}
 
 		return nil
@@ -1745,66 +1838,45 @@ func (s *ReportService) processAdminDismiss(report *domain.Report, adminID strin
 	return nil
 }
 
-// checkAutoApproval checks if 2+ action opinions match on reasons+days, logging for admin review
-// NOTE: 자동 승인 기능 제거됨. 최고 관리자가 직접 승인해야 함.
+// checkAutoApproval checks if 2+ action opinions exist and auto-approves
+// Sets admin_approved=1 (processed remains 0 for cron to handle discipline)
 func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 	if s.opinionRepo == nil {
 		return nil
 	}
 
-	opinions, err := s.opinionRepo.GetMatchingActionOpinions(report.Table, report.Parent)
-	if err != nil || len(opinions) < 2 {
+	// Count action opinions
+	actionCount, _, err := s.opinionRepo.CountByReportGrouped(report.Table, report.Parent)
+	if err != nil || actionCount < 2 {
 		return nil
 	}
 
-	// Check if at least 2 action opinions have matching reasons, days, and type
-	type opKey struct {
-		Reasons string
-		Days    int
-		Type    string
-	}
-	counts := make(map[opKey]int)
-	var matchedKey opKey
-	for _, op := range opinions {
-		key := opKey{
-			Reasons: op.DisciplineReasons,
-			Days:    op.DisciplineDays,
-			Type:    op.DisciplineType,
-		}
-		counts[key]++
-		if counts[key] >= 2 {
-			matchedKey = key
-		}
-	}
+	// Auto-approve: set admin_approved=1, processed=0
+	log.Printf("[INFO] 자동 승인: table=%s, parent=%d (action 의견 %d건)", report.Table, report.Parent, actionCount)
 
-	for _, count := range counts {
-		if count >= 2 {
-			// 최종처리 탭으로 이동 (scheduled 상태: action_count >= 2, admin_approved=0)
-			log.Printf("[INFO] 최종처리 탭으로 이동: table=%s, parent=%d (action 의견 %d건 일치, 사유=%s, 일수=%d, 유형=%s) - 최고관리자 승인 대기",
-				report.Table, report.Parent, count, matchedKey.Reasons, matchedKey.Days, matchedKey.Type)
-
-			// 모니터링 권고 사항만 저장 (admin_approved는 최고관리자가 직접 승인할 때 설정)
-			allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
-			for _, r := range allReports {
-				if !r.Processed && !r.AdminApproved {
-					_ = s.repo.UpdateMonitoringRecommendation(
-						r.ID,
-						matchedKey.Reasons, // reasonsJSON (이미 JSON 문자열)
-						matchedKey.Days,
-						matchedKey.Type,
-						"2명 이상 조치 의견 일치 (시스템 권고)",
-					)
-				}
+	// Update all related reports to admin_approved=1
+	allReports, err := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	if err != nil {
+		log.Printf("[WARN] 관련 신고 조회 실패: %v", err)
+		return nil
+	}
+	for _, r := range allReports {
+		if !r.Processed && !r.AdminApproved {
+			// Use scheduled approve logic: sets admin_approved=1, processed=0
+			// This way PHP cron will handle the discipline execution
+			adminUsersJSON := `["system"]`
+			if err := s.repo.UpdateStatusScheduledApprove(r.ID, adminUsersJSON, "[]", 0, "", "자동 승인 (2명 이상 동의)"); err != nil {
+				log.Printf("[WARN] 자동 승인 업데이트 실패 (id=%d): %v", r.ID, err)
 			}
-
-			return nil
 		}
 	}
 
+	s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), "scheduled", "system", fmt.Sprintf("자동 승인 (action 의견 %d건)", actionCount))
 	return nil
 }
 
-// checkAutoDismiss checks if 2+ dismiss opinions exist, triggering auto-dismiss
+// checkAutoDismiss checks if 2+ dismiss/no_action opinions exist, triggering auto-dismiss
+// Sets processed=1, admin_approved=0
 func (s *ReportService) checkAutoDismiss(report *domain.Report) error {
 	if s.opinionRepo == nil {
 		return nil
@@ -1812,30 +1884,31 @@ func (s *ReportService) checkAutoDismiss(report *domain.Report) error {
 
 	actionCount, dismissCount, err := s.opinionRepo.CountByReportGrouped(report.Table, report.Parent)
 	if err != nil {
+		return err
+	}
+
+	// Count non-action opinions (dismiss + no_action)
+	// Since we only have "action" and "dismiss" types, dismissCount represents all non-action opinions
+	noActionCount := dismissCount
+
+	if noActionCount < 2 {
 		return nil
 	}
 
-	// 의견 갈림 체크: actionCount와 dismissCount 모두 1 이상이면 자동 처리 안 함
-	if actionCount > 0 && dismissCount > 0 {
-		log.Printf("[INFO] 의견 갈림 감지: table=%s, parent=%d (action=%d, dismiss=%d) - 모니터링 유지",
-			report.Table, report.Parent, actionCount, dismissCount)
-		return nil
-	}
+	// Auto-dismiss: set processed=1, admin_approved=0
+	log.Printf("[INFO] 자동 미처리: table=%s, parent=%d (dismiss 의견 %d건, action 의견 %d건)", report.Table, report.Parent, noActionCount, actionCount)
 
-	// dismissCount >= 2 AND actionCount == 0인 경우만 자동 기각
-	if dismissCount < 2 {
-		return nil
-	}
-
-	// Auto-dismiss: update all related reports
-	log.Printf("[INFO] 자동 기각: table=%s, parent=%d (dismiss 의견 %d건)", report.Table, report.Parent, dismissCount)
+	// Update all related reports to dismissed status
 	allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
 	for _, r := range allReports {
 		if !r.Processed {
-			_ = s.repo.UpdateStatus(r.ID, ReportStatusDismissed, "system")
+			if err := s.repo.UpdateStatus(r.ID, ReportStatusDismissed, "system"); err != nil {
+				log.Printf("[WARN] 자동 미처리 업데이트 실패 (id=%d): %v", r.ID, err)
+			}
 		}
 	}
 
+	s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), ReportStatusDismissed, "system", fmt.Sprintf("자동 미처리 (dismiss 의견 %d건)", noActionCount))
 	return nil
 }
 

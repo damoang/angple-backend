@@ -99,6 +99,14 @@ func (m *mockMemberRepo) FindAll(page, limit int, keyword string) ([]*domain.Mem
 	return args.Get(0).([]*domain.Member), args.Get(1).(int64), args.Error(2)
 }
 
+func (m *mockMemberRepo) FindNicksByIDs(userIDs []string) (map[string]string, error) {
+	args := m.Called(userIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]string), args.Error(1)
+}
+
 func (m *mockMemberRepo) UpdateFields(id int, fields map[string]interface{}) error {
 	return m.Called(id, fields).Error(0)
 }

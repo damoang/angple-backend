@@ -120,8 +120,8 @@ func (r *DisciplineRepository) CreateDisciplineLog(
 		Option:    "html1",
 		Subject:   subject,
 		Content:   string(contentJSON),
-		MemberID:  "police",  // PHP 호환: 시스템 계정
-		Name:      "police",  // PHP 호환: 시스템 계정
+		MemberID:  "police", // PHP 호환: 시스템 계정
+		Name:      "police", // PHP 호환: 시스템 계정
 		Password:  "",
 		DateTime:  now,
 		Last:      nowStr,

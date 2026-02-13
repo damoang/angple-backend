@@ -228,14 +228,14 @@ func Setup(
 
 	// Reports (신고 API)
 	reports := api.Group("/reports")
-	reports.POST("", reportHandler.SubmitReport)           // 신고 접수 (일반 사용자)
-	reports.GET("/mine", reportHandler.MyReports)          // 내 신고 내역
-	reports.GET("", reportHandler.ListReports)             // 신고 목록 (관리자)
-	reports.GET("/data", reportHandler.GetReportData)      // 신고 데이터 조회 (관리자)
-	reports.GET("/recent", reportHandler.GetRecentReports) // 최근 신고 목록 (관리자)
-	reports.GET("/stats", reportHandler.GetStats)             // 신고 통계 (관리자)
-	reports.GET("/opinions", reportHandler.GetOpinions)       // 의견 목록 (관리자)
-	reports.POST("/process", reportHandler.ProcessReport)           // 신고 처리 (관리자)
+	reports.POST("", reportHandler.SubmitReport)                     // 신고 접수 (일반 사용자)
+	reports.GET("/mine", reportHandler.MyReports)                    // 내 신고 내역
+	reports.GET("", reportHandler.ListReports)                       // 신고 목록 (관리자)
+	reports.GET("/data", reportHandler.GetReportData)                // 신고 데이터 조회 (관리자)
+	reports.GET("/recent", reportHandler.GetRecentReports)           // 최근 신고 목록 (관리자)
+	reports.GET("/stats", reportHandler.GetStats)                    // 신고 통계 (관리자)
+	reports.GET("/opinions", reportHandler.GetOpinions)              // 의견 목록 (관리자)
+	reports.POST("/process", reportHandler.ProcessReport)            // 신고 처리 (관리자)
 	reports.POST("/batch-process", reportHandler.BatchProcessReport) // 신고 일괄 처리 (관리자)
 
 	// Singo Users (검토자 목록)

@@ -476,10 +476,11 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
-				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_id
-			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
+				LEFT JOIN g5_member m ON o.reviewer_id = m.mb_no
+				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NOT NULL
+				GROUP BY o.sg_table, o.sg_parent
+			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.sg_table, s.sg_id
 			` + havingClause + `
@@ -519,9 +520,8 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 	offset := (page - 1) * limit
 	mainSQL := `
 		SELECT
-			s.sg_table,
+			s.sg_table, s.sg_parent,
 			MAX(s.sg_id) as sg_id,
-			MAX(s.sg_parent) as sg_parent,
 			COUNT(*) as report_count,
 			COUNT(DISTINCT s.mb_id) as reporter_count,
 			MAX(s.mb_id) as reporter_mb_id,
@@ -554,10 +554,11 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 				   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count,
 				   GROUP_CONCAT(DISTINCT o.reviewer_id) as reviewer_ids
 			FROM g5_na_singo_opinions o
-			LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
-			WHERE su.mb_id IS NULL
-			GROUP BY o.sg_table, o.sg_id
-		) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id` + myReviewJoin + `
+			LEFT JOIN g5_member m ON o.reviewer_id = m.mb_no
+			LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+			WHERE su.mb_id IS NOT NULL
+			GROUP BY o.sg_table, o.sg_parent
+		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent` + myReviewJoin + `
 		WHERE 1=1` + dateFilter + excludeFilter + `
 		GROUP BY s.sg_table, s.sg_id
 		` + havingClause + `
@@ -602,11 +603,12 @@ func (r *ReportRepository) CountByStatusAggregated(status string) (int64, error)
 			LEFT JOIN (
 				SELECT o.sg_table, o.sg_id, COUNT(*) as opinion_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
-				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_id
-			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
-			GROUP BY s.sg_table, s.sg_id
+				LEFT JOIN g5_member m ON o.reviewer_id = m.mb_no
+				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NOT NULL
+				GROUP BY o.sg_table, o.sg_parent
+			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
+			GROUP BY s.sg_table, s.sg_parent
 			` + havingClause + `
 		) t`
 
@@ -655,10 +657,11 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 			LEFT JOIN (
 				SELECT o.sg_table, o.sg_id, COUNT(*) as opinion_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
-				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_id
-			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
+				LEFT JOIN g5_member m ON o.reviewer_id = m.mb_no
+				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NOT NULL
+				GROUP BY o.sg_table, o.sg_parent
+			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
@@ -707,10 +710,11 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 			LEFT JOIN (
 				SELECT o.sg_table, o.sg_id, COUNT(*) as opinion_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
-				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_id
-			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
+				LEFT JOIN g5_member m ON o.reviewer_id = m.mb_no
+				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NOT NULL
+				GROUP BY o.sg_table, o.sg_parent
+			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 			WHERE 1=1` + dateFilter + excludeFilter + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
@@ -782,10 +786,11 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 				   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count,
 				   GROUP_CONCAT(DISTINCT o.reviewer_id) as reviewer_ids
 			FROM g5_na_singo_opinions o
-			LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
-			WHERE su.mb_id IS NULL
-			GROUP BY o.sg_table, o.sg_id
-		) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
+			LEFT JOIN g5_member m ON o.reviewer_id = m.mb_no
+			LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+			WHERE su.mb_id IS NOT NULL
+			GROUP BY o.sg_table, o.sg_parent
+		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
 		WHERE s.target_mb_id IN (?)` + dateFilter + `
 		GROUP BY s.sg_table, s.sg_id
 		` + statusHaving + `
@@ -862,11 +867,11 @@ func (r *ReportRepository) UpdateStatusScheduledApprove(id int, processedBy, rea
 	return r.db.Model(&domain.Report{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"admin_approved":          true,
-			"processed":               false,
-			"admin_datetime":          gorm.Expr("NOW()"),
-			"admin_users":             processedBy,
-			"hold":                    false,
+			"admin_approved":           true,
+			"processed":                false,
+			"admin_datetime":           gorm.Expr("NOW()"),
+			"admin_users":              processedBy,
+			"hold":                     false,
 			"admin_discipline_reasons": reasonsJSON,
 			"admin_discipline_days":    days,
 			"admin_discipline_type":    disciplineType,
@@ -931,11 +936,12 @@ func (r *ReportRepository) GetAllStatusCounts() (map[string]int64, error) {
 					SUM(CASE WHEN o.opinion_type = 'action' THEN 1 ELSE 0 END) as action_count,
 					SUM(CASE WHEN o.opinion_type = 'dismiss' THEN 1 ELSE 0 END) as dismiss_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN singo_users su ON o.reviewer_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
-				WHERE su.mb_id IS NULL
-				GROUP BY o.sg_table, o.sg_id
-			) op ON s.sg_table=op.sg_table AND s.sg_id=op.sg_id
-			GROUP BY s.sg_table, s.sg_id
+				LEFT JOIN g5_member m ON o.reviewer_id = m.mb_no
+				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				WHERE su.mb_id IS NOT NULL
+				GROUP BY o.sg_table, o.sg_parent
+			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
+			GROUP BY s.sg_table, s.sg_parent
 		) t`
 
 	var result struct {
@@ -987,6 +993,35 @@ func (r *ReportRepository) GetByTarget(targetID string, limit int) ([]domain.Rep
 		return nil, err
 	}
 	return reports, nil
+}
+
+// CountDistinctReporters counts unique reporters for a specific post (Phase 6-1: 자동 잠금)
+func (r *ReportRepository) CountDistinctReporters(table string, sgID int) (int64, error) {
+	var count int64
+	err := r.db.Model(&domain.Report{}).
+		Where("sg_table = ? AND sg_id = ? AND sg_flag = 0", table, sgID).
+		Distinct("mb_id").
+		Count(&count).Error
+	return count, err
+}
+
+// UpdatePostLockField updates wr_7 field in write_* and g5_board_new tables (Phase 6-1: 자동 잠금)
+func (r *ReportRepository) UpdatePostLockField(table string, sgID int, value interface{}) error {
+	writeTable := "write_" + table
+
+	// Update write_* table
+	if err := r.db.Table(writeTable).
+		Where("wr_id = ?", sgID).
+		Update("wr_7", value).Error; err != nil {
+		return err
+	}
+
+	// Update g5_board_new table (최신글 목록)
+	r.db.Table("g5_board_new").
+		Where("bo_table = ? AND wr_id = ?", table, sgID).
+		Update("wr_singo", value)
+
+	return nil
 }
 
 // GetAdjacentReport retrieves the adjacent report (previous or next) based on created_at timestamp

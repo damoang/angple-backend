@@ -17,21 +17,21 @@ const (
 // Banner represents a banner in the system
 // Table: banners (실제 DB 스키마에 맞춤)
 type Banner struct {
-	ID            string         `gorm:"column:id;primaryKey" json:"id"`
-	AdvertiserID  string         `gorm:"column:advertiser_id" json:"advertiser_id,omitempty"`
-	Name          string         `gorm:"column:name" json:"name"`
-	ImageURL      string         `gorm:"column:image_url" json:"image_url"`
-	LandingURL    string         `gorm:"column:landing_url" json:"landing_url"`
-	Position      BannerPosition `gorm:"column:position" json:"position"`
-	StartDate     *time.Time     `gorm:"column:start_date" json:"start_date"`
-	EndDate       *time.Time     `gorm:"column:end_date" json:"end_date"`
-	Status        string         `gorm:"column:status" json:"status"`
-	RejectReason  string         `gorm:"column:reject_reason" json:"reject_reason,omitempty"`
-	AltText       string         `gorm:"column:alt_text" json:"alt_text,omitempty"`
-	Target        string         `gorm:"column:target" json:"target"`
-	Memo          string         `gorm:"column:memo" json:"memo,omitempty"`
-	CreatedAt     time.Time      `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt     time.Time      `gorm:"column:updated_at" json:"updated_at"`
+	ID           string         `gorm:"column:id;primaryKey" json:"id"`
+	AdvertiserID string         `gorm:"column:advertiser_id" json:"advertiser_id,omitempty"`
+	Name         string         `gorm:"column:name" json:"name"`
+	ImageURL     string         `gorm:"column:image_url" json:"image_url"`
+	LandingURL   string         `gorm:"column:landing_url" json:"landing_url"`
+	Position     BannerPosition `gorm:"column:position" json:"position"`
+	StartDate    *time.Time     `gorm:"column:start_date" json:"start_date"`
+	EndDate      *time.Time     `gorm:"column:end_date" json:"end_date"`
+	Status       string         `gorm:"column:status" json:"status"`
+	RejectReason string         `gorm:"column:reject_reason" json:"reject_reason,omitempty"`
+	AltText      string         `gorm:"column:alt_text" json:"alt_text,omitempty"`
+	Target       string         `gorm:"column:target" json:"target"`
+	Memo         string         `gorm:"column:memo" json:"memo,omitempty"`
+	CreatedAt    time.Time      `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt    time.Time      `gorm:"column:updated_at" json:"updated_at"`
 
 	// 레거시 호환 필드 (사용하지 않지만 기존 코드 호환용)
 	Title      string `gorm:"-" json:"title,omitempty"`

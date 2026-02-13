@@ -388,11 +388,11 @@ func (s *promotionService) IsAdvertiser(memberID string) (bool, *domain.Advertis
 
 // nariyaWidgetJSON은 nariya 위젯 JSON 파일의 최상위 구조
 type nariyaWidgetJSON struct {
-	BoardException       string                       `json:"board_exception"`
-	InsertIndex          int                          `json:"insert_index"`
-	MinCntForInsertIndex int                          `json:"min_cnt_for_insert_index"`
-	HowManyToDisplay     int                          `json:"how_many_to_display"`
-	Advertisers          map[string]nariyaAdvertiser   `json:"advertisers"`
+	BoardException       string                      `json:"board_exception"`
+	InsertIndex          int                         `json:"insert_index"`
+	MinCntForInsertIndex int                         `json:"min_cnt_for_insert_index"`
+	HowManyToDisplay     int                         `json:"how_many_to_display"`
+	Advertisers          map[string]nariyaAdvertiser `json:"advertisers"`
 }
 
 // nariyaAdvertiser는 nariya 위젯 JSON의 광고주 항목

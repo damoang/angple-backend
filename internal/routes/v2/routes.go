@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"github.com/damoang/angple-backend/internal/config"
+	"github.com/damoang/angple-backend/internal/handler"
 	v2handler "github.com/damoang/angple-backend/internal/handler/v2"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -128,4 +130,19 @@ func SetupInstall(router *gin.Engine, h *v2handler.InstallHandler) {
 	install.GET("/status", h.CheckInstallStatus)
 	install.POST("/test-db", h.TestDB)
 	install.POST("/create-admin", h.CreateAdmin)
+}
+
+// SetupReports configures v2 report routes
+func SetupReports(router *gin.Engine, reportHandler *handler.ReportHandler, damoangJWT *jwt.DamoangManager, cfg *config.Config, jwtManager *jwt.Manager) {
+	// Use DamoangCookieAuth for compatibility with singo app
+	reports := router.Group("/api/v2/reports", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
+	reports.POST("", reportHandler.SubmitReport)
+	reports.GET("/mine", reportHandler.MyReports)
+	reports.GET("", reportHandler.ListReports)
+	reports.GET("/data", reportHandler.GetReportData)
+	reports.GET("/recent", reportHandler.GetRecentReports)
+	reports.GET("/stats", reportHandler.GetStats)
+	reports.GET("/opinions", reportHandler.GetOpinions)
+	reports.POST("/process", reportHandler.ProcessReport)
+	reports.POST("/batch-process", reportHandler.BatchProcessReport)
 }

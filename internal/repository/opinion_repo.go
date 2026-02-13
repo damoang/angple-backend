@@ -128,7 +128,10 @@ func (r *OpinionRepository) DeleteByReportGrouped(table string, parent int) erro
 
 // GetByMultipleReportsGrouped retrieves opinions for multiple table+parent combinations in a single query
 // Returns map keyed by "table:parent" string
-func (r *OpinionRepository) GetByMultipleReportsGrouped(keys []struct{ Table string; Parent int }) (map[string][]domain.Opinion, error) {
+func (r *OpinionRepository) GetByMultipleReportsGrouped(keys []struct {
+	Table  string
+	Parent int
+}) (map[string][]domain.Opinion, error) {
 	if len(keys) == 0 {
 		return map[string][]domain.Opinion{}, nil
 	}
