@@ -157,7 +157,8 @@ func (h *ReportHandler) ListReports(c *gin.Context) {
 // @Tags reports
 // @Produce json
 // @Param sg_table query string true "신고 테이블"
-// @Param sg_id query int true "신고 ID"
+// @Param sg_id query int false "신고 ID (특정 신고 조회 시)"
+// @Param sg_parent query int false "신고 대상 게시글 ID (sg_id 없을 때 필수, 레거시 호환)"
 // @Param include query string false "포함할 데이터 (ai,history) - 쉼표로 구분"
 // @Success 200 {object} common.APIResponse
 // @Failure 401 {object} common.APIResponse
@@ -175,10 +176,18 @@ func (h *ReportHandler) GetReportData(c *gin.Context) {
 
 	// Parse query parameters
 	table := c.Query("sg_table")
-	id, err := strconv.Atoi(c.Query("sg_id"))
-	if err != nil || table == "" {
-		common.ErrorResponse(c, http.StatusBadRequest, "잘못된 요청입니다", nil)
+	sgID, _ := strconv.Atoi(c.Query("sg_id"))
+	parent, err := strconv.Atoi(c.Query("sg_parent"))
+
+	// 하위 호환성: sg_id 없으면 sg_parent 필수 (레거시)
+	if table == "" || (sgID == 0 && (err != nil || parent == 0)) {
+		common.ErrorResponse(c, http.StatusBadRequest, "sg_table과 sg_id 또는 sg_parent가 필요합니다", nil)
 		return
+	}
+
+	// sg_id 없으면 parent 사용 (레거시 호환)
+	if sgID == 0 && parent > 0 {
+		// parent만 있는 경우: 기존 동작 유지
 	}
 
 	// Singo 역할 기반 닉네임 마스킹
@@ -198,7 +207,13 @@ func (h *ReportHandler) GetReportData(c *gin.Context) {
 	// Get report data (enhanced if includes specified)
 	if len(includes) > 0 {
 		// Phase 2: 통합 API - AI 평가 + 징계 이력 포함
-		enhanced, err := h.service.GetDataEnhanced(table, id, userID, singoRole, includes)
+		var enhanced *domain.ReportDetailEnhancedResponse
+		var err error
+		if sgID > 0 {
+			enhanced, err = h.service.GetDataEnhanced(table, parent, userID, singoRole, includes, sgID)
+		} else {
+			enhanced, err = h.service.GetDataEnhanced(table, parent, userID, singoRole, includes)
+		}
 		if err != nil {
 			common.ErrorResponse(c, http.StatusNotFound, err.Error(), nil)
 			return
@@ -218,7 +233,13 @@ func (h *ReportHandler) GetReportData(c *gin.Context) {
 		})
 	} else {
 		// 기존 API (하위 호환성 유지)
-		detail, err := h.service.GetData(table, id, userID, singoRole)
+		var detail *domain.ReportDetailResponse
+		var err error
+		if sgID > 0 {
+			detail, err = h.service.GetData(table, parent, userID, singoRole, sgID)
+		} else {
+			detail, err = h.service.GetData(table, parent, userID, singoRole)
+		}
 		if err != nil {
 			common.ErrorResponse(c, http.StatusNotFound, err.Error(), nil)
 			return
