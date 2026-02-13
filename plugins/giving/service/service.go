@@ -1,4 +1,3 @@
-//go:build ignore
 
 // 나눔 플러그인 비즈니스 로직
 package service
@@ -12,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"angple-backend/plugins/giving/domain"
-	"angple-backend/plugins/giving/repository"
+	"github.com/damoang/angple-backend/plugins/giving/domain"
+	"github.com/damoang/angple-backend/plugins/giving/repository"
 
 	"gorm.io/gorm"
 )
