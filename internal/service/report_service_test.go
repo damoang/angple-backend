@@ -186,6 +186,34 @@ func (m *MockMemberRepository) ExistsByEmailExcluding(email string, excludeUserI
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *MockMemberRepository) FindNicksByIDs(userIDs []string) (map[string]string, error) {
+	args := m.Called(userIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]string), args.Error(1)
+}
+
+func (m *MockMemberRepository) FindNicksByMbNos(mbNos []int) (map[string]string, error) {
+	args := m.Called(mbNos)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]string), args.Error(1)
+}
+
+func (m *MockMemberRepository) FindAll(page, limit int, keyword string) ([]*domain.Member, int64, error) {
+	args := m.Called(page, limit, keyword)
+	if args.Get(0) == nil {
+		return nil, args.Get(1).(int64), args.Error(2)
+	}
+	return args.Get(0).([]*domain.Member), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockMemberRepository) UpdateFields(id int, fields map[string]interface{}) error {
+	return m.Called(id, fields).Error(0)
+}
+
 // Test helper to create a sample report
 func createTestReport() *domain.Report {
 	return &domain.Report{

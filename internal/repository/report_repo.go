@@ -652,10 +652,15 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				MAX(s.admin_approved) as admin_approved,
 				MAX(s.processed) as processed,
 				MAX(s.hold) as hold,
-				IFNULL(op.opinion_count, 0) as opinion_count
+				IFNULL(op.opinion_count, 0) as opinion_count,
+				IFNULL(op.action_count, 0) as action_count,
+				IFNULL(op.dismiss_count, 0) as dismiss_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT o.sg_table, o.sg_parent, COUNT(*) as opinion_count
+				SELECT o.sg_table, o.sg_parent,
+					   COUNT(DISTINCT o.reviewer_id) as opinion_count,
+					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
+					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
 				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
 				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
@@ -705,10 +710,15 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				MAX(s.admin_approved) as admin_approved,
 				MAX(s.processed) as processed,
 				MAX(s.hold) as hold,
-				IFNULL(op.opinion_count, 0) as opinion_count
+				IFNULL(op.opinion_count, 0) as opinion_count,
+				IFNULL(op.action_count, 0) as action_count,
+				IFNULL(op.dismiss_count, 0) as dismiss_count
 			FROM g5_na_singo s
 			LEFT JOIN (
-				SELECT o.sg_table, o.sg_parent, COUNT(*) as opinion_count
+				SELECT o.sg_table, o.sg_parent,
+					   COUNT(DISTINCT o.reviewer_id) as opinion_count,
+					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
+					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
 				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
 				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
