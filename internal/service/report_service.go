@@ -1135,8 +1135,8 @@ func (s *ReportService) processApprove(report *domain.Report, adminID, clientIP 
 // PHP cron (매시 정각) processes these records. Cancellable until cron execution.
 func (s *ReportService) processScheduledApprove(report *domain.Report, adminID string, req *domain.ReportActionRequest) error {
 	// 검증: 승인 시 필수 항목 확인
-	if req.PenaltyDays <= 0 {
-		return fmt.Errorf("승인 시 이용제한 일수는 필수입니다 (1일 이상 또는 9999=영구)")
+	if req.PenaltyDays < 0 {
+		return fmt.Errorf("승인 시 이용제한 일수가 올바르지 않습니다 (0=주의, 1이상=기간제한, 9999=영구)")
 	}
 	if len(req.PenaltyReasons) == 0 {
 		return fmt.Errorf("승인 시 제재 사유는 필수입니다")
@@ -1206,8 +1206,8 @@ func (s *ReportService) processScheduledApprove(report *domain.Report, adminID s
 // 4. Send memo to target member
 func (s *ReportService) processImmediateApprove(report *domain.Report, adminID, clientIP string, req *domain.ReportActionRequest) error {
 	// 검증: 승인 시 필수 항목 확인
-	if req.PenaltyDays <= 0 {
-		return fmt.Errorf("승인 시 이용제한 일수는 필수입니다 (1일 이상 또는 9999=영구)")
+	if req.PenaltyDays < 0 {
+		return fmt.Errorf("승인 시 이용제한 일수가 올바르지 않습니다 (0=주의, 1이상=기간제한, 9999=영구)")
 	}
 	if len(req.PenaltyReasons) == 0 {
 		return fmt.Errorf("승인 시 제재 사유는 필수입니다")
@@ -1461,8 +1461,8 @@ func (s *ReportService) processImmediateBulkApprove(
 	}
 
 	// 검증: 승인 시 필수 항목 확인
-	if req.PenaltyDays <= 0 {
-		return fmt.Errorf("승인 시 이용제한 일수는 필수입니다 (1일 이상 또는 9999=영구)")
+	if req.PenaltyDays < 0 {
+		return fmt.Errorf("승인 시 이용제한 일수가 올바르지 않습니다 (0=주의, 1이상=기간제한, 9999=영구)")
 	}
 	if len(req.PenaltyReasons) == 0 {
 		return fmt.Errorf("승인 시 제재 사유는 필수입니다")
