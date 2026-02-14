@@ -58,6 +58,9 @@ __pycache__/
 .serena/
 /api
 
+# Build binary
+/angple-backend
+
 # Claude Code
 .claude/
 CLAUDE.md

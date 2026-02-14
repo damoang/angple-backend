@@ -113,6 +113,7 @@ type ReportDetailEnhancedResponse struct {
 // ReportListResponse represents report list response
 type ReportListResponse struct {
 	ID                int    `json:"id"`
+	SGID              int    `json:"sg_id"`
 	Table             string `json:"table"`
 	Parent            int    `json:"parent"`
 	Type              int8   `json:"type"`       // 1=post, 2=comment

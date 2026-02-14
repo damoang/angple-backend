@@ -41,3 +41,9 @@ func (r *AIEvaluationRepository) ListByReport(table string, parent int) ([]domai
 	}
 	return evals, nil
 }
+
+// DeleteByReport deletes all AI evaluations for a report (재평가용)
+func (r *AIEvaluationRepository) DeleteByReport(table string, parent int) error {
+	return r.db.Where("sg_table = ? AND sg_parent = ?", table, parent).
+		Delete(&domain.AIEvaluation{}).Error
+}

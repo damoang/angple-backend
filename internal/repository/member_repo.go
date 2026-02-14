@@ -211,7 +211,7 @@ func (r *memberRepository) FindNicksByIDs(userIDs []string) (map[string]string, 
 }
 
 // FindNicksByMbNos batch-loads nicknames for given mb_no values (opinions의 reviewer_id용)
-// 하이브리드: 숫자 → mb_no IN, 비숫자 → mb_id IN (레거시 호환)
+// 하이브리드 조회: 숫자 → mb_no IN, 비숫자 → mb_id IN (레거시 데이터 호환)
 func (r *memberRepository) FindNicksByMbNos(mbNos []string) (map[string]string, error) {
 	if len(mbNos) == 0 {
 		return map[string]string{}, nil
@@ -228,6 +228,7 @@ func (r *memberRepository) FindNicksByMbNos(mbNos []string) (map[string]string, 
 
 	m := make(map[string]string, len(mbNos))
 
+	// mb_no 기반 조회 (숫자)
 	if len(numericIDs) > 0 {
 		type row struct {
 			MbNo   int    `gorm:"column:mb_no"`
@@ -246,6 +247,7 @@ func (r *memberRepository) FindNicksByMbNos(mbNos []string) (map[string]string, 
 		}
 	}
 
+	// mb_id 기반 fallback (비숫자, 레거시 데이터)
 	if len(stringIDs) > 0 {
 		type row struct {
 			MbID   string `gorm:"column:mb_id"`
