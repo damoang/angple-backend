@@ -16,7 +16,10 @@ import (
 	"github.com/damoang/angple-backend/internal/repository"
 )
 
-const penaltyTypeLevel = "level"
+const (
+	penaltyTypeLevel     = "level"
+	penaltyTypeIntercept = "intercept"
+)
 
 // AIEvaluator 백엔드 AI 평가 실행기
 type AIEvaluator struct {
@@ -309,7 +312,7 @@ func validateFields(resp *aiRawResponse) error {
 		return fmt.Errorf("penalty_days가 유효하지 않습니다 (받은 값: %d)", resp.PenaltyDays)
 	}
 	for _, t := range resp.PenaltyType {
-		if t != penaltyTypeLevel && t != "intercept" {
+		if t != penaltyTypeLevel && t != penaltyTypeIntercept {
 			return fmt.Errorf("penalty_type은 level/intercept만 가능합니다 (받은 값: %s)", t)
 		}
 	}
