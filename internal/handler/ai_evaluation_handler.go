@@ -51,7 +51,7 @@ func (h *AIEvaluationHandler) SaveEvaluation(c *gin.Context) {
 		return
 	}
 
-	adminID := middleware.GetDamoangUserID(c)
+	adminID := middleware.GetV2UserID(c)
 
 	var req domain.SaveAIEvaluationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

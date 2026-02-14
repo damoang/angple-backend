@@ -476,8 +476,8 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
-				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				LEFT JOIN v2_users v ON o.reviewer_id = CAST(v.id AS CHAR)
+				LEFT JOIN singo_users su ON v.username COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
@@ -554,8 +554,8 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 				   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count,
 				   GROUP_CONCAT(DISTINCT o.reviewer_id) as reviewer_ids
 			FROM g5_na_singo_opinions o
-			LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
-			LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+			LEFT JOIN v2_users v ON o.reviewer_id = CAST(v.id AS CHAR)
+			LEFT JOIN singo_users su ON v.username COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 			WHERE su.mb_id IS NOT NULL
 			GROUP BY o.sg_table, o.sg_parent
 		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent` + myReviewJoin + `
@@ -603,8 +603,8 @@ func (r *ReportRepository) CountByStatusAggregated(status string) (int64, error)
 			LEFT JOIN (
 				SELECT o.sg_table, o.sg_parent, COUNT(*) as opinion_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
-				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				LEFT JOIN v2_users v ON o.reviewer_id = CAST(v.id AS CHAR)
+				LEFT JOIN singo_users su ON v.username COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
@@ -662,8 +662,8 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
-				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				LEFT JOIN v2_users v ON o.reviewer_id = CAST(v.id AS CHAR)
+				LEFT JOIN singo_users su ON v.username COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
@@ -720,8 +720,8 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
-				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				LEFT JOIN v2_users v ON o.reviewer_id = CAST(v.id AS CHAR)
+				LEFT JOIN singo_users su ON v.username COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
@@ -796,8 +796,8 @@ func (r *ReportRepository) ListAggregatedByTargetIDs(targetIDs []string, status 
 				   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count,
 				   GROUP_CONCAT(DISTINCT o.reviewer_id) as reviewer_ids
 			FROM g5_na_singo_opinions o
-			LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
-			LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+			LEFT JOIN v2_users v ON o.reviewer_id = CAST(v.id AS CHAR)
+			LEFT JOIN singo_users su ON v.username COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 			WHERE su.mb_id IS NOT NULL
 			GROUP BY o.sg_table, o.sg_parent
 		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
@@ -946,8 +946,8 @@ func (r *ReportRepository) GetAllStatusCounts() (map[string]int64, error) {
 					SUM(CASE WHEN o.opinion_type = 'action' THEN 1 ELSE 0 END) as action_count,
 					SUM(CASE WHEN o.opinion_type = 'dismiss' THEN 1 ELSE 0 END) as dismiss_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
-				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
+				LEFT JOIN v2_users v ON o.reviewer_id = CAST(v.id AS CHAR)
+				LEFT JOIN singo_users su ON v.username COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent

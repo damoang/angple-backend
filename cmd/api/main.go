@@ -697,13 +697,14 @@ func main() {
 
 		// v2 Reports API (신고 시스템)
 		if reportHandler != nil {
-			v2routes.SetupReports(router, reportHandler, damoangJWT, cfg, jwtManager)
+			v2routes.SetupReports(router, reportHandler, damoangJWT, cfg,
+				jwtManager, middleware.WithV2UserRepo(v2UserRepo))
 		}
 
 		// AI Evaluation API (v2 - 관리자 전용, damoang_jwt 쿠키 인증)
 		if aiEvalHandler != nil {
 			aiEvalRoutes := router.Group("/api/v2/reports/ai-evaluation",
-				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
+				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager, middleware.WithV2UserRepo(v2UserRepo)))
 			aiEvalRoutes.POST("", aiEvalHandler.SaveEvaluation)
 			aiEvalRoutes.GET("", aiEvalHandler.GetEvaluation)
 			aiEvalRoutes.GET("/list", aiEvalHandler.ListEvaluation)
@@ -711,7 +712,7 @@ func main() {
 
 			// v1 호환 (singo 앱에서 사용)
 			aiEvalV1 := router.Group("/api/v1/ai-evaluations",
-				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
+				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager, middleware.WithV2UserRepo(v2UserRepo)))
 			aiEvalV1.POST("", aiEvalHandler.SaveEvaluation)
 			aiEvalV1.GET("", aiEvalHandler.GetEvaluation)
 			aiEvalV1.GET("/list", aiEvalHandler.ListEvaluation)

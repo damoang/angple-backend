@@ -43,6 +43,9 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("nickname", claims.Nickname)
 			c.Set("level", claims.Level)
 
+			// Bearer 토큰의 UserID는 이미 v2_users.id
+			c.Set("v2_user_id", claims.UserID)
+
 			c.Next()
 			return
 		}
@@ -53,6 +56,8 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("userID", GetDamoangUserID(c))
 			c.Set("nickname", GetDamoangUserName(c))
 			c.Set("level", GetDamoangUserLevel(c))
+
+			// v2_user_id는 DamoangCookieAuth에서 이미 설정됨 (있는 경우)
 
 			c.Next()
 			return
@@ -94,6 +99,9 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("nickname", claims.Nickname)
 			c.Set("level", claims.Level)
 
+			// Bearer 토큰의 UserID는 이미 v2_users.id
+			c.Set("v2_user_id", claims.UserID)
+
 			c.Next()
 			return
 		}
@@ -103,6 +111,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("userID", GetDamoangUserID(c))
 			c.Set("nickname", GetDamoangUserName(c))
 			c.Set("level", GetDamoangUserLevel(c))
+			// v2_user_id는 DamoangCookieAuth에서 이미 설정됨 (있는 경우)
 		}
 
 		// Continue even without authentication (optional)

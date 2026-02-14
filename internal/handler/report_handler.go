@@ -49,7 +49,7 @@ func (h *ReportHandler) findSingoUser(userID string) *domain.SingoUser {
 
 // getSingoRole returns the singo role for the authenticated user
 func (h *ReportHandler) getSingoRole(c *gin.Context) (string, string) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetV2UserID(c)
 	user := h.findSingoUser(userID)
 	if user == nil {
 		return userID, ""
@@ -60,7 +60,7 @@ func (h *ReportHandler) getSingoRole(c *gin.Context) (string, string) {
 // requireSingoAccess checks if the user is registered in singo_users (any role)
 // Falls back to level >= 10 check if singoUserRepo is not configured
 func (h *ReportHandler) requireSingoAccess(c *gin.Context) bool {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetV2UserID(c)
 	if h.singoUserRepo != nil {
 		if h.findSingoUser(userID) != nil {
 			return true
@@ -317,7 +317,7 @@ func (h *ReportHandler) ProcessReport(c *gin.Context) {
 		return
 	}
 
-	adminID := middleware.GetDamoangUserID(c)
+	adminID := middleware.GetV2UserID(c)
 	clientIP := c.ClientIP()
 
 	var req domain.ReportActionRequest
@@ -469,7 +469,7 @@ func (h *ReportHandler) BatchProcessReport(c *gin.Context) {
 		return
 	}
 
-	adminID := middleware.GetDamoangUserID(c)
+	adminID := middleware.GetV2UserID(c)
 	clientIP := c.ClientIP()
 
 	var req domain.BatchReportActionRequest

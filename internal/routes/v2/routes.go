@@ -133,9 +133,9 @@ func SetupInstall(router *gin.Engine, h *v2handler.InstallHandler) {
 }
 
 // SetupReports configures v2 report routes
-func SetupReports(router *gin.Engine, reportHandler *handler.ReportHandler, damoangJWT *jwt.DamoangManager, cfg *config.Config, jwtManager *jwt.Manager) {
+func SetupReports(router *gin.Engine, reportHandler *handler.ReportHandler, damoangJWT *jwt.DamoangManager, cfg *config.Config, cookieAuthOpts ...interface{}) {
 	// Use DamoangCookieAuth for compatibility with singo app
-	reports := router.Group("/api/v2/reports", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
+	reports := router.Group("/api/v2/reports", middleware.DamoangCookieAuth(damoangJWT, cfg, cookieAuthOpts...))
 	reports.POST("", reportHandler.SubmitReport)
 	reports.GET("/mine", reportHandler.MyReports)
 	reports.GET("", reportHandler.ListReports)

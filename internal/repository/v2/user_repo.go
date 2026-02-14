@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"fmt"
 	"time"
 
 	v2 "github.com/damoang/angple-backend/internal/domain/v2"
@@ -17,6 +18,7 @@ type UserRepository interface {
 	FindAll(page, limit int, keyword string) ([]*v2.V2User, int64, error)
 	Count() (int64, error)
 	CountSince(since time.Time) (int64, error)
+	FindNicksByIDs(ids []string) (map[string]string, error)
 }
 
 type userRepository struct {
@@ -83,4 +85,31 @@ func (r *userRepository) CountSince(since time.Time) (int64, error) {
 	var count int64
 	err := r.db.Model(&v2.V2User{}).Where("created_at >= ?", since).Count(&count).Error
 	return count, err
+}
+
+// FindNicksByIDs batch-loads nicknames for given v2_users.id values
+// 반환: map["3"]"닉네임"
+func (r *userRepository) FindNicksByIDs(ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+
+	type row struct {
+		ID       uint64 `gorm:"column:id"`
+		Nickname string `gorm:"column:nickname"`
+	}
+	var rows []row
+	err := r.db.Table("v2_users").
+		Select("id, nickname").
+		Where("id IN ?", ids).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		m[fmt.Sprintf("%d", r.ID)] = r.Nickname
+	}
+	return m, nil
 }
