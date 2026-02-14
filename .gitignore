@@ -57,3 +57,7 @@ __pycache__/
 # Serena
 .serena/
 /api
+
+# Claude Code
+.claude/
+CLAUDE.md
