@@ -307,6 +307,7 @@ func main() {
 		reportService.SetHistoryRepo(historyRepo)
 		reportService.SetSingoUserRepo(singoUserRepo)
 		reportService.SetAIEvaluationRepo(aiEvalRepo) // Phase 2: 통합 API용
+		reportService.SetV2UserRepo(v2repo.NewUserRepository(db)) // Bearer 토큰 user_id → mb_id 변환용
 		promotionService := service.NewPromotionService(promotionRepo)
 		bannerService := service.NewBannerService(bannerRepo)
 		goodService := service.NewGoodService(goodRepo)
