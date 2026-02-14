@@ -1,4 +1,3 @@
-//go:build ignore
 
 // 나눔 플러그인 도메인 모델
 package domain
