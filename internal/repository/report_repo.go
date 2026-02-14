@@ -476,7 +476,7 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='action' THEN o.reviewer_id END) as action_count,
 					   COUNT(DISTINCT CASE WHEN o.opinion_type='dismiss' THEN o.reviewer_id END) as dismiss_count
 				FROM g5_na_singo_opinions o
-				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR)
+				LEFT JOIN g5_member m ON o.reviewer_id = CAST(m.mb_no AS CHAR) COLLATE utf8mb4_unicode_ci
 				LEFT JOIN singo_users su ON m.mb_id COLLATE utf8mb4_unicode_ci = su.mb_id COLLATE utf8mb4_unicode_ci
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
