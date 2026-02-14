@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain"
@@ -15,6 +17,7 @@ type MemberRepository interface {
 	FindByID(id int) (*domain.Member, error)
 	FindByNickname(nickname string) (*domain.Member, error)
 	FindNicksByIDs(userIDs []string) (map[string]string, error)
+	FindNicksByMbNos(mbNos []string) (map[string]string, error)
 
 	// Write operations
 	Create(member *domain.Member) error
@@ -204,6 +207,63 @@ func (r *memberRepository) FindNicksByIDs(userIDs []string) (map[string]string, 
 	for _, r := range rows {
 		m[r.MbID] = r.MbNick
 	}
+	return m, nil
+}
+
+// FindNicksByMbNos batch-loads nicknames for given mb_no values (opinions의 reviewer_id용)
+// 하이브리드: 숫자 → mb_no IN, 비숫자 → mb_id IN (레거시 호환)
+func (r *memberRepository) FindNicksByMbNos(mbNos []string) (map[string]string, error) {
+	if len(mbNos) == 0 {
+		return map[string]string{}, nil
+	}
+
+	var numericIDs, stringIDs []string
+	for _, id := range mbNos {
+		if _, err := strconv.Atoi(id); err == nil {
+			numericIDs = append(numericIDs, id)
+		} else {
+			stringIDs = append(stringIDs, id)
+		}
+	}
+
+	m := make(map[string]string, len(mbNos))
+
+	if len(numericIDs) > 0 {
+		type row struct {
+			MbNo   int    `gorm:"column:mb_no"`
+			MbNick string `gorm:"column:mb_nick"`
+		}
+		var rows []row
+		err := r.db.Table("g5_member").
+			Select("mb_no, mb_nick").
+			Where("mb_no IN ?", numericIDs).
+			Find(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			m[fmt.Sprintf("%d", r.MbNo)] = r.MbNick
+		}
+	}
+
+	if len(stringIDs) > 0 {
+		type row struct {
+			MbID   string `gorm:"column:mb_id"`
+			MbNick string `gorm:"column:mb_nick"`
+		}
+		var rows []row
+		err := r.db.Table("g5_member").
+			Select("mb_id, mb_nick").
+			Where("mb_id IN ?", stringIDs).
+			Find(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			m[r.MbID] = r.MbNick
+		}
+	}
+
 	return m, nil
 }
 

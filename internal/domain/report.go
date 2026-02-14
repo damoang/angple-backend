@@ -76,6 +76,7 @@ type OpinionResponse struct {
 	Days         int    `json:"discipline_days,omitempty"`
 	Type         string `json:"discipline_type,omitempty"`
 	Detail       string `json:"discipline_detail,omitempty"`
+	IsMine       bool   `json:"is_mine"`
 	CreatedAt    string `json:"created_at"`
 }
 

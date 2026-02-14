@@ -66,7 +66,7 @@ type GivingPlugin struct {
 	adminHandler  *handlers.AdminHandler
 }
 
-func New() *GivingPlugin            { return &GivingPlugin{} }
+func New() *GivingPlugin             { return &GivingPlugin{} }
 func (p *GivingPlugin) Name() string { return "giving" }
 
 func (p *GivingPlugin) Migrate(db *gorm.DB) error {
