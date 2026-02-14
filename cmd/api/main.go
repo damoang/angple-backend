@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/damoang/angple-backend/docs" // swagger docs
@@ -355,6 +356,35 @@ func main() {
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
 		aiEvalHandler = handler.NewAIEvaluationHandler(aiEvalService)
+
+		// AI Evaluator (백엔드 자동 평가)
+		if os.Getenv("AI_EVAL_ENABLED") == "true" {
+			aiEvalModels := strings.Split(os.Getenv("AI_EVAL_MODELS"), ",")
+			// 빈 문자열 제거
+			var models []string
+			for _, m := range aiEvalModels {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					models = append(models, m)
+				}
+			}
+			if len(models) > 0 {
+				aiEvaluator := service.NewAIEvaluator(
+					aiEvalRepo,
+					reportRepo,
+					opinionRepo,
+					boardRepo,
+					memberRepo,
+					os.Getenv("AI_CLI_PROXY_URL"),
+					os.Getenv("AI_CLI_PROXY_KEY"),
+					models,
+				)
+				reportService.SetAIEvaluator(aiEvaluator)
+				aiEvalHandler.SetEvaluator(aiEvaluator)
+				pkglogger.Info("✅ AI Evaluator initialized (models: %v)", models)
+			}
+		}
+
 		adminHandler = handler.NewAdminHandler(adminMemberService)
 
 		// Tenant Management
@@ -675,6 +705,7 @@ func main() {
 			aiEvalRoutes.POST("", aiEvalHandler.SaveEvaluation)
 			aiEvalRoutes.GET("", aiEvalHandler.GetEvaluation)
 			aiEvalRoutes.GET("/list", aiEvalHandler.ListEvaluation)
+			aiEvalRoutes.POST("/evaluate", aiEvalHandler.RequestEvaluation)
 
 			// v1 호환 (singo 앱에서 사용)
 			aiEvalV1 := router.Group("/api/v1/ai-evaluations",
