@@ -888,7 +888,7 @@ func (r *ReportRepository) UpdateStatusScheduledApprove(id int, processedBy, rea
 		}).Error
 }
 
-// ClearAdminDisciplineFields resets admin_discipline_* fields (used when reverting)
+// ClearAdminDisciplineFields resets admin_discipline_* and approval fields (used when reverting)
 func (r *ReportRepository) ClearAdminDisciplineFields(id int) error {
 	return r.db.Model(&domain.Report{}).
 		Where("id = ?", id).
@@ -897,6 +897,11 @@ func (r *ReportRepository) ClearAdminDisciplineFields(id int) error {
 			"admin_discipline_days":    0,
 			"admin_discipline_type":    "",
 			"admin_discipline_detail":  "",
+			"processed":               false,
+			"admin_approved":           false,
+			"processed_datetime":       nil,
+			"discipline_log_id":        nil,
+			"admin_users":              "",
 		}).Error
 }
 

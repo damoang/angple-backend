@@ -814,7 +814,8 @@ func (s *ReportService) buildProcessResult(primary *domain.Report, allReports []
 	result := &domain.ProcessResultResponse{}
 
 	// Use primary report's admin_users and processed_datetime
-	result.AdminUsers = primary.AdminUsers
+	// admin_users JSON의 mb_id를 닉네임으로 변환
+	result.AdminUsers = s.resolveAdminUsersNicks(primary.AdminUsers)
 	if primary.ProcessedDatetime != nil {
 		result.ProcessedDatetime = primary.ProcessedDatetime.Format("2006-01-02 15:04:05")
 	}
@@ -874,6 +875,42 @@ func (s *ReportService) buildProcessResult(primary *domain.Report, allReports []
 	}
 
 	return result
+}
+
+// resolveAdminUsersNicks는 admin_users JSON의 mb_id(v2_users.id)를 닉네임으로 변환
+func (s *ReportService) resolveAdminUsersNicks(adminUsersJSON string) string {
+	approvals, err := domain.ParseAdminUsers(adminUsersJSON)
+	if err != nil || len(approvals) == 0 {
+		return adminUsersJSON
+	}
+
+	// mb_id 목록 추출
+	ids := make([]string, len(approvals))
+	for i, a := range approvals {
+		ids[i] = a.MbID
+	}
+
+	// v2_users에서 닉네임 조회
+	if s.v2UserRepo == nil {
+		return adminUsersJSON
+	}
+	nickMap, err := s.v2UserRepo.FindNicksByIDs(ids)
+	if err != nil || len(nickMap) == 0 {
+		return adminUsersJSON
+	}
+
+	// mb_id → nickname 치환
+	for i, a := range approvals {
+		if nick, ok := nickMap[a.MbID]; ok {
+			approvals[i].MbID = nick
+		}
+	}
+
+	data, err := json.Marshal(approvals)
+	if err != nil {
+		return adminUsersJSON
+	}
+	return string(data)
 }
 
 // getContentType determines if the report target is a post or comment based on parent
@@ -1921,7 +1958,7 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 		if !r.Processed && !r.AdminApproved {
 			// Use scheduled approve logic: sets admin_approved=1, processed=0
 			// This way PHP cron will handle the discipline execution
-			adminUsersJSON := `["system"]`
+			adminUsersJSON := `[{"mb_id":"system","datetime":"` + time.Now().Format("2006-01-02 15:04:05") + `"}]`
 			if err := s.repo.UpdateStatusScheduledApprove(r.ID, adminUsersJSON, "[]", 0, "", "자동 승인 (2명 이상 동의)"); err != nil {
 				log.Printf("[WARN] 자동 승인 업데이트 실패 (id=%d): %v", r.ID, err)
 			}

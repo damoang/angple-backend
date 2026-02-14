@@ -48,6 +48,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -908,9 +909,18 @@ func trimSpace(s string) string {
 
 // initDB MySQL 연결 초기화
 func initDB(cfg *config.Config) (*gorm.DB, error) {
-	dsn := cfg.Database.GetDSN()
+	// go-sql-driver/mysql Config로 DSN 생성 (Params로 세션 변수 설정)
+	mysqlCfg, err := mysqldriver.ParseDSN(cfg.Database.GetDSN())
+	if err != nil {
+		return nil, fmt.Errorf("DSN 파싱 실패: %w", err)
+	}
+	if mysqlCfg.Params == nil {
+		mysqlCfg.Params = map[string]string{}
+	}
+	// 모든 커넥션에 KST 타임존 적용 (RDS 기본은 UTC)
+	mysqlCfg.Params["time_zone"] = "'+09:00'"
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(mysql.Open(mysqlCfg.FormatDSN()), &gorm.Config{
 		// PrepareStmt: true, // Prepared statement 캐싱
 		Logger: gormlogger.Default.LogMode(gormlogger.Info), // SQL 디버깅
 	})
