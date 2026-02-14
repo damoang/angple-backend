@@ -107,7 +107,7 @@ func (m *mockMemberRepo) FindNicksByIDs(userIDs []string) (map[string]string, er
 	return args.Get(0).(map[string]string), args.Error(1)
 }
 
-func (m *mockMemberRepo) FindNicksByMbNos(mbNos []int) (map[string]string, error) {
+func (m *mockMemberRepo) FindNicksByMbNos(mbNos []string) (map[string]string, error) {
 	args := m.Called(mbNos)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)

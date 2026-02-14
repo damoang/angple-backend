@@ -327,16 +327,12 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 	reviewerNickMap := make(map[string]string)
 	if len(reviewerIDSet) > 0 {
 		// reviewer_id는 mb_no이므로 mb_no 기반으로 닉네임 조회
-		mbNos := make([]int, 0, len(reviewerIDSet))
+		reviewerIDs := make([]string, 0, len(reviewerIDSet))
 		for id := range reviewerIDSet {
-			if n, e := strconv.Atoi(id); e == nil {
-				mbNos = append(mbNos, n)
-			}
+			reviewerIDs = append(reviewerIDs, id)
 		}
-		if len(mbNos) > 0 {
-			if nicks, err := s.memberRepo.FindNicksByMbNos(mbNos); err == nil && nicks != nil {
-				reviewerNickMap = nicks
-			}
+		if nicks, err := s.memberRepo.FindNicksByMbNos(reviewerIDs); err == nil && nicks != nil {
+			reviewerNickMap = nicks
 		}
 	}
 
@@ -549,16 +545,12 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 	reviewerNickMap := make(map[string]string)
 	if len(reviewerIDSet) > 0 {
 		// reviewer_id는 mb_no이므로 mb_no 기반으로 닉네임 조회
-		mbNos := make([]int, 0, len(reviewerIDSet))
+		reviewerIDs := make([]string, 0, len(reviewerIDSet))
 		for id := range reviewerIDSet {
-			if n, e := strconv.Atoi(id); e == nil {
-				mbNos = append(mbNos, n)
-			}
+			reviewerIDs = append(reviewerIDs, id)
 		}
-		if len(mbNos) > 0 {
-			if nicks, err := s.memberRepo.FindNicksByMbNos(mbNos); err == nil && nicks != nil {
-				reviewerNickMap = nicks
-			}
+		if nicks, err := s.memberRepo.FindNicksByMbNos(reviewerIDs); err == nil && nicks != nil {
+			reviewerNickMap = nicks
 		}
 	}
 
@@ -2021,34 +2013,12 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 		return nil, err
 	}
 
-	// Batch-load nicknames (reviewer_id는 mb_no이므로 mb_no → nick 변환 필요)
-	mbNos := make([]int, 0, len(opinions))
-	for _, op := range opinions {
-		if n, e := strconv.Atoi(op.ReviewerID); e == nil {
-			mbNos = append(mbNos, n)
-		}
-	}
-	nickMap := map[string]string{}
-	if len(mbNos) > 0 {
-		nickMap, _ = s.memberRepo.FindNicksByMbNos(mbNos)
-	}
-	if nickMap == nil {
-		nickMap = map[string]string{}
-	}
-	// 기존 mb_id 기반 조회도 시도 (하위 호환)
+	// Batch-load nicknames (하이브리드: mb_no + mb_id)
 	userIDs := make([]string, 0, len(opinions))
 	for _, op := range opinions {
-		if _, ok := nickMap[op.ReviewerID]; !ok {
-			userIDs = append(userIDs, op.ReviewerID)
-		}
+		userIDs = append(userIDs, op.ReviewerID)
 	}
-	if len(userIDs) > 0 {
-		if extra, err := s.memberRepo.FindNicksByIDs(userIDs); err == nil {
-			for k, v := range extra {
-				nickMap[k] = v
-			}
-		}
-	}
+	nickMap, _ := s.memberRepo.FindNicksByMbNos(userIDs)
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
@@ -2069,7 +2039,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 		}
 
 		if maskReviewerNick {
-			if op.ReviewerID == requestingMbNo {
+			if requestingMbNo != "" && op.ReviewerID == requestingMbNo {
 				reviewerNick = "나(본인)"
 			} else if cached, ok := maskedNickMap[op.ReviewerID]; ok {
 				reviewerNick = cached
@@ -2080,6 +2050,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 			}
 		}
 
+		isMine := requestingMbNo != "" && op.ReviewerID == requestingMbNo
 		responses[i] = domain.OpinionResponse{
 			ReviewerID:   op.ReviewerID,
 			ReviewerNick: reviewerNick,
@@ -2088,11 +2059,12 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 			Days:         op.DisciplineDays,
 			Type:         op.DisciplineType,
 			Detail:       op.DisciplineDetail,
+			IsMine:       isMine,
 			CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 
 		// admin 역할이면 ReviewerID도 마스킹 (다른 담당자 식별 방지)
-		if maskReviewerNick && op.ReviewerID != requestingMbNo {
+		if maskReviewerNick && !isMine {
 			responses[i].ReviewerID = ""
 		}
 	}
