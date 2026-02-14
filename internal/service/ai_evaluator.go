@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,8 @@ import (
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
 )
+
+const penaltyTypeLevel = "level"
 
 // AIEvaluator 백엔드 AI 평가 실행기
 type AIEvaluator struct {
@@ -56,12 +59,15 @@ func NewAIEvaluator(
 
 // EvaluateAsync 비동기 평가 실행 (이미 평가 있으면 skip)
 func (e *AIEvaluator) EvaluateAsync(table string, parent int) error {
-	existing, _ := e.aiRepo.ListByReport(table, parent)
+	existing, err := e.aiRepo.ListByReport(table, parent)
+	if err != nil {
+		log.Printf("[AI평가] 기존 평가 조회 실패: %v", err)
+	}
 	if len(existing) > 0 {
 		log.Printf("[AI평가] skip: 이미 평가 존재 (table=%s, parent=%d, count=%d)", table, parent, len(existing))
 		return nil
 	}
-	_, err := e.Evaluate(table, parent)
+	_, err = e.Evaluate(table, parent)
 	return err
 }
 
@@ -90,24 +96,7 @@ func (e *AIEvaluator) Evaluate(table string, parent int) ([]domain.AIEvaluation,
 	}
 
 	// 4. 닉네임 로드
-	userIDs := []string{}
-	if report.ReporterID != "" {
-		userIDs = append(userIDs, report.ReporterID)
-	}
-	if report.TargetID != "" {
-		userIDs = append(userIDs, report.TargetID)
-	}
-	for _, op := range opinions {
-		if op.ReviewerID != "" {
-			userIDs = append(userIDs, op.ReviewerID)
-		}
-	}
-	nickMap := map[string]string{}
-	if e.memberRepo != nil && len(userIDs) > 0 {
-		if nicks, err := e.memberRepo.FindNicksByIDs(userIDs); err == nil {
-			nickMap = nicks
-		}
-	}
+	nickMap := e.loadNicknames(report, opinions)
 
 	// 5. 프롬프트 빌드
 	systemPrompt := buildSystemPrompt()
@@ -173,9 +162,18 @@ func (e *AIEvaluator) callAndSave(table string, parent int, model, systemPrompt,
 	}
 
 	// JSON 변환
-	penaltyTypeJSON, _ := json.Marshal(validated.PenaltyType)
-	penaltyReasonsJSON, _ := json.Marshal(validated.PenaltyReasons)
-	flagsJSON, _ := json.Marshal(validated.Flags)
+	penaltyTypeJSON, err := json.Marshal(validated.PenaltyType)
+	if err != nil {
+		return nil, fmt.Errorf("penaltyType JSON 변환 실패: %w", err)
+	}
+	penaltyReasonsJSON, err := json.Marshal(validated.PenaltyReasons)
+	if err != nil {
+		return nil, fmt.Errorf("penaltyReasons JSON 변환 실패: %w", err)
+	}
+	flagsJSON, err := json.Marshal(validated.Flags)
+	if err != nil {
+		return nil, fmt.Errorf("flags JSON 변환 실패: %w", err)
+	}
 
 	eval := &domain.AIEvaluation{
 		Table:             table,
@@ -219,7 +217,7 @@ func (e *AIEvaluator) callProvider(model, systemPrompt, userMessage string) (str
 	}
 
 	url := e.proxyURL + "/chat/completions"
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", err
 	}
@@ -282,52 +280,58 @@ var validPenaltyDays = map[int]bool{
 	0: true, 1: true, 5: true, 10: true, 30: true, 180: true, 365: true, 9999: true,
 }
 
-// parseAndValidate JSON 파싱 + 검증
-func (e *AIEvaluator) parseAndValidate(rawText string) (*aiRawResponse, error) {
-	// 코드블록 처리
-	jsonStr := rawText
+// extractJSON 코드블록에서 JSON 추출
+func extractJSON(rawText string) string {
 	if idx := strings.Index(rawText, "```"); idx >= 0 {
 		start := strings.Index(rawText[idx:], "\n")
 		if start >= 0 {
 			end := strings.Index(rawText[idx+start+1:], "```")
 			if end >= 0 {
-				jsonStr = strings.TrimSpace(rawText[idx+start+1 : idx+start+1+end])
+				return strings.TrimSpace(rawText[idx+start+1 : idx+start+1+end])
 			}
 		}
 	}
+	return rawText
+}
+
+// validateFields AI 응답 필드 검증
+func validateFields(resp *aiRawResponse) error {
+	if resp.Score < 0 || resp.Score > 100 {
+		return fmt.Errorf("score는 0-100 범위여야 합니다 (받은 값: %d)", resp.Score)
+	}
+	if resp.Confidence < 0 || resp.Confidence > 100 {
+		return fmt.Errorf("confidence는 0-100 범위여야 합니다 (받은 값: %d)", resp.Confidence)
+	}
+	if !validActions[resp.Action] {
+		return fmt.Errorf("action은 dismiss/warning/delete/ban 중 하나여야 합니다 (받은 값: %s)", resp.Action)
+	}
+	if !validPenaltyDays[resp.PenaltyDays] {
+		return fmt.Errorf("penalty_days가 유효하지 않습니다 (받은 값: %d)", resp.PenaltyDays)
+	}
+	for _, t := range resp.PenaltyType {
+		if t != penaltyTypeLevel && t != "intercept" {
+			return fmt.Errorf("penalty_type은 level/intercept만 가능합니다 (받은 값: %s)", t)
+		}
+	}
+	for _, r := range resp.PenaltyReasons {
+		if r < 21 || r > 43 {
+			return fmt.Errorf("penalty_reasons는 21-43 범위여야 합니다 (받은 값: %d)", r)
+		}
+	}
+	return nil
+}
+
+// parseAndValidate JSON 파싱 + 검증
+func (e *AIEvaluator) parseAndValidate(rawText string) (*aiRawResponse, error) {
+	jsonStr := extractJSON(rawText)
 
 	var resp aiRawResponse
 	if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
 		return nil, fmt.Errorf("JSON 파싱 실패: %w", err)
 	}
 
-	// score 범위
-	if resp.Score < 0 || resp.Score > 100 {
-		return nil, fmt.Errorf("score는 0-100 범위여야 합니다 (받은 값: %d)", resp.Score)
-	}
-	// confidence 범위
-	if resp.Confidence < 0 || resp.Confidence > 100 {
-		return nil, fmt.Errorf("confidence는 0-100 범위여야 합니다 (받은 값: %d)", resp.Confidence)
-	}
-	// action 검증
-	if !validActions[resp.Action] {
-		return nil, fmt.Errorf("action은 dismiss/warning/delete/ban 중 하나여야 합니다 (받은 값: %s)", resp.Action)
-	}
-	// penalty_days 검증
-	if !validPenaltyDays[resp.PenaltyDays] {
-		return nil, fmt.Errorf("penalty_days가 유효하지 않습니다 (받은 값: %d)", resp.PenaltyDays)
-	}
-	// penalty_type 검증
-	for _, t := range resp.PenaltyType {
-		if t != "level" && t != "intercept" {
-			return nil, fmt.Errorf("penalty_type은 level/intercept만 가능합니다 (받은 값: %s)", t)
-		}
-	}
-	// penalty_reasons 검증 (21-43)
-	for _, r := range resp.PenaltyReasons {
-		if r < 21 || r > 43 {
-			return nil, fmt.Errorf("penalty_reasons는 21-43 범위여야 합니다 (받은 값: %d)", r)
-		}
+	if err := validateFields(&resp); err != nil {
+		return nil, err
 	}
 
 	// dismiss 규칙 자동 보정
@@ -338,6 +342,28 @@ func (e *AIEvaluator) parseAndValidate(rawText string) (*aiRawResponse, error) {
 	}
 
 	return &resp, nil
+}
+
+// loadNicknames 리포트 관련 사용자 닉네임 일괄 조회
+func (e *AIEvaluator) loadNicknames(report *domain.Report, opinions []domain.Opinion) map[string]string {
+	var userIDs []string
+	if report.ReporterID != "" {
+		userIDs = append(userIDs, report.ReporterID)
+	}
+	if report.TargetID != "" {
+		userIDs = append(userIDs, report.TargetID)
+	}
+	for _, op := range opinions {
+		if op.ReviewerID != "" {
+			userIDs = append(userIDs, op.ReviewerID)
+		}
+	}
+	if e.memberRepo != nil && len(userIDs) > 0 {
+		if nicks, err := e.memberRepo.FindNicksByIDs(userIDs); err == nil {
+			return nicks
+		}
+	}
+	return map[string]string{}
 }
 
 // buildUserMessage 신고 정보 + 콘텐츠 + 의견을 문자열로 구성
