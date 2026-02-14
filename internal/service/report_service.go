@@ -293,7 +293,7 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		for id := range reviewerIDSet {
 			reviewerIDs = append(reviewerIDs, id)
 		}
-		if nicks, err := s.memberRepo.FindNicksByIDs(reviewerIDs); err == nil && nicks != nil {
+		if nicks, err := s.memberRepo.FindNicksByMbNos(reviewerIDs); err == nil && nicks != nil {
 			reviewerNickMap = nicks
 		}
 	}
@@ -510,7 +510,7 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 		for id := range reviewerIDSet {
 			reviewerIDs = append(reviewerIDs, id)
 		}
-		if nicks, err := s.memberRepo.FindNicksByIDs(reviewerIDs); err == nil && nicks != nil {
+		if nicks, err := s.memberRepo.FindNicksByMbNos(reviewerIDs); err == nil && nicks != nil {
 			reviewerNickMap = nicks
 		}
 	}
@@ -1976,12 +1976,20 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 		return nil, err
 	}
 
-	// Batch-load nicknames
+	// mb_id → mb_no 변환 (opinions 테이블의 reviewer_id는 mb_no로 저장됨)
+	requestingMbNo := ""
+	if requestingUserID != "" {
+		if member, err := s.memberRepo.FindByUserID(requestingUserID); err == nil && member != nil {
+			requestingMbNo = fmt.Sprintf("%d", member.ID)
+		}
+	}
+
+	// Batch-load nicknames (mb_no 기반)
 	userIDs := make([]string, 0, len(opinions))
 	for _, op := range opinions {
 		userIDs = append(userIDs, op.ReviewerID)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByIDs(userIDs)
+	nickMap, _ := s.memberRepo.FindNicksByMbNos(userIDs)
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
@@ -2002,7 +2010,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 		}
 
 		if maskReviewerNick {
-			if op.ReviewerID == requestingUserID {
+			if requestingMbNo != "" && op.ReviewerID == requestingMbNo {
 				reviewerNick = "나(본인)"
 			} else if cached, ok := maskedNickMap[op.ReviewerID]; ok {
 				reviewerNick = cached
@@ -2013,6 +2021,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 			}
 		}
 
+		isMine := requestingMbNo != "" && op.ReviewerID == requestingMbNo
 		responses[i] = domain.OpinionResponse{
 			ReviewerID:   op.ReviewerID,
 			ReviewerNick: reviewerNick,
@@ -2021,11 +2030,12 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 			Days:         op.DisciplineDays,
 			Type:         op.DisciplineType,
 			Detail:       op.DisciplineDetail,
+			IsMine:       isMine,
 			CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 
 		// admin 역할이면 ReviewerID도 마스킹 (다른 담당자 식별 방지)
-		if maskReviewerNick && op.ReviewerID != requestingUserID {
+		if maskReviewerNick && !isMine {
 			responses[i].ReviewerID = ""
 		}
 	}
