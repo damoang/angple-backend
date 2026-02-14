@@ -55,7 +55,7 @@ type ReportService struct {
 	historyRepo      *repository.HistoryRepository
 	disciplineRepo   *repository.DisciplineRepository
 	aiEvaluationRepo *repository.AIEvaluationRepository // Phase 2: 통합 API용
-	aiEvaluator      *AIEvaluator                      // AI 자동 평가 실행기
+	aiEvaluator      *AIEvaluator                       // AI 자동 평가 실행기
 	memoRepo         *repository.G5MemoRepository
 	memberRepo       repository.MemberRepository
 	boardRepo        *repository.BoardRepository
@@ -2052,8 +2052,8 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 	for _, op := range opinions {
 		userIDs = append(userIDs, op.ReviewerID)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByMbNos(userIDs)
-	if nickMap == nil {
+	nickMap, err := s.memberRepo.FindNicksByMbNos(userIDs)
+	if err != nil || nickMap == nil {
 		nickMap = map[string]string{}
 	}
 
@@ -2073,7 +2073,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 		}
 
 		if maskReviewerNick {
-			if op.ReviewerID == requestingMbNo {
+			if requestingMbNo != "" && op.ReviewerID == requestingMbNo {
 				reviewerNick = "나(본인)"
 			} else if cached, ok := maskedNickMap[op.ReviewerID]; ok {
 				reviewerNick = cached

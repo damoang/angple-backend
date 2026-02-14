@@ -1,5 +1,3 @@
-//go:build ignore
-
 // 나눔 플러그인 도메인 모델
 package domain
 
@@ -172,12 +170,12 @@ type BidStats struct {
 
 // AdminStats 관리자 통계
 type AdminStats struct {
-	PostID             int            `json:"post_id"`
-	UniqueParticipants int            `json:"unique_participants"`
-	TotalBidCount      int            `json:"total_bid_count"`
-	TotalPointsUsed    int            `json:"total_points_used"`
-	NumberDistribution []NumberCount  `json:"number_distribution"`
-	RecentBids         []GivingBid    `json:"recent_bids"`
+	PostID             int           `json:"post_id"`
+	UniqueParticipants int           `json:"unique_participants"`
+	TotalBidCount      int           `json:"total_bid_count"`
+	TotalPointsUsed    int           `json:"total_points_used"`
+	NumberDistribution []NumberCount `json:"number_distribution"`
+	RecentBids         []GivingBid   `json:"recent_bids"`
 }
 
 // VisualizationResponse 번호 분포 시각화 응답
