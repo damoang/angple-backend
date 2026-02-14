@@ -23,15 +23,16 @@ const (
 
 // AIEvaluator 백엔드 AI 평가 실행기
 type AIEvaluator struct {
-	aiRepo      *repository.AIEvaluationRepository
-	reportRepo  *repository.ReportRepository
-	opinionRepo *repository.OpinionRepository
-	boardRepo   *repository.BoardRepository
-	memberRepo  repository.MemberRepository
-	proxyURL    string   // CLIProxyAPI base URL (e.g. "http://127.0.0.1:8317/v1")
-	proxyKey    string   // API key
-	models      []string // e.g. ["claude-sonnet-4-5-20250929", "gpt-5", "gemini-2.5-pro"]
-	httpClient  *http.Client
+	aiRepo         *repository.AIEvaluationRepository
+	reportRepo     *repository.ReportRepository
+	opinionRepo    *repository.OpinionRepository
+	boardRepo      *repository.BoardRepository
+	memberRepo     repository.MemberRepository
+	disciplineRepo *repository.DisciplineRepository
+	proxyURL       string   // CLIProxyAPI base URL (e.g. "http://127.0.0.1:8317/v1")
+	proxyKey       string   // API key
+	models         []string // e.g. ["claude-sonnet-4-5-20250929", "gpt-5", "gemini-2.5-pro"]
+	httpClient     *http.Client
 }
 
 // NewAIEvaluator creates a new AIEvaluator
@@ -41,19 +42,21 @@ func NewAIEvaluator(
 	opinionRepo *repository.OpinionRepository,
 	boardRepo *repository.BoardRepository,
 	memberRepo repository.MemberRepository,
+	disciplineRepo *repository.DisciplineRepository,
 	proxyURL string,
 	proxyKey string,
 	models []string,
 ) *AIEvaluator {
 	return &AIEvaluator{
-		aiRepo:      aiRepo,
-		reportRepo:  reportRepo,
-		opinionRepo: opinionRepo,
-		boardRepo:   boardRepo,
-		memberRepo:  memberRepo,
-		proxyURL:    proxyURL,
-		proxyKey:    proxyKey,
-		models:      models,
+		aiRepo:         aiRepo,
+		reportRepo:     reportRepo,
+		opinionRepo:    opinionRepo,
+		boardRepo:      boardRepo,
+		memberRepo:     memberRepo,
+		disciplineRepo: disciplineRepo,
+		proxyURL:       proxyURL,
+		proxyKey:       proxyKey,
+		models:         models,
 		httpClient: &http.Client{
 			Timeout: 90 * time.Second,
 		},
@@ -105,9 +108,17 @@ func (e *AIEvaluator) Evaluate(table string, parent int) ([]domain.AIEvaluation,
 	allReports, _ := e.reportRepo.GetAllByTableAndParent(table, parent)
 	reportReasons := collectReportReasons(allReports)
 
-	// 6. 프롬프트 빌드
+	// 6. 피신고자 제재 이력 로드 (최근 10건)
+	var disciplineHistory []domain.DisciplineLog
+	if e.disciplineRepo != nil && report.TargetID != "" {
+		if history, _, err := e.disciplineRepo.FindByTargetMember(report.TargetID, 1, 10); err == nil {
+			disciplineHistory = history
+		}
+	}
+
+	// 7. 프롬프트 빌드
 	systemPrompt := buildSystemPrompt()
-	userMessage := e.buildUserMessage(report, boardName, opinions, nickMap, reportReasons)
+	userMessage := e.buildUserMessage(report, boardName, opinions, nickMap, reportReasons, disciplineHistory)
 
 	// 7. 3개 모델 병렬 호출
 	type evalResult struct {
@@ -373,8 +384,8 @@ func (e *AIEvaluator) loadNicknames(report *domain.Report, opinions []domain.Opi
 	return map[string]string{}
 }
 
-// buildUserMessage 신고 정보 + 콘텐츠 + 의견을 문자열로 구성
-func (e *AIEvaluator) buildUserMessage(report *domain.Report, boardName string, opinions []domain.Opinion, nickMap map[string]string, reportReasons string) string {
+// buildUserMessage 신고 정보 + 콘텐츠 + 의견 + 제재 이력을 문자열로 구성
+func (e *AIEvaluator) buildUserMessage(report *domain.Report, boardName string, opinions []domain.Opinion, nickMap map[string]string, reportReasons string, disciplineHistory []domain.DisciplineLog) string {
 	var parts []string
 
 	targetType := "게시물"
@@ -447,10 +458,38 @@ func (e *AIEvaluator) buildUserMessage(report *domain.Report, boardName string, 
 		}
 	}
 
+	// 피신고자 제재 이력
+	if len(disciplineHistory) > 0 {
+		parts = append(parts, "")
+		parts = append(parts, fmt.Sprintf("## 피신고자 제재 이력 (최근 %d건, 누적 %d회)", len(disciplineHistory), len(disciplineHistory)))
+		for _, hist := range disciplineHistory {
+			var content domain.DisciplineLogContent
+			if err := json.Unmarshal([]byte(hist.Content), &content); err == nil {
+				daysLabel := fmt.Sprintf("%d일", content.PenaltyPeriod)
+				if content.PenaltyPeriod == 0 {
+					daysLabel = "경고"
+				} else if content.PenaltyPeriod == 9999 || content.PenaltyPeriod == -1 {
+					daysLabel = "영구"
+				}
+				reason := hist.Wr1
+				if reason == "" && len(content.SgTypes) > 0 {
+					var labels []string
+					for _, code := range content.SgTypes {
+						if label, ok := sgTypeLabels[int8(code)]; ok {
+							labels = append(labels, label)
+						}
+					}
+					reason = strings.Join(labels, ", ")
+				}
+				parts = append(parts, fmt.Sprintf("- [%s] %s (%s)", hist.DateTime.Format("2006-01-02"), reason, daysLabel))
+			}
+		}
+	}
+
 	return strings.Join(parts, "\n")
 }
 
-// buildSystemPrompt 프론트엔드의 SYSTEM_PROMPT와 동일
+// buildSystemPrompt 시스템 프롬프트 생성
 func buildSystemPrompt() string {
 	return `당신은 다모앙(damoang.net) 커뮤니티의 신고 처리 AI 보조입니다.
 신고 내용, 대상 콘텐츠, 모니터링 의견을 분석하여 관리자에게 권고 의견을 제공합니다.
@@ -543,7 +582,8 @@ func buildSystemPrompt() string {
 6. confidence는 AI의 판단 확신도 (0~100)
 7. reasoning은 **운영정책 조항을 인용**하며 판단 근거를 한글로 2-3문장 작성
 8. flags는 특이사항을 한글 키워드 배열로 제공
-9. penalty_days는 제11조 기준을 참고하되, 피신고자의 과거 제재 이력을 알 수 없으므로 해당 위반의 심각도 기준으로 판단하세요.
+9. penalty_days는 제11조 누적 기준을 적용하세요. 피신고자의 제재 이력이 제공되면 누적 횟수에 맞는 기간을 선택하세요. 이력이 없으면 초범으로 간주합니다.
+10. 제재 이력이 제공된 경우, reasoning에 "제재 이력 N회로 제11조 기준 M회차 적용" 등 근거를 명시하세요.
 
 ## 출력 형식
 반드시 아래 JSON 형식만 반환하세요. 다른 텍스트는 포함하지 마세요.

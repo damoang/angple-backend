@@ -149,16 +149,15 @@ func (r *ReportRepository) GetByTableAndSgID(table string, sgID, parent int) (*d
 }
 
 // GetAllByTableAndSgID retrieves all reports for the same content based on sg_id.
-// Uses sg_id to find sg_parent, then returns all reports with matching table+parent.
+// Returns only reports with matching sg_table + sg_id (same content target).
 func (r *ReportRepository) GetAllByTableAndSgID(table string, sgID, parent int) ([]domain.Report, error) {
-	// First get the primary report to confirm sg_parent
-	primaryReport, err := r.GetByTableAndSgID(table, sgID, parent)
-	if err != nil {
+	var reports []domain.Report
+	if err := r.db.Where("sg_table = ? AND sg_id = ?", table, sgID).
+		Order("sg_time DESC").
+		Find(&reports).Error; err != nil {
 		return nil, err
 	}
-
-	// Return all reports for this content (table + parent)
-	return r.GetAllByTableAndParent(table, primaryReport.Parent)
+	return reports, nil
 }
 
 // GetRecent retrieves recent reports

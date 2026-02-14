@@ -377,6 +377,7 @@ func main() {
 					opinionRepo,
 					boardRepo,
 					memberRepo,
+					disciplineRepo,
 					os.Getenv("AI_CLI_PROXY_URL"),
 					os.Getenv("AI_CLI_PROXY_KEY"),
 					models,

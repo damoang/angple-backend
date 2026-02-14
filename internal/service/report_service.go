@@ -1140,8 +1140,8 @@ func (s *ReportService) processScheduledApprove(report *domain.Report, adminID s
 		penaltyDays = -1
 	}
 
-	// Update all reports for the same content
-	allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	// Update all reports for the same content (sg_id 기준)
+	allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 	for _, r := range allReports {
 		if !r.Processed {
 			// Convert adminID to JSON array format
@@ -1358,7 +1358,7 @@ func (s *ReportService) ProcessBatchImmediate(adminID, clientIP string, req *dom
 	byTarget := make(map[string]*reportGroup)
 
 	for i := range req.Tables {
-		allReports, err := s.repo.GetAllByTableAndParent(req.Tables[i], req.Parents[i])
+		allReports, err := s.repo.GetAllByTableAndSgID(req.Tables[i], req.Parents[i], 0)
 		if err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, fmt.Sprintf("%s/%d: %v", req.Tables[i], req.Parents[i], err))
@@ -1567,8 +1567,8 @@ func (s *ReportService) processImmediateBulkApprove(
 			log.Printf("[WARN] 벌크 승인 상태 업데이트 실패 (id=%d): %v", report.ID, err)
 		}
 
-		// Also update other reports for the same content
-		allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+		// Also update other reports for the same content (sg_id 기준)
+		allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 		for _, r := range allReports {
 			if r.ID != report.ID && !r.Processed {
 				subAdminUsersJSON, err := domain.AddAdminApproval(r.AdminUsers, adminID)
@@ -1688,6 +1688,15 @@ func (s *ReportService) Create(reporterID, targetID, table string, parent int, r
 		return nil, err
 	}
 
+	// AI 평가 자동 실행 (비동기 — 신고 접수 시, 기존 평가 있으면 skip)
+	if s.aiEvaluator != nil {
+		go func() {
+			if err := s.aiEvaluator.EvaluateAsync(report.Table, report.Parent); err != nil {
+				log.Printf("[WARN] AI 자동 평가 실패 (신고 접수, table=%s, parent=%d): %v", report.Table, report.Parent, err)
+			}
+		}()
+	}
+
 	return report, nil
 }
 
@@ -1794,8 +1803,8 @@ func (s *ReportService) processSubmitOpinion(report *domain.Report, adminID stri
 			}
 		}
 
-		// Also update all other reports for the same content
-		allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+		// Also update all other reports for the same content (sg_id 기준)
+		allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 		for _, r := range allReports {
 			if r.ID != report.ID && !r.Processed {
 				_ = s.repo.UpdateStatus(r.ID, ReportStatusMonitoring, adminID)
@@ -1853,7 +1862,7 @@ func (s *ReportService) processCancelOpinion(report *domain.Report, adminID stri
 
 		if actionCount == 0 && dismissCount == 0 {
 			// No opinions left — revert to pending
-			allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+			allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 			for _, r := range allReports {
 				if !r.Processed {
 					_ = s.repo.UpdateStatus(r.ID, ReportStatusPending, adminID)
@@ -1873,8 +1882,8 @@ func (s *ReportService) processCancelOpinion(report *domain.Report, adminID stri
 // processAdminDismiss handles admin dismissal and updates all related reports
 func (s *ReportService) processAdminDismiss(report *domain.Report, adminID string) error {
 	prevStatus := report.Status()
-	// Dismiss all reports for the same content
-	allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	// Dismiss all reports for the same content (sg_id 기준)
+	allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 	for _, r := range allReports {
 		if !r.Processed {
 			if err := s.repo.UpdateStatus(r.ID, ReportStatusDismissed, adminID); err != nil {
@@ -1902,8 +1911,8 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 	// Auto-approve: set admin_approved=1, processed=0
 	log.Printf("[INFO] 자동 승인: table=%s, parent=%d (action 의견 %d건)", report.Table, report.Parent, actionCount)
 
-	// Update all related reports to admin_approved=1
-	allReports, err := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	// Update all related reports to admin_approved=1 (sg_id 기준)
+	allReports, err := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 	if err != nil {
 		log.Printf("[WARN] 관련 신고 조회 실패: %v", err)
 		return nil
@@ -1946,8 +1955,8 @@ func (s *ReportService) checkAutoDismiss(report *domain.Report) error {
 	// Auto-dismiss: set processed=1, admin_approved=0
 	log.Printf("[INFO] 자동 미처리: table=%s, parent=%d (dismiss 의견 %d건, action 의견 %d건)", report.Table, report.Parent, noActionCount, actionCount)
 
-	// Update all related reports to dismissed status
-	allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	// Update all related reports to dismissed status (sg_id 기준)
+	allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 	for _, r := range allReports {
 		if !r.Processed {
 			if err := s.repo.UpdateStatus(r.ID, ReportStatusDismissed, "system"); err != nil {
@@ -1984,8 +1993,8 @@ func (s *ReportService) revertToPending(report *domain.Report, adminID string) e
 		_ = s.opinionRepo.DeleteByReportGrouped(report.Table, report.Parent)
 	}
 
-	// Revert all related reports to pending + clear admin_discipline_* fields
-	allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	// Revert all related reports to pending + clear admin_discipline_* fields (sg_id 기준)
+	allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 	for _, r := range allReports {
 		_ = s.repo.UpdateStatus(r.ID, ReportStatusPending, adminID)
 		_ = s.repo.ClearAdminDisciplineFields(r.ID)
@@ -2000,8 +2009,8 @@ func (s *ReportService) revertToPending(report *domain.Report, adminID string) e
 func (s *ReportService) revertToMonitoring(report *domain.Report, adminID string) error {
 	prevStatus := report.Status()
 
-	// Revert all related reports to monitoring (keep opinions) + clear admin_discipline_* fields
-	allReports, _ := s.repo.GetAllByTableAndParent(report.Table, report.Parent)
+	// Revert all related reports to monitoring (keep opinions) + clear admin_discipline_* fields (sg_id 기준)
+	allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 	for _, r := range allReports {
 		_ = s.repo.UpdateStatus(r.ID, ReportStatusMonitoring, adminID)
 		_ = s.repo.ClearAdminDisciplineFields(r.ID)
