@@ -1989,8 +1989,8 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 	for _, op := range opinions {
 		userIDs = append(userIDs, op.ReviewerID)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByMbNos(userIDs)
-	if nickMap == nil {
+	nickMap, err := s.memberRepo.FindNicksByMbNos(userIDs)
+	if err != nil || nickMap == nil {
 		nickMap = map[string]string{}
 	}
 
