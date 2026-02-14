@@ -162,10 +162,12 @@ func (r *DisciplineRepository) FindByTargetMember(memberID string, page, limit i
 	var logs []domain.DisciplineLog
 	var total int64
 
-	// DisciplineLog content JSON에 target_id가 포함된 것을 찾음
+	// DisciplineLog content JSON에 target_id 또는 penalty_mb_id가 포함된 것을 찾음
 	// wr_is_comment = 0 (본글만, 소명 댓글 제외)
 	query := r.db.Table(disciplineLogTable).
-		Where("wr_is_comment = 0 AND wr_content LIKE ?", fmt.Sprintf("%%\"target_id\":\"%s\"%%", memberID))
+		Where("wr_is_comment = 0 AND (wr_content LIKE ? OR wr_content LIKE ?)",
+			fmt.Sprintf("%%\"target_id\":\"%s\"%%", memberID),
+			fmt.Sprintf("%%\"penalty_mb_id\":\"%s\"%%", memberID))
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

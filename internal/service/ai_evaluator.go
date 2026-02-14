@@ -101,11 +101,15 @@ func (e *AIEvaluator) Evaluate(table string, parent int) ([]domain.AIEvaluation,
 	// 4. 닉네임 로드
 	nickMap := e.loadNicknames(report, opinions)
 
-	// 5. 프롬프트 빌드
-	systemPrompt := buildSystemPrompt()
-	userMessage := e.buildUserMessage(report, boardName, opinions, nickMap)
+	// 5. 모든 신고 로드하여 신고 사유 유형 수집
+	allReports, _ := e.reportRepo.GetAllByTableAndParent(table, parent)
+	reportReasons := collectReportReasons(allReports)
 
-	// 6. 3개 모델 병렬 호출
+	// 6. 프롬프트 빌드
+	systemPrompt := buildSystemPrompt()
+	userMessage := e.buildUserMessage(report, boardName, opinions, nickMap, reportReasons)
+
+	// 7. 3개 모델 병렬 호출
 	type evalResult struct {
 		eval *domain.AIEvaluation
 		err  error
@@ -124,7 +128,7 @@ func (e *AIEvaluator) Evaluate(table string, parent int) ([]domain.AIEvaluation,
 	}
 	wg.Wait()
 
-	// 7. 결과 수집
+	// 8. 결과 수집
 	var evals []domain.AIEvaluation
 	for i, r := range results {
 		if r.err != nil {
@@ -317,8 +321,8 @@ func validateFields(resp *aiRawResponse) error {
 		}
 	}
 	for _, r := range resp.PenaltyReasons {
-		if r < 21 || r > 43 {
-			return fmt.Errorf("penalty_reasons는 21-43 범위여야 합니다 (받은 값: %d)", r)
+		if r < 21 || r > 38 {
+			return fmt.Errorf("penalty_reasons는 21-38 범위여야 합니다 (받은 값: %d)", r)
 		}
 	}
 	return nil
@@ -370,7 +374,7 @@ func (e *AIEvaluator) loadNicknames(report *domain.Report, opinions []domain.Opi
 }
 
 // buildUserMessage 신고 정보 + 콘텐츠 + 의견을 문자열로 구성
-func (e *AIEvaluator) buildUserMessage(report *domain.Report, boardName string, opinions []domain.Opinion, nickMap map[string]string) string {
+func (e *AIEvaluator) buildUserMessage(report *domain.Report, boardName string, opinions []domain.Opinion, nickMap map[string]string, reportReasons string) string {
 	var parts []string
 
 	targetType := "게시물"
@@ -382,11 +386,20 @@ func (e *AIEvaluator) buildUserMessage(report *domain.Report, boardName string, 
 	parts = append(parts, fmt.Sprintf("- 대상 유형: %s", targetType))
 	parts = append(parts, fmt.Sprintf("- 게시판: %s", boardName))
 
-	reason := report.Reason
-	if reason == "" && report.Type > 0 {
-		reason = fmt.Sprintf("%d", report.Type)
+	// 전체 신고자의 사유 유형 (collectReportReasons 결과)
+	if reportReasons != "" {
+		parts = append(parts, fmt.Sprintf("- 신고 사유: %s", reportReasons))
+	} else {
+		reason := report.Reason
+		if reason == "" && report.Type > 0 {
+			if label, ok := sgTypeLabels[report.Type]; ok {
+				reason = label
+			} else {
+				reason = fmt.Sprintf("%d", report.Type)
+			}
+		}
+		parts = append(parts, fmt.Sprintf("- 신고 사유: %s", reason))
 	}
-	parts = append(parts, fmt.Sprintf("- 신고 사유: %s", reason))
 
 	reporterNick := nickMap[report.ReporterID]
 	if reporterNick == "" {
@@ -490,27 +503,22 @@ func buildSystemPrompt() string {
 해당하는 코드를 모두 선택하세요. 괄호 안은 제9조 항목 번호입니다.
 - 21: 회원비하 (1호)
 - 22: 예의없음 (2호)
-- 23: 부적절한 표현 (3호)
-- 24: 욕설/비속어 (3호)
-- 25: 성적 표현 (13호)
-- 26: 혐오 표현 (4호)
-- 27: 정치적 선동 (5호/6호)
-- 28: 광고/홍보 (15호)
-- 29: 도배 (8호)
-- 30: 허위사실 (7호)
-- 31: 저작권 침해 (12호)
-- 32: 개인정보 노출 (12호)
-- 33: 불법 콘텐츠 (14호)
-- 34: 사기/피싱 (7호)
-- 35: 분란 조장 (5호)
-- 36: 운영 방해 (16호)
-- 37: 다중 계정 (17호)
-- 38: 타사이트 홍보 (15호)
-- 39: 기타 규정 위반 (18호)
-- 40: 반복 위반 (가중 처벌)
-- 41: 용도위반 (9호)
-- 42: 거래금지 위반 (10호)
-- 43: 구걸 (11호)
+- 23: 부적절한 표현/욕설/비속어 (3호)
+- 24: 차별행위/혐오 표현 (4호)
+- 25: 분란유도/갈등조장 (5호)
+- 26: 여론조성 (6호)
+- 27: 회원기만/허위사실 (7호)
+- 28: 이용방해/도배 (8호)
+- 29: 용도위반 (9호)
+- 30: 거래금지위반 (10호)
+- 31: 구걸 (11호)
+- 32: 권리침해/개인정보노출/저작권침해 (12호)
+- 33: 외설/성적 표현 (13호)
+- 34: 위법행위/불법 콘텐츠 (14호)
+- 35: 광고/홍보/타사이트 홍보 (15호)
+- 36: 운영정책부정 (16호)
+- 37: 다중이/다중 계정 (17호)
+- 38: 기타사유 (18호)
 
 ## 제재 유형 (penalty_type)
 - "level": 등급 제한 (회원 등급 하향)
@@ -550,6 +558,47 @@ func buildSystemPrompt() string {
   "reasoning": string,
   "flags": string[]
 }`
+}
+
+// sgTypeLabels maps sg_type integer codes to Korean labels
+var sgTypeLabels = map[int8]string{
+	1: "회원비하", 2: "예의없음", 3: "부적절한 표현", 4: "차별행위",
+	5: "분란유도/갈등조장", 6: "여론조성", 7: "회원기만", 8: "이용방해",
+	9: "용도위반", 10: "거래금지위반", 11: "구걸", 12: "권리침해",
+	13: "외설", 14: "위법행위", 15: "광고/홍보", 16: "운영정책부정",
+	17: "다중이", 18: "기타사유",
+	21: "회원비하", 22: "예의없음", 23: "부적절한 표현", 24: "차별행위",
+	25: "분란유도/갈등조장", 26: "여론조성", 27: "회원기만", 28: "이용방해",
+	29: "용도위반", 30: "거래금지위반", 31: "구걸", 32: "권리침해",
+	33: "외설", 34: "위법행위", 35: "광고/홍보", 36: "운영정책부정",
+	37: "다중이", 38: "기타사유",
+}
+
+// collectReportReasons 모든 신고에서 sg_type 라벨을 수집하여 "사유 (건수)" 형태로 반환
+func collectReportReasons(reports []domain.Report) string {
+	if len(reports) == 0 {
+		return ""
+	}
+	counts := make(map[string]int)
+	var order []string
+	for _, r := range reports {
+		if r.Type == 0 {
+			continue
+		}
+		label, ok := sgTypeLabels[r.Type]
+		if !ok {
+			label = fmt.Sprintf("코드%d", r.Type)
+		}
+		if counts[label] == 0 {
+			order = append(order, label)
+		}
+		counts[label]++
+	}
+	var parts []string
+	for _, label := range order {
+		parts = append(parts, fmt.Sprintf("%s (%d건)", label, counts[label]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // truncateStr truncates a string to maxLen bytes

@@ -156,7 +156,7 @@ func (h *AIEvaluationHandler) ListEvaluation(c *gin.Context) {
 
 // RequestEvaluation handles POST /api/v2/reports/ai-evaluation/evaluate
 // @Summary AI 재평가 요청
-// @Description 신고에 대한 AI 평가를 수동으로 실행합니다 (super_admin 전용). 기존 결과를 삭제하고 재평가합니다.
+// @Description 신고에 대한 AI 평가를 수동으로 실행합니다 (super_admin 전용). 기존 결과은 유지되고 새 평가가 추가됩니다.
 // @Tags ai-evaluation
 // @Accept json
 // @Produce json
@@ -194,8 +194,8 @@ func (h *AIEvaluationHandler) RequestEvaluation(c *gin.Context) {
 		return
 	}
 
-	// 기존 결과 삭제 후 재평가
-	evals, err := h.evaluator.DeleteAndReEvaluate(req.Table, req.Parent)
+	// 기존 결과 유지, 새 평가 추가
+	evals, err := h.evaluator.Evaluate(req.Table, req.Parent)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "AI 평가 실행 실패: "+err.Error(), nil)
 		return
