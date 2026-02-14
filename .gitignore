@@ -57,3 +57,6 @@ __pycache__/
 # Serena
 .serena/
 /api
+
+# Build binary
+/angple-backend
