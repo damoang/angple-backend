@@ -55,6 +55,7 @@ type ReportService struct {
 	historyRepo      *repository.HistoryRepository
 	disciplineRepo   *repository.DisciplineRepository
 	aiEvaluationRepo *repository.AIEvaluationRepository // Phase 2: 통합 API용
+	aiEvaluator      *AIEvaluator                      // AI 자동 평가 실행기
 	memoRepo         *repository.G5MemoRepository
 	memberRepo       repository.MemberRepository
 	boardRepo        *repository.BoardRepository
@@ -105,6 +106,11 @@ func (s *ReportService) SetSingoUserRepo(singoUserRepo *repository.SingoUserRepo
 // SetAIEvaluationRepo sets the AI evaluation repository (Phase 2: 통합 API용)
 func (s *ReportService) SetAIEvaluationRepo(aiEvaluationRepo *repository.AIEvaluationRepository) {
 	s.aiEvaluationRepo = aiEvaluationRepo
+}
+
+// SetAIEvaluator sets the AI evaluator for auto-evaluation on opinion submit
+func (s *ReportService) SetAIEvaluator(evaluator *AIEvaluator) {
+	s.aiEvaluator = evaluator
 }
 
 // SetRedisClient sets Redis client for caching
@@ -213,8 +219,24 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		}
 	}
 
+	// mb_id → mb_no 변환 (opinions 테이블의 reviewer_id는 mb_no로 저장됨)
+	requestingMbNo := ""
+	if requestingUserID != "" {
+		if member, err := s.memberRepo.FindByUserID(requestingUserID); err == nil && member != nil {
+			requestingMbNo = fmt.Sprintf("%d", member.ID)
+		}
+	}
+	excludeReviewerMbNo := ""
+	if excludeReviewer != "" {
+		if excludeReviewer == requestingUserID && requestingMbNo != "" {
+			excludeReviewerMbNo = requestingMbNo
+		} else if member, err := s.memberRepo.FindByUserID(excludeReviewer); err == nil && member != nil {
+			excludeReviewerMbNo = fmt.Sprintf("%d", member.ID)
+		}
+	}
+
 	// 2. 캐시 미스 → DB 조회
-	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewer, requestingUserID)
+	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewerMbNo, requestingMbNo)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -293,7 +315,7 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		for id := range reviewerIDSet {
 			reviewerIDs = append(reviewerIDs, id)
 		}
-		if nicks, err := s.memberRepo.FindNicksByIDs(reviewerIDs); err == nil && nicks != nil {
+		if nicks, err := s.memberRepo.FindNicksByMbNos(reviewerIDs); err == nil && nicks != nil {
 			reviewerNickMap = nicks
 		}
 	}
@@ -371,12 +393,16 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		opKey := fmt.Sprintf("%s:%d", row.Table, row.SGID)
 		if ops, ok := opinionsMap[opKey]; ok && len(ops) > 0 {
 			opResponses := make([]domain.OpinionResponse, 0, len(ops))
+			anonCounter := 1
+			anonMap := map[string]string{} // reviewerID → 마스킹된 닉네임 캐시
 			for _, op := range ops {
 				reviewerNick := reviewerNickMap[op.ReviewerID]
 				if reviewerNick == "" {
 					reviewerNick = "(알 수 없음)"
 				}
-				opResponses = append(opResponses, domain.OpinionResponse{
+
+				isMine := requestingMbNo != "" && op.ReviewerID == requestingMbNo
+				opResp := domain.OpinionResponse{
 					ReviewerID:   op.ReviewerID,
 					ReviewerNick: reviewerNick,
 					OpinionType:  op.OpinionType,
@@ -384,8 +410,27 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 					Days:         op.DisciplineDays,
 					Type:         op.DisciplineType,
 					Detail:       op.DisciplineDetail,
+					IsMine:       isMine,
 					CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
-				})
+				}
+
+				// 닉네임 마스킹 (super_admin 제외)
+				if singoRole != "super_admin" {
+					if isMine {
+						opResp.ReviewerNick = "나(본인)"
+					} else if cached, ok := anonMap[op.ReviewerID]; ok {
+						opResp.ReviewerNick = cached
+						opResp.ReviewerID = ""
+					} else {
+						masked := fmt.Sprintf("검토자 %d", anonCounter)
+						anonMap[op.ReviewerID] = masked
+						opResp.ReviewerNick = masked
+						opResp.ReviewerID = ""
+						anonCounter++
+					}
+				}
+
+				opResponses = append(opResponses, opResp)
 			}
 			resp.Opinions = opResponses
 		}
@@ -419,7 +464,15 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 		limit = 20
 	}
 
-	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewer)
+	// mb_id → mb_no 변환 (opinions 테이블의 reviewer_id는 mb_no로 저장됨)
+	excludeReviewerMbNo := ""
+	if excludeReviewer != "" {
+		if member, err := s.memberRepo.FindByUserID(excludeReviewer); err == nil && member != nil {
+			excludeReviewerMbNo = fmt.Sprintf("%d", member.ID)
+		}
+	}
+
+	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewerMbNo)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -510,7 +563,7 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 		for id := range reviewerIDSet {
 			reviewerIDs = append(reviewerIDs, id)
 		}
-		if nicks, err := s.memberRepo.FindNicksByIDs(reviewerIDs); err == nil && nicks != nil {
+		if nicks, err := s.memberRepo.FindNicksByMbNos(reviewerIDs); err == nil && nicks != nil {
 			reviewerNickMap = nicks
 		}
 	}
@@ -870,6 +923,7 @@ func (s *ReportService) updatePostLockStatus(table string, sgID int) error {
 func toReportListResponse(report *domain.Report, nickMap, boardNameMap map[string]string) domain.ReportListResponse {
 	resp := domain.ReportListResponse{
 		ID:               report.ID,
+		SGID:             report.SGID,
 		Table:            report.Table,
 		Parent:           report.Parent,
 		Type:             getContentType(report.Parent),
@@ -1782,6 +1836,15 @@ func (s *ReportService) processSubmitOpinion(report *domain.Report, adminID stri
 			log.Printf("[WARN] 자동 잠금 상태 업데이트 실패: %v", err)
 		}
 
+		// AI 평가 자동 실행 (비동기 — 의견 제출 성공 후)
+		if s.aiEvaluator != nil {
+			go func() {
+				if err := s.aiEvaluator.EvaluateAsync(report.Table, report.Parent); err != nil {
+					log.Printf("[WARN] AI 자동 평가 실패 (table=%s, parent=%d): %v", report.Table, report.Parent, err)
+				}
+			}()
+		}
+
 		return nil
 	}
 
@@ -1976,12 +2039,20 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 		return nil, err
 	}
 
-	// Batch-load nicknames
+	// mb_id → mb_no 변환 (opinions 테이블의 reviewer_id는 mb_no로 저장됨)
+	requestingMbNo := ""
+	if requestingUserID != "" {
+		if member, err := s.memberRepo.FindByUserID(requestingUserID); err == nil && member != nil {
+			requestingMbNo = fmt.Sprintf("%d", member.ID)
+		}
+	}
+
+	// Batch-load nicknames (mb_no 기반)
 	userIDs := make([]string, 0, len(opinions))
 	for _, op := range opinions {
 		userIDs = append(userIDs, op.ReviewerID)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByIDs(userIDs)
+	nickMap, _ := s.memberRepo.FindNicksByMbNos(userIDs)
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
@@ -2002,7 +2073,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 		}
 
 		if maskReviewerNick {
-			if op.ReviewerID == requestingUserID {
+			if op.ReviewerID == requestingMbNo {
 				reviewerNick = "나(본인)"
 			} else if cached, ok := maskedNickMap[op.ReviewerID]; ok {
 				reviewerNick = cached
@@ -2013,6 +2084,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 			}
 		}
 
+		isMine := requestingMbNo != "" && op.ReviewerID == requestingMbNo
 		responses[i] = domain.OpinionResponse{
 			ReviewerID:   op.ReviewerID,
 			ReviewerNick: reviewerNick,
@@ -2021,11 +2093,12 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 			Days:         op.DisciplineDays,
 			Type:         op.DisciplineType,
 			Detail:       op.DisciplineDetail,
+			IsMine:       isMine,
 			CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 
 		// admin 역할이면 ReviewerID도 마스킹 (다른 담당자 식별 방지)
-		if maskReviewerNick && op.ReviewerID != requestingUserID {
+		if maskReviewerNick && !isMine {
 			responses[i].ReviewerID = ""
 		}
 	}

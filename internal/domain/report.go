@@ -76,6 +76,7 @@ type OpinionResponse struct {
 	Days         int    `json:"discipline_days,omitempty"`
 	Type         string `json:"discipline_type,omitempty"`
 	Detail       string `json:"discipline_detail,omitempty"`
+	IsMine       bool   `json:"is_mine"`
 	CreatedAt    string `json:"created_at"`
 }
 
@@ -112,6 +113,7 @@ type ReportDetailEnhancedResponse struct {
 // ReportListResponse represents report list response
 type ReportListResponse struct {
 	ID                int    `json:"id"`
+	SGID              int    `json:"sg_id"`
 	Table             string `json:"table"`
 	Parent            int    `json:"parent"`
 	Type              int8   `json:"type"`       // 1=post, 2=comment
