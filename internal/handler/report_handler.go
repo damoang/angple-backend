@@ -605,3 +605,52 @@ func (h *ReportHandler) GetStats(c *gin.Context) {
 		Data: stats,
 	})
 }
+
+// GetAdjacentReport handles GET /api/v1/reports/adjacent
+// 인접 신고 조회 (이전/다음 네비게이션)
+func (h *ReportHandler) GetAdjacentReport(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+	if !h.requireSingoAccess(c) {
+		return
+	}
+
+	table := c.Query("sg_table")
+	sgID, err := strconv.Atoi(c.Query("sg_id"))
+	if err != nil || table == "" {
+		common.ErrorResponse(c, http.StatusBadRequest, "sg_table과 sg_id가 필요합니다", nil)
+		return
+	}
+
+	direction := c.Query("direction")
+	if direction != "prev" && direction != "next" {
+		common.ErrorResponse(c, http.StatusBadRequest, "direction은 prev 또는 next여야 합니다", nil)
+		return
+	}
+
+	status := c.Query("status")
+	sort := c.DefaultQuery("sort", "newest")
+	fromDate := c.Query("from_date")
+	toDate := c.Query("to_date")
+	search := c.Query("search")
+
+	report, err := h.service.GetAdjacentReport(table, sgID, direction, status, sort, fromDate, toDate, search)
+	if err != nil {
+		// 인접 신고 없음 → null 반환
+		c.JSON(http.StatusOK, common.APIResponse{
+			Data: nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: gin.H{
+			"sg_id":  report.SGID,
+			"table":  report.Table,
+			"parent": report.Parent,
+			"type":   report.Type,
+		},
+	})
+}

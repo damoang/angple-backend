@@ -44,18 +44,18 @@ func Setup(
 	v1UsageTracker *middleware.APIUsageTracker,
 	cfg *config.Config,
 	boardPermissionChecker middleware.BoardPermissionChecker,
+	v2UserRepo middleware.V2UserFinder,
 ) {
 	// Deprecation 설정 (레거시 API용)
 	deprecationMW := middleware.Deprecation(middleware.DeprecationConfig{
-		SunsetDate:        "Sat, 01 Aug 2026 00:00:00 GMT",
-		MigrationGuideURL: "https://github.com/damoang/angple-backend/blob/main/docs/v1-to-v2-migration-guide.md",
+		SunsetDate: "Sat, 01 Aug 2026 00:00:00 GMT",
 	})
 
 	// v1→v2 리다이렉트 (Enabled=false: Link 헤더만 추가, true로 변경 시 301 리다이렉트)
 	v1Redirect := middleware.V1ToV2Redirect(middleware.V1RedirectConfig{Enabled: false})
 
 	// 레거시 API (그누보드 DB 기반) → /api/v1 으로 이동, Deprecation 헤더 + 사용량 추적 + v2 리다이렉트 힌트
-	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager), deprecationMW, v1Redirect, v1UsageTracker.Track())
+	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager, middleware.WithV2UserRepo(v2UserRepo)), deprecationMW, v1Redirect, v1UsageTracker.Track())
 
 	// Authentication endpoints (no auth required)
 	auth := api.Group("/auth")
@@ -237,6 +237,7 @@ func Setup(
 	reports.GET("/opinions", reportHandler.GetOpinions)              // 의견 목록 (관리자)
 	reports.POST("/process", reportHandler.ProcessReport)            // 신고 처리 (관리자)
 	reports.POST("/batch-process", reportHandler.BatchProcessReport) // 신고 일괄 처리 (관리자)
+	reports.GET("/adjacent", reportHandler.GetAdjacentReport)        // 인접 신고 조회 (이전/다음)
 
 	// Singo Users (검토자 목록)
 	api.GET("/singo-users", reportHandler.ListSingoUsers)

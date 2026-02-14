@@ -555,11 +555,13 @@ func main() {
 
 	// 라우트 등록 (only if DB is connected)
 	if db != nil {
+		// v2 UserRepo (v1, v2 양쪽에서 사용)
+		v2UserRepo := v2repo.NewUserRepository(db)
+
 		// v1 레거시 API (그누보드 DB 기반) → /api/v1
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, adminHandler, v1UsageTracker, cfg, boardPermissionChecker)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, adminHandler, v1UsageTracker, cfg, boardPermissionChecker, v2UserRepo)
 
 		// v2 API (v2_ 테이블 기반) → /api/v2
-		v2UserRepo := v2repo.NewUserRepository(db)
 		v2PostRepo := v2repo.NewPostRepository(db)
 		v2CommentRepo := v2repo.NewCommentRepository(db)
 		v2BoardRepo := v2repo.NewBoardRepository(db)

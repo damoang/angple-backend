@@ -74,9 +74,6 @@ func V2ErrorResponse(c *gin.Context, status int, message string, err error) {
 		Code:    getErrorCode(status),
 		Message: message,
 	}
-	if err != nil {
-		v2Err.Details = err.Error()
-	}
 	c.JSON(status, V2Response{
 		Success: false,
 		Error:   v2Err,

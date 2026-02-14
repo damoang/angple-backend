@@ -207,9 +207,9 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 	canCache := excludeReviewer == "" && s.redisClient != nil
 
 	if canCache {
-		// 캐시 키: reports:list:{status}:{page}:{limit}:{from}:{to}:{sort}:{minOp}
-		cacheKey = fmt.Sprintf("reports:list:%s:%d:%d:%s:%s:%s:%d",
-			status, page, limit, fromDate, toDate, sort, minOpinions)
+		// 캐시 키: reports:list:{status}:{page}:{limit}:{from}:{to}:{sort}:{minOp}:{role}:{uid}
+		cacheKey = fmt.Sprintf("reports:list:%s:%d:%d:%s:%s:%s:%d:%s:%s",
+			status, page, limit, fromDate, toDate, sort, minOpinions, singoRole, requestingUserID)
 
 		// 1. Redis에서 캐시 확인
 		ctx := context.Background()
@@ -226,24 +226,9 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		}
 	}
 
-	// mb_id → mb_no 변환 (opinions 테이블의 reviewer_id는 mb_no로 저장됨)
-	requestingMbNo := ""
-	if requestingUserID != "" {
-		if member, err := s.memberRepo.FindByUserID(requestingUserID); err == nil && member != nil {
-			requestingMbNo = fmt.Sprintf("%d", member.ID)
-		}
-	}
-	excludeReviewerMbNo := ""
-	if excludeReviewer != "" {
-		if excludeReviewer == requestingUserID && requestingMbNo != "" {
-			excludeReviewerMbNo = requestingMbNo
-		} else if member, err := s.memberRepo.FindByUserID(excludeReviewer); err == nil && member != nil {
-			excludeReviewerMbNo = fmt.Sprintf("%d", member.ID)
-		}
-	}
-
+	// reviewer_id는 v2_users.id 기반 → 변환 없이 직접 사용
 	// 2. 캐시 미스 → DB 조회
-	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewerMbNo, requestingMbNo)
+	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewer, requestingUserID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -411,7 +396,7 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 					reviewerNick = "(알 수 없음)"
 				}
 
-				isMine := requestingMbNo != "" && op.ReviewerID == requestingMbNo
+				isMine := requestingUserID != "" && op.ReviewerID == requestingUserID
 				opResp := domain.OpinionResponse{
 					ReviewerID:   op.ReviewerID,
 					ReviewerNick: reviewerNick,
@@ -474,15 +459,8 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 		limit = 20
 	}
 
-	// mb_id → mb_no 변환 (opinions 테이블의 reviewer_id는 mb_no로 저장됨)
-	excludeReviewerMbNo := ""
-	if excludeReviewer != "" {
-		if member, err := s.memberRepo.FindByUserID(excludeReviewer); err == nil && member != nil {
-			excludeReviewerMbNo = fmt.Sprintf("%d", member.ID)
-		}
-	}
-
-	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewerMbNo)
+	// reviewer_id는 v2_users.id 기반 → 변환 없이 직접 사용
+	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewer)
 	if err != nil {
 		return nil, 0, err
 	}
