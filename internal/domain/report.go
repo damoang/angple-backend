@@ -73,7 +73,7 @@ type OpinionResponse struct {
 	ReviewerNick string `json:"reviewer_nick"`
 	OpinionType  string `json:"opinion_type"`
 	Reasons      string `json:"discipline_reasons,omitempty"`
-	Days         int    `json:"discipline_days,omitempty"`
+	Days         int    `json:"discipline_days"`
 	Type         string `json:"discipline_type,omitempty"`
 	Detail       string `json:"discipline_detail,omitempty"`
 	IsMine       bool   `json:"is_mine"`
@@ -106,8 +106,9 @@ type ReportDetailResponse struct {
 // ReportDetailEnhancedResponse extends ReportDetailResponse with optional data (Phase 2: 통합 API)
 type ReportDetailEnhancedResponse struct {
 	ReportDetailResponse
-	AIEvaluations     []AIEvaluation  `json:"ai_evaluations,omitempty"`     // AI 평가 목록 (?include=ai)
-	DisciplineHistory []DisciplineLog `json:"discipline_history,omitempty"` // 징계 이력 (?include=history)
+	AIEvaluations     []AIEvaluation   `json:"ai_evaluations,omitempty"`     // AI 평가 목록 (?include=ai)
+	DisciplineHistory []DisciplineLog  `json:"discipline_history,omitempty"` // 징계 이력 (?include=history)
+	ContentHistory    []ContentHistory `json:"content_history,omitempty"`    // 콘텐츠 수정/삭제 이력 (?include=content_history)
 }
 
 // ReportListResponse represents report list response

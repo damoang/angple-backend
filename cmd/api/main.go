@@ -309,8 +309,13 @@ func main() {
 		reportService.SetHistoryRepo(historyRepo)
 		reportService.SetSingoUserRepo(singoUserRepo)
 		reportService.SetSingoSettingRepo(singoSettingRepo)
-		reportService.SetAIEvaluationRepo(aiEvalRepo)             // Phase 2: 통합 API용
+		reportService.SetAIEvaluationRepo(aiEvalRepo) // Phase 2: 통합 API용
+		contentHistoryRepo := repository.NewContentHistoryRepository(db)
+		reportService.SetContentHistoryRepo(contentHistoryRepo)
 		reportService.SetV2UserRepo(v2repo.NewUserRepository(db)) // Bearer 토큰 user_id → mb_id 변환용
+		if redisClient != nil {
+			reportService.SetRedisClient(redisClient) // Redis 캐싱 활성화
+		}
 		promotionService := service.NewPromotionService(promotionRepo)
 		bannerService := service.NewBannerService(bannerRepo)
 		goodService := service.NewGoodService(goodRepo)

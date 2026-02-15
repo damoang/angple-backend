@@ -73,7 +73,7 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 
 	// Generate JWT tokens
 	userIDStr := strconv.FormatUint(user.ID, 10)
-	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Nickname, int(user.Level))
+	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 	}
 
 	userIDStr := strconv.FormatUint(user.ID, 10)
-	newAccess, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Nickname, int(user.Level))
+	newAccess, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
@@ -179,7 +179,7 @@ func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, er
 
 	// Generate angple JWT tokens
 	userIDStr := strconv.FormatUint(user.ID, 10)
-	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Nickname, int(user.Level))
+	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}

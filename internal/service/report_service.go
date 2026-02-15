@@ -42,6 +42,8 @@ const (
 	opinionTypeDismiss = "dismiss"
 	opinionTypeAction  = "action"
 
+	singoRoleSuperAdmin = "super_admin"
+
 	// Phase 6-1: 자동 잠금 설정 (1달 후 PHP 제거 시 활성화 예정)
 	autoLockEnabled   = false // 지금은 false, 1달 후 true로 변경
 	autoLockThreshold = 3     // N명 이상 신고 시 잠금
@@ -56,19 +58,20 @@ var (
 
 // ReportService handles report business logic
 type ReportService struct {
-	repo             *repository.ReportRepository
-	opinionRepo      *repository.OpinionRepository
-	historyRepo      *repository.HistoryRepository
-	disciplineRepo   *repository.DisciplineRepository
-	aiEvaluationRepo *repository.AIEvaluationRepository // Phase 2: 통합 API용
-	aiEvaluator      *AIEvaluator                       // AI 자동 평가 실행기
-	memoRepo         *repository.G5MemoRepository
-	memberRepo       repository.MemberRepository
-	boardRepo        *repository.BoardRepository
-	singoUserRepo    *repository.SingoUserRepository
-	singoSettingRepo *repository.SingoSettingRepository
-	v2UserRepo       v2repo.UserRepository // v2_users 조회 (Bearer 토큰 user_id → mb_id 변환용)
-	redisClient      *redis.Client         // Redis 클라이언트
+	repo               *repository.ReportRepository
+	opinionRepo        *repository.OpinionRepository
+	historyRepo        *repository.HistoryRepository
+	disciplineRepo     *repository.DisciplineRepository
+	aiEvaluationRepo   *repository.AIEvaluationRepository // Phase 2: 통합 API용
+	aiEvaluator        *AIEvaluator                       // AI 자동 평가 실행기
+	memoRepo           *repository.G5MemoRepository
+	memberRepo         repository.MemberRepository
+	boardRepo          *repository.BoardRepository
+	singoUserRepo      *repository.SingoUserRepository
+	singoSettingRepo   *repository.SingoSettingRepository
+	contentHistoryRepo *repository.ContentHistoryRepository
+	v2UserRepo         v2repo.UserRepository // v2_users 조회 (Bearer 토큰 user_id → mb_id 변환용)
+	redisClient        *redis.Client         // Redis 클라이언트
 
 	// singoUserRepo.FindAll() cache (5분 TTL)
 	singoUsersMu     sync.RWMutex
@@ -124,6 +127,11 @@ func (s *ReportService) SetV2UserRepo(v2UserRepo v2repo.UserRepository) {
 // SetAIEvaluationRepo sets the AI evaluation repository (Phase 2: 통합 API용)
 func (s *ReportService) SetAIEvaluationRepo(aiEvaluationRepo *repository.AIEvaluationRepository) {
 	s.aiEvaluationRepo = aiEvaluationRepo
+}
+
+// SetContentHistoryRepo sets the content history repository
+func (s *ReportService) SetContentHistoryRepo(contentHistoryRepo *repository.ContentHistoryRepository) {
+	s.contentHistoryRepo = contentHistoryRepo
 }
 
 // SetAIEvaluator sets the AI evaluator for auto-evaluation on opinion submit
@@ -204,7 +212,7 @@ func (s *ReportService) recordHistory(table string, sgID, parent int, prevStatus
 }
 
 // List retrieves paginated aggregated reports grouped by (table, parent)
-func (s *ReportService) List(status string, page, limit int, fromDate, toDate, sort, singoRole string, minOpinions int, excludeReviewer, requestingUserID string) ([]domain.AggregatedReportResponse, int64, error) {
+func (s *ReportService) List(status string, page, limit int, fromDate, toDate, sort, singoRole string, minOpinions int, excludeReviewer, requestingUserID, search string) ([]domain.AggregatedReportResponse, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -212,39 +220,80 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		limit = 20
 	}
 
-	// Redis 캐싱 (3분 TTL) - excludeReviewer 없는 경우만 캐싱
-	const cacheTTL = 3 * time.Minute
-	var cacheKey string
-	canCache := excludeReviewer == "" && s.redisClient != nil
+	// Redis 캐싱 (3분 TTL) - excludeReviewer/search 없는 경우만 캐싱
+	canCache := excludeReviewer == "" && search == "" && s.redisClient != nil
+	cacheKey := fmt.Sprintf("reports:list:%s:%d:%d:%s:%s:%s:%d:%s:%s",
+		status, page, limit, fromDate, toDate, sort, minOpinions, singoRole, requestingUserID)
 
 	if canCache {
-		// 캐시 키: reports:list:{status}:{page}:{limit}:{from}:{to}:{sort}:{minOp}:{role}:{uid}
-		cacheKey = fmt.Sprintf("reports:list:%s:%d:%d:%s:%s:%s:%d:%s:%s",
-			status, page, limit, fromDate, toDate, sort, minOpinions, singoRole, requestingUserID)
-
-		// 1. Redis에서 캐시 확인
-		ctx := context.Background()
-		cached, err := s.redisClient.Get(ctx, cacheKey).Result()
-		if err == nil {
-			// 캐시 히트! JSON 파싱 후 반환
-			var cacheData struct {
-				Responses []domain.AggregatedReportResponse `json:"responses"`
-				Total     int64                             `json:"total"`
-			}
-			if json.Unmarshal([]byte(cached), &cacheData) == nil {
-				return cacheData.Responses, cacheData.Total, nil
-			}
+		if responses, total, ok := s.tryGetCachedList(cacheKey); ok {
+			return responses, total, nil
 		}
 	}
 
-	// reviewer_id는 v2_users.id 기반 → 변환 없이 직접 사용
-	// 2. 캐시 미스 → DB 조회
-	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewer, requestingUserID)
+	// 캐시 미스 → DB 조회
+	rows, total, err := s.repo.ListAggregated(status, page, limit, fromDate, toDate, sort, minOpinions, excludeReviewer, requestingUserID, search)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Batch-load nicknames and board names
+	nickMap, boardNameMap := s.loadNicknamesAndBoardsForRows(rows)
+	opinionsMap := s.loadOpinionsByContent(rows)
+	reviewerNickMap := s.loadReviewerNicknames(opinionsMap)
+	totalReviewers := s.getTotalReviewerCount()
+
+	// Convert to response format
+	responses := make([]domain.AggregatedReportResponse, len(rows))
+	for i, row := range rows {
+		responses[i] = s.buildAggregatedRowResponse(row, nickMap, boardNameMap, totalReviewers, singoRole, requestingUserID, opinionsMap, reviewerNickMap)
+	}
+
+	// Redis에 저장 (3분 TTL)
+	if canCache {
+		s.cacheListResult(cacheKey, responses, total)
+	}
+
+	return responses, total, nil
+}
+
+// tryGetCachedList attempts to retrieve cached list results from Redis.
+func (s *ReportService) tryGetCachedList(cacheKey string) ([]domain.AggregatedReportResponse, int64, bool) {
+	ctx := context.Background()
+	cached, err := s.redisClient.Get(ctx, cacheKey).Result()
+	if err != nil {
+		return nil, 0, false
+	}
+	var cacheData struct {
+		Responses []domain.AggregatedReportResponse `json:"responses"`
+		Total     int64                             `json:"total"`
+	}
+	if json.Unmarshal([]byte(cached), &cacheData) != nil {
+		return nil, 0, false
+	}
+	return cacheData.Responses, cacheData.Total, true
+}
+
+// cacheListResult stores list results in Redis with 3-minute TTL.
+func (s *ReportService) cacheListResult(cacheKey string, responses []domain.AggregatedReportResponse, total int64) {
+	const cacheTTL = 3 * time.Minute
+	ctx := context.Background()
+	cacheData := struct {
+		Responses []domain.AggregatedReportResponse `json:"responses"`
+		Total     int64                             `json:"total"`
+	}{
+		Responses: responses,
+		Total:     total,
+	}
+	jsonData, err := json.Marshal(cacheData)
+	if err != nil {
+		log.Printf("[WARN] 캐시 직렬화 실패: %v", err)
+		return
+	}
+	s.redisClient.Set(ctx, cacheKey, jsonData, cacheTTL)
+}
+
+// loadNicknamesAndBoardsForRows batch-loads nicknames and board names for aggregated report rows.
+func (s *ReportService) loadNicknamesAndBoardsForRows(rows []repository.AggregatedReportRow) (nickMap, boardNameMap map[string]string) {
 	userIDs := make(map[string]bool)
 	boardIDs := make(map[string]bool)
 	for _, r := range rows {
@@ -263,11 +312,21 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 	for id := range userIDs {
 		ids = append(ids, id)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByIDs(ids)
+	var err error
+	nickMap, err = s.memberRepo.FindNicksByIDs(ids)
+	if err != nil {
+		log.Printf("[WARN] 닉네임 조회 실패: %v", err)
+	}
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
 
+	boardNameMap = s.loadBoardNames(boardIDs)
+	return
+}
+
+// loadBoardNames batch-loads board names from a set of board IDs.
+func (s *ReportService) loadBoardNames(boardIDs map[string]bool) map[string]string {
 	boardNameMap := make(map[string]string)
 	if s.boardRepo != nil {
 		boardIDList := make([]string, 0, len(boardIDs))
@@ -278,32 +337,39 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 			boardNameMap = names
 		}
 	}
+	return boardNameMap
+}
 
-	// Batch-load opinions for all rows (1 query), then re-key by sg_id
+// loadOpinionsByContent batch-loads opinions for all rows and re-keys by sg_id.
+func (s *ReportService) loadOpinionsByContent(rows []repository.AggregatedReportRow) map[string][]domain.Opinion {
 	opinionsMap := make(map[string][]domain.Opinion)
-	if s.opinionRepo != nil && len(rows) > 0 {
-		keys := make([]struct {
+	if s.opinionRepo == nil || len(rows) == 0 {
+		return opinionsMap
+	}
+
+	keys := make([]struct {
+		Table  string
+		Parent int
+	}, 0, len(rows))
+	for _, r := range rows {
+		keys = append(keys, struct {
 			Table  string
 			Parent int
-		}, 0, len(rows))
-		for _, r := range rows {
-			keys = append(keys, struct {
-				Table  string
-				Parent int
-			}{r.Table, r.Parent})
-		}
-		if opMap, err := s.opinionRepo.GetByMultipleReportsGrouped(keys); err == nil {
-			// Re-key by sg_id: 같은 parent 아래 다른 댓글의 의견이 섞이지 않도록
-			for _, ops := range opMap {
-				for _, op := range ops {
-					key := fmt.Sprintf("%s:%d", op.Table, op.SGID)
-					opinionsMap[key] = append(opinionsMap[key], op)
-				}
+		}{r.Table, r.Parent})
+	}
+	if opMap, err := s.opinionRepo.GetByMultipleReportsGrouped(keys); err == nil {
+		for _, ops := range opMap {
+			for _, op := range ops {
+				key := fmt.Sprintf("%s:%d", op.Table, op.SGID)
+				opinionsMap[key] = append(opinionsMap[key], op)
 			}
 		}
 	}
+	return opinionsMap
+}
 
-	// Batch-load reviewer nicknames for opinions
+// loadReviewerNicknames batch-loads reviewer nicknames from v2_users for all opinions.
+func (s *ReportService) loadReviewerNicknames(opinionsMap map[string][]domain.Opinion) map[string]string {
 	reviewerIDSet := make(map[string]bool)
 	for _, ops := range opinionsMap {
 		for _, op := range ops {
@@ -313,145 +379,150 @@ func (s *ReportService) List(status string, page, limit int, fromDate, toDate, s
 		}
 	}
 	reviewerNickMap := make(map[string]string)
-	if len(reviewerIDSet) > 0 {
-		// reviewer_id는 v2_users.id — v2_users 테이블에서 닉네임 조회
+	if len(reviewerIDSet) > 0 && s.v2UserRepo != nil {
 		reviewerIDs := make([]string, 0, len(reviewerIDSet))
 		for id := range reviewerIDSet {
 			reviewerIDs = append(reviewerIDs, id)
 		}
-		if s.v2UserRepo != nil {
-			if nicks, err := s.v2UserRepo.FindNicksByIDs(reviewerIDs); err == nil && nicks != nil {
-				reviewerNickMap = nicks
-			}
+		if nicks, err := s.v2UserRepo.FindNicksByIDs(reviewerIDs); err == nil && nicks != nil {
+			reviewerNickMap = nicks
 		}
 	}
+	return reviewerNickMap
+}
 
-	// Get total reviewer count (cached)
-	totalReviewers := s.getTotalReviewerCount()
+// convertRowToResponse is the shared helper that converts an AggregatedReportRow to an AggregatedReportResponse.
+// It handles the common fields; callers set extra fields (e.g. ReporterID, ReviewedByMe) as needed.
+func convertRowToResponse(
+	row repository.AggregatedReportRow,
+	nickMap, boardNameMap map[string]string,
+	totalReviewers int,
+	singoRole, requestingUserID string,
+	opinionsMap map[string][]domain.Opinion,
+	reviewerNickMap map[string]string,
+) domain.AggregatedReportResponse {
+	rowStatus := computeRowStatus(row.AdminApproved, row.Processed, row.Hold, row.OpinionCount, row.ActionCount, row.DismissCount)
 
-	// Convert to response format
-	responses := make([]domain.AggregatedReportResponse, len(rows))
-	for i, row := range rows {
-		// Compute status from aggregated flags
-		rowStatus := computeRowStatus(row.AdminApproved, row.Processed, row.Hold, row.OpinionCount, row.ActionCount, row.DismissCount)
-
-		// Parse reviewer IDs from comma-separated string
-		var reviewerIDList []string
-		if row.ReviewerIDs != "" {
-			reviewerIDList = strings.Split(row.ReviewerIDs, ",")
-		}
-
-		// Determine type: 1=post (sg_id == sg_parent), 2=comment (sg_id != sg_parent)
-		reportType := int8(1) // default to post
-		if row.SGID != row.Parent {
-			reportType = 2 // comment
-		}
-
-		resp := domain.AggregatedReportResponse{
-			Table:                       row.Table,
-			SGID:                        row.SGID,
-			Parent:                      row.Parent,
-			Type:                        reportType,
-			ReportCount:                 row.ReportCount,
-			ReporterCount:               row.ReporterCount,
-			ReporterID:                  row.ReporterID,
-			ReporterNickname:            nickMap[row.ReporterID],
-			TargetID:                    row.TargetID,
-			TargetNickname:              nickMap[row.TargetID],
-			TargetTitle:                 truncateUTF8(row.TargetTitle, 50),
-			TargetContent:               truncateUTF8(row.TargetContent, 100),
-			BoardSubject:                boardNameMap[row.Table],
-			ReportTypes:                 row.ReportTypes,
-			OpinionCount:                row.OpinionCount,
-			ActionCount:                 row.ActionCount,
-			DismissCount:                row.DismissCount,
-			Status:                      rowStatus,
-			FirstReportTime:             row.FirstReportTime,
-			LatestReportTime:            row.LatestReportTime,
-			ReviewedCount:               len(reviewerIDList),
-			TotalReviewers:              totalReviewers,
-			ReviewedByMe:                row.ReviewedByMe == 1,
-			AdminUsers:                  row.AdminUsers,
-			ProcessedDatetime:           row.ProcessedDatetime,
-			MonitoringDisciplineReasons: row.MonitoringDisciplineReasons,
-			MonitoringDisciplineDays:    row.MonitoringDisciplineDays,
-			MonitoringDisciplineType:    row.MonitoringDisciplineType,
-			MonitoringDisciplineDetail:  row.MonitoringDisciplineDetail,
-		}
-
-		// super_admin만 실제 reviewer_ids 포함
-		if singoRole == "super_admin" {
-			resp.ReviewerIDs = reviewerIDList
-		}
-
-		// Attach opinions for this content (sg_id 기준 매핑)
-		opKey := fmt.Sprintf("%s:%d", row.Table, row.SGID)
-		if ops, ok := opinionsMap[opKey]; ok && len(ops) > 0 {
-			opResponses := make([]domain.OpinionResponse, 0, len(ops))
-			anonCounter := 1
-			anonMap := map[string]string{} // reviewerID → 마스킹된 닉네임 캐시
-			for _, op := range ops {
-				reviewerNick := reviewerNickMap[op.ReviewerID]
-				if reviewerNick == "" {
-					reviewerNick = "(알 수 없음)"
-				}
-
-				isMine := requestingUserID != "" && op.ReviewerID == requestingUserID
-				opResp := domain.OpinionResponse{
-					ReviewerID:   op.ReviewerID,
-					ReviewerNick: reviewerNick,
-					OpinionType:  op.OpinionType,
-					Reasons:      op.DisciplineReasons,
-					Days:         op.DisciplineDays,
-					Type:         op.DisciplineType,
-					Detail:       op.DisciplineDetail,
-					IsMine:       isMine,
-					CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
-				}
-
-				// 닉네임 마스킹 (super_admin 제외)
-				if singoRole != "super_admin" {
-					if isMine {
-						opResp.ReviewerNick = "나(본인)"
-					} else if cached, ok := anonMap[op.ReviewerID]; ok {
-						opResp.ReviewerNick = cached
-						opResp.ReviewerID = ""
-					} else {
-						masked := fmt.Sprintf("검토자 %d", anonCounter)
-						anonMap[op.ReviewerID] = masked
-						opResp.ReviewerNick = masked
-						opResp.ReviewerID = ""
-						anonCounter++
-					}
-				}
-
-				opResponses = append(opResponses, opResp)
-			}
-			resp.Opinions = opResponses
-		}
-
-		responses[i] = resp
+	var reviewerIDList []string
+	if row.ReviewerIDs != "" {
+		reviewerIDList = strings.Split(row.ReviewerIDs, ",")
 	}
 
-	// 3. Redis에 저장 (3분 TTL)
-	if canCache {
-		ctx := context.Background()
-		cacheData := struct {
-			Responses []domain.AggregatedReportResponse `json:"responses"`
-			Total     int64                             `json:"total"`
-		}{
-			Responses: responses,
-			Total:     total,
-		}
-		jsonData, _ := json.Marshal(cacheData)
-		s.redisClient.Set(ctx, cacheKey, jsonData, cacheTTL)
+	reportType := int8(1)
+	if row.SGID != row.Parent {
+		reportType = 2
 	}
 
-	return responses, total, nil
+	resp := domain.AggregatedReportResponse{
+		Table:                       row.Table,
+		SGID:                        row.SGID,
+		Parent:                      row.Parent,
+		Type:                        reportType,
+		ReportCount:                 row.ReportCount,
+		ReporterCount:               row.ReporterCount,
+		TargetID:                    row.TargetID,
+		TargetNickname:              nickMap[row.TargetID],
+		TargetTitle:                 truncateUTF8(row.TargetTitle, 50),
+		TargetContent:               truncateUTF8(row.TargetContent, 100),
+		BoardSubject:                boardNameMap[row.Table],
+		ReportTypes:                 row.ReportTypes,
+		OpinionCount:                row.OpinionCount,
+		ActionCount:                 row.ActionCount,
+		DismissCount:                row.DismissCount,
+		Status:                      rowStatus,
+		FirstReportTime:             row.FirstReportTime,
+		LatestReportTime:            row.LatestReportTime,
+		ReviewedCount:               len(reviewerIDList),
+		TotalReviewers:              totalReviewers,
+		AdminUsers:                  row.AdminUsers,
+		ProcessedDatetime:           row.ProcessedDatetime,
+		MonitoringDisciplineReasons: row.MonitoringDisciplineReasons,
+		MonitoringDisciplineDays:    row.MonitoringDisciplineDays,
+		MonitoringDisciplineType:    row.MonitoringDisciplineType,
+		MonitoringDisciplineDetail:  row.MonitoringDisciplineDetail,
+	}
+
+	if singoRole == singoRoleSuperAdmin {
+		resp.ReviewerIDs = reviewerIDList
+	}
+
+	opKey := fmt.Sprintf("%s:%d", row.Table, row.SGID)
+	if ops, ok := opinionsMap[opKey]; ok && len(ops) > 0 {
+		resp.Opinions = buildMaskedOpinionResponses(ops, reviewerNickMap, singoRole, requestingUserID)
+	}
+
+	return resp
+}
+
+// buildAggregatedRowResponse converts a single AggregatedReportRow to an AggregatedReportResponse.
+func (s *ReportService) buildAggregatedRowResponse(
+	row repository.AggregatedReportRow,
+	nickMap, boardNameMap map[string]string,
+	totalReviewers int,
+	singoRole, requestingUserID string,
+	opinionsMap map[string][]domain.Opinion,
+	reviewerNickMap map[string]string,
+) domain.AggregatedReportResponse {
+	resp := convertRowToResponse(row, nickMap, boardNameMap, totalReviewers, singoRole, requestingUserID, opinionsMap, reviewerNickMap)
+	resp.ReporterID = row.ReporterID
+	resp.ReporterNickname = nickMap[row.ReporterID]
+	resp.ReviewedByMe = row.ReviewedByMe == 1
+	return resp
+}
+
+// buildMaskedOpinionResponses creates OpinionResponse list with reviewer nickname masking for non-super_admin.
+func buildMaskedOpinionResponses(ops []domain.Opinion, reviewerNickMap map[string]string, singoRole, requestingUserID string) []domain.OpinionResponse {
+	opResponses := make([]domain.OpinionResponse, 0, len(ops))
+	anonCounter := 1
+	anonMap := map[string]string{}
+	for _, op := range ops {
+		reviewerNick := reviewerNickMap[op.ReviewerID]
+		if reviewerNick == "" {
+			reviewerNick = "(알 수 없음)"
+		}
+
+		isMine := requestingUserID != "" && op.ReviewerID == requestingUserID
+		opResp := domain.OpinionResponse{
+			ReviewerID:   op.ReviewerID,
+			ReviewerNick: reviewerNick,
+			OpinionType:  op.OpinionType,
+			Reasons:      op.DisciplineReasons,
+			Days:         op.DisciplineDays,
+			Type:         op.DisciplineType,
+			Detail:       op.DisciplineDetail,
+			IsMine:       isMine,
+			CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
+		}
+
+		if singoRole != singoRoleSuperAdmin {
+			applyReviewerMasking(&opResp, isMine, op.ReviewerID, anonMap, &anonCounter)
+		}
+
+		opResponses = append(opResponses, opResp)
+	}
+	return opResponses
+}
+
+// applyReviewerMasking masks reviewer identity for non-super_admin users.
+func applyReviewerMasking(opResp *domain.OpinionResponse, isMine bool, reviewerID string, anonMap map[string]string, anonCounter *int) {
+	if isMine {
+		opResp.ReviewerNick = "나(본인)"
+		return
+	}
+	if cached, ok := anonMap[reviewerID]; ok {
+		opResp.ReviewerNick = cached
+		opResp.ReviewerID = ""
+		return
+	}
+	masked := fmt.Sprintf("검토자 %d", *anonCounter)
+	anonMap[reviewerID] = masked
+	opResp.ReviewerNick = masked
+	opResp.ReviewerID = ""
+	*anonCounter++
 }
 
 // ListByTarget retrieves paginated reports grouped by target user (피신고자별 그룹핑)
-func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, toDate, sort, singoRole, excludeReviewer string) ([]domain.TargetAggregatedResponse, int64, error) {
+func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, toDate, sort, singoRole, excludeReviewer, search string) ([]domain.TargetAggregatedResponse, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -459,182 +530,33 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 		limit = 20
 	}
 
-	// reviewer_id는 v2_users.id 기반 → 변환 없이 직접 사용
-	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewer)
+	rows, total, err := s.repo.ListAggregatedByTarget(status, page, limit, fromDate, toDate, sort, excludeReviewer, search)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Batch-load nicknames
-	userIDs := make([]string, 0, len(rows))
-	for _, r := range rows {
-		if r.TargetID != "" {
-			userIDs = append(userIDs, r.TargetID)
-		}
+	userIDs := s.collectTargetUserIDs(rows)
+	nickMap, nickErr := s.memberRepo.FindNicksByIDs(userIDs)
+	if nickErr != nil {
+		log.Printf("[WARN] 닉네임 조회 실패: %v", nickErr)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByIDs(userIDs)
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
 
-	// Get sub-contents for each target user
 	contentRows, err := s.repo.ListAggregatedByTargetIDs(userIDs, status, fromDate, toDate)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Batch-load board names for sub-contents
-	boardIDs := make(map[string]bool)
-	for _, cr := range contentRows {
-		if cr.Table != "" {
-			boardIDs[cr.Table] = true
-		}
-	}
-	boardNameMap := make(map[string]string)
-	if s.boardRepo != nil {
-		boardIDList := make([]string, 0, len(boardIDs))
-		for id := range boardIDs {
-			boardIDList = append(boardIDList, id)
-		}
-		if names, err := s.boardRepo.FindByIDs(boardIDList); err == nil {
-			boardNameMap = names
-		}
-	}
-
-	// Get total reviewer count (cached)
+	boardNameMap := s.loadBoardNamesForContentRows(contentRows)
 	totalReviewers := s.getTotalReviewerCount()
+	disciplineCountMap := s.loadDisciplineCounts(userIDs)
+	opinionsMap := s.loadOpinionsByContent(contentRows)
+	reviewerNickMap := s.loadReviewerNicknames(opinionsMap)
 
-	// Batch-load discipline counts for all target users
-	disciplineCountMap := make(map[string]int)
-	if s.disciplineRepo != nil && len(userIDs) > 0 {
-		if counts, err := s.disciplineRepo.CountByTargetMemberIDs(userIDs); err == nil {
-			disciplineCountMap = counts
-		}
-	}
+	contentsByTarget := s.groupContentsByTarget(contentRows, nickMap, boardNameMap, totalReviewers, singoRole, opinionsMap, reviewerNickMap)
 
-	// Batch-load opinions for all sub-contents (1 query), then re-key by sg_id
-	opinionsMap := make(map[string][]domain.Opinion)
-	if s.opinionRepo != nil && len(contentRows) > 0 {
-		keys := make([]struct {
-			Table  string
-			Parent int
-		}, 0, len(contentRows))
-		for _, cr := range contentRows {
-			keys = append(keys, struct {
-				Table  string
-				Parent int
-			}{cr.Table, cr.Parent})
-		}
-		if opMap, err := s.opinionRepo.GetByMultipleReportsGrouped(keys); err == nil {
-			// Re-key by sg_id: 같은 parent 아래 다른 댓글의 의견이 섞이지 않도록
-			for _, ops := range opMap {
-				for _, op := range ops {
-					key := fmt.Sprintf("%s:%d", op.Table, op.SGID)
-					opinionsMap[key] = append(opinionsMap[key], op)
-				}
-			}
-		}
-	}
-
-	// Batch-load reviewer nicknames for opinions
-	reviewerIDSet := make(map[string]bool)
-	for _, ops := range opinionsMap {
-		for _, op := range ops {
-			if op.ReviewerID != "" {
-				reviewerIDSet[op.ReviewerID] = true
-			}
-		}
-	}
-	reviewerNickMap := make(map[string]string)
-	if len(reviewerIDSet) > 0 {
-		// reviewer_id는 v2_users.id — v2_users 테이블에서 닉네임 조회
-		reviewerIDs := make([]string, 0, len(reviewerIDSet))
-		for id := range reviewerIDSet {
-			reviewerIDs = append(reviewerIDs, id)
-		}
-		if s.v2UserRepo != nil {
-			if nicks, err := s.v2UserRepo.FindNicksByIDs(reviewerIDs); err == nil && nicks != nil {
-				reviewerNickMap = nicks
-			}
-		}
-	}
-
-	// Group sub-contents by target_mb_id
-	contentsByTarget := make(map[string][]domain.AggregatedReportResponse)
-	for _, cr := range contentRows {
-		rowStatus := computeRowStatus(cr.AdminApproved, cr.Processed, cr.Hold, cr.OpinionCount, cr.ActionCount, cr.DismissCount)
-
-		var reviewerIDList []string
-		if cr.ReviewerIDs != "" {
-			reviewerIDList = strings.Split(cr.ReviewerIDs, ",")
-		}
-
-		// Determine type: 1=post, 2=comment
-		crType := int8(1)
-		if cr.SGID != cr.Parent {
-			crType = 2
-		}
-
-		resp := domain.AggregatedReportResponse{
-			Table:                       cr.Table,
-			SGID:                        cr.SGID,
-			Parent:                      cr.Parent,
-			Type:                        crType,
-			ReportCount:                 cr.ReportCount,
-			ReporterCount:               cr.ReporterCount,
-			TargetID:                    cr.TargetID,
-			TargetNickname:              nickMap[cr.TargetID],
-			TargetTitle:                 truncateUTF8(cr.TargetTitle, 50),
-			TargetContent:               truncateUTF8(cr.TargetContent, 100),
-			BoardSubject:                boardNameMap[cr.Table],
-			ReportTypes:                 cr.ReportTypes,
-			OpinionCount:                cr.OpinionCount,
-			ActionCount:                 cr.ActionCount,
-			DismissCount:                cr.DismissCount,
-			Status:                      rowStatus,
-			FirstReportTime:             cr.FirstReportTime,
-			LatestReportTime:            cr.LatestReportTime,
-			ReviewedCount:               len(reviewerIDList),
-			TotalReviewers:              totalReviewers,
-			AdminUsers:                  cr.AdminUsers,
-			ProcessedDatetime:           cr.ProcessedDatetime,
-			MonitoringDisciplineReasons: cr.MonitoringDisciplineReasons,
-			MonitoringDisciplineDays:    cr.MonitoringDisciplineDays,
-			MonitoringDisciplineType:    cr.MonitoringDisciplineType,
-			MonitoringDisciplineDetail:  cr.MonitoringDisciplineDetail,
-		}
-		if singoRole == "super_admin" {
-			resp.ReviewerIDs = reviewerIDList
-		}
-
-		// Attach opinions for this content (sg_id 기준 매핑)
-		opKey := fmt.Sprintf("%s:%d", cr.Table, cr.SGID)
-		if ops, ok := opinionsMap[opKey]; ok && len(ops) > 0 {
-			opResponses := make([]domain.OpinionResponse, 0, len(ops))
-			for _, op := range ops {
-				// 닉네임을 찾을 수 없는 경우 (탈퇴한 사용자 등) 기본값 설정
-				reviewerNick := reviewerNickMap[op.ReviewerID]
-				if reviewerNick == "" {
-					reviewerNick = "(알 수 없음)"
-				}
-				opResponses = append(opResponses, domain.OpinionResponse{
-					ReviewerID:   op.ReviewerID,
-					ReviewerNick: reviewerNick,
-					OpinionType:  op.OpinionType,
-					Reasons:      op.DisciplineReasons,
-					Days:         op.DisciplineDays,
-					Type:         op.DisciplineType,
-					Detail:       op.DisciplineDetail,
-					CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
-				})
-			}
-			resp.Opinions = opResponses
-		}
-
-		contentsByTarget[cr.TargetID] = append(contentsByTarget[cr.TargetID], resp)
-	}
-
-	// Build response
 	responses := make([]domain.TargetAggregatedResponse, len(rows))
 	for i, row := range rows {
 		responses[i] = domain.TargetAggregatedResponse{
@@ -653,6 +575,69 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 	return responses, total, nil
 }
 
+// collectTargetUserIDs extracts unique target user IDs from target aggregated rows.
+func (s *ReportService) collectTargetUserIDs(rows []domain.TargetAggregatedRow) []string {
+	userIDs := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.TargetID != "" {
+			userIDs = append(userIDs, r.TargetID)
+		}
+	}
+	return userIDs
+}
+
+// loadBoardNamesForContentRows batch-loads board names from content rows.
+func (s *ReportService) loadBoardNamesForContentRows(contentRows []repository.AggregatedReportRow) map[string]string {
+	boardIDs := make(map[string]bool)
+	for _, cr := range contentRows {
+		if cr.Table != "" {
+			boardIDs[cr.Table] = true
+		}
+	}
+	return s.loadBoardNames(boardIDs)
+}
+
+// loadDisciplineCounts batch-loads discipline counts for target user IDs.
+func (s *ReportService) loadDisciplineCounts(userIDs []string) map[string]int {
+	disciplineCountMap := make(map[string]int)
+	if s.disciplineRepo != nil && len(userIDs) > 0 {
+		if counts, err := s.disciplineRepo.CountByTargetMemberIDs(userIDs); err == nil {
+			disciplineCountMap = counts
+		}
+	}
+	return disciplineCountMap
+}
+
+// groupContentsByTarget groups content rows by target_mb_id, converting each to an AggregatedReportResponse.
+func (s *ReportService) groupContentsByTarget(
+	contentRows []repository.AggregatedReportRow,
+	nickMap, boardNameMap map[string]string,
+	totalReviewers int,
+	singoRole string,
+	opinionsMap map[string][]domain.Opinion,
+	reviewerNickMap map[string]string,
+) map[string][]domain.AggregatedReportResponse {
+	contentsByTarget := make(map[string][]domain.AggregatedReportResponse)
+	for _, cr := range contentRows {
+		resp := buildContentRowResponse(cr, nickMap, boardNameMap, totalReviewers, singoRole, opinionsMap, reviewerNickMap)
+		contentsByTarget[cr.TargetID] = append(contentsByTarget[cr.TargetID], resp)
+	}
+	return contentsByTarget
+}
+
+// buildContentRowResponse converts an AggregatedReportRow to an AggregatedReportResponse for target-grouped views.
+// ListByTarget uses empty requestingUserID ("") since it doesn't track per-user review status.
+func buildContentRowResponse(
+	cr repository.AggregatedReportRow,
+	nickMap, boardNameMap map[string]string,
+	totalReviewers int,
+	singoRole string,
+	opinionsMap map[string][]domain.Opinion,
+	reviewerNickMap map[string]string,
+) domain.AggregatedReportResponse {
+	return convertRowToResponse(cr, nickMap, boardNameMap, totalReviewers, singoRole, "", opinionsMap, reviewerNickMap)
+}
+
 // GetRecent retrieves recent reports
 func (s *ReportService) GetRecent(limit int) ([]domain.ReportListResponse, error) {
 	if limit < 1 || limit > 50 {
@@ -669,6 +654,7 @@ func (s *ReportService) GetRecent(limit int) ([]domain.ReportListResponse, error
 	for i, report := range reports {
 		responses[i] = domain.ReportListResponse{
 			ID:         report.ID,
+			SGID:       report.SGID,
 			Table:      report.Table,
 			Parent:     report.Parent,
 			ReporterID: report.ReporterID,
@@ -721,7 +707,10 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 	for id := range userIDs {
 		ids = append(ids, id)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByIDs(ids)
+	nickMap, nickErr := s.memberRepo.FindNicksByIDs(ids)
+	if nickErr != nil {
+		log.Printf("[WARN] 닉네임 조회 실패: %v", nickErr)
+	}
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
@@ -807,6 +796,14 @@ func (s *ReportService) GetDataEnhanced(table string, parent int, requestingUser
 				// 페이지네이션 없이 최근 10건만 조회
 				if history, _, err := s.disciplineRepo.FindByTargetMember(detail.Report.TargetID, 1, 10); err == nil {
 					enhanced.DisciplineHistory = history
+				}
+			}
+
+		case "content_history":
+			// 콘텐츠 수정/삭제 이력 조회
+			if s.contentHistoryRepo != nil {
+				if records, err := s.contentHistoryRepo.FindByTableAndID(table, actualParent); err == nil {
+					enhanced.ContentHistory = records
 				}
 			}
 		}
@@ -1794,6 +1791,7 @@ func (s *ReportService) GetMyReports(userID string, limit int) ([]domain.ReportL
 	for i, report := range reports {
 		responses[i] = domain.ReportListResponse{
 			ID:         report.ID,
+			SGID:       report.SGID,
 			Table:      report.Table,
 			Parent:     report.Parent,
 			ReporterID: report.ReporterID,
@@ -2175,7 +2173,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 
 	// 담당자 닉네임 마스킹 (admin 역할일 때)
 	// super_admin은 실제 닉네임 표시, admin은 마스킹
-	maskReviewerNick := singoRole != "super_admin"
+	maskReviewerNick := singoRole != singoRoleSuperAdmin
 	maskedCounter := 1
 	maskedNickMap := map[string]string{} // reviewerID → 마스킹된 닉네임 캐시
 
@@ -2254,8 +2252,9 @@ func (s *ReportService) GetStats() (map[string]int64, error) {
 	// 3. Redis에 저장 (5분 TTL)
 	if s.redisClient != nil {
 		ctx := context.Background()
-		jsonData, _ := json.Marshal(stats)
-		s.redisClient.Set(ctx, cacheKey, jsonData, cacheTTL)
+		if jsonData, err := json.Marshal(stats); err == nil {
+			s.redisClient.Set(ctx, cacheKey, jsonData, cacheTTL)
+		}
 	}
 
 	return stats, nil

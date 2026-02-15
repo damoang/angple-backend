@@ -90,7 +90,7 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 	}
 
 	// 3. Generate JWT tokens
-	accessToken, err := s.jwtManager.GenerateAccessToken(member.UserID, member.Nickname, member.Level)
+	accessToken, err := s.jwtManager.GenerateAccessToken(member.UserID, member.UserID, member.Nickname, member.Level)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (s *authService) RefreshToken(refreshToken string) (*TokenPair, error) {
 	}
 
 	// 3. Generate new access token
-	accessToken, err := s.jwtManager.GenerateAccessToken(member.UserID, member.Nickname, member.Level)
+	accessToken, err := s.jwtManager.GenerateAccessToken(member.UserID, member.UserID, member.Nickname, member.Level)
 	if err != nil {
 		return nil, err
 	}

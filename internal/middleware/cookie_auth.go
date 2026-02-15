@@ -129,7 +129,12 @@ func DamoangCookieAuth(damoangJWT *jwt.DamoangManager, _ *config.Config, opts ..
 				if len(parts) == 2 && parts[0] == "Bearer" {
 					claims, verifyErr := cfg.jwtManager.VerifyToken(parts[1])
 					if verifyErr == nil {
-						c.Set("damoang_user_id", claims.UserID)
+						// Username(mb_id)이 있으면 우선 사용, 없으면 UserID fallback
+						userIdentity := claims.UserID
+						if claims.Username != "" {
+							userIdentity = claims.Username
+						}
+						c.Set("damoang_user_id", userIdentity)
 						c.Set("damoang_user_name", claims.Nickname)
 						c.Set("damoang_user_level", claims.Level)
 						c.Set("damoang_authenticated", true)

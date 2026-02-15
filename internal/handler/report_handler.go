@@ -126,13 +126,14 @@ func (h *ReportHandler) ListReports(c *gin.Context) {
 	minOpinions, _ := strconv.Atoi(c.DefaultQuery("min_opinions", "0"))
 	groupBy := c.DefaultQuery("group_by", "content") // content (기본) or target
 	excludeReviewer := c.Query("exclude_reviewer")
+	search := c.Query("search")
 
 	// Get singo role for reviewer info visibility + requesting user ID
 	requestingUserID, singoRole := h.getSingoRole(c)
 
 	// group_by=target: 피신고자별 그룹핑
 	if groupBy == "target" {
-		reports, total, err := h.service.ListByTarget(status, page, limit, fromDate, toDate, sort, singoRole, excludeReviewer)
+		reports, total, err := h.service.ListByTarget(status, page, limit, fromDate, toDate, sort, singoRole, excludeReviewer, search)
 		if err != nil {
 			common.ErrorResponse(c, http.StatusInternalServerError, "신고 목록 조회 중 오류가 발생했습니다", err)
 			return
@@ -149,7 +150,7 @@ func (h *ReportHandler) ListReports(c *gin.Context) {
 	}
 
 	// Default: group_by=content (기존 방식)
-	reports, total, err := h.service.List(status, page, limit, fromDate, toDate, sort, singoRole, minOpinions, excludeReviewer, requestingUserID)
+	reports, total, err := h.service.List(status, page, limit, fromDate, toDate, sort, singoRole, minOpinions, excludeReviewer, requestingUserID, search)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "신고 목록 조회 중 오류가 발생했습니다", err)
 		return
@@ -243,6 +244,7 @@ func (h *ReportHandler) GetReportData(c *gin.Context) {
 				"process_result":     enhanced.ProcessResult,
 				"ai_evaluations":     enhanced.AIEvaluations,
 				"discipline_history": enhanced.DisciplineHistory,
+				"content_history":    enhanced.ContentHistory,
 			},
 		})
 	} else {
@@ -655,7 +657,24 @@ func (h *ReportHandler) GetStats(c *gin.Context) {
 }
 
 // GetAdjacentReport handles GET /api/v1/reports/adjacent
-// 인접 신고 조회 (이전/다음 네비게이션)
+// @Summary 인접 신고 조회 (이전/다음)
+// @Description 현재 신고 기준으로 이전 또는 다음 신고를 조회합니다 (관리자 전용)
+// @Tags reports
+// @Produce json
+// @Param sg_table query string true "신고 테이블"
+// @Param sg_id query int true "현재 신고 ID"
+// @Param direction query string true "방향 (prev 또는 next)"
+// @Param status query string false "상태 필터 (pending, monitoring, approved, dismissed)"
+// @Param sort query string false "정렬 기준 (newest, oldest)"
+// @Param from_date query string false "시작 날짜 (YYYY-MM-DD)"
+// @Param to_date query string false "종료 날짜 (YYYY-MM-DD)"
+// @Param search query string false "검색어"
+// @Success 200 {object} common.APIResponse
+// @Failure 401 {object} common.APIResponse
+// @Failure 403 {object} common.APIResponse
+// @Failure 404 {object} common.APIResponse
+// @Security BearerAuth
+// @Router /reports/adjacent [get]
 func (h *ReportHandler) GetAdjacentReport(c *gin.Context) {
 	if !middleware.IsDamoangAuthenticated(c) {
 		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
