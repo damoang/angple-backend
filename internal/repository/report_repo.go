@@ -366,70 +366,58 @@ type AggregatedReportRow struct {
 	MonitoringDisciplineDetail  string `gorm:"column:monitoring_discipline_detail"`
 }
 
-// ListAggregated retrieves paginated aggregated reports grouped by (table, parent)
-func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDate, toDate, sort string, minOpinions int, excludeReviewer, requestingUserID, search string) ([]AggregatedReportRow, int64, error) {
-	// Build HAVING clause using SELECT aliases (MySQL 8 supports aliases in HAVING)
-	havingClause := ""
+// queryFilters holds WHERE clause fragments and their corresponding arguments for building SQL queries.
+type queryFilters struct {
+	dateFilter    string
+	dateArgs      []interface{}
+	excludeFilter string
+	excludeArgs   []interface{}
+	searchFilter  string
+	searchArgs    []interface{}
+}
 
-	// Support comma-separated statuses (e.g., "approved,scheduled")
-	if strings.Contains(status, ",") {
-		statuses := strings.Split(status, ",")
-		var conditions []string
-		for _, st := range statuses {
-			st = strings.TrimSpace(st)
-			switch st {
-			case ReportStatusPending:
-				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
-			case ReportStatusMonitoring:
-				// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
-				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0))")
-			case "needs_review":
-				// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
-				conditions = append(conditions, "(action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
-			case "needs_final_approval":
-				// 최종승인 대기: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
-				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
-			case ReportStatusHold:
-				conditions = append(conditions, "(hold = 1 AND processed = 0)")
-			case ReportStatusApproved:
-				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
-			case "scheduled":
-				// 예약대기: 최고관리자가 승인함, 크론 처리 대기 중
-				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
-			case ReportStatusDismissed:
-				conditions = append(conditions, "(admin_approved = 0 AND processed = 1)")
-			}
-		}
-		if len(conditions) > 0 {
-			havingClause = "HAVING (" + strings.Join(conditions, " OR ") + ")"
-		}
-	} else {
-		// Single status
-		switch status {
-		case ReportStatusPending:
-			havingClause = "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
-		case ReportStatusMonitoring:
-			// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
-			havingClause = "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0)"
-		case "needs_review":
-			// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
-			havingClause = "HAVING action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
-		case "needs_final_approval":
-			// 최종승인 대기: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
-			havingClause = "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
-		case ReportStatusHold:
-			havingClause = "HAVING hold = 1 AND processed = 0"
-		case ReportStatusApproved:
-			havingClause = "HAVING admin_approved = 1 AND processed = 1"
-		case "scheduled":
-			// 예약대기: 최고관리자가 승인함, 크론 처리 대기 중
-			havingClause = "HAVING admin_approved = 1 AND processed = 0"
-		case ReportStatusDismissed:
-			havingClause = "HAVING admin_approved = 0 AND processed = 1"
-		}
+// buildQueryFilters constructs date, exclude-reviewer, and search WHERE clause fragments.
+func buildQueryFilters(fromDate, toDate, excludeReviewer, search string) queryFilters {
+	var f queryFilters
+
+	if fromDate != "" {
+		f.dateFilter += " AND s.sg_time >= ?"
+		f.dateArgs = append(f.dateArgs, fromDate+" 00:00:00")
+	}
+	if toDate != "" {
+		f.dateFilter += " AND s.sg_time <= ?"
+		f.dateArgs = append(f.dateArgs, toDate+" 23:59:59")
 	}
 
-	// min_opinions 필터: HAVING 절에 opinion_count >= N 추가
+	if excludeReviewer != "" {
+		f.excludeFilter = " AND NOT EXISTS (SELECT 1 FROM g5_na_singo_opinions exc WHERE exc.sg_table = s.sg_table AND exc.sg_id = s.sg_id AND exc.reviewer_id = ?)"
+		f.excludeArgs = append(f.excludeArgs, excludeReviewer)
+	}
+
+	if search != "" {
+		f.searchFilter = " AND (s.target_content LIKE ? OR s.target_title LIKE ? OR s.target_mb_id LIKE ?)"
+		f.searchArgs = append(f.searchArgs, "%"+search+"%", "%"+search+"%", "%"+search+"%")
+	}
+
+	return f
+}
+
+// allFilterArgs returns all filter arguments concatenated in order: date, exclude, search.
+func (f *queryFilters) allFilterArgs() []interface{} {
+	args := append(f.dateArgs, f.excludeArgs...)
+	return append(args, f.searchArgs...)
+}
+
+// allFilterSQL returns concatenated WHERE clause fragments.
+func (f *queryFilters) allFilterSQL() string {
+	return f.dateFilter + f.excludeFilter + f.searchFilter
+}
+
+// buildDetailedStatusHaving generates HAVING clause for status filtering with needs_review support.
+// This is used by ListAggregated where monitoring excludes needs_review/needs_final_approval.
+func buildDetailedStatusHaving(status string, minOpinions int) string {
+	havingClause := buildDetailedStatusHavingCore(status)
+
 	if minOpinions > 0 {
 		if havingClause == "" {
 			havingClause = fmt.Sprintf("HAVING opinion_count >= %d", minOpinions)
@@ -438,37 +426,106 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 		}
 	}
 
-	// Date filter
-	dateFilter := ""
-	dateArgs := []interface{}{}
-	if fromDate != "" {
-		dateFilter += " AND s.sg_time >= ?"
-		dateArgs = append(dateArgs, fromDate+" 00:00:00")
+	return havingClause
+}
+
+// detailedStatusCondition returns the SQL condition for a single detailed status value.
+func detailedStatusCondition(st string) string {
+	switch st {
+	case ReportStatusPending:
+		return "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)"
+	case ReportStatusMonitoring:
+		return "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0))"
+	case "needs_review":
+		return "(action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)"
+	case "needs_final_approval":
+		return "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)"
+	case ReportStatusHold:
+		return "(hold = 1 AND processed = 0)"
+	case ReportStatusApproved:
+		return "(admin_approved = 1 AND processed = 1)"
+	case "scheduled":
+		return "(admin_approved = 1 AND processed = 0)"
+	case ReportStatusDismissed:
+		return "(admin_approved = 0 AND processed = 1)"
+	default:
+		return ""
 	}
-	if toDate != "" {
-		dateFilter += " AND s.sg_time <= ?"
-		dateArgs = append(dateArgs, toDate+" 23:59:59")
+}
+
+// buildDetailedStatusHavingCore generates the HAVING clause without minOpinions.
+func buildDetailedStatusHavingCore(status string) string {
+	if strings.Contains(status, ",") {
+		statuses := strings.Split(status, ",")
+		var conditions []string
+		for _, st := range statuses {
+			if cond := detailedStatusCondition(strings.TrimSpace(st)); cond != "" {
+				conditions = append(conditions, cond)
+			}
+		}
+		if len(conditions) > 0 {
+			return "HAVING (" + strings.Join(conditions, " OR ") + ")"
+		}
+		return ""
 	}
 
-	// excludeReviewer filter: 이미 검토한 건 제외
-	excludeFilter := ""
-	excludeArgs := []interface{}{}
-	if excludeReviewer != "" {
-		excludeFilter = " AND NOT EXISTS (SELECT 1 FROM g5_na_singo_opinions exc WHERE exc.sg_table = s.sg_table AND exc.sg_id = s.sg_id AND exc.reviewer_id = ?)"
-		excludeArgs = append(excludeArgs, excludeReviewer)
+	if cond := detailedStatusCondition(status); cond != "" {
+		return "HAVING " + strings.TrimPrefix(strings.TrimSuffix(cond, ")"), "(")
+	}
+	return ""
+}
+
+// buildSortClause returns the ORDER BY clause for the given sort parameter.
+func buildSortClause(sort string) string {
+	switch sort {
+	case "oldest":
+		return "ORDER BY first_report_time ASC"
+	case "most_reported":
+		return "ORDER BY report_count DESC, latest_report_time DESC"
+	default:
+		return "ORDER BY latest_report_time DESC"
+	}
+}
+
+// buildMyReviewJoinClause constructs the LEFT JOIN and SELECT for reviewed_by_me.
+func buildMyReviewJoinClause(requestingUserID string) (joinSQL, selectSQL string, args []interface{}) {
+	if requestingUserID == "" {
+		return "", "0 as reviewed_by_me", nil
+	}
+	joinSQL = ` LEFT JOIN (
+			SELECT DISTINCT sg_table, sg_id
+			FROM g5_na_singo_opinions
+			WHERE reviewer_id = ?
+		) my_review ON s.sg_table = my_review.sg_table AND s.sg_id = my_review.sg_id`
+	selectSQL = "CASE WHEN my_review.sg_table IS NOT NULL THEN 1 ELSE 0 END as reviewed_by_me"
+	args = []interface{}{requestingUserID}
+	return
+}
+
+// ListAggregated retrieves paginated aggregated reports grouped by (table, parent)
+func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDate, toDate, sort string, minOpinions int, excludeReviewer, requestingUserID, search string) ([]AggregatedReportRow, int64, error) {
+	havingClause := buildDetailedStatusHaving(status, minOpinions)
+	filters := buildQueryFilters(fromDate, toDate, excludeReviewer, search)
+	orderClause := buildSortClause(sort)
+	myReviewJoin, myReviewSelect, myReviewArgs := buildMyReviewJoinClause(requestingUserID)
+
+	total, err := r.countAggregated(havingClause, &filters)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	// search filter: 콘텐츠/제목/닉네임 검색
-	searchFilter := ""
-	searchArgs := []interface{}{}
-	if search != "" {
-		searchFilter = " AND (s.target_content LIKE ? OR s.target_title LIKE ? OR s.target_mb_id LIKE ?)"
-		searchArgs = append(searchArgs, "%"+search+"%", "%"+search+"%", "%"+search+"%")
+	rows, err := r.queryAggregated(havingClause, orderClause, myReviewJoin, myReviewSelect, myReviewArgs, &filters, page, limit)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	// Count query — inner SELECT must include all columns referenced by HAVING
-	countArgs := append(dateArgs, excludeArgs...)
-	countArgs = append(countArgs, searchArgs...)
+	return rows, total, nil
+}
+
+// countAggregated executes the count query for ListAggregated.
+func (r *ReportRepository) countAggregated(havingClause string, f *queryFilters) (int64, error) {
+	filterSQL := f.allFilterSQL()
+	countArgs := f.allFilterArgs()
 	countSQL := `
 		SELECT COUNT(*) FROM (
 			SELECT s.sg_table, s.sg_parent,
@@ -490,42 +547,21 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
-			WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
+			WHERE 1=1` + filterSQL + `
 			GROUP BY s.sg_table, s.sg_id
 			` + havingClause + `
 		) t`
 
 	var total int64
 	if err := r.db.Raw(countSQL, countArgs...).Scan(&total).Error; err != nil {
-		return nil, 0, err
+		return 0, err
 	}
+	return total, nil
+}
 
-	// Dynamic ORDER BY based on sort parameter
-	orderClause := "ORDER BY latest_report_time DESC" // newest (default)
-	switch sort {
-	case "oldest":
-		orderClause = "ORDER BY first_report_time ASC"
-	case "most_reported":
-		orderClause = "ORDER BY report_count DESC, latest_report_time DESC"
-	case "most_recent":
-		orderClause = "ORDER BY latest_report_time DESC"
-	}
-
-	// reviewed_by_me: LEFT JOIN으로 현재 사용자 검토 여부 확인
-	myReviewJoin := ""
-	myReviewSelect := "0 as reviewed_by_me"
-	myReviewArgs := []interface{}{}
-	if requestingUserID != "" {
-		myReviewJoin = ` LEFT JOIN (
-			SELECT DISTINCT sg_table, sg_id
-			FROM g5_na_singo_opinions
-			WHERE reviewer_id = ?
-		) my_review ON s.sg_table = my_review.sg_table AND s.sg_id = my_review.sg_id`
-		myReviewSelect = "CASE WHEN my_review.sg_table IS NOT NULL THEN 1 ELSE 0 END as reviewed_by_me"
-		myReviewArgs = append(myReviewArgs, requestingUserID)
-	}
-
-	// Main query
+// queryAggregated executes the main query for ListAggregated.
+func (r *ReportRepository) queryAggregated(havingClause, orderClause, myReviewJoin, myReviewSelect string, myReviewArgs []interface{}, f *queryFilters, page, limit int) ([]AggregatedReportRow, error) {
+	filterSQL := f.allFilterSQL()
 	offset := (page - 1) * limit
 	mainSQL := `
 		SELECT
@@ -568,22 +604,21 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			WHERE su.mb_id IS NOT NULL
 			GROUP BY o.sg_table, o.sg_parent
 		) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent` + myReviewJoin + `
-		WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
+		WHERE 1=1` + filterSQL + `
 		GROUP BY s.sg_table, s.sg_id
 		` + havingClause + `
 		` + orderClause + `
 		LIMIT ? OFFSET ?`
 
-	mainArgs := append(myReviewArgs, dateArgs...)
-	mainArgs = append(mainArgs, excludeArgs...)
-	mainArgs = append(mainArgs, searchArgs...)
+	mainArgs := append(myReviewArgs, f.dateArgs...)
+	mainArgs = append(mainArgs, f.excludeArgs...)
+	mainArgs = append(mainArgs, f.searchArgs...)
 	mainArgs = append(mainArgs, limit, offset)
 	var rows []AggregatedReportRow
 	if err := r.db.Raw(mainSQL, mainArgs...).Scan(&rows).Error; err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-
-	return rows, total, nil
+	return rows, nil
 }
 
 // CountByStatusAggregated counts unique (table, parent) groups by status
@@ -631,40 +666,12 @@ func (r *ReportRepository) CountByStatusAggregated(status string) (int64, error)
 
 // ListAggregatedByTarget retrieves paginated reports grouped by target_mb_id (피신고자별 그룹핑)
 func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int, fromDate, toDate, sort, excludeReviewer, search string) ([]domain.TargetAggregatedRow, int64, error) {
-	// Build inner HAVING clause for status filter (same logic as ListAggregated but at content level)
 	statusHaving := r.buildStatusHaving(status)
+	filters := buildQueryFilters(fromDate, toDate, excludeReviewer, search)
+	orderClause := buildSortClause(sort)
 
-	// Date filter
-	dateFilter := ""
-	dateArgs := []interface{}{}
-	if fromDate != "" {
-		dateFilter += " AND s.sg_time >= ?"
-		dateArgs = append(dateArgs, fromDate+" 00:00:00")
-	}
-	if toDate != "" {
-		dateFilter += " AND s.sg_time <= ?"
-		dateArgs = append(dateArgs, toDate+" 23:59:59")
-	}
-
-	// excludeReviewer filter
-	excludeFilter := ""
-	excludeArgs := []interface{}{}
-	if excludeReviewer != "" {
-		excludeFilter = " AND NOT EXISTS (SELECT 1 FROM g5_na_singo_opinions exc WHERE exc.sg_table = s.sg_table AND exc.sg_id = s.sg_id AND exc.reviewer_id = ?)"
-		excludeArgs = append(excludeArgs, excludeReviewer)
-	}
-
-	// search filter
-	searchFilter := ""
-	searchArgs := []interface{}{}
-	if search != "" {
-		searchFilter = " AND (s.target_content LIKE ? OR s.target_title LIKE ? OR s.target_mb_id LIKE ?)"
-		searchArgs = append(searchArgs, "%"+search+"%", "%"+search+"%", "%"+search+"%")
-	}
-
-	// Count query — count distinct target_mb_id
-	countArgs := append(dateArgs, excludeArgs...)
-	countArgs = append(countArgs, searchArgs...)
+	filterSQL := filters.allFilterSQL()
+	countArgs := filters.allFilterArgs()
 	countSQL := `
 		SELECT COUNT(DISTINCT target_mb_id) FROM (
 			SELECT s.target_mb_id, s.sg_table, s.sg_parent,
@@ -686,7 +693,7 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
-			WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
+			WHERE 1=1` + filterSQL + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
 		) t`
@@ -696,18 +703,6 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 		return nil, 0, err
 	}
 
-	// Dynamic ORDER BY
-	orderClause := "ORDER BY latest_report_time DESC"
-	switch sort {
-	case "oldest":
-		orderClause = "ORDER BY first_report_time ASC"
-	case "most_reported":
-		orderClause = "ORDER BY report_count DESC, latest_report_time DESC"
-	case "most_recent":
-		orderClause = "ORDER BY latest_report_time DESC"
-	}
-
-	// Main query — aggregate at target_mb_id level from content-level filtered results
 	offset := (page - 1) * limit
 	mainSQL := `
 		SELECT
@@ -744,7 +739,7 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 				WHERE su.mb_id IS NOT NULL
 				GROUP BY o.sg_table, o.sg_parent
 			) op ON s.sg_table=op.sg_table AND s.sg_parent=op.sg_parent
-			WHERE 1=1` + dateFilter + excludeFilter + searchFilter + `
+			WHERE 1=1` + filterSQL + `
 			GROUP BY s.target_mb_id, s.sg_table, s.sg_parent
 			` + statusHaving + `
 		) filtered
@@ -752,8 +747,8 @@ func (r *ReportRepository) ListAggregatedByTarget(status string, page, limit int
 		` + orderClause + `
 		LIMIT ? OFFSET ?`
 
-	mainArgs := append(dateArgs, excludeArgs...)
-	mainArgs = append(mainArgs, searchArgs...)
+	mainArgs := append(filters.dateArgs, filters.excludeArgs...)
+	mainArgs = append(mainArgs, filters.searchArgs...)
 	mainArgs = append(mainArgs, limit, offset)
 	var rows []domain.TargetAggregatedRow
 	if err := r.db.Raw(mainSQL, mainArgs...).Scan(&rows).Error; err != nil {
