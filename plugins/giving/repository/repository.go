@@ -1,5 +1,3 @@
-//go:build ignore
-
 // 나눔 플러그인 Repository
 package repository
 
@@ -7,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"angple-backend/plugins/giving/domain"
+	"github.com/damoang/angple-backend/plugins/giving/domain"
 
 	"gorm.io/gorm"
 )

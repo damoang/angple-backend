@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/damoang/angple-backend/docs" // swagger docs
@@ -39,9 +40,11 @@ import (
 	_ "github.com/damoang/angple-backend/internal/plugins/embed"
 	_ "github.com/damoang/angple-backend/internal/plugins/imagelink"
 	_ "github.com/damoang/angple-backend/internal/plugins/marketplace"
+	_ "github.com/damoang/angple-backend/plugins/giving"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
@@ -300,13 +303,16 @@ func main() {
 		reactionService := service.NewReactionService(reactionRepo)
 		g5MemoRepo := repository.NewG5MemoRepository(db)
 		singoUserRepo := repository.NewSingoUserRepository(db)
+		singoSettingRepo := repository.NewSingoSettingRepository(db)
 		reportService := service.NewReportService(reportRepo, disciplineRepo, g5MemoRepo, memberRepo, boardRepo)
 		reportService.SetOpinionRepo(opinionRepo)
 		reportService.SetHistoryRepo(historyRepo)
 		reportService.SetSingoUserRepo(singoUserRepo)
+		reportService.SetSingoSettingRepo(singoSettingRepo)
 		reportService.SetAIEvaluationRepo(aiEvalRepo) // Phase 2: 통합 API용
 		contentHistoryRepo := repository.NewContentHistoryRepository(db)
 		reportService.SetContentHistoryRepo(contentHistoryRepo)
+		reportService.SetV2UserRepo(v2repo.NewUserRepository(db)) // Bearer 토큰 user_id → mb_id 변환용
 		if redisClient != nil {
 			reportService.SetRedisClient(redisClient) // Redis 캐싱 활성화
 		}
@@ -346,6 +352,7 @@ func main() {
 		reactionHandler = handler.NewReactionHandler(reactionService)
 		reportHandler = handler.NewReportHandler(reportService)
 		reportHandler.SetSingoUserRepo(singoUserRepo)
+		reportHandler.SetSingoSettingRepo(singoSettingRepo)
 		dajoongiHandler = handler.NewDajoongiHandler(dajoongiRepo)
 		promotionHandler = handler.NewPromotionHandler(promotionService)
 		bannerHandler = handler.NewBannerHandler(bannerService)
@@ -360,6 +367,38 @@ func main() {
 		disciplineHandler = handler.NewDisciplineHandler(disciplineService)
 		galleryHandler = handler.NewGalleryHandler(galleryService)
 		aiEvalHandler = handler.NewAIEvaluationHandler(aiEvalService)
+
+		// AI Evaluator (백엔드 자동 평가)
+		if os.Getenv("AI_EVAL_ENABLED") == "true" {
+			aiEvalModels := strings.Split(os.Getenv("AI_EVAL_MODELS"), ",")
+			// 빈 문자열 제거
+			var models []string
+			for _, m := range aiEvalModels {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					models = append(models, m)
+				}
+			}
+			if len(models) > 0 {
+				aiEvaluator := service.NewAIEvaluator(
+					aiEvalRepo,
+					reportRepo,
+					opinionRepo,
+					boardRepo,
+					memberRepo,
+					disciplineRepo,
+					postRepo,
+					commentRepo,
+					os.Getenv("AI_CLI_PROXY_URL"),
+					os.Getenv("AI_CLI_PROXY_KEY"),
+					models,
+				)
+				reportService.SetAIEvaluator(aiEvaluator)
+				aiEvalHandler.SetEvaluator(aiEvaluator)
+				pkglogger.Info("✅ AI Evaluator initialized (models: %v)", models)
+			}
+		}
+
 		adminHandler = handler.NewAdminHandler(adminMemberService)
 
 		// Tenant Management
@@ -528,11 +567,13 @@ func main() {
 
 	// 라우트 등록 (only if DB is connected)
 	if db != nil {
+		// v2 UserRepo (v1, v2 양쪽에서 사용)
+		v2UserRepo := v2repo.NewUserRepository(db)
+
 		// v1 레거시 API (그누보드 DB 기반) → /api/v1
-		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, adminHandler, v1UsageTracker, cfg, boardPermissionChecker)
+		routes.Setup(router, postHandler, commentHandler, authHandler, menuHandler, siteHandler, boardHandler, memberHandler, autosaveHandler, filterHandler, tokenHandler, memoHandler, reactionHandler, reportHandler, dajoongiHandler, promotionHandler, bannerHandler, jwtManager, damoangJWT, goodHandler, recommendedHandler, notificationHandler, memberProfileHandler, fileHandler, scrapHandler, blockHandler, messageHandler, wsHandler, disciplineHandler, galleryHandler, adminHandler, v1UsageTracker, cfg, boardPermissionChecker, v2UserRepo)
 
 		// v2 API (v2_ 테이블 기반) → /api/v2
-		v2UserRepo := v2repo.NewUserRepository(db)
 		v2PostRepo := v2repo.NewPostRepository(db)
 		v2CommentRepo := v2repo.NewCommentRepository(db)
 		v2BoardRepo := v2repo.NewBoardRepository(db)
@@ -668,17 +709,24 @@ func main() {
 			media.DELETE("/files", mediaHandler.DeleteFile)
 		}
 
+		// v2 Reports API (신고 시스템)
+		if reportHandler != nil {
+			v2routes.SetupReports(router, reportHandler, damoangJWT, cfg,
+				jwtManager, middleware.WithV2UserRepo(v2UserRepo))
+		}
+
 		// AI Evaluation API (v2 - 관리자 전용, damoang_jwt 쿠키 인증)
 		if aiEvalHandler != nil {
 			aiEvalRoutes := router.Group("/api/v2/reports/ai-evaluation",
-				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
+				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager, middleware.WithV2UserRepo(v2UserRepo)))
 			aiEvalRoutes.POST("", aiEvalHandler.SaveEvaluation)
 			aiEvalRoutes.GET("", aiEvalHandler.GetEvaluation)
 			aiEvalRoutes.GET("/list", aiEvalHandler.ListEvaluation)
+			aiEvalRoutes.POST("/evaluate", aiEvalHandler.RequestEvaluation)
 
 			// v1 호환 (singo 앱에서 사용)
 			aiEvalV1 := router.Group("/api/v1/ai-evaluations",
-				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager))
+				middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager, middleware.WithV2UserRepo(v2UserRepo)))
 			aiEvalV1.POST("", aiEvalHandler.SaveEvaluation)
 			aiEvalV1.GET("", aiEvalHandler.GetEvaluation)
 			aiEvalV1.GET("/list", aiEvalHandler.ListEvaluation)
@@ -871,9 +919,18 @@ func trimSpace(s string) string {
 
 // initDB MySQL 연결 초기화
 func initDB(cfg *config.Config) (*gorm.DB, error) {
-	dsn := cfg.Database.GetDSN()
+	// go-sql-driver/mysql Config로 DSN 생성 (Params로 세션 변수 설정)
+	mysqlCfg, err := mysqldriver.ParseDSN(cfg.Database.GetDSN())
+	if err != nil {
+		return nil, fmt.Errorf("DSN 파싱 실패: %w", err)
+	}
+	if mysqlCfg.Params == nil {
+		mysqlCfg.Params = map[string]string{}
+	}
+	// 모든 커넥션에 KST 타임존 적용 (RDS 기본은 UTC)
+	mysqlCfg.Params["time_zone"] = "'+09:00'"
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(mysql.Open(mysqlCfg.FormatDSN()), &gorm.Config{
 		// PrepareStmt: true, // Prepared statement 캐싱
 		Logger: gormlogger.Default.LogMode(gormlogger.Info), // SQL 디버깅
 	})

@@ -120,8 +120,8 @@ func (r *DisciplineRepository) CreateDisciplineLog(
 		Option:    "html1",
 		Subject:   subject,
 		Content:   string(contentJSON),
-		MemberID:  "police",  // PHP 호환: 시스템 계정
-		Name:      "police",  // PHP 호환: 시스템 계정
+		MemberID:  "police", // PHP 호환: 시스템 계정
+		Name:      "police", // PHP 호환: 시스템 계정
 		Password:  "",
 		DateTime:  now,
 		Last:      nowStr,
@@ -162,13 +162,12 @@ func (r *DisciplineRepository) FindByTargetMember(memberID string, page, limit i
 	var logs []domain.DisciplineLog
 	var total int64
 
-	// DisciplineLog content JSON에 penalty_mb_id가 포함된 것을 찾음 (Go 생성분)
-	// 또는 wr_subject가 "member_id(" 로 시작하는 것 (PHP 레거시 호환)
+	// DisciplineLog content JSON에 target_id 또는 penalty_mb_id가 포함된 것을 찾음
 	// wr_is_comment = 0 (본글만, 소명 댓글 제외)
 	query := r.db.Table(disciplineLogTable).
-		Where("wr_is_comment = 0 AND (wr_content LIKE ? OR wr_subject LIKE ?)",
-			fmt.Sprintf("%%\"penalty_mb_id\":\"%s\"%%", memberID),
-			fmt.Sprintf("%s(%%", memberID))
+		Where("wr_is_comment = 0 AND (wr_content LIKE ? OR wr_content LIKE ?)",
+			fmt.Sprintf("%%\"target_id\":\"%s\"%%", memberID),
+			fmt.Sprintf("%%\"penalty_mb_id\":\"%s\"%%", memberID))
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

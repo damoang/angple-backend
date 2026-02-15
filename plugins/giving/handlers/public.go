@@ -1,5 +1,3 @@
-//go:build ignore
-
 // 나눔 플러그인 공개 + 인증 핸들러
 package handlers
 
@@ -8,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"angple-backend/plugins/giving/service"
+	"github.com/damoang/angple-backend/plugins/giving/service"
 
 	"github.com/gin-gonic/gin"
 )

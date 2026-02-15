@@ -44,18 +44,18 @@ func Setup(
 	v1UsageTracker *middleware.APIUsageTracker,
 	cfg *config.Config,
 	boardPermissionChecker middleware.BoardPermissionChecker,
+	v2UserRepo middleware.V2UserFinder,
 ) {
 	// Deprecation 설정 (레거시 API용)
 	deprecationMW := middleware.Deprecation(middleware.DeprecationConfig{
-		SunsetDate:        "Sat, 01 Aug 2026 00:00:00 GMT",
-		MigrationGuideURL: "https://github.com/damoang/angple-backend/blob/main/docs/v1-to-v2-migration-guide.md",
+		SunsetDate: "Sat, 01 Aug 2026 00:00:00 GMT",
 	})
 
 	// v1→v2 리다이렉트 (Enabled=false: Link 헤더만 추가, true로 변경 시 301 리다이렉트)
 	v1Redirect := middleware.V1ToV2Redirect(middleware.V1RedirectConfig{Enabled: false})
 
 	// 레거시 API (그누보드 DB 기반) → /api/v1 으로 이동, Deprecation 헤더 + 사용량 추적 + v2 리다이렉트 힌트
-	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager), deprecationMW, v1Redirect, v1UsageTracker.Track())
+	api := router.Group("/api/v1", middleware.DamoangCookieAuth(damoangJWT, cfg, jwtManager, middleware.WithV2UserRepo(v2UserRepo)), deprecationMW, v1Redirect, v1UsageTracker.Track())
 
 	// Authentication endpoints (no auth required)
 	auth := api.Group("/auth")
@@ -228,19 +228,29 @@ func Setup(
 
 	// Reports (신고 API)
 	reports := api.Group("/reports")
-	reports.POST("", reportHandler.SubmitReport)           // 신고 접수 (일반 사용자)
-	reports.GET("/mine", reportHandler.MyReports)          // 내 신고 내역
-	reports.GET("", reportHandler.ListReports)             // 신고 목록 (관리자)
-	reports.GET("/data", reportHandler.GetReportData)      // 신고 데이터 조회 (관리자)
-	reports.GET("/recent", reportHandler.GetRecentReports) // 최근 신고 목록 (관리자)
-	reports.GET("/stats", reportHandler.GetStats)             // 신고 통계 (관리자)
-	reports.GET("/opinions", reportHandler.GetOpinions)       // 의견 목록 (관리자)
-	reports.GET("/adjacent", reportHandler.GetAdjacentReport) // 인접 신고 조회 (관리자)
-	reports.POST("/process", reportHandler.ProcessReport)           // 신고 처리 (관리자)
+	reports.POST("", reportHandler.SubmitReport)                     // 신고 접수 (일반 사용자)
+	reports.GET("/mine", reportHandler.MyReports)                    // 내 신고 내역
+	reports.GET("", reportHandler.ListReports)                       // 신고 목록 (관리자)
+	reports.GET("/data", reportHandler.GetReportData)                // 신고 데이터 조회 (관리자)
+	reports.GET("/recent", reportHandler.GetRecentReports)           // 최근 신고 목록 (관리자)
+	reports.GET("/stats", reportHandler.GetStats)                    // 신고 통계 (관리자)
+	reports.GET("/opinions", reportHandler.GetOpinions)              // 의견 목록 (관리자)
+	reports.POST("/process", reportHandler.ProcessReport)            // 신고 처리 (관리자)
 	reports.POST("/batch-process", reportHandler.BatchProcessReport) // 신고 일괄 처리 (관리자)
+	reports.GET("/adjacent", reportHandler.GetAdjacentReport)        // 인접 신고 조회 (이전/다음)
 
-	// Singo Users (검토자 목록)
-	api.GET("/singo-users", reportHandler.ListSingoUsers)
+	// Singo Users (검토자 관리)
+	singoUsers := api.Group("/singo-users")
+	singoUsers.GET("/me", reportHandler.GetSingoUserMe)
+	singoUsers.GET("", reportHandler.ListSingoUsers)
+	singoUsers.POST("", reportHandler.CreateSingoUser)
+	singoUsers.PUT("/:mbId", reportHandler.UpdateSingoUserRole)
+	singoUsers.DELETE("/:mbId", reportHandler.DeleteSingoUser)
+
+	// Singo Settings (자동 처리 설정)
+	singoSettings := api.Group("/singo-settings")
+	singoSettings.GET("", reportHandler.GetSingoSettings)
+	singoSettings.PUT("/:key", reportHandler.UpdateSingoSetting)
 
 	// Disciplines (이용제한 API)
 	disciplines := api.Group("/disciplines")

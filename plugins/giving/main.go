@@ -23,20 +23,20 @@ func init() {
 		},
 		Handlers: map[string]plugin.HandlerFunc{
 			// 공개 API
-			"ListGivings":    handlers.ListGivings,
-			"GetGivingDetail": handlers.GetGivingDetail,
+			"ListGivings":      handlers.ListGivings,
+			"GetGivingDetail":  handlers.GetGivingDetail,
 			"GetVisualization": handlers.GetVisualization,
-			"GetLiveStatus":   handlers.GetLiveStatus,
+			"GetLiveStatus":    handlers.GetLiveStatus,
 
 			// 인증 필요 API
 			"CreateBid": handlers.CreateBid,
 			"GetMyBids": handlers.GetMyBids,
 
 			// 관리자 API
-			"PauseGiving":    handlers.PauseGiving,
-			"ResumeGiving":   handlers.ResumeGiving,
+			"PauseGiving":     handlers.PauseGiving,
+			"ResumeGiving":    handlers.ResumeGiving,
 			"ForceStopGiving": handlers.ForceStopGiving,
-			"GetAdminStats":  handlers.GetAdminStats,
+			"GetAdminStats":   handlers.GetAdminStats,
 		},
 		HookHandlers: map[string]plugin.HookFunc{
 			"AddAdminMenu": hooks.AddAdminMenu,

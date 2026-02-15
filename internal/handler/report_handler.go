@@ -15,8 +15,9 @@ import (
 
 // ReportHandler handles report requests
 type ReportHandler struct {
-	service       *service.ReportService
-	singoUserRepo *repository.SingoUserRepository
+	service          *service.ReportService
+	singoUserRepo    *repository.SingoUserRepository
+	singoSettingRepo *repository.SingoSettingRepository
 }
 
 // NewReportHandler creates a new ReportHandler
@@ -27,6 +28,11 @@ func NewReportHandler(service *service.ReportService) *ReportHandler {
 // SetSingoUserRepo sets the singo user repository for role-based access control
 func (h *ReportHandler) SetSingoUserRepo(repo *repository.SingoUserRepository) {
 	h.singoUserRepo = repo
+}
+
+// SetSingoSettingRepo sets the singo setting repository
+func (h *ReportHandler) SetSingoSettingRepo(repo *repository.SingoSettingRepository) {
+	h.singoSettingRepo = repo
 }
 
 // findSingoUser — JWT user_id로 singo_users 조회 (mb_id → v2_users.id → g5_member.mb_no)
@@ -49,7 +55,7 @@ func (h *ReportHandler) findSingoUser(userID string) *domain.SingoUser {
 
 // getSingoRole returns the singo role for the authenticated user
 func (h *ReportHandler) getSingoRole(c *gin.Context) (string, string) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetV2UserID(c)
 	user := h.findSingoUser(userID)
 	if user == nil {
 		return userID, ""
@@ -58,20 +64,28 @@ func (h *ReportHandler) getSingoRole(c *gin.Context) (string, string) {
 }
 
 // requireSingoAccess checks if the user is registered in singo_users (any role)
-// Falls back to level >= 10 check if singoUserRepo is not configured
 func (h *ReportHandler) requireSingoAccess(c *gin.Context) bool {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetV2UserID(c)
 	if h.singoUserRepo != nil {
 		if h.findSingoUser(userID) != nil {
 			return true
 		}
 	}
-	// 레거시 폴백: singo_users 미설정 시 level 체크
-	if middleware.GetDamoangUserLevel(c) >= 10 {
-		return true
-	}
 	common.ErrorResponse(c, http.StatusForbidden, "관리자 권한이 필요합니다", nil)
 	return false
+}
+
+// requireSuperAdmin checks if the user has super_admin role
+func (h *ReportHandler) requireSuperAdmin(c *gin.Context) bool {
+	if !h.requireSingoAccess(c) {
+		return false
+	}
+	_, role := h.getSingoRole(c)
+	if role != "super_admin" {
+		common.ErrorResponse(c, http.StatusForbidden, "최고 관리자 권한이 필요합니다", nil)
+		return false
+	}
+	return true
 }
 
 // ListReports handles GET /api/v2/reports
@@ -319,13 +333,28 @@ func (h *ReportHandler) ProcessReport(c *gin.Context) {
 		return
 	}
 
-	adminID := middleware.GetDamoangUserID(c)
+	adminID := middleware.GetV2UserID(c)
 	clientIP := c.ClientIP()
 
 	var req domain.ReportActionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
 		return
+	}
+
+	// super_admin 전용 액션 체크
+	adminOnlyActions := map[string]bool{
+		"adminApprove":       true,
+		"adminDismiss":       true,
+		"adminHold":          true,
+		"revertToPending":    true,
+		"revertToMonitoring": true,
+	}
+	if adminOnlyActions[req.Action] {
+		if _, role := h.getSingoRole(c); role != "super_admin" {
+			common.ErrorResponse(c, http.StatusForbidden, "최고 관리자만 가능합니다", nil)
+			return
+		}
 	}
 
 	// Process report
@@ -471,13 +500,28 @@ func (h *ReportHandler) BatchProcessReport(c *gin.Context) {
 		return
 	}
 
-	adminID := middleware.GetDamoangUserID(c)
+	adminID := middleware.GetV2UserID(c)
 	clientIP := c.ClientIP()
 
 	var req domain.BatchReportActionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
 		return
+	}
+
+	// super_admin 전용 액션 체크
+	batchAdminOnlyActions := map[string]bool{
+		"adminApprove":       true,
+		"adminDismiss":       true,
+		"adminHold":          true,
+		"revertToPending":    true,
+		"revertToMonitoring": true,
+	}
+	if batchAdminOnlyActions[req.Action] {
+		if _, role := h.getSingoRole(c); role != "super_admin" {
+			common.ErrorResponse(c, http.StatusForbidden, "최고 관리자만 가능합니다", nil)
+			return
+		}
 	}
 
 	if len(req.Tables) != len(req.Parents) {
@@ -554,21 +598,25 @@ func (h *ReportHandler) ListSingoUsers(c *gin.Context) {
 		return
 	}
 
-	users, err := h.singoUserRepo.FindAll()
-	if err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "검토자 목록 조회 실패", err)
-		return
-	}
-
 	_, singoRole := h.getSingoRole(c)
 
 	if singoRole == "super_admin" {
-		// Return full user list
+		// Return full user list with nicknames
+		users, err := h.singoUserRepo.FindAllWithNick()
+		if err != nil {
+			common.ErrorResponse(c, http.StatusInternalServerError, "검토자 목록 조회 실패", err)
+			return
+		}
 		c.JSON(http.StatusOK, common.APIResponse{
 			Data: users,
 		})
 	} else {
 		// Return only count for non-super_admin
+		users, err := h.singoUserRepo.FindAll()
+		if err != nil {
+			common.ErrorResponse(c, http.StatusInternalServerError, "검토자 목록 조회 실패", err)
+			return
+		}
 		c.JSON(http.StatusOK, common.APIResponse{
 			Data: gin.H{
 				"total": len(users),
@@ -636,52 +684,276 @@ func (h *ReportHandler) GetAdjacentReport(c *gin.Context) {
 		return
 	}
 
-	// Parse query parameters
 	table := c.Query("sg_table")
 	sgID, err := strconv.Atoi(c.Query("sg_id"))
-	if err != nil || table == "" || sgID == 0 {
+	if err != nil || table == "" {
 		common.ErrorResponse(c, http.StatusBadRequest, "sg_table과 sg_id가 필요합니다", nil)
 		return
 	}
 
 	direction := c.Query("direction")
 	if direction != "prev" && direction != "next" {
-		common.ErrorResponse(c, http.StatusBadRequest, "direction은 'prev' 또는 'next'여야 합니다", nil)
+		common.ErrorResponse(c, http.StatusBadRequest, "direction은 prev 또는 next여야 합니다", nil)
 		return
 	}
 
-	// Optional filters
 	status := c.Query("status")
 	sort := c.DefaultQuery("sort", "newest")
 	fromDate := c.Query("from_date")
 	toDate := c.Query("to_date")
 	search := c.Query("search")
 
-	// Get adjacent report
-	adjacentReport, err := h.service.GetAdjacentReport(table, sgID, direction, status, sort, fromDate, toDate, search)
+	report, err := h.service.GetAdjacentReport(table, sgID, direction, status, sort, fromDate, toDate, search)
 	if err != nil {
-		if err.Error() == "인접 신고를 찾을 수 없습니다" || err.Error() == "현재 신고를 찾을 수 없습니다" {
-			c.JSON(http.StatusOK, common.APIResponse{
-				Data: gin.H{
-					"success": true,
-					"data":    nil,
-				},
-			})
-			return
-		}
-		common.ErrorResponse(c, http.StatusInternalServerError, "인접 신고 조회 중 오류가 발생했습니다", err)
+		// 인접 신고 없음 → null 반환
+		c.JSON(http.StatusOK, common.APIResponse{
+			Data: nil,
+		})
 		return
 	}
 
 	c.JSON(http.StatusOK, common.APIResponse{
 		Data: gin.H{
-			"success": true,
-			"data": gin.H{
-				"sg_id":  adjacentReport.SGID,
-				"table":  adjacentReport.Table,
-				"parent": adjacentReport.Parent,
-				"type":   adjacentReport.Type,
-			},
+			"sg_id":  report.SGID,
+			"table":  report.Table,
+			"parent": report.Parent,
+			"type":   report.Type,
 		},
+	})
+}
+
+// GetSingoUserMe handles GET /api/v1/singo-users/me
+// Returns the current user's singo role information
+func (h *ReportHandler) GetSingoUserMe(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+
+	userID := middleware.GetV2UserID(c)
+	user := h.findSingoUser(userID)
+	if user == nil {
+		common.ErrorResponse(c, http.StatusNotFound, "등록된 사용자가 아닙니다", nil)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: user,
+	})
+}
+
+// CreateSingoUser handles POST /api/v1/singo-users
+// Creates a new singo user (super_admin only)
+func (h *ReportHandler) CreateSingoUser(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+	if !h.requireSuperAdmin(c) {
+		return
+	}
+
+	var req struct {
+		MbID string `json:"mb_id" binding:"required"`
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "mb_id와 role이 필요합니다", err)
+		return
+	}
+
+	if req.Role != "admin" && req.Role != "super_admin" {
+		common.ErrorResponse(c, http.StatusBadRequest, "role은 admin 또는 super_admin이어야 합니다", nil)
+		return
+	}
+
+	// 중복 체크
+	existing, _ := h.singoUserRepo.FindByMbID(req.MbID)
+	if existing != nil {
+		common.ErrorResponse(c, http.StatusConflict, "이미 등록된 사용자입니다", nil)
+		return
+	}
+
+	if err := h.singoUserRepo.Create(req.MbID, req.Role); err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "사용자 추가 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, common.APIResponse{
+		Data: gin.H{"success": true, "message": "사용자가 추가되었습니다"},
+	})
+}
+
+// UpdateSingoUserRole handles PUT /api/v1/singo-users/:mbId
+// Updates a singo user's role (super_admin only)
+func (h *ReportHandler) UpdateSingoUserRole(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+	if !h.requireSuperAdmin(c) {
+		return
+	}
+
+	mbID := c.Param("mbId")
+	if mbID == "" {
+		common.ErrorResponse(c, http.StatusBadRequest, "mbId가 필요합니다", nil)
+		return
+	}
+
+	var req struct {
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "role이 필요합니다", err)
+		return
+	}
+
+	if req.Role != "admin" && req.Role != "super_admin" {
+		common.ErrorResponse(c, http.StatusBadRequest, "role은 admin 또는 super_admin이어야 합니다", nil)
+		return
+	}
+
+	// 존재 여부 체크
+	existing, _ := h.singoUserRepo.FindByMbID(mbID)
+	if existing == nil {
+		common.ErrorResponse(c, http.StatusNotFound, "등록되지 않은 사용자입니다", nil)
+		return
+	}
+
+	if err := h.singoUserRepo.UpdateRole(mbID, req.Role); err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "역할 변경 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: gin.H{"success": true, "message": "역할이 변경되었습니다"},
+	})
+}
+
+// DeleteSingoUser handles DELETE /api/v1/singo-users/:mbId
+// Deletes a singo user (super_admin only)
+func (h *ReportHandler) DeleteSingoUser(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+	if !h.requireSuperAdmin(c) {
+		return
+	}
+
+	mbID := c.Param("mbId")
+	if mbID == "" {
+		common.ErrorResponse(c, http.StatusBadRequest, "mbId가 필요합니다", nil)
+		return
+	}
+
+	// 자기 자신 삭제 방지
+	currentUserID := middleware.GetV2UserID(c)
+	currentUser := h.findSingoUser(currentUserID)
+	if currentUser != nil && currentUser.MbID == mbID {
+		common.ErrorResponse(c, http.StatusBadRequest, "자기 자신은 삭제할 수 없습니다", nil)
+		return
+	}
+
+	if err := h.singoUserRepo.DeleteByMbID(mbID); err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "사용자 삭제 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: gin.H{"success": true, "message": "사용자가 삭제되었습니다"},
+	})
+}
+
+// GetSingoSettings handles GET /api/v1/singo-settings
+// Returns all singo settings (any singo user)
+func (h *ReportHandler) GetSingoSettings(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+	if !h.requireSingoAccess(c) {
+		return
+	}
+
+	if h.singoSettingRepo == nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "설정 저장소 미설정", nil)
+		return
+	}
+
+	settings, err := h.singoSettingRepo.GetAll()
+	if err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "설정 조회 실패", err)
+		return
+	}
+
+	// key-value 맵으로 변환
+	result := make(map[string]string)
+	for _, s := range settings {
+		result[s.Key] = s.Value
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: result,
+	})
+}
+
+// UpdateSingoSetting handles PUT /api/v1/singo-settings/:key
+// Updates a singo setting (super_admin only)
+func (h *ReportHandler) UpdateSingoSetting(c *gin.Context) {
+	if !middleware.IsDamoangAuthenticated(c) {
+		common.ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", nil)
+		return
+	}
+	if !h.requireSuperAdmin(c) {
+		return
+	}
+
+	if h.singoSettingRepo == nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "설정 저장소 미설정", nil)
+		return
+	}
+
+	key := c.Param("key")
+	if key == "" {
+		common.ErrorResponse(c, http.StatusBadRequest, "설정 키가 필요합니다", nil)
+		return
+	}
+
+	// 허용된 키 목록
+	allowedKeys := map[string]bool{
+		"auto_approval_enabled":      true,
+		"auto_approval_min_opinions": true,
+		"auto_dismiss_enabled":       true,
+		"auto_dismiss_min_opinions":  true,
+	}
+	if !allowedKeys[key] {
+		common.ErrorResponse(c, http.StatusBadRequest, "허용되지 않은 설정 키입니다", nil)
+		return
+	}
+
+	var req struct {
+		Value string `json:"value" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "value가 필요합니다", err)
+		return
+	}
+
+	userID := middleware.GetV2UserID(c)
+	user := h.findSingoUser(userID)
+	updatedBy := userID
+	if user != nil {
+		updatedBy = user.MbID
+	}
+
+	if err := h.singoSettingRepo.Set(key, req.Value, updatedBy); err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "설정 저장 실패", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.APIResponse{
+		Data: gin.H{"success": true, "key": key, "value": req.Value},
 	})
 }

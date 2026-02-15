@@ -57,3 +57,14 @@ __pycache__/
 # Serena
 .serena/
 /api
+
+# Build binary
+/angple-backend
+/angple-api
+
+# Readonly env
+.env.readonly
+
+# Claude Code
+.claude/
+CLAUDE.md

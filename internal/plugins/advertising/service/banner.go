@@ -58,7 +58,18 @@ func (s *bannerService) GetBannersByDate(date time.Time) ([]*domain.CelebrationB
 
 	responses := make([]*domain.CelebrationBannerResponse, 0, len(banners))
 	for _, banner := range banners {
-		responses = append(responses, banner.ToResponse())
+		resp := banner.ToResponse()
+
+		// 멤버 정보 조회 (target_member_id가 있는 경우)
+		if banner.TargetMemberID != "" {
+			memberInfo, err := s.repo.FindMemberByID(banner.TargetMemberID)
+			if err == nil && memberInfo != nil {
+				resp.TargetMemberNick = memberInfo.Nickname
+				resp.TargetMemberPhoto = memberInfo.ImageURL
+			}
+		}
+
+		responses = append(responses, resp)
 	}
 
 	return responses, nil
@@ -190,7 +201,18 @@ func (s *bannerService) GetBanner(id uint64) (*domain.CelebrationBannerResponse,
 		return nil, err
 	}
 
-	return banner.ToResponse(), nil
+	resp := banner.ToResponse()
+
+	// 멤버 정보 조회 (target_member_id가 있는 경우)
+	if banner.TargetMemberID != "" {
+		memberInfo, err := s.repo.FindMemberByID(banner.TargetMemberID)
+		if err == nil && memberInfo != nil {
+			resp.TargetMemberNick = memberInfo.Nickname
+			resp.TargetMemberPhoto = memberInfo.ImageURL
+		}
+	}
+
+	return resp, nil
 }
 
 // ListBanners 모든 배너 조회
@@ -203,7 +225,18 @@ func (s *bannerService) ListBanners(activeOnly bool) ([]*domain.CelebrationBanne
 
 	responses := make([]*domain.CelebrationBannerResponse, 0, len(banners))
 	for _, banner := range banners {
-		responses = append(responses, banner.ToResponse())
+		resp := banner.ToResponse()
+
+		// 멤버 정보 조회 (target_member_id가 있는 경우)
+		if banner.TargetMemberID != "" {
+			memberInfo, err := s.repo.FindMemberByID(banner.TargetMemberID)
+			if err == nil && memberInfo != nil {
+				resp.TargetMemberNick = memberInfo.Nickname
+				resp.TargetMemberPhoto = memberInfo.ImageURL
+			}
+		}
+
+		responses = append(responses, resp)
 	}
 
 	return responses, nil

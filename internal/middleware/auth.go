@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -19,7 +18,7 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			// Parse Bearer token
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
+				common.ErrorResponse(c, 401, "로그인이 필요합니다", nil)
 				c.Abort()
 				return
 			}
@@ -29,11 +28,7 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			// Verify token
 			claims, err := jwtManager.VerifyToken(tokenString)
 			if err != nil {
-				if errors.Is(err, jwt.ErrExpiredToken) {
-					common.ErrorResponse(c, 401, "Token expired", err)
-				} else {
-					common.ErrorResponse(c, 401, "Invalid token", err)
-				}
+				common.ErrorResponse(c, 401, "로그인이 필요합니다", nil)
 				c.Abort()
 				return
 			}
@@ -42,6 +37,9 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("userID", claims.UserID)
 			c.Set("nickname", claims.Nickname)
 			c.Set("level", claims.Level)
+
+			// Bearer 토큰의 UserID는 이미 v2_users.id
+			c.Set("v2_user_id", claims.UserID)
 
 			c.Next()
 			return
@@ -54,12 +52,14 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("nickname", GetDamoangUserName(c))
 			c.Set("level", GetDamoangUserLevel(c))
 
+			// v2_user_id는 DamoangCookieAuth에서 이미 설정됨 (있는 경우)
+
 			c.Next()
 			return
 		}
 
 		// 3. No valid authentication found
-		common.ErrorResponse(c, 401, "Missing authorization header", nil)
+		common.ErrorResponse(c, 401, "로그인이 필요합니다", nil)
 		c.Abort()
 	}
 }
@@ -73,7 +73,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		if authHeader != "" {
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				common.ErrorResponse(c, 401, "Invalid authorization header format", nil)
+				common.ErrorResponse(c, 401, "로그인이 필요합니다", nil)
 				c.Abort()
 				return
 			}
@@ -81,11 +81,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			tokenString := parts[1]
 			claims, err := jwtManager.VerifyToken(tokenString)
 			if err != nil {
-				if errors.Is(err, jwt.ErrExpiredToken) {
-					common.ErrorResponse(c, 401, "Token expired", err)
-				} else {
-					common.ErrorResponse(c, 401, "Invalid token", err)
-				}
+				common.ErrorResponse(c, 401, "로그인이 필요합니다", nil)
 				c.Abort()
 				return
 			}
@@ -93,6 +89,9 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("userID", claims.UserID)
 			c.Set("nickname", claims.Nickname)
 			c.Set("level", claims.Level)
+
+			// Bearer 토큰의 UserID는 이미 v2_users.id
+			c.Set("v2_user_id", claims.UserID)
 
 			c.Next()
 			return
@@ -103,6 +102,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			c.Set("userID", GetDamoangUserID(c))
 			c.Set("nickname", GetDamoangUserName(c))
 			c.Set("level", GetDamoangUserLevel(c))
+			// v2_user_id는 DamoangCookieAuth에서 이미 설정됨 (있는 경우)
 		}
 
 		// Continue even without authentication (optional)

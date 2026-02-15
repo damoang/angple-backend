@@ -58,3 +58,49 @@ func (r *SingoUserRepository) FindAll() ([]domain.SingoUser, error) {
 	err := r.db.Find(&users).Error
 	return users, err
 }
+
+// FindAllWithNick — 모든 Singo 사용자 + 닉네임 조회
+func (r *SingoUserRepository) FindAllWithNick() ([]domain.SingoUserWithNick, error) {
+	var users []domain.SingoUserWithNick
+	err := r.db.Table("singo_users").
+		Select("singo_users.id, singo_users.mb_id, singo_users.role, COALESCE(g5_member.mb_nick, '') as mb_nick").
+		Joins("LEFT JOIN g5_member ON singo_users.mb_id COLLATE utf8mb4_unicode_ci = g5_member.mb_id").
+		Order("singo_users.id ASC").
+		Find(&users).Error
+	return users, err
+}
+
+// FindByMbIDWithNick — mb_id로 Singo 사용자 + 닉네임 조회
+func (r *SingoUserRepository) FindByMbIDWithNick(mbID string) (*domain.SingoUserWithNick, error) {
+	var user domain.SingoUserWithNick
+	err := r.db.Table("singo_users").
+		Select("singo_users.id, singo_users.mb_id, singo_users.role, COALESCE(g5_member.mb_nick, '') as mb_nick").
+		Joins("LEFT JOIN g5_member ON singo_users.mb_id COLLATE utf8mb4_unicode_ci = g5_member.mb_id").
+		Where("singo_users.mb_id = ?", mbID).
+		First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// Create — Singo 사용자 추가
+func (r *SingoUserRepository) Create(mbID, role string) error {
+	user := domain.SingoUser{
+		MbID: mbID,
+		Role: role,
+	}
+	return r.db.Create(&user).Error
+}
+
+// UpdateRole — Singo 사용자 역할 변경
+func (r *SingoUserRepository) UpdateRole(mbID, role string) error {
+	return r.db.Model(&domain.SingoUser{}).
+		Where("mb_id = ?", mbID).
+		Update("role", role).Error
+}
+
+// DeleteByMbID — Singo 사용자 삭제
+func (r *SingoUserRepository) DeleteByMbID(mbID string) error {
+	return r.db.Where("mb_id = ?", mbID).Delete(&domain.SingoUser{}).Error
+}
