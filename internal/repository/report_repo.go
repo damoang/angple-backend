@@ -16,11 +16,14 @@ var (
 
 // Report status constants
 const (
-	ReportStatusPending    = "pending"
-	ReportStatusMonitoring = "monitoring"
-	ReportStatusHold       = "hold"
-	ReportStatusApproved   = "approved"
-	ReportStatusDismissed  = "dismissed"
+	ReportStatusPending            = "pending"
+	ReportStatusMonitoring         = "monitoring"
+	ReportStatusHold               = "hold"
+	ReportStatusApproved           = "approved"
+	ReportStatusDismissed          = "dismissed"
+	ReportStatusNeedsReview        = "needs_review"
+	ReportStatusNeedsFinalApproval = "needs_final_approval"
+	ReportStatusScheduled          = "scheduled"
 )
 
 // ReportRepository handles report data operations
@@ -436,15 +439,15 @@ func detailedStatusCondition(st string) string {
 		return "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)"
 	case ReportStatusMonitoring:
 		return "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0))"
-	case "needs_review":
+	case ReportStatusNeedsReview:
 		return "(action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)"
-	case "needs_final_approval":
+	case ReportStatusNeedsFinalApproval:
 		return "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)"
 	case ReportStatusHold:
 		return "(hold = 1 AND processed = 0)"
 	case ReportStatusApproved:
 		return "(admin_approved = 1 AND processed = 1)"
-	case "scheduled":
+	case ReportStatusScheduled:
 		return "(admin_approved = 1 AND processed = 0)"
 	case ReportStatusDismissed:
 		return "(admin_approved = 0 AND processed = 1)"
@@ -842,13 +845,13 @@ func (r *ReportRepository) buildStatusHaving(status string) string {
 				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
 			case ReportStatusMonitoring:
 				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
-			case "needs_final_approval":
+			case ReportStatusNeedsFinalApproval:
 				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
 			case ReportStatusHold:
 				conditions = append(conditions, "(hold = 1 AND processed = 0)")
 			case ReportStatusApproved:
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
-			case "scheduled":
+			case ReportStatusScheduled:
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
 			case ReportStatusDismissed:
 				conditions = append(conditions, "(admin_approved = 0 AND processed = 1)")
@@ -866,13 +869,13 @@ func (r *ReportRepository) buildStatusHaving(status string) string {
 		return "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
 	case ReportStatusMonitoring:
 		return "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
-	case "needs_final_approval":
+	case ReportStatusNeedsFinalApproval:
 		return "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
 	case ReportStatusHold:
 		return "HAVING hold = 1 AND processed = 0"
 	case ReportStatusApproved:
 		return "HAVING admin_approved = 1 AND processed = 1"
-	case "scheduled":
+	case ReportStatusScheduled:
 		return "HAVING admin_approved = 1 AND processed = 0"
 	case ReportStatusDismissed:
 		return "HAVING admin_approved = 0 AND processed = 1"
@@ -989,14 +992,14 @@ func (r *ReportRepository) GetAllStatusCounts() (map[string]int64, error) {
 	}
 
 	stats := map[string]int64{
-		"pending":              result.PendingCount,
-		"monitoring":           result.MonitoringCount,
-		"hold":                 result.HoldCount,
-		"approved":             result.ApprovedCount,
-		"dismissed":            result.DismissedCount,
-		"needs_review":         result.NeedsReviewCount,
-		"needs_final_approval": result.NeedsFinalApprovalCount,
-		"total":                result.TotalCount,
+		ReportStatusPending:            result.PendingCount,
+		ReportStatusMonitoring:         result.MonitoringCount,
+		ReportStatusHold:               result.HoldCount,
+		ReportStatusApproved:           result.ApprovedCount,
+		ReportStatusDismissed:          result.DismissedCount,
+		ReportStatusNeedsReview:        result.NeedsReviewCount,
+		ReportStatusNeedsFinalApproval: result.NeedsFinalApprovalCount,
+		"total":                        result.TotalCount,
 	}
 	return stats, nil
 }

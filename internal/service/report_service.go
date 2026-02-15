@@ -39,6 +39,8 @@ const (
 	opinionTypeDismiss = "dismiss"
 	opinionTypeAction  = "action"
 
+	singoRoleSuperAdmin = "super_admin"
+
 	// Phase 6-1: 자동 잠금 설정 (1달 후 PHP 제거 시 활성화 예정)
 	autoLockEnabled   = false // 지금은 false, 1달 후 true로 변경
 	autoLockThreshold = 3     // N명 이상 신고 시 잠금
@@ -279,7 +281,11 @@ func (s *ReportService) cacheListResult(cacheKey string, responses []domain.Aggr
 		Responses: responses,
 		Total:     total,
 	}
-	jsonData, _ := json.Marshal(cacheData)
+	jsonData, err := json.Marshal(cacheData)
+	if err != nil {
+		log.Printf("[WARN] 캐시 직렬화 실패: %v", err)
+		return
+	}
 	s.redisClient.Set(ctx, cacheKey, jsonData, cacheTTL)
 }
 
@@ -303,7 +309,11 @@ func (s *ReportService) loadNicknamesAndBoardsForRows(rows []repository.Aggregat
 	for id := range userIDs {
 		ids = append(ids, id)
 	}
-	nickMap, _ = s.memberRepo.FindNicksByIDs(ids)
+	var err error
+	nickMap, err = s.memberRepo.FindNicksByIDs(ids)
+	if err != nil {
+		log.Printf("[WARN] 닉네임 조회 실패: %v", err)
+	}
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
@@ -378,8 +388,9 @@ func (s *ReportService) loadReviewerNicknames(opinionsMap map[string][]domain.Op
 	return reviewerNickMap
 }
 
-// buildAggregatedRowResponse converts a single AggregatedReportRow to an AggregatedReportResponse.
-func (s *ReportService) buildAggregatedRowResponse(
+// convertRowToResponse is the shared helper that converts an AggregatedReportRow to an AggregatedReportResponse.
+// It handles the common fields; callers set extra fields (e.g. ReporterID, ReviewedByMe) as needed.
+func convertRowToResponse(
 	row repository.AggregatedReportRow,
 	nickMap, boardNameMap map[string]string,
 	totalReviewers int,
@@ -394,7 +405,7 @@ func (s *ReportService) buildAggregatedRowResponse(
 		reviewerIDList = strings.Split(row.ReviewerIDs, ",")
 	}
 
-	reportType := getContentType(row.Parent)
+	reportType := int8(1)
 	if row.SGID != row.Parent {
 		reportType = 2
 	}
@@ -406,8 +417,6 @@ func (s *ReportService) buildAggregatedRowResponse(
 		Type:                        reportType,
 		ReportCount:                 row.ReportCount,
 		ReporterCount:               row.ReporterCount,
-		ReporterID:                  row.ReporterID,
-		ReporterNickname:            nickMap[row.ReporterID],
 		TargetID:                    row.TargetID,
 		TargetNickname:              nickMap[row.TargetID],
 		TargetTitle:                 truncateUTF8(row.TargetTitle, 50),
@@ -422,7 +431,6 @@ func (s *ReportService) buildAggregatedRowResponse(
 		LatestReportTime:            row.LatestReportTime,
 		ReviewedCount:               len(reviewerIDList),
 		TotalReviewers:              totalReviewers,
-		ReviewedByMe:                row.ReviewedByMe == 1,
 		AdminUsers:                  row.AdminUsers,
 		ProcessedDatetime:           row.ProcessedDatetime,
 		MonitoringDisciplineReasons: row.MonitoringDisciplineReasons,
@@ -431,7 +439,7 @@ func (s *ReportService) buildAggregatedRowResponse(
 		MonitoringDisciplineDetail:  row.MonitoringDisciplineDetail,
 	}
 
-	if singoRole == "super_admin" {
+	if singoRole == singoRoleSuperAdmin {
 		resp.ReviewerIDs = reviewerIDList
 	}
 
@@ -440,6 +448,22 @@ func (s *ReportService) buildAggregatedRowResponse(
 		resp.Opinions = buildMaskedOpinionResponses(ops, reviewerNickMap, singoRole, requestingUserID)
 	}
 
+	return resp
+}
+
+// buildAggregatedRowResponse converts a single AggregatedReportRow to an AggregatedReportResponse.
+func (s *ReportService) buildAggregatedRowResponse(
+	row repository.AggregatedReportRow,
+	nickMap, boardNameMap map[string]string,
+	totalReviewers int,
+	singoRole, requestingUserID string,
+	opinionsMap map[string][]domain.Opinion,
+	reviewerNickMap map[string]string,
+) domain.AggregatedReportResponse {
+	resp := convertRowToResponse(row, nickMap, boardNameMap, totalReviewers, singoRole, requestingUserID, opinionsMap, reviewerNickMap)
+	resp.ReporterID = row.ReporterID
+	resp.ReporterNickname = nickMap[row.ReporterID]
+	resp.ReviewedByMe = row.ReviewedByMe == 1
 	return resp
 }
 
@@ -467,7 +491,7 @@ func buildMaskedOpinionResponses(ops []domain.Opinion, reviewerNickMap map[strin
 			CreatedAt:    op.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 
-		if singoRole != "super_admin" {
+		if singoRole != singoRoleSuperAdmin {
 			applyReviewerMasking(&opResp, isMine, op.ReviewerID, anonMap, &anonCounter)
 		}
 
@@ -509,7 +533,10 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 	}
 
 	userIDs := s.collectTargetUserIDs(rows)
-	nickMap, _ := s.memberRepo.FindNicksByIDs(userIDs)
+	nickMap, nickErr := s.memberRepo.FindNicksByIDs(userIDs)
+	if nickErr != nil {
+		log.Printf("[WARN] 닉네임 조회 실패: %v", nickErr)
+	}
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
@@ -624,6 +651,7 @@ func (s *ReportService) groupContentsByTarget(
 }
 
 // buildContentRowResponse converts an AggregatedReportRow to an AggregatedReportResponse for target-grouped views.
+// ListByTarget uses empty requestingUserID ("") since it doesn't track per-user review status.
 func buildContentRowResponse(
 	cr repository.AggregatedReportRow,
 	nickMap, boardNameMap map[string]string,
@@ -632,58 +660,7 @@ func buildContentRowResponse(
 	opinionsMap map[string][]domain.Opinion,
 	reviewerNickMap map[string]string,
 ) domain.AggregatedReportResponse {
-	rowStatus := computeRowStatus(cr.AdminApproved, cr.Processed, cr.Hold, cr.OpinionCount)
-
-	var reviewerIDList []string
-	if cr.ReviewerIDs != "" {
-		reviewerIDList = strings.Split(cr.ReviewerIDs, ",")
-	}
-
-	crType := int8(1)
-	if cr.SGID != cr.Parent {
-		crType = 2
-	}
-
-	resp := domain.AggregatedReportResponse{
-		Table:                       cr.Table,
-		SGID:                        cr.SGID,
-		Parent:                      cr.Parent,
-		Type:                        crType,
-		ReportCount:                 cr.ReportCount,
-		ReporterCount:               cr.ReporterCount,
-		TargetID:                    cr.TargetID,
-		TargetNickname:              nickMap[cr.TargetID],
-		TargetTitle:                 truncateUTF8(cr.TargetTitle, 50),
-		TargetContent:               truncateUTF8(cr.TargetContent, 100),
-		BoardSubject:                boardNameMap[cr.Table],
-		ReportTypes:                 cr.ReportTypes,
-		OpinionCount:                cr.OpinionCount,
-		ActionCount:                 cr.ActionCount,
-		DismissCount:                cr.DismissCount,
-		Status:                      rowStatus,
-		FirstReportTime:             cr.FirstReportTime,
-		LatestReportTime:            cr.LatestReportTime,
-		ReviewedCount:               len(reviewerIDList),
-		TotalReviewers:              totalReviewers,
-		AdminUsers:                  cr.AdminUsers,
-		ProcessedDatetime:           cr.ProcessedDatetime,
-		MonitoringDisciplineReasons: cr.MonitoringDisciplineReasons,
-		MonitoringDisciplineDays:    cr.MonitoringDisciplineDays,
-		MonitoringDisciplineType:    cr.MonitoringDisciplineType,
-		MonitoringDisciplineDetail:  cr.MonitoringDisciplineDetail,
-	}
-	if singoRole == "super_admin" {
-		resp.ReviewerIDs = reviewerIDList
-	}
-
-	// Attach opinions for this content (sg_id 기준 매핑)
-	// ListByTarget uses empty requestingUserID ("") since it doesn't track per-user review status
-	opKey := fmt.Sprintf("%s:%d", cr.Table, cr.SGID)
-	if ops, ok := opinionsMap[opKey]; ok && len(ops) > 0 {
-		resp.Opinions = buildMaskedOpinionResponses(ops, reviewerNickMap, singoRole, "")
-	}
-
-	return resp
+	return convertRowToResponse(cr, nickMap, boardNameMap, totalReviewers, singoRole, "", opinionsMap, reviewerNickMap)
 }
 
 // GetRecent retrieves recent reports
@@ -755,7 +732,10 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 	for id := range userIDs {
 		ids = append(ids, id)
 	}
-	nickMap, _ := s.memberRepo.FindNicksByIDs(ids)
+	nickMap, nickErr := s.memberRepo.FindNicksByIDs(ids)
+	if nickErr != nil {
+		log.Printf("[WARN] 닉네임 조회 실패: %v", nickErr)
+	}
 	if nickMap == nil {
 		nickMap = map[string]string{}
 	}
@@ -2172,7 +2152,7 @@ func (s *ReportService) GetOpinions(table string, sgID, parent int, requestingUs
 
 	// 담당자 닉네임 마스킹 (admin 역할일 때)
 	// super_admin은 실제 닉네임 표시, admin은 마스킹
-	maskReviewerNick := singoRole != "super_admin"
+	maskReviewerNick := singoRole != singoRoleSuperAdmin
 	maskedCounter := 1
 	maskedNickMap := map[string]string{} // reviewerID → 마스킹된 닉네임 캐시
 
@@ -2251,8 +2231,9 @@ func (s *ReportService) GetStats() (map[string]int64, error) {
 	// 3. Redis에 저장 (5분 TTL)
 	if s.redisClient != nil {
 		ctx := context.Background()
-		jsonData, _ := json.Marshal(stats)
-		s.redisClient.Set(ctx, cacheKey, jsonData, cacheTTL)
+		if jsonData, err := json.Marshal(stats); err == nil {
+			s.redisClient.Set(ctx, cacheKey, jsonData, cacheTTL)
+		}
 	}
 
 	return stats, nil
