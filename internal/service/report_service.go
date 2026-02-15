@@ -742,8 +742,15 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 		}
 	}
 
-	// Compute aggregate status
-	status := computeAggregateStatus(allReports)
+	// 현재 sg_id에 해당하는 리포트만 필터링하여 상태 계산
+	// (같은 parent 아래 다른 sg_id의 처리 상태가 현재 신고에 영향주지 않도록)
+	sgIdReports := make([]domain.Report, 0)
+	for _, r := range allReports {
+		if r.SGID == primaryReport.SGID {
+			sgIdReports = append(sgIdReports, r)
+		}
+	}
+	status := computeAggregateStatus(sgIdReports)
 
 	// Build primary report response
 	primary := toReportListResponse(primaryReport, nickMap, boardNameMap)
@@ -761,7 +768,7 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 	// Build process result for processed reports
 	var processResult *domain.ProcessResultResponse
 	if status == ReportStatusApproved || status == ReportStatusDismissed || status == ReportStatusScheduled {
-		processResult = s.buildProcessResult(primaryReport, allReports)
+		processResult = s.buildProcessResult(primaryReport, sgIdReports)
 	}
 
 	return &domain.ReportDetailResponse{
