@@ -898,7 +898,7 @@ func (r *ReportRepository) ClearAdminDisciplineFields(id int) error {
 			"admin_discipline_days":    0,
 			"admin_discipline_type":    "",
 			"admin_discipline_detail":  "",
-			"processed":               false,
+			"processed":                false,
 			"admin_approved":           false,
 			"processed_datetime":       nil,
 			"discipline_log_id":        nil,
