@@ -16,6 +16,7 @@ import (
 	"github.com/damoang/angple-backend/internal/repository"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 // truncateUTF8 truncates string to maxLen runes, appending "…" if truncated
@@ -29,12 +30,14 @@ func truncateUTF8(s string, maxLen int) string {
 }
 
 const (
-	ReportStatusPending    = "pending"
-	ReportStatusMonitoring = "monitoring"
-	ReportStatusHold       = "hold"
-	ReportStatusScheduled  = "scheduled"
-	ReportStatusApproved   = "approved"
-	ReportStatusDismissed  = "dismissed"
+	ReportStatusPending            = "pending"
+	ReportStatusMonitoring         = "monitoring"
+	ReportStatusHold               = "hold"
+	ReportStatusScheduled          = "scheduled"
+	ReportStatusApproved           = "approved"
+	ReportStatusDismissed          = "dismissed"
+	ReportStatusNeedsReview        = "needs_review"
+	ReportStatusNeedsFinalApproval = "needs_final_approval"
 
 	opinionTypeDismiss = "dismiss"
 	opinionTypeAction  = "action"
@@ -398,7 +401,7 @@ func convertRowToResponse(
 	opinionsMap map[string][]domain.Opinion,
 	reviewerNickMap map[string]string,
 ) domain.AggregatedReportResponse {
-	rowStatus := computeRowStatus(row.AdminApproved, row.Processed, row.Hold, row.OpinionCount)
+	rowStatus := computeRowStatus(row.AdminApproved, row.Processed, row.Hold, row.OpinionCount, row.ActionCount, row.DismissCount)
 
 	var reviewerIDList []string
 	if row.ReviewerIDs != "" {
@@ -748,8 +751,15 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 		}
 	}
 
-	// Compute aggregate status
-	status := computeAggregateStatus(allReports)
+	// 현재 sg_id에 해당하는 리포트만 필터링하여 상태 계산
+	// (같은 parent 아래 다른 sg_id의 처리 상태가 현재 신고에 영향주지 않도록)
+	sgIdReports := make([]domain.Report, 0)
+	for _, r := range allReports {
+		if r.SGID == primaryReport.SGID {
+			sgIdReports = append(sgIdReports, r)
+		}
+	}
+	status := computeAggregateStatus(sgIdReports)
 
 	// Build primary report response
 	primary := toReportListResponse(primaryReport, nickMap, boardNameMap)
@@ -767,7 +777,7 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 	// Build process result for processed reports
 	var processResult *domain.ProcessResultResponse
 	if status == ReportStatusApproved || status == ReportStatusDismissed || status == ReportStatusScheduled {
-		processResult = s.buildProcessResult(primaryReport, allReports)
+		processResult = s.buildProcessResult(primaryReport, sgIdReports)
 	}
 
 	return &domain.ReportDetailResponse{
@@ -1043,41 +1053,49 @@ func computeAggregateStatus(reports []domain.Report) string {
 	}
 
 	if hasApproved && hasProcessed {
-		return "approved"
+		return ReportStatusApproved
 	}
 	if hasProcessed {
-		return "dismissed"
+		return ReportStatusDismissed
 	}
 	if hasApproved && !hasProcessed {
-		return "scheduled"
+		return ReportStatusScheduled
 	}
 	if hasHold {
-		return "hold"
+		return ReportStatusHold
 	}
 	if hasMonitoring {
-		return "monitoring"
+		return ReportStatusMonitoring
 	}
-	return "pending"
+	return ReportStatusPending
 }
 
 // computeRowStatus derives status string from aggregated flag values
-func computeRowStatus(adminApproved, processed, hold, opinionCount int) string {
+func computeRowStatus(adminApproved, processed, hold, opinionCount, actionCount, dismissCount int) string {
 	if adminApproved == 1 && processed == 1 {
-		return "approved"
+		return ReportStatusApproved
 	}
 	if processed == 1 {
-		return "dismissed"
+		return ReportStatusDismissed
 	}
 	if adminApproved == 1 && processed == 0 {
-		return "scheduled"
+		return ReportStatusScheduled
 	}
 	if hold == 1 {
-		return "hold"
+		return ReportStatusHold
 	}
 	if opinionCount > 0 {
-		return "monitoring"
+		// 검토필요: 조치/미처리 의견 모두 존재
+		if actionCount > 0 && dismissCount > 0 {
+			return ReportStatusNeedsReview
+		}
+		// 최종승인 대기: 조치 의견 2개 이상 일치
+		if actionCount >= 2 && dismissCount == 0 {
+			return ReportStatusNeedsFinalApproval
+		}
+		return ReportStatusMonitoring
 	}
-	return "pending"
+	return ReportStatusPending
 }
 
 // findReport looks up a report by ID (frontend) or by table+parent (legacy)
@@ -1125,7 +1143,7 @@ func (s *ReportService) Process(adminID, clientIP string, req *domain.ReportActi
 
 	// Revert actions allowed on processed, hold, or scheduled reports
 	if (req.Action == "revertToPending" || req.Action == "revertToMonitoring") &&
-		currentStatus != ReportStatusApproved && currentStatus != ReportStatusDismissed && currentStatus != ReportStatusHold && currentStatus != "scheduled" {
+		currentStatus != ReportStatusApproved && currentStatus != ReportStatusDismissed && currentStatus != ReportStatusHold && currentStatus != ReportStatusScheduled {
 		return ErrInvalidAction
 	}
 
@@ -1225,7 +1243,7 @@ func (s *ReportService) processScheduledApprove(report *domain.Report, adminID s
 		}
 	}
 
-	s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), "scheduled", adminID, "예약 승인 (크론 처리 대기)")
+	s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), ReportStatusScheduled, adminID, "예약 승인 (크론 처리 대기)")
 	log.Printf("[INFO] 예약 승인 설정: report_id=%d, admin=%s, days=%d", report.ID, adminID, penaltyDays)
 	return nil
 }
@@ -1595,57 +1613,85 @@ func (s *ReportService) processImmediateBulkApprove(
 		content.PenaltyReasons = []string{}
 	}
 
-	// 5. CreateDisciplineLog (1번)
-	disciplineLogID, err := s.disciplineRepo.CreateDisciplineLog(
-		adminID,
-		adminName,
-		targetID,
-		targetNickname,
-		content,
-		reports[0].ID,
-		reports[0].Table,
-		"admin_approve",
-		clientIP,
-	)
-	if err != nil {
-		return fmt.Errorf("징계 내역 생성 실패: %w", err)
-	}
+	// 5~6. 트랜잭션: DisciplineLog 생성 + 신고 상태 업데이트 (원자적 처리)
+	var disciplineLogID int
+	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
+		txRepo := s.repo.WithTx(tx)
+		txDisciplineRepo := s.disciplineRepo.WithTx(tx)
 
-	// 6. UpdateStatusApprovedWithVersion for each report (+ all sub-reports)
-	for _, report := range reports {
-		// Update the representative report
-		// Convert adminID to JSON array format
-		adminUsersJSON, err := domain.AddAdminApproval(report.AdminUsers, adminID)
+		// 5a. 각 리포트를 FOR UPDATE로 잠금 + 이미 처리된 건 필터링 (race condition 방지)
+		var lockedReports []*domain.Report
+		for _, report := range reports {
+			locked, err := txRepo.GetByIDForUpdate(report.ID)
+			if err != nil {
+				return fmt.Errorf("신고 잠금 실패 (id=%d): %w", report.ID, err)
+			}
+			if locked.Processed {
+				log.Printf("[INFO] 벌크 승인 중 이미 처리된 신고 건너뜀 (id=%d)", report.ID)
+				continue
+			}
+			lockedReports = append(lockedReports, locked)
+		}
+		if len(lockedReports) == 0 {
+			return fmt.Errorf("모든 신고가 이미 처리되었습니다")
+		}
+
+		// 5b. CreateDisciplineLog (1번)
+		var err error
+		disciplineLogID, err = txDisciplineRepo.CreateDisciplineLog(
+			adminID,
+			adminName,
+			targetID,
+			targetNickname,
+			content,
+			lockedReports[0].ID,
+			lockedReports[0].Table,
+			"admin_approve",
+			clientIP,
+		)
 		if err != nil {
-			log.Printf("[ERROR] admin_users JSON 생성 실패 (id=%d): %v", report.ID, err)
-			continue
+			return fmt.Errorf("징계 내역 생성 실패: %w", err)
 		}
 
-		if err := s.repo.UpdateStatusApprovedWithVersion(report.ID, adminUsersJSON, disciplineLogID, report.Version); err != nil {
-			log.Printf("[WARN] 벌크 승인 상태 업데이트 실패 (id=%d): %v", report.ID, err)
-		}
+		// 6. UpdateStatusApprovedWithVersion for each report (+ all sub-reports)
+		for _, report := range lockedReports {
+			adminUsersJSON, err := domain.AddAdminApproval(report.AdminUsers, adminID)
+			if err != nil {
+				return fmt.Errorf("admin_users JSON 생성 실패 (id=%d): %w", report.ID, err)
+			}
 
-		// Also update other reports for the same content (sg_id 기준)
-		allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
-		for _, r := range allReports {
-			if r.ID != report.ID && !r.Processed {
-				subAdminUsersJSON, err := domain.AddAdminApproval(r.AdminUsers, adminID)
-				if err != nil {
-					log.Printf("[ERROR] admin_users JSON 생성 실패 (id=%d): %v", r.ID, err)
-					continue
-				}
+			if err := txRepo.UpdateStatusApprovedWithVersion(report.ID, adminUsersJSON, disciplineLogID, report.Version); err != nil {
+				return fmt.Errorf("벌크 승인 상태 업데이트 실패 (id=%d): %w", report.ID, err)
+			}
 
-				if err := s.repo.UpdateStatusApprovedWithVersion(r.ID, subAdminUsersJSON, disciplineLogID, r.Version); err != nil {
-					log.Printf("[WARN] 벌크 승인 관련 신고 업데이트 실패 (id=%d): %v", r.ID, err)
+			// Also update other reports for the same content (sg_id 기준)
+			allReports, _ := txRepo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
+			for _, r := range allReports {
+				if r.ID != report.ID && !r.Processed {
+					subAdminUsersJSON, err := domain.AddAdminApproval(r.AdminUsers, adminID)
+					if err != nil {
+						log.Printf("[WARN] 벌크 승인 관련 신고 admin_users JSON 생성 실패 (id=%d): %v", r.ID, err)
+						continue
+					}
+
+					if err := txRepo.UpdateStatusApprovedWithVersion(r.ID, subAdminUsersJSON, disciplineLogID, r.Version); err != nil {
+						log.Printf("[WARN] 벌크 승인 관련 신고 업데이트 실패 (id=%d): %v", r.ID, err)
+						// sub-report 실패는 로그만 (다른 사용자의 신고이므로 치명적이지 않음)
+					}
 				}
 			}
+
+			s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), ReportStatusApproved, adminID,
+				fmt.Sprintf("벌크 관리자 승인 (discipline_log_id=%d, %d건 묶음)", disciplineLogID, len(lockedReports)))
 		}
 
-		s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), ReportStatusApproved, adminID,
-			fmt.Sprintf("벌크 관리자 승인 (discipline_log_id=%d, %d건 묶음)", disciplineLogID, len(reports)))
+		return nil
+	})
+	if txErr != nil {
+		return txErr
 	}
 
-	// 7. Apply member restrictions (1번)
+	// 7. Apply member restrictions (1번) — 트랜잭션 밖: best-effort
 	if targetMember != nil && len(req.PenaltyType) > 0 {
 		fields := make(map[string]interface{})
 		for _, pt := range req.PenaltyType {
@@ -1670,7 +1716,7 @@ func (s *ReportService) processImmediateBulkApprove(
 		}
 	}
 
-	// 8. Send memo (1번)
+	// 8. Send memo (1번) — 트랜잭션 밖: best-effort
 	if targetMember != nil && len(req.PenaltyType) > 0 {
 		memo := buildDisciplineMemo(targetNickname, targetID, disciplineLogID)
 		if err := s.memoRepo.SendMemo(targetID, "police", memo, clientIP); err != nil {
@@ -1943,11 +1989,14 @@ func (s *ReportService) processCancelOpinion(report *domain.Report, adminID stri
 func (s *ReportService) processAdminDismiss(report *domain.Report, adminID string) error {
 	prevStatus := report.Status()
 	// Dismiss all reports for the same content (sg_id 기준)
-	allReports, _ := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
+	allReports, err := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
+	if err != nil {
+		return fmt.Errorf("관련 신고 조회 실패 (sg_id=%d): %w", report.SGID, err)
+	}
 	for _, r := range allReports {
 		if !r.Processed {
 			if err := s.repo.UpdateStatus(r.ID, ReportStatusDismissed, adminID); err != nil {
-				log.Printf("[WARN] 신고 미처리 업데이트 실패 (id=%d): %v", r.ID, err)
+				return fmt.Errorf("신고 미처리 업데이트 실패 (id=%d): %w", r.ID, err)
 			}
 		}
 	}
@@ -2243,7 +2292,7 @@ func (s *ReportService) GetStats() (map[string]int64, error) {
 func (s *ReportService) getStatsLegacy() (map[string]int64, error) {
 	stats := make(map[string]int64)
 
-	statuses := []string{ReportStatusPending, ReportStatusMonitoring, ReportStatusHold, ReportStatusApproved, ReportStatusDismissed, "needs_review", "needs_final_approval"}
+	statuses := []string{ReportStatusPending, ReportStatusMonitoring, ReportStatusHold, ReportStatusApproved, ReportStatusDismissed, ReportStatusNeedsReview, ReportStatusNeedsFinalApproval}
 	var total int64
 	for _, status := range statuses {
 		count, err := s.repo.CountByStatusAggregated(status)

@@ -574,7 +574,7 @@ func (h *ReportHandler) BatchProcessReport(c *gin.Context) {
 
 	c.JSON(http.StatusOK, common.APIResponse{
 		Data: gin.H{
-			"success":   true,
+			"success":   failed == 0,
 			"processed": processed,
 			"failed":    failed,
 			"errors":    errors,
