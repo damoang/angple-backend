@@ -823,9 +823,23 @@ func (s *ReportService) buildProcessResult(primary *domain.Report, allReports []
 
 	// Use primary report's admin_users and processed_datetime
 	// admin_users JSON의 mb_id를 닉네임으로 변환
-	result.AdminUsers = s.resolveAdminUsersNicks(primary.AdminUsers)
-	if primary.ProcessedDatetime != nil {
-		result.ProcessedDatetime = primary.ProcessedDatetime.Format("2006-01-02 15:04:05")
+	// primary의 admin_users가 비어있으면 allReports에서 admin_approved=true인 리포트의 값 사용
+	adminUsersJSON := primary.AdminUsers
+	processedDatetime := primary.ProcessedDatetime
+	if adminUsersJSON == "" {
+		for _, r := range allReports {
+			if r.AdminApproved && r.AdminUsers != "" {
+				adminUsersJSON = r.AdminUsers
+				if r.ProcessedDatetime != nil {
+					processedDatetime = r.ProcessedDatetime
+				}
+				break
+			}
+		}
+	}
+	result.AdminUsers = s.resolveAdminUsersNicks(adminUsersJSON)
+	if processedDatetime != nil {
+		result.ProcessedDatetime = processedDatetime.Format("2006-01-02 15:04:05")
 	}
 
 	// Find discipline_log_id from any of the reports
@@ -1844,15 +1858,16 @@ func (s *ReportService) processSubmitOpinion(report *domain.Report, adminID stri
 		// Record history
 		s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), ReportStatusMonitoring, adminID, "의견 제출")
 
-		// Check for auto-approval (2+ action opinions → admin_approved=1)
-		if err := s.checkAutoApproval(report); err != nil {
-			log.Printf("[WARN] 자동 승인 체크 실패: %v", err)
-		}
-
-		// Check for auto-dismiss (2+ dismiss/no_action opinions → processed=1, admin_approved=0)
-		if err := s.checkAutoDismiss(report); err != nil {
-			log.Printf("[WARN] 자동 미처리 체크 실패: %v", err)
-		}
+		// 자동 승인/미처리 비활성화 (2025-02-15)
+		// // Check for auto-approval (2+ action opinions → admin_approved=1)
+		// if err := s.checkAutoApproval(report); err != nil {
+		// 	log.Printf("[WARN] 자동 승인 체크 실패: %v", err)
+		// }
+		//
+		// // Check for auto-dismiss (2+ dismiss/no_action opinions → processed=1, admin_approved=0)
+		// if err := s.checkAutoDismiss(report); err != nil {
+		// 	log.Printf("[WARN] 자동 미처리 체크 실패: %v", err)
+		// }
 
 		// Phase 6-1: 자동 잠금 체크 (비활성화 상태면 실행 안됨)
 		if err := s.updatePostLockStatus(report.Table, report.SGID); err != nil {
