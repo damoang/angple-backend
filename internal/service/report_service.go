@@ -552,7 +552,7 @@ func (s *ReportService) ListByTarget(status string, page, limit int, fromDate, t
 	boardNameMap := s.loadBoardNamesForContentRows(contentRows)
 	totalReviewers := s.getTotalReviewerCount()
 	disciplineCountMap := s.loadDisciplineCounts(userIDs)
-	opinionsMap := s.loadOpinionsByContentRows(contentRows)
+	opinionsMap := s.loadOpinionsByContent(contentRows)
 	reviewerNickMap := s.loadReviewerNicknames(opinionsMap)
 
 	contentsByTarget := s.groupContentsByTarget(contentRows, nickMap, boardNameMap, totalReviewers, singoRole, opinionsMap, reviewerNickMap)
@@ -606,34 +606,6 @@ func (s *ReportService) loadDisciplineCounts(userIDs []string) map[string]int {
 		}
 	}
 	return disciplineCountMap
-}
-
-// loadOpinionsByContentRows batch-loads opinions for content rows and re-keys by sg_id.
-func (s *ReportService) loadOpinionsByContentRows(contentRows []repository.AggregatedReportRow) map[string][]domain.Opinion {
-	opinionsMap := make(map[string][]domain.Opinion)
-	if s.opinionRepo == nil || len(contentRows) == 0 {
-		return opinionsMap
-	}
-
-	keys := make([]struct {
-		Table  string
-		Parent int
-	}, 0, len(contentRows))
-	for _, cr := range contentRows {
-		keys = append(keys, struct {
-			Table  string
-			Parent int
-		}{cr.Table, cr.Parent})
-	}
-	if opMap, err := s.opinionRepo.GetByMultipleReportsGrouped(keys); err == nil {
-		for _, ops := range opMap {
-			for _, op := range ops {
-				key := fmt.Sprintf("%s:%d", op.Table, op.SGID)
-				opinionsMap[key] = append(opinionsMap[key], op)
-			}
-		}
-	}
-	return opinionsMap
 }
 
 // groupContentsByTarget groups content rows by target_mb_id, converting each to an AggregatedReportResponse.
