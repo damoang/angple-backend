@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain"
@@ -14,6 +16,8 @@ type MemberRepository interface {
 	FindByEmail(email string) (*domain.Member, error)
 	FindByID(id int) (*domain.Member, error)
 	FindByNickname(nickname string) (*domain.Member, error)
+	FindNicksByIDs(userIDs []string) (map[string]string, error)
+	FindNicksByMbNos(mbNos []string) (map[string]string, error)
 
 	// Write operations
 	Create(member *domain.Member) error
@@ -27,6 +31,10 @@ type MemberRepository interface {
 	ExistsByNickname(nickname string, excludeUserID string) (bool, error)
 	ExistsByPhone(phone string, excludeUserID string) (bool, error)
 	ExistsByEmailExcluding(email string, excludeUserID string) (bool, error)
+
+	// Admin operations
+	FindAll(page, limit int, keyword string) ([]*domain.Member, int64, error)
+	UpdateFields(id int, fields map[string]interface{}) error
 }
 
 type memberRepository struct {
@@ -154,4 +162,114 @@ func (r *memberRepository) ExistsByEmailExcluding(email string, excludeUserID st
 	}
 	err := query.Count(&count).Error
 	return count > 0, err
+}
+
+// FindAll returns paginated member list with optional keyword search
+func (r *memberRepository) FindAll(page, limit int, keyword string) ([]*domain.Member, int64, error) {
+	var members []*domain.Member
+	var total int64
+
+	query := r.db.Model(&domain.Member{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("mb_id LIKE ? OR mb_nick LIKE ? OR mb_email LIKE ? OR mb_name LIKE ?", like, like, like, like)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	if err := query.Order("mb_no DESC").Offset(offset).Limit(limit).Find(&members).Error; err != nil {
+		return nil, 0, err
+	}
+	return members, total, nil
+}
+
+// FindNicksByIDs batch-loads nicknames for given user IDs (N+1 prevention)
+func (r *memberRepository) FindNicksByIDs(userIDs []string) (map[string]string, error) {
+	if len(userIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	type row struct {
+		MbID   string `gorm:"column:mb_id"`
+		MbNick string `gorm:"column:mb_nick"`
+	}
+	var rows []row
+	err := r.db.Table("g5_member").
+		Select("mb_id, mb_nick").
+		Where("mb_id IN ?", userIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		m[r.MbID] = r.MbNick
+	}
+	return m, nil
+}
+
+// FindNicksByMbNos batch-loads nicknames for given mb_no values (opinions의 reviewer_id용)
+// 하이브리드 조회: 숫자 → mb_no IN, 비숫자 → mb_id IN (레거시 데이터 호환)
+func (r *memberRepository) FindNicksByMbNos(mbNos []string) (map[string]string, error) {
+	if len(mbNos) == 0 {
+		return map[string]string{}, nil
+	}
+
+	var numericIDs, stringIDs []string
+	for _, id := range mbNos {
+		if _, err := strconv.Atoi(id); err == nil {
+			numericIDs = append(numericIDs, id)
+		} else {
+			stringIDs = append(stringIDs, id)
+		}
+	}
+
+	m := make(map[string]string, len(mbNos))
+
+	// mb_no 기반 조회 (숫자)
+	if len(numericIDs) > 0 {
+		type row struct {
+			MbNo   int    `gorm:"column:mb_no"`
+			MbNick string `gorm:"column:mb_nick"`
+		}
+		var rows []row
+		err := r.db.Table("g5_member").
+			Select("mb_no, mb_nick").
+			Where("mb_no IN ?", numericIDs).
+			Find(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			m[fmt.Sprintf("%d", r.MbNo)] = r.MbNick
+		}
+	}
+
+	// mb_id 기반 fallback (비숫자, 레거시 데이터)
+	if len(stringIDs) > 0 {
+		type row struct {
+			MbID   string `gorm:"column:mb_id"`
+			MbNick string `gorm:"column:mb_nick"`
+		}
+		var rows []row
+		err := r.db.Table("g5_member").
+			Select("mb_id, mb_nick").
+			Where("mb_id IN ?", stringIDs).
+			Find(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			m[r.MbID] = r.MbNick
+		}
+	}
+
+	return m, nil
+}
+
+// UpdateFields updates specific fields of a member
+func (r *memberRepository) UpdateFields(id int, fields map[string]interface{}) error {
+	return r.db.Model(&domain.Member{}).Where("mb_no = ?", id).Updates(fields).Error
 }

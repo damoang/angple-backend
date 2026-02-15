@@ -100,6 +100,23 @@ func (r *BoardRepository) FindByID(boardID string) (*domain.Board, error) {
 	return &board, nil
 }
 
+// FindByIDs - 여러 게시판 ID로 일괄 조회 (N+1 방지)
+func (r *BoardRepository) FindByIDs(boardIDs []string) (map[string]string, error) {
+	if len(boardIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	var boards []domain.Board
+	err := r.db.Where("bo_table IN ?", boardIDs).Select("bo_table, bo_subject").Find(&boards).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(boards))
+	for _, b := range boards {
+		result[b.BoardID] = b.Subject
+	}
+	return result, nil
+}
+
 // FindAll - 모든 게시판 목록 조회
 func (r *BoardRepository) FindAll(offset, limit int) ([]domain.Board, int64, error) {
 	var boards []domain.Board
@@ -178,6 +195,26 @@ func (r *BoardRepository) Delete(boardID string) error {
 		// 4. g5_board_new 테이블에서 관련 신규 글 정보 삭제
 		return tx.Exec("DELETE FROM g5_board_new WHERE bo_table = ?", boardID).Error
 	})
+}
+
+// FindDisplaySettings - 별도 테이블에서 게시판 표시 설정 조회 (SELECT only)
+func (r *BoardRepository) FindDisplaySettings(boardID string) (*domain.BoardDisplaySettingsModel, error) {
+	var settings domain.BoardDisplaySettingsModel
+	err := r.db.Where("board_id = ?", boardID).First(&settings).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil // 설정 없으면 nil (기본값 사용)
+		}
+		return nil, err
+	}
+
+	return &settings, nil
+}
+
+// SaveDisplaySettings - 게시판 표시 설정 저장 (upsert)
+func (r *BoardRepository) SaveDisplaySettings(settings *domain.BoardDisplaySettingsModel) error {
+	return r.db.Save(settings).Error
 }
 
 // Exists - 게시판 존재 여부 확인

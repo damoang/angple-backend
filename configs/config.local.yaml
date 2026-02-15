@@ -2,7 +2,7 @@
 # APP_ENV=local (기본값)
 
 server:
-  port: 8083
+  port: 8081
   mode: development
   env: local
 
@@ -33,4 +33,9 @@ data_paths:
   recommended_path: "./data/recommended"  # 로컬 개발용 경로
 
 cors:
-  allow_origins: "http://localhost:5173, http://localhost:5174, http://localhost:3000"
+  allow_origins: "http://localhost:5173, http://localhost:5174, http://localhost:5175, http://localhost:5176, http://localhost:3000"
+
+# 플러그인 설정
+plugins:
+  commerce:
+    enabled: true  # Commerce 플러그인 활성화

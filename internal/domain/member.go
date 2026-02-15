@@ -48,6 +48,10 @@ type Member struct {
 	Level         int       `gorm:"column:mb_level" json:"level"`
 	MemoCount     int       `gorm:"column:mb_memo_cnt" json:"-"`
 	ScrapCount    int       `gorm:"column:mb_scrap_cnt" json:"-"`
+	AsExp         int       `gorm:"column:as_exp" json:"as_exp"`
+	AsLevel       int       `gorm:"column:as_level" json:"as_level"`
+	AsMax         int       `gorm:"column:as_max" json:"as_max"`
+	ImageURL      string    `gorm:"column:mb_image_url" json:"mb_image_url,omitempty"`
 }
 
 func (Member) TableName() string {
@@ -76,4 +80,76 @@ func (m *Member) ToResponse() *MemberResponse {
 		Point:    m.Point,
 		Profile:  m.Profile,
 	}
+}
+
+// MemberProfileResponse represents a public member profile
+type MemberProfileResponse struct {
+	UserID    string `json:"user_id"`
+	Nickname  string `json:"nickname"`
+	Profile   string `json:"profile,omitempty"`
+	CreatedAt string `json:"created_at"`
+	Level     int    `json:"level"`
+	Point     int    `json:"point"`
+}
+
+// ToProfileResponse converts Member to MemberProfileResponse
+func (m *Member) ToProfileResponse() *MemberProfileResponse {
+	return &MemberProfileResponse{
+		UserID:    m.UserID,
+		Nickname:  m.Nickname,
+		Profile:   m.Profile,
+		Level:     m.Level,
+		Point:     m.Point,
+		CreatedAt: m.CreatedAt.Format("2006-01-02"),
+	}
+}
+
+// MemberPostSummary represents a summary of a member's post
+type MemberPostSummary struct {
+	CreatedAt string `json:"created_at"`
+	BoardID   string `json:"board_id"`
+	Title     string `json:"title"`
+	ID        int    `json:"id"`
+	Comments  int    `json:"comments_count"`
+	Likes     int    `json:"likes"`
+	Views     int    `json:"views"`
+}
+
+// MemberCommentSummary represents a summary of a member's comment
+type MemberCommentSummary struct {
+	CreatedAt string `json:"created_at"`
+	BoardID   string `json:"board_id"`
+	Content   string `json:"content"`
+	ID        int    `json:"id"`
+	PostID    int    `json:"post_id"`
+}
+
+// PointHistory represents a point transaction record (g5_point table)
+type PointHistory struct {
+	CreatedAt string `json:"created_at"`
+	Content   string `json:"content"`
+	RelTable  string `json:"rel_table,omitempty"`
+	RelAction string `json:"rel_action,omitempty"`
+	ID        int    `json:"id"`
+	Point     int    `json:"point"`
+	RelID     int    `json:"rel_id,omitempty"`
+}
+
+// Point domain model (g5_point table)
+type Point struct {
+	Datetime   string `gorm:"column:po_datetime" json:"datetime"`
+	Content    string `gorm:"column:po_content" json:"content"`
+	RelTable   string `gorm:"column:po_rel_table" json:"rel_table"`
+	RelAction  string `gorm:"column:po_rel_action" json:"rel_action"`
+	MbID       string `gorm:"column:mb_id" json:"mb_id"`
+	RelID      string `gorm:"column:po_rel_id" json:"rel_id"`
+	ID         int    `gorm:"column:po_id;primaryKey" json:"id"`
+	UsePoint   int    `gorm:"column:po_use_point" json:"use_point"`
+	Point      int    `gorm:"column:po_point" json:"point"`
+	MbPoint    int    `gorm:"column:po_mb_point" json:"mb_point"`
+	ExpireDate string `gorm:"column:po_expire_date" json:"expire_date"`
+}
+
+func (Point) TableName() string {
+	return "g5_point"
 }

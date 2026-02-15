@@ -5,9 +5,11 @@ import (
 	"time"
 )
 
-// BoardDisplaySettings represents display options for board list view
+// BoardDisplaySettings represents display options for board list/view
 type BoardDisplaySettings struct {
-	ListStyle     string `json:"list_style"`     // compact, card, detailed
+	ListLayout    string `json:"list_layout"`    // compact, card, detailed, gallery, webzine
+	ViewLayout    string `json:"view_layout"`    // basic
+	ListStyle     string `json:"list_style"`     // deprecated: list_layout으로 대체. 하위호환용
 	ShowPreview   bool   `json:"show_preview"`   // 본문 미리보기 표시 여부
 	PreviewLength int    `json:"preview_length"` // 미리보기 글자 수
 	ShowThumbnail bool   `json:"show_thumbnail"` // 썸네일 이미지 표시 여부
@@ -16,6 +18,8 @@ type BoardDisplaySettings struct {
 // DefaultBoardDisplaySettings returns default display settings
 func DefaultBoardDisplaySettings() BoardDisplaySettings {
 	return BoardDisplaySettings{
+		ListLayout:    "compact",
+		ViewLayout:    "basic",
 		ListStyle:     "compact",
 		ShowPreview:   false,
 		PreviewLength: 150,
@@ -134,6 +138,17 @@ type UpdateBoardRequest struct {
 	UploadSize   *int64  `json:"upload_size,omitempty"`
 }
 
+// BoardPermissions - 사용자별 게시판 권한 정보
+type BoardPermissions struct {
+	CanList     bool `json:"can_list"`
+	CanRead     bool `json:"can_read"`
+	CanWrite    bool `json:"can_write"`
+	CanReply    bool `json:"can_reply"`
+	CanComment  bool `json:"can_comment"`
+	CanUpload   bool `json:"can_upload"`
+	CanDownload bool `json:"can_download"`
+}
+
 // BoardResponse - 게시판 응답 DTO
 type BoardResponse struct {
 	InsertTime      time.Time            `json:"insert_time"`
@@ -158,7 +173,8 @@ type BoardResponse struct {
 	UploadCount     int                  `json:"upload_count"`
 	CountWrite      int                  `json:"count_write"`
 	CountComment    int                  `json:"count_comment"`
-	DisplaySettings BoardDisplaySettings `json:"display_settings"` // 게시판 표시 설정
+	DisplaySettings BoardDisplaySettings `json:"display_settings"`      // 게시판 표시 설정
+	Permissions     *BoardPermissions    `json:"permissions,omitempty"` // 사용자별 권한 (인증 시에만 포함)
 }
 
 // GetDisplaySettings parses Extra1 field as BoardDisplaySettings
@@ -175,9 +191,19 @@ func (b *Board) GetDisplaySettings() BoardDisplaySettings {
 		return DefaultBoardDisplaySettings()
 	}
 
-	// 유효성 검증
+	// list_style → list_layout 마이그레이션 (하위호환)
+	if settings.ListLayout == "" && settings.ListStyle != "" {
+		settings.ListLayout = settings.ListStyle
+	}
+	if settings.ListLayout == "" {
+		settings.ListLayout = "compact"
+	}
+	if settings.ViewLayout == "" {
+		settings.ViewLayout = "basic"
+	}
+	// 하위호환: list_style도 동기화
 	if settings.ListStyle == "" {
-		settings.ListStyle = "compact"
+		settings.ListStyle = settings.ListLayout
 	}
 	if settings.PreviewLength <= 0 {
 		settings.PreviewLength = 150
@@ -211,5 +237,21 @@ func (b *Board) ToResponse() *BoardResponse {
 		CountComment:    b.CountComment,
 		InsertTime:      b.InsertTime,
 		DisplaySettings: b.GetDisplaySettings(), // Extra1에서 파싱
+		Permissions:     nil,                    // 기본값: 권한 정보 없음
 	}
+}
+
+// ToResponseWithPermissions returns BoardResponse with user-specific permissions
+func (b *Board) ToResponseWithPermissions(memberLevel int) *BoardResponse {
+	resp := b.ToResponse()
+	resp.Permissions = &BoardPermissions{
+		CanList:     memberLevel >= b.ListLevel,
+		CanRead:     memberLevel >= b.ReadLevel,
+		CanWrite:    memberLevel >= b.WriteLevel,
+		CanReply:    memberLevel >= b.ReplyLevel,
+		CanComment:  memberLevel >= b.CommentLevel,
+		CanUpload:   memberLevel >= b.UploadLevel,
+		CanDownload: memberLevel >= b.DownloadLevel,
+	}
+	return resp
 }

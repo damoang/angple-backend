@@ -1,0 +1,23 @@
+# 나눔 플러그인 설정
+# Giving Plugin Configuration
+
+# 응모 제한
+bid:
+  max_numbers_per_bid: 100      # 한 번에 최대 응모 번호 수
+  min_number: 1                  # 최소 응모 번호
+
+# 수수료
+commission:
+  rate: 50                       # 글작성자 수수료 비율 (%)
+
+# 목록
+list:
+  default_limit: 20              # 기본 페이지 크기
+  max_limit: 40                  # 최대 페이지 크기
+
+# 썸네일
+thumbnail:
+  s3_hostname: s3.damoang.net
+  width: 400
+  height: 225
+  format: webp

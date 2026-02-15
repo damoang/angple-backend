@@ -1,0 +1,21 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: angple-api-pdb
+  namespace: angple
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: angple-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: angple-gateway-pdb
+  namespace: angple
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: angple-gateway

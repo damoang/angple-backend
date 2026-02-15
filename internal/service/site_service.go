@@ -314,13 +314,13 @@ func (s *SiteService) isValidPlan(plan string) bool {
 // getDBStrategyByPlan determines DB strategy based on plan
 func (s *SiteService) getDBStrategyByPlan(plan string) string {
 	switch plan {
-	case "free":
-		return "shared"
-	case "pro", "business":
-		return "schema"
-	case "enterprise":
-		return "dedicated"
+	case planFree:
+		return dbStrategyShared
+	case planPro, planBusiness:
+		return dbStrategySchema
+	case planEnterprise:
+		return dbStrategyDedicated
 	default:
-		return "shared"
+		return dbStrategyShared
 	}
 }

@@ -167,10 +167,15 @@ func (h *CommentHandler) LikeComment(c *gin.Context) {
 
 	// Get authenticated user ID from JWT middleware
 	userID := middleware.GetUserID(c)
+	ip := c.ClientIP()
 
-	result, err := h.service.LikeComment(boardID, commentID, userID)
+	result, err := h.service.LikeComment(boardID, commentID, userID, ip)
 	if errors.Is(err, common.ErrPostNotFound) {
 		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
+	}
+	if errors.Is(err, common.ErrAlreadyRecommended) {
+		common.ErrorResponse(c, 409, "이미 좋아요한 댓글입니다", err)
 		return
 	}
 	if err != nil {
@@ -194,10 +199,15 @@ func (h *CommentHandler) DislikeComment(c *gin.Context) {
 
 	// Get authenticated user ID from JWT middleware
 	userID := middleware.GetUserID(c)
+	ip := c.ClientIP()
 
-	result, err := h.service.DislikeComment(boardID, commentID, userID)
+	result, err := h.service.DislikeComment(boardID, commentID, userID, ip)
 	if errors.Is(err, common.ErrPostNotFound) {
 		common.ErrorResponse(c, 404, "Comment not found", err)
+		return
+	}
+	if errors.Is(err, common.ErrAlreadyRecommended) {
+		common.ErrorResponse(c, 409, "이미 싫어요한 댓글입니다", err)
 		return
 	}
 	if err != nil {

@@ -43,12 +43,8 @@ func ErrorResponse(c *gin.Context, status int, message string, err error) {
 		Message: message,
 	}
 
-	if err != nil {
-		errInfo.Details = err.Error()
-	}
-
-	c.JSON(status, APIResponse{
-		Error: errInfo,
+	c.JSON(status, gin.H{
+		"error": errInfo,
 	})
 }
 

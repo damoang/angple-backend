@@ -440,115 +440,104 @@ export CORS_ALLOW_ORIGINS=https://damoang.net
 
 ---
 
-## 🚀 운영 환경 배포
+## 🚀 운영 환경 배포 (Standalone)
 
-### Docker Compose 사용 (권장)
+전체 스택(MySQL, Redis, API, Gateway, Web, Admin)을 단일 compose로 실행합니다.
 
-1. **운영 서버에 코드 배포**
-   ```bash
-   git clone https://github.com/damoang/angple-backend.git
-   cd angple-backend
-   ```
-
-2. **환경 변수 설정**
-   ```bash
-   # .env.prod 파일 생성
-   cat > .env.prod << 'EOF'
-   APP_ENV=prod
-   DB_HOST=your-production-db-host
-   DB_PORT=3306
-   DB_USER=angple_user
-   DB_PASSWORD=your-secure-password
-   DB_NAME=angple_prod
-   REDIS_HOST=your-redis-host
-   REDIS_PORT=6379
-   JWT_SECRET=your-jwt-secret-key
-   DAMOANG_JWT_SECRET=your-damoang-jwt-secret
-   CORS_ALLOW_ORIGINS=https://damoang.net,https://www.damoang.net
-   EOF
-   ```
-
-3. **Docker Compose 실행**
-   ```bash
-   # 운영 환경 실행
-   docker-compose --env-file .env.prod up -d
-
-   # 로그 확인
-   docker-compose logs -f api
-   ```
-
-### 바이너리 직접 실행
+### 빠른 시작
 
 ```bash
-# 1. 빌드
-make build-api
+git clone https://github.com/damoang/angple-backend.git
+cd angple-backend
+cp .env.example .env   # 필수 값 수정
+docker compose -f docker-compose.standalone.yml up -d
+```
 
-# 2. 환경 변수 설정
-export APP_ENV=prod
-export DB_HOST=...
-export DB_PASSWORD=...
-# (기타 환경 변수)
+### 필수 환경 변수 (`.env`)
 
-# 3. 실행
-./bin/api
+| 변수 | 설명 | 필수 |
+|------|------|------|
+| `DB_PASSWORD` | MySQL 사용자 비밀번호 | O |
+| `MYSQL_ROOT_PASSWORD` | MySQL root 비밀번호 | O |
+| `JWT_SECRET` | JWT 서명 키 (32자 이상) | O |
+| `ANGPLE_VERSION` | Docker 이미지 태그 | - (기본: latest) |
+| `CORS_ALLOW_ORIGINS` | 허용 Origin 목록 | - |
+| `LARAVEL_BACKEND_URL` | 레거시 PHP 백엔드 URL | - |
+| `DAMOANG_JWT_SECRET` | 레거시 SSO 시크릿 | - |
+
+### 서비스 포트
+
+| 서비스 | 기본 포트 | 환경 변수 |
+|--------|----------|----------|
+| Gateway | 8080 | `GATEWAY_PORT` |
+| API | 8081 | `API_PORT` |
+| Web | 3010 | `WEB_PORT` |
+| Admin | 3011 | `ADMIN_PORT` |
+
+### 서버별 커스터마이징 (`docker-compose.override.yml`)
+
+리버스 프록시(Nginx Proxy Manager 등)나 레거시 DB 연동 등 **서버 고유 설정**은 `docker-compose.override.yml`을 사용합니다. 이 파일은 Docker Compose가 자동으로 merge합니다.
+
+```yaml
+# docker-compose.override.yml 예시
+services:
+  api:
+    networks:
+      - proxy-network
+      - legacy-db
+    environment:
+      DB_HOST: legacy-mysql
+      DB_NAME: legacy_db
+      DB_USER: root
+      DB_PASSWORD: legacy-password
+  gateway:
+    networks:
+      - proxy-network
+  web:
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    external: true
+  legacy-db:
+    external: true
+    name: existing_mysql_network
 ```
 
 ### Health Check
 
 ```bash
-curl https://api.damoang.net/health
+curl http://localhost:8081/health   # API
+curl http://localhost:8080/health   # Gateway
+curl http://localhost:3010          # Web
+curl http://localhost:3011          # Admin
 ```
 
 ---
 
-## 🔄 GitHub Actions 배포
+## 🔄 CI/CD (GitHub Actions)
 
-GitHub Actions를 통해 개발/운영 환경에 자동 또는 수동으로 배포할 수 있습니다.
+### 빌드 및 배포
 
-### 환경 구성
+`main` 브랜치에 push하면 자동으로:
 
-| 환경 | 서버 | 트리거 | 빌드 방식 | 이미지 저장 |
-|------|------|--------|----------|------------|
-| **개발 (DEV)** | OCI | `push to main` 자동 | docker compose | 로컬만 |
-| **운영 (PROD)** | EC2 | 수동 (workflow_dispatch) | docker build | ECR |
-
-### 개발 환경 배포 (OCI - 자동)
-
-main 브랜치에 push하면 자동으로 OCI 개발 서버에 배포됩니다.
+1. Go 테스트 실행
+2. API + Gateway Docker 이미지 빌드 (linux/amd64, linux/arm64)
+3. GHCR(ghcr.io)에 push
+4. SSH로 서버에 접속하여 이미지 pull & 재시작
 
 ```
-main push → GitHub Actions → SSH to OCI → git pull → docker compose up
+main push → test → build (multi-arch) → GHCR push → SSH deploy
 ```
 
-**워크플로우**: `.github/workflows/deploy-dev.yml`
+**워크플로우**: `.github/workflows/ghcr-deploy.yml`
 
-### 운영 환경 배포 (EC2 - 수동)
-
-GitHub Actions에서 수동으로 트리거하여 EC2 운영 서버에 배포합니다.
-
-```
-수동 트리거 → GitHub Actions → AWS SSM → git pull → docker build → ECR push → docker run
-```
+### 운영 환경 배포 (수동)
 
 **워크플로우**: `.github/workflows/deploy-prod.yml`
 
-**배포 방법:**
-1. GitHub → Actions → "Deploy to Prod (EC2)" 선택
-2. "Run workflow" 클릭
-3. (선택) Image tag 입력 또는 비워두면 자동 생성 (`main-{커밋SHA}`)
-
-**운영 포트:**
-- API: `8082`
-- Gateway: `8083`
-
-### 롤백
-
-ECR에 저장된 이전 이미지로 롤백할 수 있습니다:
-
-```bash
-# 이전 이미지 태그로 배포
-/home/damoang/deploy/rollback.sh angple-backend main-{이전커밋}
-```
+GitHub Actions에서 수동 트리거하여 운영 서버에 배포합니다.
 
 ---
 

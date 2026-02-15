@@ -3,12 +3,14 @@ package service
 import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
+	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/repository"
 )
 
 // PostService business logic for posts
 type PostService interface {
 	ListPosts(boardID string, page, limit int) ([]*domain.PostResponse, *common.Meta, error)
+	ListNotices(boardID string) ([]*domain.PostResponse, error)
 	GetPost(boardID string, id int) (*domain.PostResponse, error)
 	CreatePost(boardID string, req *domain.CreatePostRequest, authorID string) (*domain.PostResponse, error)
 	UpdatePost(boardID string, id int, req *domain.UpdatePostRequest, authorID string) error
@@ -17,12 +19,18 @@ type PostService interface {
 }
 
 type postService struct {
-	repo repository.PostRepository
+	repo     repository.PostRepository
+	fileRepo repository.FileRepository
+	hooks    *plugin.HookManager
 }
 
 // NewPostService creates a new PostService
-func NewPostService(repo repository.PostRepository) PostService {
-	return &postService{repo: repo}
+func NewPostService(repo repository.PostRepository, hooks *plugin.HookManager, fileRepo ...repository.FileRepository) PostService {
+	s := &postService{repo: repo, hooks: hooks}
+	if len(fileRepo) > 0 {
+		s.fileRepo = fileRepo[0]
+	}
+	return s
 }
 
 // ListPosts retrieves paginated posts
@@ -47,6 +55,9 @@ func (s *postService) ListPosts(boardID string, page, limit int) ([]*domain.Post
 		responses[i] = post.ToResponse()
 	}
 
+	// Batch-fill thumbnails from g5_board_file for posts missing inline images
+	s.fillThumbnailsFromFiles(boardID, posts, responses)
+
 	// Build metadata
 	meta := &common.Meta{
 		BoardID: boardID,
@@ -56,6 +67,59 @@ func (s *postService) ListPosts(boardID string, page, limit int) ([]*domain.Post
 	}
 
 	return responses, meta, nil
+}
+
+// fillThumbnailsFromFiles batch-loads thumbnails from g5_board_file
+// for posts that have attached files but no inline <img> in content
+func (s *postService) fillThumbnailsFromFiles(boardID string, posts []*domain.Post, responses []*domain.PostResponse) {
+	if s.fileRepo == nil {
+		return
+	}
+
+	// Collect post IDs that need file-based thumbnails
+	var needFileIDs []int
+	needFileIdx := map[int]int{} // postID -> index in responses
+	for i, post := range posts {
+		if responses[i].Thumbnail == "" && post.HasFile > 0 {
+			needFileIDs = append(needFileIDs, post.ID)
+			needFileIdx[post.ID] = i
+		}
+	}
+
+	if len(needFileIDs) == 0 {
+		return
+	}
+
+	// Single batch query (N+1 방지)
+	fileURLs, err := s.fileRepo.FindFirstFileURLs(boardID, needFileIDs)
+	if err != nil {
+		return // 파일 조회 실패해도 목록은 정상 반환
+	}
+
+	for postID, url := range fileURLs {
+		if idx, ok := needFileIdx[postID]; ok {
+			responses[idx].Thumbnail = url
+		}
+	}
+}
+
+// ListNotices retrieves notice posts
+func (s *postService) ListNotices(boardID string) ([]*domain.PostResponse, error) {
+	posts, err := s.repo.ListNotices(boardID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to response
+	responses := make([]*domain.PostResponse, len(posts))
+	for i, post := range posts {
+		responses[i] = post.ToResponse()
+	}
+
+	// Batch-fill thumbnails from g5_board_file
+	s.fillThumbnailsFromFiles(boardID, posts, responses)
+
+	return responses, nil
 }
 
 // GetPost retrieves a single post by ID
@@ -68,7 +132,21 @@ func (s *postService) GetPost(boardID string, id int) (*domain.PostResponse, err
 	// Increment view count asynchronously
 	go s.repo.IncrementHit(boardID, id) //nolint:errcheck // 비동기 조회수 증가, 실패해도 무시
 
-	return post.ToResponse(), nil
+	resp := post.ToResponse()
+
+	// post.content Filter (content 렌더링 시)
+	if s.hooks != nil {
+		data := s.hooks.Apply(plugin.HookPostContent, map[string]interface{}{
+			"board_id": boardID,
+			"post_id":  id,
+			"content":  resp.Content,
+		})
+		if v, ok := data["content"].(string); ok {
+			resp.Content = v
+		}
+	}
+
+	return resp, nil
 }
 
 // CreatePost creates a new post
@@ -82,8 +160,34 @@ func (s *postService) CreatePost(boardID string, req *domain.CreatePostRequest, 
 		Password: req.Password,
 	}
 
+	// before_create Filter
+	if s.hooks != nil {
+		data := s.hooks.Apply(plugin.HookPostBeforeCreate, map[string]interface{}{
+			"board_id":  boardID,
+			"title":     post.Title,
+			"content":   post.Content,
+			"author_id": authorID,
+		})
+		if v, ok := data["title"].(string); ok {
+			post.Title = v
+		}
+		if v, ok := data["content"].(string); ok {
+			post.Content = v
+		}
+	}
+
 	if err := s.repo.Create(boardID, post); err != nil {
 		return nil, err
+	}
+
+	// after_create Action
+	if s.hooks != nil {
+		s.hooks.Do(plugin.HookPostAfterCreate, map[string]interface{}{
+			"board_id":  boardID,
+			"post_id":   post.ID,
+			"title":     post.Title,
+			"author_id": authorID,
+		})
 	}
 
 	return post.ToResponse(), nil
@@ -108,10 +212,42 @@ func (s *postService) UpdatePost(boardID string, id int, req *domain.UpdatePostR
 		Category: req.Category,
 	}
 
-	return s.repo.Update(boardID, id, post)
+	// before_update Filter
+	if s.hooks != nil {
+		data := s.hooks.Apply(plugin.HookPostBeforeUpdate, map[string]interface{}{
+			"board_id":  boardID,
+			"post_id":   id,
+			"title":     post.Title,
+			"content":   post.Content,
+			"author_id": authorID,
+		})
+		if v, ok := data["title"].(string); ok {
+			post.Title = v
+		}
+		if v, ok := data["content"].(string); ok {
+			post.Content = v
+		}
+	}
+
+	if err := s.repo.Update(boardID, id, post); err != nil {
+		return err
+	}
+
+	// after_update Action
+	if s.hooks != nil {
+		s.hooks.Do(plugin.HookPostAfterUpdate, map[string]interface{}{
+			"board_id":  boardID,
+			"post_id":   id,
+			"author_id": authorID,
+		})
+	}
+
+	return nil
 }
 
 // DeletePost deletes a post
+//
+//nolint:dupl // CommentService.DeleteComment과 구조 유사하나 다른 Hook 이벤트 사용
 func (s *postService) DeletePost(boardID string, id int, authorID string) error {
 	// Check if post exists and belongs to author
 	existing, err := s.repo.FindByID(boardID, id)
@@ -124,7 +260,29 @@ func (s *postService) DeletePost(boardID string, id int, authorID string) error 
 		return common.ErrUnauthorized
 	}
 
-	return s.repo.Delete(boardID, id)
+	// before_delete Filter
+	if s.hooks != nil {
+		s.hooks.Apply(plugin.HookPostBeforeDelete, map[string]interface{}{
+			"board_id":  boardID,
+			"post_id":   id,
+			"author_id": authorID,
+		})
+	}
+
+	if err := s.repo.Delete(boardID, id); err != nil {
+		return err
+	}
+
+	// after_delete Action
+	if s.hooks != nil {
+		s.hooks.Do(plugin.HookPostAfterDelete, map[string]interface{}{
+			"board_id":  boardID,
+			"post_id":   id,
+			"author_id": authorID,
+		})
+	}
+
+	return nil
 }
 
 // SearchPosts searches posts by keyword
@@ -148,6 +306,9 @@ func (s *postService) SearchPosts(boardID string, keyword string, page, limit in
 	for i, post := range posts {
 		responses[i] = post.ToResponse()
 	}
+
+	// Batch-fill thumbnails from g5_board_file
+	s.fillThumbnailsFromFiles(boardID, posts, responses)
 
 	// Build metadata
 	meta := &common.Meta{

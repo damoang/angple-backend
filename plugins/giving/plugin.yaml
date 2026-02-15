@@ -1,0 +1,116 @@
+# 나눔 플러그인
+# Giving Plugin
+
+name: giving
+version: 1.0.0
+title: 나눔
+description: 최저고유번호 기반 나눔 시스템 (응모, 당첨, 포인트 연동)
+author: Damoang Team
+license: MIT
+homepage: https://github.com/damoang/angple-backend
+
+# 호환성
+requires:
+  angple: ">=1.0.0 <2.0.0"
+  go: ">=1.21"
+
+# DB 마이그레이션
+migrations:
+  - file: 001_init.up.sql
+    version: 1
+
+# Hook 등록
+hooks:
+  - event: admin.menu
+    handler: AddAdminMenu
+    priority: 50
+    description: 관리자 메뉴에 나눔 관리 추가
+
+# API 라우트
+routes:
+  # 공개 API
+  - path: /list
+    method: GET
+    handler: ListGivings
+    auth: none
+    description: 나눔 목록 (진행중/종료)
+
+  - path: /:id
+    method: GET
+    handler: GetGivingDetail
+    auth: optional
+    description: 나눔 상세 (통계 + 당첨자)
+
+  - path: /:id/visualization
+    method: GET
+    handler: GetVisualization
+    auth: none
+    description: 종료된 나눔 번호 분포
+
+  - path: /:id/live-status
+    method: GET
+    handler: GetLiveStatus
+    auth: none
+    description: 진행중 나눔 실시간 현황
+
+  # 인증 필요 API
+  - path: /:id/bid
+    method: POST
+    handler: CreateBid
+    auth: required
+    description: 나눔 응모
+
+  - path: /:id/bid
+    method: GET
+    handler: GetMyBids
+    auth: required
+    description: 내 응모 현황
+
+  # 관리자 API
+  - path: /admin/:id/pause
+    method: POST
+    handler: PauseGiving
+    auth: required
+    description: 나눔 일시정지
+
+  - path: /admin/:id/resume
+    method: POST
+    handler: ResumeGiving
+    auth: required
+    description: 나눔 재개
+
+  - path: /admin/:id/force-stop
+    method: POST
+    handler: ForceStopGiving
+    auth: required
+    description: 나눔 강제종료
+
+  - path: /admin/:id/stats
+    method: GET
+    handler: GetAdminStats
+    auth: required
+    description: 나눔 관리자 통계
+
+# 설정 스키마
+settings:
+  - key: max_bid_numbers
+    type: number
+    default: 100
+    min: 1
+    max: 500
+    label: 최대 응모 번호 개수
+    description: 한 번에 응모 가능한 최대 번호 수
+
+  - key: commission_rate
+    type: number
+    default: 50
+    min: 0
+    max: 100
+    label: 수수료 비율 (%)
+    description: 글작성자에게 지급되는 수수료 비율
+
+# 권한 정의
+permissions:
+  - id: giving.manage
+    label: 나눔 관리
+    description: 나눔 일시정지/재개/강제종료 권한

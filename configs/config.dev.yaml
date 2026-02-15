@@ -2,7 +2,7 @@
 # APP_ENV=dev
 
 server:
-  port: 8082
+  port: 8081
   mode: development
   env: dev
 
@@ -34,3 +34,8 @@ data_paths:
 
 cors:
   allow_origins: "https://dev.damoang.net, https://api-dev.damoang.net"
+
+# 플러그인 설정
+plugins:
+  commerce:
+    enabled: true  # Commerce 플러그인 활성화

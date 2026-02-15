@@ -6,6 +6,7 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/middleware"
+	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/internal/service"
 	"github.com/damoang/angple-backend/pkg/ginutil"
 	"github.com/gin-gonic/gin"
@@ -13,12 +14,13 @@ import (
 
 // PostHandler handles HTTP requests for posts
 type PostHandler struct {
-	service service.PostService
+	service   service.PostService
+	boardRepo *repository.BoardRepository
 }
 
 // NewPostHandler creates a new PostHandler
-func NewPostHandler(service service.PostService) *PostHandler {
-	return &PostHandler{service: service}
+func NewPostHandler(service service.PostService, boardRepo *repository.BoardRepository) *PostHandler {
+	return &PostHandler{service: service, boardRepo: boardRepo}
 }
 
 // ListPosts godoc
@@ -45,6 +47,28 @@ func (h *PostHandler) ListPosts(c *gin.Context) {
 	}
 
 	common.SuccessResponse(c, data, meta)
+}
+
+// ListNotices godoc
+// @Summary      공지사항 목록 조회
+// @Description  특정 게시판의 공지사항 목록을 조회합니다
+// @Tags         posts
+// @Accept       json
+// @Produce      json
+// @Param        board_id  path      string  true   "게시판 ID"
+// @Success      200  {object}  common.APIResponse{data=[]domain.Post}
+// @Failure      500  {object}  common.APIResponse
+// @Router       /boards/{board_id}/notices [get]
+func (h *PostHandler) ListNotices(c *gin.Context) {
+	boardID := c.Param("board_id")
+
+	data, err := h.service.ListNotices(boardID)
+	if err != nil {
+		common.ErrorResponse(c, 500, "Failed to fetch notices", err)
+		return
+	}
+
+	common.SuccessResponse(c, data, nil)
 }
 
 // GetPost godoc
@@ -305,6 +329,14 @@ func (h *PostHandler) GetPostPreview(c *gin.Context) {
 		return
 	}
 
+	// Get board subject
+	boardSubject := boardID
+	if h.boardRepo != nil {
+		if board, err := h.boardRepo.FindByID(boardID); err == nil && board != nil {
+			boardSubject = board.Subject
+		}
+	}
+
 	// Prepare response
 	previewData := &PostPreviewData{
 		Subject:      post.Title,
@@ -313,12 +345,12 @@ func (h *PostHandler) GetPostPreview(c *gin.Context) {
 		Datetime:     post.CreatedAt.Format("2006-01-02 15:04:05"),
 		Hit:          post.Views,
 		Good:         post.Likes,
-		Nogood:       0,     // TODO: Add nogood field to PostResponse
+		Nogood:       post.Dislikes,
 		IP:           "",    // IP is hidden for privacy
 		IsComment:    false, // Preview is only for posts, not comments
 		Files:        []string{},
 		Links:        []string{},
-		BoardSubject: boardID, // TODO: Get board subject from board service
+		BoardSubject: boardSubject,
 	}
 
 	c.JSON(200, PostPreviewResponse{

@@ -1,0 +1,32 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alerts.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "alertmanager:9093"
+
+scrape_configs:
+  - job_name: "angple-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["angple-api:8081"]
+    # K8s 환경에서는 아래 사용
+    # kubernetes_sd_configs:
+    #   - role: pod
+    #     namespaces:
+    #       names: ["angple"]
+    # relabel_configs:
+    #   - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+    #     regex: angple-api
+    #     action: keep
+
+  - job_name: "angple-gateway"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["angple-gateway:8080"]

@@ -1,22 +1,56 @@
 package service
 
 import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
+	"github.com/damoang/angple-backend/internal/plugin"
 	"github.com/damoang/angple-backend/internal/repository"
 	"github.com/damoang/angple-backend/pkg/auth"
+	"github.com/damoang/angple-backend/pkg/cache"
 	"github.com/damoang/angple-backend/pkg/jwt"
 )
+
+// RegisterRequest represents a registration request
+type RegisterRequest struct {
+	UserID   string `json:"user_id" binding:"required"`
+	Password string `json:"password" binding:"required"`
+	Name     string `json:"name" binding:"required"`
+	Nickname string `json:"nickname" binding:"required"`
+	Email    string `json:"email" binding:"required"`
+}
+
+// UserInfo 사용자 정보 (포인트, 경험치 포함)
+type UserInfo struct {
+	MbID    string `json:"mb_id"`
+	MbName  string `json:"mb_name"`
+	MbLevel int    `json:"mb_level"`
+	MbEmail string `json:"mb_email"`
+	MbPoint int    `json:"mb_point"`
+	MbExp   int    `json:"mb_exp"`
+	AsLevel int    `json:"as_level"`
+	AsMax   int    `json:"as_max"`
+	MbImage string `json:"mb_image,omitempty"` // 프로필 이미지 URL
+}
 
 // AuthService authentication business logic
 type AuthService interface {
 	Login(userID, password string) (*LoginResponse, error)
 	RefreshToken(refreshToken string) (*TokenPair, error)
+	Register(req *RegisterRequest) (*domain.MemberResponse, error)
+	Withdraw(userID string) error
+	GetUserInfo(userID string) (*UserInfo, error)
 }
 
 type authService struct {
 	memberRepo repository.MemberRepository
 	jwtManager *jwt.Manager
+	hooks      *plugin.HookManager
+	cache      cache.Service
 }
 
 // LoginResponse login response
@@ -33,10 +67,12 @@ type TokenPair struct {
 }
 
 // NewAuthService creates a new AuthService
-func NewAuthService(memberRepo repository.MemberRepository, jwtManager *jwt.Manager) AuthService {
+func NewAuthService(memberRepo repository.MemberRepository, jwtManager *jwt.Manager, hooks *plugin.HookManager, cacheService cache.Service) AuthService {
 	return &authService{
 		memberRepo: memberRepo,
 		jwtManager: jwtManager,
+		hooks:      hooks,
+		cache:      cacheService,
 	}
 }
 
@@ -67,11 +103,103 @@ func (s *authService) Login(userID, password string) (*LoginResponse, error) {
 	// 4. Update login time (async)
 	go s.memberRepo.UpdateLoginTime(member.UserID) //nolint:errcheck // 비동기 로그인 시간 업데이트, 실패해도 무시
 
+	// 5. Cache user session info
+	if s.cache != nil {
+		sessionData := map[string]interface{}{
+			"user_id":  member.UserID,
+			"nickname": member.Nickname,
+			"level":    member.Level,
+			"email":    member.Email,
+		}
+		if err := s.cache.SetSession(context.Background(), member.UserID, sessionData); err != nil {
+			log.Printf("cache warning: failed to set session: %v", err)
+		}
+		// Also cache user profile for faster profile lookups
+		if err := s.cache.SetUser(context.Background(), member.UserID, member.ToProfileResponse()); err != nil {
+			log.Printf("cache warning: failed to set user: %v", err)
+		}
+	}
+
+	// 6. Fire after_login hook
+	if s.hooks != nil {
+		s.hooks.Do(plugin.HookUserAfterLogin, map[string]interface{}{
+			"user_id":  member.UserID,
+			"nickname": member.Nickname,
+			"level":    member.Level,
+		})
+	}
+
 	return &LoginResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		User:         member.ToResponse(),
 	}, nil
+}
+
+// Register creates a new member account
+func (s *authService) Register(req *RegisterRequest) (*domain.MemberResponse, error) {
+	// 중복 체크
+	exists, err := s.memberRepo.ExistsByUserID(req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, common.ErrUserAlreadyExists
+	}
+
+	exists, err = s.memberRepo.ExistsByEmail(req.Email)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, fmt.Errorf("이미 사용 중인 이메일입니다")
+	}
+
+	exists, err = s.memberRepo.ExistsByNickname(req.Nickname, "")
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, fmt.Errorf("이미 사용 중인 닉네임입니다")
+	}
+
+	// 비밀번호 해싱 (MySQL PASSWORD() 호환)
+	hashedPassword := auth.HashPassword(req.Password)
+
+	member := &domain.Member{
+		UserID:    req.UserID,
+		Password:  hashedPassword,
+		Name:      req.Name,
+		Nickname:  req.Nickname,
+		Email:     req.Email,
+		Level:     2, // 기본 회원 레벨
+		Point:     0,
+		CreatedAt: time.Now(),
+	}
+
+	if err := s.memberRepo.Create(member); err != nil {
+		return nil, err
+	}
+
+	return member.ToResponse(), nil
+}
+
+// Withdraw marks a member as withdrawn (data preserved)
+func (s *authService) Withdraw(userID string) error {
+	member, err := s.memberRepo.FindByUserID(userID)
+	if err != nil {
+		return common.ErrUserNotFound
+	}
+
+	if member.LeaveDate != "" {
+		return fmt.Errorf("이미 탈퇴한 회원입니다")
+	}
+
+	// 탈퇴일 기록 (데이터 보존, YYYYMMDD 형식)
+	leaveDate := time.Now().Format("20060102")
+	member.LeaveDate = leaveDate
+
+	return s.memberRepo.Update(member.ID, member)
 }
 
 // RefreshToken creates new access token from refresh token
@@ -103,5 +231,33 @@ func (s *authService) RefreshToken(refreshToken string) (*TokenPair, error) {
 	return &TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
+	}, nil
+}
+
+// GetUserInfo returns user info including point and exp
+func (s *authService) GetUserInfo(userID string) (*UserInfo, error) {
+	member, err := s.memberRepo.FindByUserID(userID)
+	if err != nil {
+		return nil, common.ErrUserNotFound
+	}
+
+	// 프로필 이미지 URL: S3 URL(mb_image_url) 우선, 없으면 레거시 경로 폴백
+	mbImage := ""
+	if member.ImageURL != "" {
+		mbImage = "https://s3.damoang.net/" + member.ImageURL
+	} else if len(userID) >= 2 {
+		mbImage = fmt.Sprintf("https://damoang.net/data/member_image/%s/%s.gif", userID[:2], userID)
+	}
+
+	return &UserInfo{
+		MbID:    member.UserID,
+		MbName:  member.Name,
+		MbLevel: member.Level,
+		MbEmail: member.Email,
+		MbPoint: member.Point,
+		MbExp:   member.AsExp,
+		AsLevel: member.AsLevel,
+		AsMax:   member.AsMax,
+		MbImage: mbImage,
 	}, nil
 }

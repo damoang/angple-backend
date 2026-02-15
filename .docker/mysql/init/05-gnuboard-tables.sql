@@ -5,6 +5,23 @@ SET NAMES utf8mb4;
 SET CHARACTER SET utf8mb4;
 
 -- ============================================================
+-- 게시판 그룹 테이블 (g5_group)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `g5_group` (
+  `gr_id` varchar(255) NOT NULL DEFAULT '' COMMENT '그룹 ID',
+  `gr_subject` varchar(255) NOT NULL DEFAULT '' COMMENT '그룹 제목',
+  `gr_admin` varchar(255) NOT NULL DEFAULT '' COMMENT '그룹 관리자',
+  `gr_use_access` tinyint(4) NOT NULL DEFAULT 0 COMMENT '접근 사용',
+  `gr_order` int(11) NOT NULL DEFAULT 0 COMMENT '정렬 순서',
+  `gr_1` varchar(255) NOT NULL DEFAULT '' COMMENT '여분 필드1',
+  `gr_2` varchar(255) NOT NULL DEFAULT '' COMMENT '여분 필드2',
+  `gr_3` varchar(255) NOT NULL DEFAULT '' COMMENT '여분 필드3',
+  `gr_4` varchar(255) NOT NULL DEFAULT '' COMMENT '여분 필드4',
+  `gr_5` varchar(255) NOT NULL DEFAULT '' COMMENT '여분 필드5',
+  PRIMARY KEY (`gr_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8 COMMENT='게시판 그룹';
+
+-- ============================================================
 -- 게시판 설정 테이블 (g5_board)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS `g5_board` (

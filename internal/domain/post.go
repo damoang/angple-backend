@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -62,11 +64,28 @@ type PostResponse struct {
 	Category      string    `json:"category,omitempty"`
 	Author        string    `json:"author"`
 	AuthorID      string    `json:"author_id"`
+	AuthorIP      string    `json:"author_ip,omitempty"` // 마스킹된 IP (예: 123.456.*.*)
+	Thumbnail     string    `json:"thumbnail,omitempty"` // 본문 첫 번째 이미지 URL
+	Link1         string    `json:"link1,omitempty"`
+	Link2         string    `json:"link2,omitempty"`
 	ID            int       `json:"id"`
 	Views         int       `json:"views"`
 	Likes         int       `json:"likes"`
+	Dislikes      int       `json:"dislikes"`
 	CommentsCount int       `json:"comments_count"`
 	HasFile       bool      `json:"has_file"`
+}
+
+// imgSrcRegex extracts src from <img> tags
+var imgSrcRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
+
+// extractFirstImage extracts the first image URL from HTML content
+func extractFirstImage(html string) string {
+	matches := imgSrcRegex.FindStringSubmatch(html)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+	return ""
 }
 
 func (p *Post) ToResponse() *PostResponse {
@@ -77,12 +96,50 @@ func (p *Post) ToResponse() *PostResponse {
 		Category:      p.Category,
 		Author:        p.Author,
 		AuthorID:      p.AuthorID,
+		AuthorIP:      maskIP(p.IP),
+		Thumbnail:     extractFirstImage(p.Content),
+		Link1:         p.Link1,
+		Link2:         p.Link2,
 		Views:         p.Views,
 		Likes:         p.Likes,
+		Dislikes:      p.Dislikes,
 		CommentsCount: p.CommentCount,
 		CreatedAt:     p.CreatedAt,
 		HasFile:       p.HasFile > 0,
 	}
+}
+
+// maskIP masks the 2nd octet of an IPv4 address with ♡ (e.g., "123.45.67.89" -> "123.♡.67.89")
+// Matches legacy PHP: G5_IP_DISPLAY_v4 = '\\1.♡.\\3.\\4'
+func maskIP(ip string) string {
+	if ip == "" {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	start := 0
+	for i, c := range ip {
+		if c == '.' {
+			parts = append(parts, ip[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, ip[start:])
+
+	if len(parts) == 4 {
+		// IPv4: mask 2nd octet with ♡
+		return parts[0] + ".♡." + parts[2] + "." + parts[3]
+	}
+	// IPv6: mask 2nd, 4th, 6th groups with ♡
+	if strings.Contains(ip, ":") {
+		v6parts := strings.Split(ip, ":")
+		if len(v6parts) >= 8 {
+			v6parts[1] = "♡"
+			v6parts[3] = "♡"
+			v6parts[5] = "♡"
+			return strings.Join(v6parts, ":")
+		}
+	}
+	return ip
 }
 
 type CreatePostRequest struct {

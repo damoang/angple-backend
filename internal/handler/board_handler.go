@@ -77,7 +77,40 @@ func (h *BoardHandler) GetBoard(c *gin.Context) {
 		return
 	}
 
-	common.SuccessResponse(c, board.ToResponse(), nil)
+	// 사용자 레벨 확인 (인증된 경우 권한 정보 포함)
+	memberLevel := getMemberLevelFromContext(c)
+	var resp *domain.BoardResponse
+	if memberLevel > 0 {
+		resp = board.ToResponseWithPermissions(memberLevel)
+	} else {
+		resp = board.ToResponse()
+	}
+
+	// v2_board_display_settings 테이블에서 표시 설정 조회 (bo_1 대신 별도 테이블 사용)
+	resp.DisplaySettings = h.service.GetBoardDisplaySettings(boardID)
+
+	common.SuccessResponse(c, resp, nil)
+}
+
+// getMemberLevelFromContext extracts member level from context
+// Supports both JWT auth and Damoang cookie auth
+func getMemberLevelFromContext(c *gin.Context) int {
+	// Try JWT auth first (level)
+	if level, exists := c.Get("level"); exists {
+		if lvl, ok := level.(int); ok && lvl > 0 {
+			return lvl
+		}
+	}
+
+	// Try Damoang cookie auth (damoang_user_level)
+	if level, exists := c.Get("damoang_user_level"); exists {
+		if lvl, ok := level.(int); ok && lvl > 0 {
+			return lvl
+		}
+	}
+
+	// Default: not authenticated
+	return 0
 }
 
 // ListBoards - 게시판 목록 조회 (GET /api/v2/boards)
@@ -125,6 +158,40 @@ func (h *BoardHandler) ListBoardsByGroup(c *gin.Context) {
 	}
 
 	common.SuccessResponse(c, responses, nil)
+}
+
+// GetDisplaySettings - 게시판 표시 설정 조회 (GET /api/v1/boards/:board_id/display-settings)
+func (h *BoardHandler) GetDisplaySettings(c *gin.Context) {
+	boardID := c.Param("board_id")
+
+	settings := h.service.GetBoardDisplaySettings(boardID)
+	common.SuccessResponse(c, settings, nil)
+}
+
+// UpdateDisplaySettings - 게시판 표시 설정 수정 (PUT /api/v1/boards/:board_id/display-settings)
+func (h *BoardHandler) UpdateDisplaySettings(c *gin.Context) {
+	boardID := c.Param("board_id")
+
+	// 관리자 권한 확인
+	memberLevel := getMemberLevelFromContext(c)
+	if memberLevel < 10 {
+		common.ErrorResponse(c, http.StatusForbidden, "Admin access required", nil)
+		return
+	}
+
+	var req domain.UpdateDisplaySettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	settings, err := h.service.SaveBoardDisplaySettings(boardID, &req)
+	if err != nil {
+		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to save display settings", err)
+		return
+	}
+
+	common.SuccessResponse(c, settings, nil)
 }
 
 // UpdateBoard - 게시판 수정 (PUT /api/v2/boards/:board_id)

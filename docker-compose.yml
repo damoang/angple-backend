@@ -1,15 +1,32 @@
+# ============================================
+# Angple Backend Docker Compose Configuration
+# ============================================
+#
+# ang-gnu(AS-IS)와 함께 실행하는 구성
+# 기본: ang-gnu의 MySQL/Redis를 공유 (host.docker.internal)
+#
+# 사용법:
+#   ang-gnu와 함께:  docker compose up -d
+#   단독 (자체 DB):  docker compose --profile infra up -d
+#                    (DB_HOST=mysql, REDIS_HOST=redis 를 .env.local에 설정)
+#
+#   개발 전용 올인원: docker compose -f docker-compose.dev.yml up -d
+#
+# ============================================
+
 services:
-  # MySQL Database
+  # MySQL Database (--profile infra 시에만 기동)
   mysql:
     image: mysql:8.4
     container_name: angple-mysql
+    profiles: ["infra"]
     ports:
-      - "3307:3306"  # 현세대(3306)와 포트 충돌 방지
+      - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-angple_root_2024}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-angple_db}
-      MYSQL_USER: ${MYSQL_USER:-angple_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-angple_pass_2024}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-damoang}
+      MYSQL_USER: ${MYSQL_USER:-user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-1234}
     volumes:
       - mysql-data:/var/lib/mysql
       - ./.docker/mysql/init:/docker-entrypoint-initdb.d
@@ -17,7 +34,7 @@ services:
     networks:
       - angple-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${MYSQL_USER:-angple_user}", "-p${MYSQL_PASSWORD:-angple_pass_2024}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${MYSQL_USER:-user}", "-p${MYSQL_PASSWORD:-1234}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,32 +47,27 @@ services:
       dockerfile: deployments/docker/api.Dockerfile
     container_name: angple-api
     ports:
-      - "8081:8081"
+      - "${API_HOST_PORT:-8082}:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
-      - .env
+      - .env.local
     environment:
-      - APP_ENV=${APP_ENV:-prod}  # 환경 선택: local, dev, staging, prod
-      - DB_HOST=${DB_HOST:-mysql}  # 로컬: mysql 컨테이너, 운영: 외부 DB
-      - DB_PORT=${DB_PORT:-3306}
-      - DB_USER=${DB_USER:-angple_user}
-      - DB_PASSWORD=${DB_PASSWORD:-angple_pass_2024}
-      - DB_NAME=${DB_NAME:-angple_db}
-      - REDIS_HOST=redis
+      - APP_ENV=${APP_ENV:-prod}
+      - DB_HOST=host.docker.internal
+      - DB_PORT=3306
+      - DB_USER=user
+      - DB_PASSWORD=1234
+      - DB_NAME=damoang
+      - REDIS_HOST=host.docker.internal
       - REDIS_PORT=6379
       - JWT_SECRET=${JWT_SECRET}
       - DAMOANG_JWT_SECRET=${DAMOANG_JWT_SECRET}
       - API_PORT=8081
-      - RECOMMENDED_DATA_PATH=/home/damoang/www/data/cache/recommended
-      - CORS_ALLOW_ORIGINS=https://damoang.dev, https://api.damoang.dev, https://web.damoang.net, https://damoang.net
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      - RECOMMENDED_DATA_PATH=${RECOMMENDED_DATA_PATH:-}
+      - CORS_ALLOW_ORIGINS=https://damoang.dev, https://api.damoang.dev, https://web.damoang.net, https://damoang.net, https://singo.damoang.net
     networks:
       - angple-network
-    volumes:
-      - /home/damoang/www/data/cache/recommended:/home/damoang/www/data/cache/recommended:ro
 
   # API Gateway
   gateway:
@@ -65,9 +77,11 @@ services:
       dockerfile: deployments/docker/gateway.Dockerfile
     container_name: angple-gateway
     ports:
-      - "8080:8080"
+      - "${GATEWAY_HOST_PORT:-8083}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - LARAVEL_BACKEND_URL=http://host.docker.internal:80  # 기존 Laravel
+      - LARAVEL_BACKEND_URL=http://host.docker.internal:80
       - GO_API_URL=http://api:8081
       - GATEWAY_PORT=8080
     depends_on:
@@ -75,12 +89,13 @@ services:
     networks:
       - angple-network
 
-  # Redis
+  # Redis (--profile infra 시에만 기동)
   redis:
     image: redis:7-alpine
     container_name: angple-redis
+    profiles: ["infra"]
     ports:
-      - "6381:6379"  # 6379는 현세대(ang-gnu)가 사용중
+      - "6381:6379"
     networks:
       - angple-network
     volumes:

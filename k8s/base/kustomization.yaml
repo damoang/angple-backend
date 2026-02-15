@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: angple
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - deployment-api.yaml
+  - deployment-gateway.yaml
+  - service-api.yaml
+  - service-gateway.yaml
+  - ingress.yaml
+  - hpa-api.yaml
+  - pdb.yaml
+  - backup-cronjob.yaml
+
+commonLabels:
+  app.kubernetes.io/managed-by: kustomize

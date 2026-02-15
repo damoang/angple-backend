@@ -1,20 +1,25 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/repository"
+	"github.com/damoang/angple-backend/pkg/cache"
 )
 
 type BoardService struct {
-	repo *repository.BoardRepository
+	repo  *repository.BoardRepository
+	cache cache.Service
 }
 
-func NewBoardService(repo *repository.BoardRepository) *BoardService {
-	return &BoardService{repo: repo}
+func NewBoardService(repo *repository.BoardRepository, cacheService cache.Service) *BoardService {
+	return &BoardService{repo: repo, cache: cacheService}
 }
 
 // CreateBoard - 게시판 생성 (관리자만 가능)
@@ -107,9 +112,34 @@ func (s *BoardService) CreateBoard(req *domain.CreateBoardRequest, adminID strin
 	return board, nil
 }
 
-// GetBoard - 게시판 정보 조회
+// GetBoard - 게시판 정보 조회 (캐시 사용)
 func (s *BoardService) GetBoard(boardID string) (*domain.Board, error) {
-	return s.repo.FindByID(boardID)
+	ctx := context.Background()
+
+	// 캐시에서 먼저 조회
+	if s.cache != nil && s.cache.IsAvailable() {
+		if cached, err := s.cache.GetBoard(ctx, boardID); err == nil {
+			var board domain.Board
+			if json.Unmarshal(cached, &board) == nil {
+				return &board, nil
+			}
+		}
+	}
+
+	// 캐시 미스: DB에서 조회
+	board, err := s.repo.FindByID(boardID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 캐시에 저장
+	if s.cache != nil {
+		if err := s.cache.SetBoard(ctx, boardID, board); err != nil {
+			log.Printf("cache warning: failed to set board: %v", err)
+		}
+	}
+
+	return board, nil
 }
 
 // ListBoards - 게시판 목록 조회
@@ -148,7 +178,18 @@ func (s *BoardService) UpdateBoard(boardID string, req *domain.UpdateBoardReques
 	s.addFieldUpdates(updates, req)
 
 	// 4. 업데이트 실행
-	return s.repo.Update(boardID, updates)
+	if err := s.repo.Update(boardID, updates); err != nil {
+		return err
+	}
+
+	// 5. 캐시 무효화
+	if s.cache != nil {
+		if err := s.cache.InvalidateBoard(context.Background(), boardID); err != nil {
+			log.Printf("cache warning: failed to invalidate board: %v", err)
+		}
+	}
+
+	return nil
 }
 
 // addFieldUpdates - 필드 업데이트를 위한 헬퍼 메서드 (복잡도 감소)
@@ -177,9 +218,81 @@ func addUpdate[T any](updates map[string]interface{}, key string, value *T) {
 	}
 }
 
+// GetBoardDisplaySettings - 게시판 표시 설정 조회 (v2_board_display_settings 테이블)
+// v2 별도 테이블에서 설정을 조회하며, 없으면 기본값 반환
+func (s *BoardService) GetBoardDisplaySettings(boardID string) domain.BoardDisplaySettings {
+	settings, err := s.repo.FindDisplaySettings(boardID)
+	if err != nil || settings == nil {
+		return domain.DefaultBoardDisplaySettings()
+	}
+	return settings.ToDisplaySettings()
+}
+
+// SaveBoardDisplaySettings - 게시판 표시 설정 저장 (upsert)
+func (s *BoardService) SaveBoardDisplaySettings(boardID string, req *domain.UpdateDisplaySettingsRequest) (domain.BoardDisplaySettings, error) {
+	// 기존 설정 조회 (없으면 기본값으로 새로 생성)
+	existing, err := s.repo.FindDisplaySettings(boardID)
+	if err != nil {
+		return domain.BoardDisplaySettings{}, err
+	}
+
+	var model *domain.BoardDisplaySettingsModel
+	if existing != nil {
+		model = existing
+	} else {
+		model = &domain.BoardDisplaySettingsModel{
+			BoardID:       boardID,
+			ListLayout:    "compact",
+			ViewLayout:    "basic",
+			PreviewLength: 150,
+		}
+	}
+
+	// 요청 필드가 있으면 업데이트
+	if req.ListLayout != nil {
+		model.ListLayout = *req.ListLayout
+	}
+	if req.ViewLayout != nil {
+		model.ViewLayout = *req.ViewLayout
+	}
+	if req.ShowPreview != nil {
+		model.ShowPreview = *req.ShowPreview
+	}
+	if req.PreviewLength != nil {
+		model.PreviewLength = *req.PreviewLength
+	}
+	if req.ShowThumbnail != nil {
+		model.ShowThumbnail = *req.ShowThumbnail
+	}
+
+	if err := s.repo.SaveDisplaySettings(model); err != nil {
+		return domain.BoardDisplaySettings{}, err
+	}
+
+	// 게시판 캐시 무효화 (display settings가 변경되었으므로)
+	if s.cache != nil {
+		if err := s.cache.InvalidateBoard(context.Background(), boardID); err != nil {
+			log.Printf("cache warning: failed to invalidate board: %v", err)
+		}
+	}
+
+	return model.ToDisplaySettings(), nil
+}
+
 // DeleteBoard - 게시판 삭제 (관리자만 가능)
 func (s *BoardService) DeleteBoard(boardID string) error {
-	return s.repo.Delete(boardID)
+	if err := s.repo.Delete(boardID); err != nil {
+		return err
+	}
+
+	// 캐시 무효화
+	if s.cache != nil {
+		if err := s.cache.InvalidateBoard(context.Background(), boardID); err != nil {
+			log.Printf("cache warning: failed to invalidate board: %v", err)
+		}
+	}
+
+	return nil
 }
 
 // CanList - 목록 보기 권한 확인
@@ -220,6 +333,34 @@ func (s *BoardService) CanComment(boardID string, memberLevel int) (bool, error)
 	}
 
 	return memberLevel >= board.CommentLevel, nil
+}
+
+// GetRequiredLevel - 특정 액션에 필요한 레벨 조회
+// Implements middleware.BoardPermissionChecker interface
+func (s *BoardService) GetRequiredLevel(boardID string, action string) int {
+	board, err := s.repo.FindByID(boardID)
+	if err != nil {
+		return 1
+	}
+
+	switch action {
+	case "list":
+		return board.ListLevel
+	case "read":
+		return board.ReadLevel
+	case "write":
+		return board.WriteLevel
+	case "reply":
+		return board.ReplyLevel
+	case "comment":
+		return board.CommentLevel
+	case "upload":
+		return board.UploadLevel
+	case "download":
+		return board.DownloadLevel
+	default:
+		return 1
+	}
 }
 
 // Utility functions

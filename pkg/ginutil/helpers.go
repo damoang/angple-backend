@@ -27,3 +27,10 @@ func ParamInt(c *gin.Context, key string) (int, error) {
 	valueStr := c.Param(key)
 	return strconv.Atoi(valueStr)
 }
+
+// ParamInt64 extracts an int64 from path parameters
+// Returns the parsed int64 and error if parsing fails
+func ParamInt64(c *gin.Context, key string) (int64, error) {
+	valueStr := c.Param(key)
+	return strconv.ParseInt(valueStr, 10, 64)
+}
