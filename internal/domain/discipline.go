@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // DisciplineLog represents a discipline log entry for g5_write_disciplinelog
 type DisciplineLog struct {
@@ -97,6 +100,33 @@ var ReasonKeyToCode = map[string]int{
 	"other":             18,
 	"news_missing_info": 39,
 	"news_full_text":    40,
+}
+
+// CodeToReasonKey는 정수 코드 → 텍스트 키 역매핑
+var CodeToReasonKey = func() map[int]string {
+	m := make(map[int]string, len(ReasonKeyToCode))
+	for k, v := range ReasonKeyToCode {
+		m[v] = k
+	}
+	return m
+}()
+
+// ResolveReasonCodes는 프론트엔드에서 전달된 사유 코드를 정수 배열로 변환한다.
+// 텍스트 키("member_insult") 또는 숫자 문자열("1", "21") 모두 처리.
+func ResolveReasonCodes(reasons []string) []int {
+	codes := make([]int, 0, len(reasons))
+	for _, r := range reasons {
+		// 1차: 텍스트 키 매핑 (기존 방식)
+		if code, ok := ReasonKeyToCode[r]; ok {
+			codes = append(codes, code)
+			continue
+		}
+		// 2차: 숫자 문자열 직접 파싱 ("1", "21" 등)
+		if num, err := strconv.Atoi(r); err == nil && num > 0 {
+			codes = append(codes, num)
+		}
+	}
+	return codes
 }
 
 // DisciplineResponse represents a discipline log entry for API response

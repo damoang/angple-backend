@@ -32,6 +32,7 @@ const (
 	ReportStatusPending    = "pending"
 	ReportStatusMonitoring = "monitoring"
 	ReportStatusHold       = "hold"
+	ReportStatusScheduled  = "scheduled"
 	ReportStatusApproved   = "approved"
 	ReportStatusDismissed  = "dismissed"
 
@@ -759,7 +760,7 @@ func (s *ReportService) GetData(table string, parent int, requestingUserID, sing
 
 	// Build process result for processed reports
 	var processResult *domain.ProcessResultResponse
-	if status == ReportStatusApproved || status == ReportStatusDismissed {
+	if status == ReportStatusApproved || status == ReportStatusDismissed || status == ReportStatusScheduled {
 		processResult = s.buildProcessResult(primaryReport, allReports)
 	}
 
@@ -1150,12 +1151,7 @@ func (s *ReportService) processScheduledApprove(report *domain.Report, adminID s
 	}
 
 	// Convert penalty_reasons to JSON integer array for PHP compatibility
-	sgTypes := make([]int, 0, len(req.PenaltyReasons))
-	for _, reasonKey := range req.PenaltyReasons {
-		if code, ok := domain.ReasonKeyToCode[reasonKey]; ok {
-			sgTypes = append(sgTypes, code)
-		}
-	}
+	sgTypes := domain.ResolveReasonCodes(req.PenaltyReasons)
 
 	// Build reasons JSON string (e.g., "[21,22,23]")
 	reasonsJSON := "[]"
@@ -1252,12 +1248,7 @@ func (s *ReportService) processImmediateApprove(report *domain.Report, adminID, 
 	}
 
 	// Convert string reason keys to integer codes (PHP SingoHelper 호환)
-	sgTypes := make([]int, 0, len(req.PenaltyReasons))
-	for _, reasonKey := range req.PenaltyReasons {
-		if code, ok := domain.ReasonKeyToCode[reasonKey]; ok {
-			sgTypes = append(sgTypes, code)
-		}
-	}
+	sgTypes := domain.ResolveReasonCodes(req.PenaltyReasons)
 
 	// Convert penalty_type: Go uses "intercept", PHP uses "access"
 	phpPenaltyType := make([]string, 0, len(req.PenaltyType))
@@ -1520,12 +1511,7 @@ func (s *ReportService) processImmediateBulkApprove(
 		penaltyPeriod = -1
 	}
 
-	sgTypes := make([]int, 0, len(req.PenaltyReasons))
-	for _, reasonKey := range req.PenaltyReasons {
-		if code, ok := domain.ReasonKeyToCode[reasonKey]; ok {
-			sgTypes = append(sgTypes, code)
-		}
-	}
+	sgTypes := domain.ResolveReasonCodes(req.PenaltyReasons)
 
 	phpPenaltyType := make([]string, 0, len(req.PenaltyType))
 	for _, pt := range req.PenaltyType {

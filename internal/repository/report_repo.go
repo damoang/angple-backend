@@ -111,18 +111,19 @@ func (r *ReportRepository) GetByTableAndParent(table string, parent int) (*domai
 }
 
 // GetAllByTableAndParent retrieves all reports for a given table and parent
-// First tries to find by sg_id, then falls back to sg_parent for backward compatibility
+// Queries by sg_parent first (includes both post and comment reports),
+// then falls back to sg_id for backward compatibility with legacy data
 func (r *ReportRepository) GetAllByTableAndParent(table string, parent int) ([]domain.Report, error) {
 	var reports []domain.Report
-	// Try sg_id first
-	if err := r.db.Where("sg_table = ? AND sg_id = ?", table, parent).
+	// Try sg_parent first (gets ALL reports: post + comment)
+	if err := r.db.Where("sg_table = ? AND sg_parent = ?", table, parent).
 		Order("sg_time DESC").
 		Find(&reports).Error; err == nil && len(reports) > 0 {
 		return reports, nil
 	}
 
-	// Fallback to sg_parent
-	if err := r.db.Where("sg_table = ? AND sg_parent = ?", table, parent).
+	// Fallback to sg_id for legacy data
+	if err := r.db.Where("sg_table = ? AND sg_id = ?", table, parent).
 		Order("sg_time DESC").
 		Find(&reports).Error; err != nil {
 		return nil, err
