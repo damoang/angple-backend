@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,7 @@ type ReportService struct {
 	memberRepo       repository.MemberRepository
 	boardRepo        *repository.BoardRepository
 	singoUserRepo    *repository.SingoUserRepository
+	singoSettingRepo *repository.SingoSettingRepository
 	v2UserRepo       v2repo.UserRepository // v2_users 조회 (Bearer 토큰 user_id → mb_id 변환용)
 	redisClient      *redis.Client         // Redis 클라이언트
 
@@ -103,6 +105,11 @@ func (s *ReportService) SetHistoryRepo(historyRepo *repository.HistoryRepository
 // SetSingoUserRepo sets the singo user repository (optional dependency)
 func (s *ReportService) SetSingoUserRepo(singoUserRepo *repository.SingoUserRepository) {
 	s.singoUserRepo = singoUserRepo
+}
+
+// SetSingoSettingRepo sets the singo setting repository (optional dependency)
+func (s *ReportService) SetSingoSettingRepo(singoSettingRepo *repository.SingoSettingRepository) {
+	s.singoSettingRepo = singoSettingRepo
 }
 
 // SetV2UserRepo sets the v2 user repository (Bearer 토큰 user_id → mb_id 변환용)
@@ -1932,23 +1939,51 @@ func (s *ReportService) processAdminDismiss(report *domain.Report, adminID strin
 	return nil
 }
 
-// checkAutoApproval checks if 2+ action opinions exist and auto-approves
-// Sets admin_approved=1 (processed remains 0 for cron to handle discipline)
+// checkAutoApproval checks if N+ action opinions exist and stores monitoring recommendation
+// Does NOT set admin_approved=1 — only stores discipline recommendation for super_admin review
 func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 	if s.opinionRepo == nil {
 		return nil
 	}
 
+	// 설정 확인: 비활성화면 즉시 리턴
+	if s.singoSettingRepo != nil {
+		if enabled, _ := s.singoSettingRepo.Get("auto_approval_enabled"); enabled != "true" {
+			return nil
+		}
+	}
+
+	// 최소 의견 수 확인 (기본 2)
+	minOpinions := 2
+	if s.singoSettingRepo != nil {
+		if minStr, _ := s.singoSettingRepo.Get("auto_approval_min_opinions"); minStr != "" {
+			if n, err := strconv.Atoi(minStr); err == nil && n > 0 {
+				minOpinions = n
+			}
+		}
+	}
+
 	// Count action opinions
 	actionCount, _, err := s.opinionRepo.CountByReportGrouped(report.Table, report.Parent)
-	if err != nil || actionCount < 2 {
+	if err != nil || actionCount < int64(minOpinions) {
 		return nil
 	}
 
-	// Auto-approve: set admin_approved=1, processed=0
-	log.Printf("[INFO] 자동 승인: table=%s, parent=%d (action 의견 %d건)", report.Table, report.Parent, actionCount)
+	// action 의견들 중 가장 보수적(최대 제재) 선택
+	opinions, _ := s.opinionRepo.GetMatchingActionOpinions(report.Table, report.Parent)
+	var best *domain.Opinion
+	for i := range opinions {
+		if best == nil || opinions[i].DisciplineDays > best.DisciplineDays {
+			best = &opinions[i]
+		}
+	}
+	if best == nil {
+		return nil
+	}
 
-	// Update all related reports to admin_approved=1 (sg_id 기준)
+	log.Printf("[INFO] 자동 추천 (승인 아님): table=%s, parent=%d (action 의견 %d건)", report.Table, report.Parent, actionCount)
+
+	// monitoring_discipline_*에 권고안만 저장 (admin_approved 설정 안 함)
 	allReports, err := s.repo.GetAllByTableAndSgID(report.Table, report.SGID, report.Parent)
 	if err != nil {
 		log.Printf("[WARN] 관련 신고 조회 실패: %v", err)
@@ -1956,24 +1991,42 @@ func (s *ReportService) checkAutoApproval(report *domain.Report) error {
 	}
 	for _, r := range allReports {
 		if !r.Processed && !r.AdminApproved {
-			// Use scheduled approve logic: sets admin_approved=1, processed=0
-			// This way PHP cron will handle the discipline execution
-			adminUsersJSON := `[{"mb_id":"system","datetime":"` + time.Now().Format("2006-01-02 15:04:05") + `"}]`
-			if err := s.repo.UpdateStatusScheduledApprove(r.ID, adminUsersJSON, "[]", 0, "", "자동 승인 (2명 이상 동의)"); err != nil {
-				log.Printf("[WARN] 자동 승인 업데이트 실패 (id=%d): %v", r.ID, err)
-			}
+			_ = s.repo.UpdateMonitoringRecommendation(
+				r.ID, best.DisciplineReasons, best.DisciplineDays,
+				best.DisciplineType,
+				fmt.Sprintf("자동 추천 (%d명 동의)", actionCount),
+			)
 		}
 	}
 
-	s.recordHistory(report.Table, report.SGID, report.Parent, report.Status(), "scheduled", "system", fmt.Sprintf("자동 승인 (action 의견 %d건)", actionCount))
+	s.recordHistory(report.Table, report.SGID, report.Parent,
+		report.Status(), ReportStatusMonitoring, "system",
+		fmt.Sprintf("제재 추천 (action 의견 %d건)", actionCount))
 	return nil
 }
 
-// checkAutoDismiss checks if 2+ dismiss/no_action opinions exist, triggering auto-dismiss
+// checkAutoDismiss checks if N+ dismiss/no_action opinions exist, triggering auto-dismiss
 // Sets processed=1, admin_approved=0
 func (s *ReportService) checkAutoDismiss(report *domain.Report) error {
 	if s.opinionRepo == nil {
 		return nil
+	}
+
+	// 설정 확인: 비활성화면 즉시 리턴
+	if s.singoSettingRepo != nil {
+		if enabled, _ := s.singoSettingRepo.Get("auto_dismiss_enabled"); enabled != "true" {
+			return nil
+		}
+	}
+
+	// 최소 의견 수 확인 (기본 2)
+	minOpinions := 2
+	if s.singoSettingRepo != nil {
+		if minStr, _ := s.singoSettingRepo.Get("auto_dismiss_min_opinions"); minStr != "" {
+			if n, err := strconv.Atoi(minStr); err == nil && n > 0 {
+				minOpinions = n
+			}
+		}
 	}
 
 	actionCount, dismissCount, err := s.opinionRepo.CountByReportGrouped(report.Table, report.Parent)
@@ -1981,11 +2034,9 @@ func (s *ReportService) checkAutoDismiss(report *domain.Report) error {
 		return err
 	}
 
-	// Count non-action opinions (dismiss + no_action)
-	// Since we only have "action" and "dismiss" types, dismissCount represents all non-action opinions
 	noActionCount := dismissCount
 
-	if noActionCount < 2 {
+	if noActionCount < int64(minOpinions) {
 		return nil
 	}
 

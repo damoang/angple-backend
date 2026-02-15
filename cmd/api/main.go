@@ -303,10 +303,12 @@ func main() {
 		reactionService := service.NewReactionService(reactionRepo)
 		g5MemoRepo := repository.NewG5MemoRepository(db)
 		singoUserRepo := repository.NewSingoUserRepository(db)
+		singoSettingRepo := repository.NewSingoSettingRepository(db)
 		reportService := service.NewReportService(reportRepo, disciplineRepo, g5MemoRepo, memberRepo, boardRepo)
 		reportService.SetOpinionRepo(opinionRepo)
 		reportService.SetHistoryRepo(historyRepo)
 		reportService.SetSingoUserRepo(singoUserRepo)
+		reportService.SetSingoSettingRepo(singoSettingRepo)
 		reportService.SetAIEvaluationRepo(aiEvalRepo)             // Phase 2: 통합 API용
 		reportService.SetV2UserRepo(v2repo.NewUserRepository(db)) // Bearer 토큰 user_id → mb_id 변환용
 		promotionService := service.NewPromotionService(promotionRepo)
@@ -345,6 +347,7 @@ func main() {
 		reactionHandler = handler.NewReactionHandler(reactionService)
 		reportHandler = handler.NewReportHandler(reportService)
 		reportHandler.SetSingoUserRepo(singoUserRepo)
+		reportHandler.SetSingoSettingRepo(singoSettingRepo)
 		dajoongiHandler = handler.NewDajoongiHandler(dajoongiRepo)
 		promotionHandler = handler.NewPromotionHandler(promotionService)
 		bannerHandler = handler.NewBannerHandler(bannerService)
@@ -379,6 +382,8 @@ func main() {
 					boardRepo,
 					memberRepo,
 					disciplineRepo,
+					postRepo,
+					commentRepo,
 					os.Getenv("AI_CLI_PROXY_URL"),
 					os.Getenv("AI_CLI_PROXY_KEY"),
 					models,

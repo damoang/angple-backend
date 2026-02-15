@@ -29,9 +29,11 @@ type AIEvaluator struct {
 	boardRepo      *repository.BoardRepository
 	memberRepo     repository.MemberRepository
 	disciplineRepo *repository.DisciplineRepository
-	proxyURL       string   // CLIProxyAPI base URL (e.g. "http://127.0.0.1:8317/v1")
-	proxyKey       string   // API key
-	models         []string // e.g. ["claude-sonnet-4-5-20250929", "gpt-5", "gemini-2.5-pro"]
+	postRepo       repository.PostRepository    // 전체 콘텐츠 평가용
+	commentRepo    repository.CommentRepository // 전체 콘텐츠 평가용
+	proxyURL       string                       // CLIProxyAPI base URL (e.g. "http://127.0.0.1:8317/v1")
+	proxyKey       string                       // API key
+	models         []string                     // e.g. ["claude-sonnet-4-5-20250929", "gpt-5", "gemini-2.5-pro"]
 	httpClient     *http.Client
 }
 
@@ -43,6 +45,8 @@ func NewAIEvaluator(
 	boardRepo *repository.BoardRepository,
 	memberRepo repository.MemberRepository,
 	disciplineRepo *repository.DisciplineRepository,
+	postRepo repository.PostRepository,
+	commentRepo repository.CommentRepository,
 	proxyURL string,
 	proxyKey string,
 	models []string,
@@ -54,6 +58,8 @@ func NewAIEvaluator(
 		boardRepo:      boardRepo,
 		memberRepo:     memberRepo,
 		disciplineRepo: disciplineRepo,
+		postRepo:       postRepo,
+		commentRepo:    commentRepo,
 		proxyURL:       proxyURL,
 		proxyKey:       proxyKey,
 		models:         models,
@@ -133,7 +139,7 @@ func (e *AIEvaluator) Evaluate(table string, parent int) ([]domain.AIEvaluation,
 		wg.Add(1)
 		go func(idx int, modelName string) {
 			defer wg.Done()
-			eval, err := e.callAndSave(table, parent, modelName, systemPrompt, userMessage)
+			eval, err := e.callAndSave(table, parent, modelName, systemPrompt, userMessage, "system")
 			results[idx] = evalResult{eval: eval, err: err}
 		}(i, model)
 	}
@@ -167,8 +173,272 @@ func (e *AIEvaluator) DeleteAndReEvaluate(table string, parent int) ([]domain.AI
 	return e.Evaluate(table, parent)
 }
 
+// EvaluateFullContent 전체 콘텐츠(원본 글 + 모든 댓글) 기반 AI 평가
+func (e *AIEvaluator) EvaluateFullContent(table string, parent int) ([]domain.AIEvaluation, error) {
+	if e.postRepo == nil || e.commentRepo == nil {
+		return nil, fmt.Errorf("전체 콘텐츠 평가 기능이 비활성화되어 있습니다 (postRepo/commentRepo 미설정)")
+	}
+
+	// 1. 리포트 로드
+	report, err := e.reportRepo.GetByTableAndParent(table, parent)
+	if err != nil {
+		return nil, fmt.Errorf("리포트 조회 실패: %w", err)
+	}
+
+	// 2. 글/댓글 타입 판별 및 전체 콘텐츠 로드
+	// 댓글 신고: report.Parent != 0 → 부모글 + 부모글의 모든 댓글
+	// 글 신고: report.Parent == 0 → 해당 글 + 해당 글의 모든 댓글
+	postID := report.SGID
+	if report.Parent != 0 {
+		postID = report.Parent
+	}
+
+	post, err := e.postRepo.FindByID(table, postID)
+	if err != nil {
+		return nil, fmt.Errorf("게시글 조회 실패: %w", err)
+	}
+
+	comments, err := e.commentRepo.ListByPost(table, postID)
+	if err != nil {
+		log.Printf("[AI평가:전체콘텐츠] 댓글 조회 실패: %v", err)
+		comments = nil
+	}
+
+	// 3. 의견 로드
+	opinions, err := e.opinionRepo.GetByReportGrouped(table, parent)
+	if err != nil {
+		opinions = nil
+	}
+
+	// 4. 게시판명 조회
+	boardName := table
+	if e.boardRepo != nil {
+		if names, err := e.boardRepo.FindByIDs([]string{table}); err == nil {
+			if name, ok := names[table]; ok {
+				boardName = name
+			}
+		}
+	}
+
+	// 5. 닉네임 로드
+	nickMap := e.loadNicknames(report, opinions)
+
+	// 6. 신고 사유 유형 수집
+	allReports, _ := e.reportRepo.GetAllByTableAndParent(table, parent)
+	reportReasons := collectReportReasons(allReports)
+
+	// 7. 피신고자 제재 이력 로드
+	var disciplineHistory []domain.DisciplineLog
+	if e.disciplineRepo != nil && report.TargetID != "" {
+		if history, _, err := e.disciplineRepo.FindByTargetMember(report.TargetID, 1, 10); err == nil {
+			disciplineHistory = history
+		}
+	}
+
+	// 8. 전체 콘텐츠 프롬프트 빌드
+	systemPrompt := buildSystemPrompt()
+	userMessage := e.buildFullContentUserMessage(report, boardName, post, comments, opinions, nickMap, reportReasons, disciplineHistory)
+
+	// 9. 3개 모델 병렬 호출
+	type evalResult struct {
+		eval *domain.AIEvaluation
+		err  error
+	}
+
+	var wg sync.WaitGroup
+	results := make([]evalResult, len(e.models))
+
+	for i, model := range e.models {
+		wg.Add(1)
+		go func(idx int, modelName string) {
+			defer wg.Done()
+			eval, err := e.callAndSave(table, parent, modelName, systemPrompt, userMessage, "system:full_content")
+			results[idx] = evalResult{eval: eval, err: err}
+		}(i, model)
+	}
+	wg.Wait()
+
+	// 10. 결과 수집
+	var evals []domain.AIEvaluation
+	for i, r := range results {
+		if r.err != nil {
+			log.Printf("[AI평가:전체콘텐츠] 모델 %s 실패: %v", e.models[i], r.err)
+			continue
+		}
+		if r.eval != nil {
+			evals = append(evals, *r.eval)
+		}
+	}
+
+	if len(evals) == 0 {
+		return nil, fmt.Errorf("모든 AI 모델 전체 콘텐츠 평가 실패")
+	}
+
+	log.Printf("[AI평가:전체콘텐츠] 완료 (table=%s, parent=%d, 성공=%d/%d)", table, parent, len(evals), len(e.models))
+	return evals, nil
+}
+
+// buildFullContentUserMessage 전체 콘텐츠(원본 글 + 모든 댓글) 기반 프롬프트 구성
+func (e *AIEvaluator) buildFullContentUserMessage(
+	report *domain.Report,
+	boardName string,
+	post *domain.Post,
+	comments []*domain.Comment,
+	opinions []domain.Opinion,
+	nickMap map[string]string,
+	reportReasons string,
+	disciplineHistory []domain.DisciplineLog,
+) string {
+	var parts []string
+
+	targetType := "게시물"
+	if report.Parent != 0 {
+		targetType = "댓글"
+	}
+
+	// 신고 정보
+	parts = append(parts, "## 신고 정보")
+	parts = append(parts, fmt.Sprintf("- 대상 유형: %s", targetType))
+	parts = append(parts, fmt.Sprintf("- 게시판: %s", boardName))
+
+	if reportReasons != "" {
+		parts = append(parts, fmt.Sprintf("- 신고 사유: %s", reportReasons))
+	} else {
+		reason := report.Reason
+		if reason == "" && report.Type > 0 {
+			if label, ok := sgTypeLabels[report.Type]; ok {
+				reason = label
+			} else {
+				reason = fmt.Sprintf("%d", report.Type)
+			}
+		}
+		parts = append(parts, fmt.Sprintf("- 신고 사유: %s", reason))
+	}
+
+	reporterNick := nickMap[report.ReporterID]
+	if reporterNick == "" {
+		reporterNick = report.ReporterID
+	}
+	parts = append(parts, fmt.Sprintf("- 신고자: %s (%s)", reporterNick, report.ReporterID))
+
+	targetNick := nickMap[report.TargetID]
+	if targetNick == "" {
+		targetNick = report.TargetID
+	}
+	parts = append(parts, fmt.Sprintf("- 피신고자: %s (%s)", targetNick, report.TargetID))
+
+	// 신고 대상 콘텐츠 (스냅샷)
+	parts = append(parts, "")
+	parts = append(parts, "## 신고 대상 콘텐츠 (신고 시점 스냅샷)")
+	if report.TargetTitle != "" {
+		parts = append(parts, fmt.Sprintf("제목: %s", report.TargetTitle))
+	}
+	if report.TargetContent != "" {
+		parts = append(parts, fmt.Sprintf("내용:\n%s", report.TargetContent))
+	} else {
+		parts = append(parts, "(콘텐츠를 불러올 수 없음)")
+	}
+
+	// 전체 게시글 원문 (현재 상태)
+	parts = append(parts, "")
+	parts = append(parts, "## 전체 게시글 원문 (현재 상태)")
+	if post != nil {
+		parts = append(parts, fmt.Sprintf("제목: %s", post.Title))
+		parts = append(parts, fmt.Sprintf("작성자: %s (%s)", post.Author, post.AuthorID))
+		parts = append(parts, fmt.Sprintf("작성일: %s", post.CreatedAt.Format("2006-01-02 15:04:05")))
+		content := stripHTML(post.Content)
+		if len(content) > 5000 {
+			content = content[:5000] + "\n...(이하 생략)"
+		}
+		parts = append(parts, fmt.Sprintf("내용:\n%s", content))
+	} else {
+		parts = append(parts, "(게시글을 불러올 수 없음)")
+	}
+
+	// 전체 댓글
+	if len(comments) > 0 {
+		maxComments := 50
+		if len(comments) > maxComments {
+			parts = append(parts, "")
+			parts = append(parts, fmt.Sprintf("## 전체 댓글 (%d개 중 최근 %d개)", len(comments), maxComments))
+			comments = comments[len(comments)-maxComments:]
+		} else {
+			parts = append(parts, "")
+			parts = append(parts, fmt.Sprintf("## 전체 댓글 (%d개)", len(comments)))
+		}
+
+		for idx, c := range comments {
+			// 신고 대상 댓글 표시 (댓글 신고인 경우)
+			marker := ""
+			if report.Parent != 0 && c.ID == report.SGID {
+				marker = " ★신고대상★"
+			}
+			content := stripHTML(c.Content)
+			if len(content) > 1000 {
+				content = content[:1000] + "...(생략)"
+			}
+			parts = append(parts, fmt.Sprintf("\n[댓글 #%d]%s %s (%s) - %s\n%s",
+				idx+1, marker, c.Author, c.AuthorID, c.CreatedAt.Format("2006-01-02 15:04"), content))
+		}
+	}
+
+	// 모니터링 의견
+	if len(opinions) > 0 {
+		parts = append(parts, "")
+		parts = append(parts, "## 모니터링 의견")
+		for _, op := range opinions {
+			actionLabel := "조치 필요"
+			if op.OpinionType != "action" {
+				actionLabel = "조치 불필요"
+			}
+			reviewerNick := nickMap[op.ReviewerID]
+			if reviewerNick == "" {
+				reviewerNick = op.ReviewerID
+			}
+			daysStr := ""
+			if op.DisciplineDays > 0 {
+				daysStr = fmt.Sprintf(" (%d일)", op.DisciplineDays)
+			}
+			parts = append(parts, fmt.Sprintf("- %s: %s%s", reviewerNick, actionLabel, daysStr))
+			if op.DisciplineDetail != "" {
+				parts = append(parts, fmt.Sprintf("  > %s", op.DisciplineDetail))
+			}
+		}
+	}
+
+	// 피신고자 제재 이력
+	if len(disciplineHistory) > 0 {
+		parts = append(parts, "")
+		parts = append(parts, fmt.Sprintf("## 피신고자 제재 이력 (최근 %d건, 누적 %d회)", len(disciplineHistory), len(disciplineHistory)))
+		for _, hist := range disciplineHistory {
+			var content domain.DisciplineLogContent
+			if err := json.Unmarshal([]byte(hist.Content), &content); err == nil {
+				daysLabel := fmt.Sprintf("%d일", content.PenaltyPeriod)
+				if content.PenaltyPeriod == 0 {
+					daysLabel = "경고"
+				} else if content.PenaltyPeriod == 9999 || content.PenaltyPeriod == -1 {
+					daysLabel = "영구"
+				}
+				reason := hist.Wr1
+				if reason == "" && len(content.SgTypes) > 0 {
+					var labels []string
+					for _, code := range content.SgTypes {
+						if label, ok := sgTypeLabels[int8(code)]; ok {
+							labels = append(labels, label)
+						}
+					}
+					reason = strings.Join(labels, ", ")
+				}
+				parts = append(parts, fmt.Sprintf("- [%s] %s (%s)", hist.DateTime.Format("2006-01-02"), reason, daysLabel))
+			}
+		}
+	}
+
+	return strings.Join(parts, "\n")
+}
+
 // callAndSave 단일 모델 호출 + DB 저장
-func (e *AIEvaluator) callAndSave(table string, parent int, model, systemPrompt, userMessage string) (*domain.AIEvaluation, error) {
+func (e *AIEvaluator) callAndSave(table string, parent int, model, systemPrompt, userMessage, evaluatedBy string) (*domain.AIEvaluation, error) {
 	rawText, err := e.callProvider(model, systemPrompt, userMessage)
 	if err != nil {
 		return nil, fmt.Errorf("API 호출 실패: %w", err)
@@ -207,7 +477,7 @@ func (e *AIEvaluator) callAndSave(table string, parent int, model, systemPrompt,
 		RawResponse:       rawText,
 		Model:             model,
 		EvaluatedAt:       time.Now(),
-		EvaluatedBy:       "system",
+		EvaluatedBy:       evaluatedBy,
 		CreatedAt:         time.Now(),
 	}
 

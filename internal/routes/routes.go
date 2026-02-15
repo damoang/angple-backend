@@ -239,8 +239,18 @@ func Setup(
 	reports.POST("/batch-process", reportHandler.BatchProcessReport) // 신고 일괄 처리 (관리자)
 	reports.GET("/adjacent", reportHandler.GetAdjacentReport)        // 인접 신고 조회 (이전/다음)
 
-	// Singo Users (검토자 목록)
-	api.GET("/singo-users", reportHandler.ListSingoUsers)
+	// Singo Users (검토자 관리)
+	singoUsers := api.Group("/singo-users")
+	singoUsers.GET("/me", reportHandler.GetSingoUserMe)
+	singoUsers.GET("", reportHandler.ListSingoUsers)
+	singoUsers.POST("", reportHandler.CreateSingoUser)
+	singoUsers.PUT("/:mbId", reportHandler.UpdateSingoUserRole)
+	singoUsers.DELETE("/:mbId", reportHandler.DeleteSingoUser)
+
+	// Singo Settings (자동 처리 설정)
+	singoSettings := api.Group("/singo-settings")
+	singoSettings.GET("", reportHandler.GetSingoSettings)
+	singoSettings.PUT("/:key", reportHandler.UpdateSingoSetting)
 
 	// Disciplines (이용제한 API)
 	disciplines := api.Group("/disciplines")

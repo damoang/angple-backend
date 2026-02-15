@@ -194,8 +194,14 @@ func (h *AIEvaluationHandler) RequestEvaluation(c *gin.Context) {
 		return
 	}
 
-	// 기존 결과 유지, 새 평가 추가
-	evals, err := h.evaluator.Evaluate(req.Table, req.Parent)
+	// 모드에 따라 분기: full_content → 전체 콘텐츠 평가, 기본 → 스냅샷 평가
+	var evals []domain.AIEvaluation
+	var err error
+	if req.Mode == "full_content" {
+		evals, err = h.evaluator.EvaluateFullContent(req.Table, req.Parent)
+	} else {
+		evals, err = h.evaluator.Evaluate(req.Table, req.Parent)
+	}
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "AI 평가 실행 실패: "+err.Error(), nil)
 		return
@@ -209,4 +215,5 @@ func (h *AIEvaluationHandler) RequestEvaluation(c *gin.Context) {
 type requestEvaluationReq struct {
 	Table  string `json:"sg_table" binding:"required"`
 	Parent int    `json:"sg_parent" binding:"required"`
+	Mode   string `json:"mode"` // "full_content" → 전체 콘텐츠 평가
 }
