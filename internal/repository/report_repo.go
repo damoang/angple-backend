@@ -16,11 +16,14 @@ var (
 
 // Report status constants
 const (
-	ReportStatusPending    = "pending"
-	ReportStatusMonitoring = "monitoring"
-	ReportStatusHold       = "hold"
-	ReportStatusApproved   = "approved"
-	ReportStatusDismissed  = "dismissed"
+	ReportStatusPending            = "pending"
+	ReportStatusMonitoring         = "monitoring"
+	ReportStatusHold               = "hold"
+	ReportStatusApproved           = "approved"
+	ReportStatusDismissed          = "dismissed"
+	ReportStatusScheduled          = "scheduled"
+	ReportStatusNeedsReview        = "needs_review"
+	ReportStatusNeedsFinalApproval = "needs_final_approval"
 )
 
 // ReportRepository handles report data operations
@@ -31,6 +34,27 @@ type ReportRepository struct {
 // NewReportRepository creates a new ReportRepository
 func NewReportRepository(db *gorm.DB) *ReportRepository {
 	return &ReportRepository{db: db}
+}
+
+// WithTx returns a new ReportRepository with the given transaction
+func (r *ReportRepository) WithTx(tx *gorm.DB) *ReportRepository {
+	return &ReportRepository{db: tx}
+}
+
+// DB returns the underlying database instance
+func (r *ReportRepository) DB() *gorm.DB {
+	return r.db
+}
+
+// GetByIDForUpdate retrieves a report by ID with SELECT FOR UPDATE (row-level lock)
+func (r *ReportRepository) GetByIDForUpdate(id int) (*domain.Report, error) {
+	var report domain.Report
+	if err := r.db.Set("gorm:query_option", "FOR UPDATE").
+		Where("id = ?", id).
+		First(&report).Error; err != nil {
+		return nil, err
+	}
+	return &report, nil
 }
 
 // List retrieves paginated reports with optional status filter
@@ -92,6 +116,9 @@ func (r *ReportRepository) GetByID(id int) (*domain.Report, error) {
 // GetByTableAndParent retrieves the most relevant report by table and parent.
 // Prioritizes unprocessed (processed=0) reports, then most recent.
 // Searches by sg_id first (for sg_id-based grouping), then sg_parent (legacy).
+//
+// NOTE: sg_id 모호성은 없음 — 그누보드에서 글 ID와 댓글 ID는 같은 테이블의 auto_increment이므로
+// 동일 sg_table 내에서 글의 sg_parent와 댓글의 sg_id가 같은 번호일 수 없음.
 func (r *ReportRepository) GetByTableAndParent(table string, parent int) (*domain.Report, error) {
 	var report domain.Report
 	// Try sg_id first (post reports: sg_id = sg_parent, comment reports: sg_id = comment_id)
@@ -383,17 +410,17 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 			case ReportStatusMonitoring:
 				// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
 				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0))")
-			case "needs_review":
+			case ReportStatusNeedsReview:
 				// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
 				conditions = append(conditions, "(action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
-			case "needs_final_approval":
+			case ReportStatusNeedsFinalApproval:
 				// 최종승인 대기: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
 				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
 			case ReportStatusHold:
 				conditions = append(conditions, "(hold = 1 AND processed = 0)")
 			case ReportStatusApproved:
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
-			case "scheduled":
+			case ReportStatusScheduled:
 				// 예약대기: 최고관리자가 승인함, 크론 처리 대기 중
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
 			case ReportStatusDismissed:
@@ -411,17 +438,17 @@ func (r *ReportRepository) ListAggregated(status string, page, limit int, fromDa
 		case ReportStatusMonitoring:
 			// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
 			havingClause = "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0)"
-		case "needs_review":
+		case ReportStatusNeedsReview:
 			// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
 			havingClause = "HAVING action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
-		case "needs_final_approval":
+		case ReportStatusNeedsFinalApproval:
 			// 최종승인 대기: 조치 의견 2개 이상 일치, 최고관리자 승인 대기
 			havingClause = "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
 		case ReportStatusHold:
 			havingClause = "HAVING hold = 1 AND processed = 0"
 		case ReportStatusApproved:
 			havingClause = "HAVING admin_approved = 1 AND processed = 1"
-		case "scheduled":
+		case ReportStatusScheduled:
 			// 예약대기: 최고관리자가 승인함, 크론 처리 대기 중
 			havingClause = "HAVING admin_approved = 1 AND processed = 0"
 		case ReportStatusDismissed:
@@ -826,14 +853,18 @@ func (r *ReportRepository) buildStatusHaving(status string) string {
 			case ReportStatusPending:
 				conditions = append(conditions, "(opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
 			case ReportStatusMonitoring:
-				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
-			case "needs_final_approval":
+				// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
+				conditions = append(conditions, "(opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0))")
+			case ReportStatusNeedsReview:
+				// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
+				conditions = append(conditions, "(action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0)")
+			case ReportStatusNeedsFinalApproval:
 				conditions = append(conditions, "(action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0)")
 			case ReportStatusHold:
 				conditions = append(conditions, "(hold = 1 AND processed = 0)")
 			case ReportStatusApproved:
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 1)")
-			case "scheduled":
+			case ReportStatusScheduled:
 				conditions = append(conditions, "(admin_approved = 1 AND processed = 0)")
 			case ReportStatusDismissed:
 				conditions = append(conditions, "(admin_approved = 0 AND processed = 1)")
@@ -850,14 +881,18 @@ func (r *ReportRepository) buildStatusHaving(status string) string {
 	case ReportStatusPending:
 		return "HAVING opinion_count = 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
 	case ReportStatusMonitoring:
-		return "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
-	case "needs_final_approval":
+		// 진행중: 의견 있는 건 (needs_review/needs_final_approval 제외)
+		return "HAVING opinion_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0 AND NOT (action_count > 0 AND dismiss_count > 0) AND NOT (action_count >= 2 AND dismiss_count = 0)"
+	case ReportStatusNeedsReview:
+		// 검토필요: 의견 갈림 (action과 dismiss 모두 존재)
+		return "HAVING action_count > 0 AND dismiss_count > 0 AND admin_approved = 0 AND processed = 0 AND hold = 0"
+	case ReportStatusNeedsFinalApproval:
 		return "HAVING action_count >= 2 AND dismiss_count = 0 AND admin_approved = 0 AND processed = 0"
 	case ReportStatusHold:
 		return "HAVING hold = 1 AND processed = 0"
 	case ReportStatusApproved:
 		return "HAVING admin_approved = 1 AND processed = 1"
-	case "scheduled":
+	case ReportStatusScheduled:
 		return "HAVING admin_approved = 1 AND processed = 0"
 	case ReportStatusDismissed:
 		return "HAVING admin_approved = 0 AND processed = 1"
