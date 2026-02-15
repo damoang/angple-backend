@@ -11,7 +11,7 @@ database:
   port: 3306
   user: ""  # DB_USER 환경변수
   password: ""  # DB_PASSWORD 환경변수
-  dbname: damoang
+  dbname: angple_db
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 3600
@@ -27,15 +27,11 @@ jwt:
   secret: ""  # JWT_SECRET 환경변수
   expires_in: 900
   refresh_in: 604800
-  damoang_secret: ""  # DAMOANG_JWT_SECRET 환경변수
-
-data_paths:
-  recommended_path: /data/recommended
 
 cors:
-  allow_origins: "https://staging.damoang.net, https://api-staging.damoang.net"
+  allow_origins: "http://localhost:3000"
 
 # 플러그인 설정
 plugins:
   commerce:
-    enabled: false  # Staging에서는 비활성화
+    enabled: false

@@ -32,7 +32,7 @@ type BoardPermissionChecker interface {
 }
 
 // BoardPermission returns a middleware that checks user's permission level for a board
-// It requires JWTAuth or DamoangCookieAuth middleware to be applied first
+// It requires JWTAuth middleware to be applied first
 func BoardPermission(checker BoardPermissionChecker, action PermissionAction) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		boardID := c.Param("board_id")
@@ -42,7 +42,7 @@ func BoardPermission(checker BoardPermissionChecker, action PermissionAction) gi
 			return
 		}
 
-		// Get member level from context (set by JWTAuth or DamoangCookieAuth)
+		// Get member level from context (set by JWTAuth)
 		memberLevel := getMemberLevel(c)
 
 		// Check permission based on action
@@ -110,19 +110,10 @@ func RequireRead(checker BoardPermissionChecker) gin.HandlerFunc {
 }
 
 // getMemberLevel extracts member level from context
-// Supports both JWT auth (level) and Damoang cookie auth (damoang_user_level)
 func getMemberLevel(c *gin.Context) int {
-	// Try JWT auth first
 	if level := GetUserLevel(c); level > 0 {
 		return level
 	}
-
-	// Try Damoang cookie auth
-	if level := GetDamoangUserLevel(c); level > 0 {
-		return level
-	}
-
-	// Default level for guests (not logged in)
 	return 1
 }
 

@@ -74,7 +74,7 @@ func (h *WSHandler) checkOrigin(r *http.Request) bool {
 // @Tags notifications
 // @Router /ws/notifications [get]
 func (h *WSHandler) Connect(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "로그인이 필요합니다"})
 		return

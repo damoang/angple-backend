@@ -238,8 +238,7 @@ func (h *StoreHandler) PluginDetail(c *gin.Context) {
 
 // getActorID 요청에서 사용자 ID 추출
 func getActorID(c *gin.Context) string {
-	// damoang_jwt 쿠키 인증에서 mb_id를 가져옴
-	if userID, exists := c.Get("mb_id"); exists {
+	if userID, exists := c.Get("userID"); exists {
 		if id, ok := userID.(string); ok {
 			return id
 		}

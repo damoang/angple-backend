@@ -22,7 +22,7 @@ func NewBlockHandler(blockRepo v2repo.BlockRepository) *BlockHandler {
 
 // BlockMember handles POST /api/v2/members/:id/block
 func (h *BlockHandler) BlockMember(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.V2ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", errors.New("unauthorized"))
 		return
@@ -64,7 +64,7 @@ func (h *BlockHandler) BlockMember(c *gin.Context) {
 
 // UnblockMember handles DELETE /api/v2/members/:id/block
 func (h *BlockHandler) UnblockMember(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.V2ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", errors.New("unauthorized"))
 		return
@@ -86,7 +86,7 @@ func (h *BlockHandler) UnblockMember(c *gin.Context) {
 
 // ListBlocks handles GET /api/v2/members/me/blocks
 func (h *BlockHandler) ListBlocks(c *gin.Context) {
-	userID := middleware.GetDamoangUserID(c)
+	userID := middleware.GetUserID(c)
 	if userID == "" {
 		common.V2ErrorResponse(c, http.StatusUnauthorized, "로그인이 필요합니다", errors.New("unauthorized"))
 		return

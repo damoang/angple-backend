@@ -107,7 +107,6 @@ func CSRFProtection() gin.HandlerFunc {
 }
 
 // GenerateCSRFToken generates a new CSRF token and sets it as a cookie
-// GET /api/v1/tokens/csrf
 func GenerateCSRFToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenBytes := make([]byte, 32)

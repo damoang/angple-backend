@@ -11,9 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// getUserIDUint64 extracts damoang user ID and converts to uint64
+// getUserIDUint64 extracts user ID and converts to uint64
 func getUserIDUint64(c *gin.Context) uint64 {
-	idStr := middleware.GetDamoangUserID(c)
+	idStr := middleware.GetUserID(c)
 	if idStr == "" {
 		return 0
 	}

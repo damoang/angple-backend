@@ -53,8 +53,7 @@ type CommercePluginConfig struct {
 
 // DataPathsConfig 데이터 경로 설정
 type DataPathsConfig struct {
-	RecommendedPath string `yaml:"recommended_path"`
-	UploadPath      string `yaml:"upload_path"`
+	UploadPath string `yaml:"upload_path"`
 }
 
 // ServerConfig 서버 설정
@@ -87,10 +86,9 @@ type RedisConfig struct {
 
 // JWTConfig JWT 설정
 type JWTConfig struct {
-	Secret        string `yaml:"secret"`
-	DamoangSecret string `yaml:"damoang_secret"`
-	ExpiresIn     int    `yaml:"expires_in"`
-	RefreshIn     int    `yaml:"refresh_in"`
+	Secret    string `yaml:"secret"`
+	ExpiresIn int    `yaml:"expires_in"`
+	RefreshIn int    `yaml:"refresh_in"`
 }
 
 // CORSConfig CORS 설정
@@ -151,20 +149,12 @@ func overrideFromEnv(cfg *Config) {
 	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		cfg.JWT.Secret = secret
 	}
-	if damoangSecret := os.Getenv("DAMOANG_JWT_SECRET"); damoangSecret != "" {
-		cfg.JWT.DamoangSecret = damoangSecret
-	}
-
 	// 서버 설정
 	if port := os.Getenv("API_PORT"); port != "" {
 		_, _ = fmt.Sscanf(port, "%d", &cfg.Server.Port) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 
 	// 데이터 경로 설정
-	if recommendedPath := os.Getenv("RECOMMENDED_DATA_PATH"); recommendedPath != "" {
-		cfg.DataPaths.RecommendedPath = recommendedPath
-	}
-
 	if uploadPath := os.Getenv("UPLOAD_PATH"); uploadPath != "" {
 		cfg.DataPaths.UploadPath = uploadPath
 	}

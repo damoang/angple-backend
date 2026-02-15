@@ -41,7 +41,7 @@ func main() {
 
 	// CORS 설정
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3010", "http://localhost:5173", "https://damoang.dev", "https://api.damoang.dev", "https://web.damoang.net", "https://damoang.net"},
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		AllowCredentials: true,

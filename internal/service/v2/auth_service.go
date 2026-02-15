@@ -9,7 +9,6 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
-	"github.com/damoang/angple-backend/pkg/auth"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -18,17 +17,15 @@ import (
 //
 //nolint:revive
 type V2AuthService struct {
-	userRepo       v2repo.UserRepository
-	jwtManager     *jwt.Manager
-	damoangManager *jwt.DamoangManager
+	userRepo   v2repo.UserRepository
+	jwtManager *jwt.Manager
 }
 
 // NewV2AuthService creates a new V2AuthService
-func NewV2AuthService(userRepo v2repo.UserRepository, jwtManager *jwt.Manager, damoangManager *jwt.DamoangManager) *V2AuthService {
+func NewV2AuthService(userRepo v2repo.UserRepository, jwtManager *jwt.Manager) *V2AuthService {
 	return &V2AuthService{
-		userRepo:       userRepo,
-		jwtManager:     jwtManager,
-		damoangManager: damoangManager,
+		userRepo:   userRepo,
+		jwtManager: jwtManager,
 	}
 }
 
@@ -128,81 +125,12 @@ func (s *V2AuthService) GetCurrentUser(userID uint64) (*v2domain.V2User, error) 
 	return s.userRepo.FindByID(userID)
 }
 
-// ExchangeGnuboardJWT verifies a damoang.net JWT and issues angple JWT tokens
-func (s *V2AuthService) ExchangeGnuboardJWT(gnuJwt string) (*V2LoginResponse, error) {
-	// Verify damoang.net JWT
-	claims, err := s.damoangManager.VerifyToken(gnuJwt)
-	if err != nil {
-		return nil, fmt.Errorf("invalid damoang_jwt: %w", err)
-	}
-
-	// Get user info from claims
-	mbID := claims.GetUserID()
-	if mbID == "" {
-		return nil, errors.New("mb_id not found in token")
-	}
-	mbName := claims.GetUserName()
-	mbLevel := claims.GetUserLevel()
-
-	// Clamp level to valid uint8 range (0-255)
-	level := mbLevel
-	if level < 0 {
-		level = 0
-	} else if level > 255 {
-		level = 255
-	}
-
-	// Find or create user by username (mb_id)
-	user, err := s.userRepo.FindByUsername(mbID)
-	if err != nil {
-		// User doesn't exist in v2_users, create from JWT claims
-		log.Printf("[ExchangeJWT] User %s not found in v2_users, creating...", mbID)
-		user = &v2domain.V2User{
-			Username: mbID,
-			Nickname: mbName,
-			Email:    claims.MbEmail,
-			Level:    uint8(level), // #nosec G115 - bounds checked above
-			Status:   userStatusActive,
-		}
-		if createErr := s.userRepo.Create(user); createErr != nil {
-			return nil, fmt.Errorf("failed to create user: %w", createErr)
-		}
-		log.Printf("[ExchangeJWT] Created user %s with ID %d", mbID, user.ID)
-	}
-
-	if user.Status == userStatusBanned {
-		return nil, errors.New("account is banned")
-	}
-	if user.Status == "inactive" {
-		return nil, errors.New("account is inactive")
-	}
-
-	// Generate angple JWT tokens
-	userIDStr := strconv.FormatUint(user.ID, 10)
-	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
-	if err != nil {
-		return nil, fmt.Errorf("generate access token: %w", err)
-	}
-	refreshToken, err := s.jwtManager.GenerateRefreshToken(userIDStr)
-	if err != nil {
-		return nil, fmt.Errorf("generate refresh token: %w", err)
-	}
-
-	return &V2LoginResponse{
-		User:         user,
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-	}, nil
-}
-
-// verifyPassword checks password against bcrypt or legacy gnuboard hash
+// verifyPassword checks password against bcrypt hash
 func verifyPassword(plain, hashed string) bool {
-	// Try bcrypt first
 	if isBcryptHash(hashed) {
 		return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plain)) == nil
 	}
-	// Fallback to legacy gnuboard password verification
-	return auth.VerifyGnuboardPassword(plain, hashed)
+	return false
 }
 
 // isBcryptHash checks if the hash is bcrypt format ($2a$, $2b$, $2y$)

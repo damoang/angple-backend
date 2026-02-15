@@ -1,13 +1,13 @@
 package v2
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
-	"github.com/damoang/angple-backend/pkg/auth"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -161,9 +161,9 @@ func (h *InstallHandler) CreateAdmin(c *gin.Context) {
 		return
 	}
 
-	// Check if admin already exists
+	// Check if admin already exists in v2_users
 	var count int64
-	h.db.Table("g5_member").Where("mb_level >= 10").Count(&count)
+	h.db.Table("v2_users").Where("level >= 10").Count(&count)
 	if count > 0 {
 		common.V2Success(c, CreateAdminResponse{
 			Success: false,
@@ -174,7 +174,7 @@ func (h *InstallHandler) CreateAdmin(c *gin.Context) {
 
 	// Check if username already exists
 	var existingUser int64
-	h.db.Table("g5_member").Where("mb_id = ?", req.Username).Count(&existingUser)
+	h.db.Table("v2_users").Where("username = ?", req.Username).Count(&existingUser)
 	if existingUser > 0 {
 		common.V2Success(c, CreateAdminResponse{
 			Success: false,
@@ -183,31 +183,23 @@ func (h *InstallHandler) CreateAdmin(c *gin.Context) {
 		return
 	}
 
-	// Hash password (using Gnuboard-compatible format)
-	hashedPassword := auth.HashPassword(req.Password)
+	// Hash password with bcrypt
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "비밀번호 해싱 실패", err)
+		return
+	}
 
-	// Create admin member
-	now := sql.NullString{String: "now()", Valid: true}
+	now := time.Now()
 	result := h.db.Exec(`
-		INSERT INTO g5_member (
-			mb_id, mb_password, mb_name, mb_nick, mb_email,
-			mb_level, mb_datetime, mb_ip, mb_intercept_date, mb_leave_date,
-			mb_email_certify, mb_memo, mb_adult, mb_dupinfo, mb_profile,
-			mb_1, mb_2, mb_3, mb_4, mb_5, mb_6, mb_7, mb_8, mb_9, mb_10
-		) VALUES (
-			?, ?, ?, ?, ?,
-			10, NOW(), ?, '', '',
-			NOW(), '', 0, '', '',
-			'', '', '', '', '', '', '', '', '', ''
-		)
-	`, req.Username, hashedPassword, req.Name, req.Name, req.Email, c.ClientIP())
+		INSERT INTO v2_users (username, password, nickname, email, level, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 10, 'active', ?, ?)
+	`, req.Username, string(hashedPassword), req.Name, req.Email, now, now)
 
 	if result.Error != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "관리자 계정 생성 실패", result.Error)
 		return
 	}
-
-	_ = now // suppress unused variable warning
 
 	common.V2Success(c, CreateAdminResponse{
 		Success: true,
@@ -224,9 +216,9 @@ func (h *InstallHandler) CreateAdmin(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Router /api/v2/install/status [get]
 func (h *InstallHandler) CheckInstallStatus(c *gin.Context) {
-	// Check if g5_member table exists and has admin
+	// Check if v2_users table exists and has admin
 	var adminCount int64
-	err := h.db.Table("g5_member").Where("mb_level >= 10").Count(&adminCount).Error
+	err := h.db.Table("v2_users").Where("level >= 10").Count(&adminCount).Error
 
 	if err != nil {
 		// Table doesn't exist or DB error

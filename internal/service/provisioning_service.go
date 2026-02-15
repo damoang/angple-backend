@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// DB strategy and plan constants
+// DB strategy, plan, and status constants
 const (
 	dbStrategySchema    = "schema"
 	dbStrategyShared    = "shared"
@@ -22,6 +22,9 @@ const (
 	planPro             = "pro"
 	planBusiness        = "business"
 	planEnterprise      = "enterprise"
+
+	paymentStatusActive   = "active"
+	paymentStatusCanceled = "canceled"
 )
 
 // ProvisioningService handles one-click community creation and subscription management

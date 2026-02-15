@@ -8,7 +8,7 @@
 4. 프론트엔드(angple, damoang-ops, damoang-ads) API 전환
 
 ## Current Phase
-Phase 1 완료, Phase 2 대기
+Phase 1, 2, 3 완료, Phase 4 대기
 
 ---
 
@@ -26,61 +26,45 @@ Phase 1 완료, Phase 2 대기
 
 ## Phase 2: angple-backend → damoang-backend 코드 이동
 
-### 2-1: 인증 레이어 이동
-- [ ] `cookie_auth.go` (damoang_jwt 쿠키 인증) 복사 & 수정
-- [ ] `pkg/auth/legacy.go` (그누보드 호환) 복사
-- [ ] `pkg/jwt/damoang.go` 복사
-- [ ] damoang-backend 자체 JWT 매니저 설정
+### 2-1: 인증 레이어 이동 ✅
+- [x] `cookie_auth.go` (damoang_jwt 쿠키 인증) 복사 & 수정
+- [x] `pkg/auth/legacy.go` (그누보드 호환) 복사
+- [x] `pkg/jwt/damoang.go` 복사
+- [x] damoang-backend 자체 JWT 매니저 설정
 
-### 2-2: v1 라우트 전체 이동
-- [ ] `internal/routes/routes.go` → damoang-backend로 복사 & import 수정
-- [ ] v1 전용 핸들러 이동 (auth, post, comment, board, member, member_profile, good, scrap, message, block, notification, memo, reaction, file, menu, site, autosave, filter, token, dajoongi, recommended)
-- [ ] v1 전용 서비스 이동
-- [ ] v1 전용 레포지토리 이동
-- [ ] v1 전용 도메인 모델 이동
+### 2-2: v1 라우트 전체 이동 ✅
+- [x] `internal/routes/routes.go` → damoang-backend로 복사 & import 수정
+- [x] v1 전용 핸들러 이동 (36개)
+- [x] v1 전용 서비스 이동 (32개)
+- [x] v1 전용 레포지토리 이동 (33+8 v2)
+- [x] v1 전용 도메인 모델 이동 (33+4 v2)
 
-### 2-3: 다모앙 전용 핸들러/서비스 이동
-- [ ] report_handler.go + report_service.go
-- [ ] ai_evaluation_handler.go + ai_evaluator.go (32KB) + ai_evaluation_service.go
-- [ ] discipline_handler.go + discipline_service.go
-- [ ] promotion_handler.go + promotion_service.go
-- [ ] banner_handler.go + banner_service.go
-- [ ] payment_handler.go + payment_service.go
-- [ ] gallery_handler.go + gallery_service.go
-- [ ] good_handler.go + good_service.go
-- [ ] recommended_handler.go
-- [ ] admin_handler.go + admin_member_service.go
-- [ ] recommendation_handler.go + recommendation_service.go
+### 2-3: 다모앙 전용 핸들러/서비스 이동 ✅
+- [x] report, ai_evaluation, discipline, promotion, banner, payment
+- [x] gallery, good, recommended, admin, recommendation
 
-### 2-4: 다모앙 전용 미들웨어 이동
-- [ ] `deprecation.go` 이동
-- [ ] `v1_redirect.go` 이동
-- [ ] `permission.go` 판단 & 처리
+### 2-4: 다모앙 전용 미들웨어 이동 ✅
+- [x] 전체 미들웨어 16개 이동 (deprecation, v1_redirect, permission 포함)
 
-### 2-5: 내장 플러그인 이동
-- [ ] `internal/plugins/advertising/` 이동
-- [ ] `internal/plugins/commerce/` 이동
-- [ ] `internal/plugins/embed/` 이동
-- [ ] `internal/plugins/imagelink/` 이동
-- [ ] `internal/plugins/marketplace/` 이동 (판단 필요: 오픈소스 유지 가능)
-- [ ] `plugins/giving/` 이동
-- [ ] `plugins/banner/` 이동
-- [ ] `plugins/emoticon/` 이동
-- [ ] `plugins/promotion/` 이동
+### 2-5: 내장 플러그인 이동 ✅
+- [x] internal/plugins: advertising, commerce, embed, imagelink, marketplace
+- [x] plugins: banner, emoticon, giving, promotion
+- [x] main.go에 blank import 추가 (6개)
 
-### 2-6: 다모앙 전용 도메인 모델 이동
-- [ ] promotion.go, banner.go, dajoongi.go, discipline.go
-- [ ] payment.go, ai_evaluation.go, report.go
-- [ ] singo_user.go, singo_setting.go, recommendation.go
+### 2-6: DI 배선 & 빌드 검증 ✅
+- [x] main.go 완전한 DI 배선 (26+ repos, 24+ services, 26+ handlers)
+- [x] `go build ./...` 성공 (301 Go files)
+- [x] `go mod tidy` 성공
 
-## Phase 3: damoang-ads 코드 흡수
-- [ ] damoang-ads 핸들러 22개 → Fiber→Gin 변환하여 이식
-- [ ] ClickHouse 클라이언트 코드 이식
-- [ ] 배너/광고 관리 핸들러 이식
-- [ ] AdSense 슬롯 관리 이식
-- [ ] 축하배너, 경제 게시물, 프로모션 이식
-- [ ] 통계 집계 이식
-- [ ] damoang-ads 라우트 통합 (/api/v1/serve/*, /api/v1/admin/*)
+## Phase 3: damoang-ads 코드 흡수 ✅
+- [x] damoang-ads 코드 복사 (internal/ads/ 66 Go files)
+- [x] Fiber→Gin 핸들러 변환 (20개 핸들러)
+- [x] 미들웨어 변환 (jwt, admin_auth, authorization, last_login)
+- [x] 라우트 변환 (/api/ads/* prefix)
+- [x] ClickHouse/MySQL/Redis 클라이언트 통합
+- [x] 배너/광고/AdSense/축하배너/경제/프로모션 이식
+- [x] 통계 서비스 8종 이식 (period, advertiser, board, os, position, ads, browser, device)
+- [x] main.go DI 배선 & 빌드 검증 (367 Go files)
 
 ## Phase 4: angple-backend 정리 (오픈소스 준비)
 
@@ -131,8 +115,8 @@ Phase 1 완료, Phase 2 대기
 | Phase | 설명 | 상태 |
 |-------|------|------|
 | Phase 1 | damoang-backend 초기 설정 | ✅ 완료 |
-| Phase 2 | 코드 이동 (angple → damoang) | ❌ 대기 |
-| Phase 3 | damoang-ads 흡수 | ❌ 대기 |
+| Phase 2 | 코드 이동 (angple → damoang) | ✅ 완료 |
+| Phase 3 | damoang-ads 흡수 | ✅ 완료 |
 | Phase 4 | angple-backend 정리 | ❌ 대기 |
 | Phase 5 | 프론트엔드 전환 | ❌ 대기 |
 | Phase 6 | Docker 배포 | ❌ 대기 |

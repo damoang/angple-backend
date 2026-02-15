@@ -116,7 +116,7 @@ func RateLimitPerUser(redisClient *redis.Client, requestsPerMinute int) gin.Hand
 			return
 		}
 
-		userID := GetDamoangUserID(c)
+		userID := GetUserID(c)
 		if userID == "" {
 			// Fall back to IP if not authenticated
 			userID = "ip:" + c.ClientIP()

@@ -27,7 +27,7 @@ func RequestLogger() gin.HandlerFunc {
 		// Log after response
 		latency := time.Since(start)
 		status := c.Writer.Status()
-		userID := GetDamoangUserID(c)
+		userID := GetUserID(c)
 
 		event := logger.GetLogger().Info()
 		if status >= 500 {
