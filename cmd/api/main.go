@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,6 +100,11 @@ func main() {
 		}
 		if err := migration.RunV2Schema(db); err != nil {
 			pkglogger.Info("V2 schema migration warning: %v", err)
+		}
+		if env == "" || env == "development" || env == "local" {
+			if err := migration.MigrateV2Data(db); err != nil {
+				pkglogger.Info("V2 data migration warning: %v", err)
+			}
 		}
 	}
 
@@ -282,6 +288,98 @@ func main() {
 				},
 			})
 		})
+		// v1 boards routes → adapt v2 data to v1 format
+		v1Boards := router.Group("/api/v1/boards")
+		v1Boards.GET("/:slug", v2Handler.GetBoard)
+		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
+			slug := c.Param("slug")
+			board, err := v2BoardRepo.FindBySlug(slug)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
+				return
+			}
+			page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+			limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+			if page < 1 {
+				page = 1
+			}
+			if limit < 1 || limit > 100 {
+				limit = 20
+			}
+			posts, total, err := v2PostRepo.FindByBoard(board.ID, page, limit)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": page, "limit": limit}})
+				return
+			}
+			// batch-load user nicknames
+			userIDs := make([]string, 0, len(posts))
+			for _, p := range posts {
+				userIDs = append(userIDs, fmt.Sprintf("%d", p.UserID))
+			}
+			nickMap, _ := v2UserRepo.FindNicksByIDs(userIDs)
+			// transform to v1 format
+			items := make([]gin.H, 0, len(posts))
+			for _, p := range posts {
+				uid := fmt.Sprintf("%d", p.UserID)
+				author := nickMap[uid]
+				if author == "" {
+					author = "익명"
+				}
+				items = append(items, gin.H{
+					"id":             p.ID,
+					"title":          p.Title,
+					"content":        p.Content,
+					"author":         author,
+					"author_id":      uid,
+					"views":          p.ViewCount,
+					"likes":          0,
+					"comments_count": p.CommentCount,
+					"is_notice":      p.IsNotice,
+					"created_at":     p.CreatedAt,
+					"updated_at":     p.UpdatedAt,
+				})
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"data": items,
+				"meta": gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
+			})
+		})
+		v1Boards.GET("/:slug/posts/:id", func(c *gin.Context) {
+			id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				return
+			}
+			post, err := v2PostRepo.FindByID(id)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				return
+			}
+			_ = v2PostRepo.IncrementViewCount(id)
+			uid := fmt.Sprintf("%d", post.UserID)
+			nickMap, _ := v2UserRepo.FindNicksByIDs([]string{uid})
+			author := nickMap[uid]
+			if author == "" {
+				author = "익명"
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"data": gin.H{
+					"id":             post.ID,
+					"title":          post.Title,
+					"content":        post.Content,
+					"author":         author,
+					"author_id":      uid,
+					"views":          post.ViewCount,
+					"likes":          0,
+					"comments_count": post.CommentCount,
+					"is_notice":      post.IsNotice,
+					"created_at":     post.CreatedAt,
+					"updated_at":     post.UpdatedAt,
+				},
+			})
+		})
+		v1Boards.GET("/:slug/posts/:id/comments", v2Handler.ListComments)
+
 		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
 			emptySection := func(id, name string) gin.H {
 				return gin.H{"id": id, "name": name, "group_id": "", "count": 0, "posts": []any{}}

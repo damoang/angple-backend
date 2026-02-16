@@ -109,8 +109,8 @@ func migratePostsAndComments(db *gorm.DB) error {
 		postSQL := fmt.Sprintf(`
 			INSERT IGNORE INTO v2_posts (board_id, user_id, title, content, status, view_count, comment_count, is_notice, created_at, updated_at)
 			SELECT
-				(SELECT id FROM v2_boards WHERE slug = '%s'),
-				COALESCE((SELECT id FROM v2_users WHERE username = w.mb_id LIMIT 1), 1),
+				(SELECT id FROM v2_boards WHERE slug = '%s' COLLATE utf8mb4_unicode_ci),
+				COALESCE((SELECT id FROM v2_users WHERE username = w.mb_id COLLATE utf8mb4_unicode_ci LIMIT 1), 1),
 				w.wr_subject,
 				w.wr_content,
 				'published',
@@ -134,8 +134,8 @@ func migratePostsAndComments(db *gorm.DB) error {
 		commentSQL := fmt.Sprintf(`
 			INSERT IGNORE INTO v2_comments (post_id, user_id, content, depth, status, created_at, updated_at)
 			SELECT
-				(SELECT p.id FROM v2_posts p JOIN v2_boards b ON p.board_id = b.id WHERE b.slug = '%s' AND p.title = (SELECT wr_subject FROM %s WHERE wr_id = w.wr_parent AND wr_is_comment = 0 LIMIT 1) LIMIT 1),
-				COALESCE((SELECT id FROM v2_users WHERE username = w.mb_id LIMIT 1), 1),
+				(SELECT p.id FROM v2_posts p JOIN v2_boards b ON p.board_id = b.id WHERE b.slug = '%s' COLLATE utf8mb4_unicode_ci AND p.title = (SELECT wr_subject FROM %s WHERE wr_id = w.wr_parent AND wr_is_comment = 0 LIMIT 1) COLLATE utf8mb4_unicode_ci LIMIT 1),
+				COALESCE((SELECT id FROM v2_users WHERE username = w.mb_id COLLATE utf8mb4_unicode_ci LIMIT 1), 1),
 				w.wr_content,
 				0,
 				'active',
