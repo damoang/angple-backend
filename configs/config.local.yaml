@@ -8,10 +8,10 @@ server:
 
 database:
   host: 127.0.0.1
-  port: 3307
-  user: angple_user
-  password: angple_pass_2024
-  dbname: angple_db
+  port: 3306
+  user: user
+  password: "1234"
+  dbname: damoang
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 3600

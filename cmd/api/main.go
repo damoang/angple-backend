@@ -266,7 +266,32 @@ func main() {
 		v1Auth.GET("/me", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
 		v1Auth.GET("/profile", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
 		router.GET("/api/v1/menus/sidebar", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+			var menus []domain.Menu
+			if err := db.Where("is_active = ? AND show_in_sidebar = ?", true, true).
+				Order("order_num ASC, id ASC").Find(&menus).Error; err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+			menuMap := make(map[int64]*domain.Menu, len(menus))
+			var roots []*domain.Menu
+			for i := range menus {
+				menus[i].Children = []*domain.Menu{}
+				menuMap[menus[i].ID] = &menus[i]
+			}
+			for i := range menus {
+				if menus[i].ParentID != nil {
+					if parent, ok := menuMap[*menus[i].ParentID]; ok {
+						parent.Children = append(parent.Children, &menus[i])
+						continue
+					}
+				}
+				roots = append(roots, &menus[i])
+			}
+			result := make([]domain.MenuResponse, 0, len(roots))
+			for _, r := range roots {
+				result = append(result, r.ToResponse())
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		})
 		router.GET("/api/v1/boards/:slug/notices", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
