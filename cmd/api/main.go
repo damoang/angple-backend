@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/config"
@@ -251,6 +252,52 @@ func main() {
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
 		v2routes.SetupAuth(router, v2AuthHandler, jwtManager)
 
+		// v1 compatibility routes (frontend calls /api/v1/*)
+		v1Auth := router.Group("/api/v1/auth")
+		v1Auth.POST("/login", v2AuthHandler.Login)
+		v1Auth.POST("/refresh", v2AuthHandler.RefreshToken)
+		v1Auth.POST("/logout", v2AuthHandler.Logout)
+		v1Auth.GET("/me", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
+		v1Auth.GET("/profile", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
+		router.GET("/api/v1/menus/sidebar", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+		})
+		router.GET("/api/v1/boards/:slug/notices", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+		})
+		router.GET("/api/ads/celebration/today", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+		})
+		// 추천 글 / 위젯 (프론트엔드 홈페이지용)
+		router.GET("/api/v1/recommended/index-widgets", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"news_tabs":    []any{},
+				"economy_tabs": []any{},
+				"gallery":      []any{},
+				"group_tabs": gin.H{
+					"all":  []any{},
+					"24h":  []any{},
+					"week": []any{},
+					"month": []any{},
+				},
+			})
+		})
+		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
+			emptySection := func(id, name string) gin.H {
+				return gin.H{"id": id, "name": name, "group_id": "", "count": 0, "posts": []any{}}
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"generated_at": "",
+				"period":       c.Param("period"),
+				"period_hours": 0,
+				"sections": gin.H{
+					"community": emptySection("community", "커뮤니티"),
+					"group":     emptySection("group", "소모임"),
+					"info":      emptySection("info", "정보"),
+				},
+			})
+		})
+
 		// v2 Admin
 		v2AdminSvc := v2svc.NewAdminService(v2UserRepo, v2BoardRepo, v2PostRepo, v2CommentRepo)
 		v2AdminHandler := v2handler.NewAdminHandler(v2AdminSvc)
@@ -465,6 +512,15 @@ func main() {
 	} else {
 		pkglogger.Info("Skipping API route setup (no DB connection)")
 	}
+
+	// v1 API catch-all: 미매핑 v1 엔드포인트에 대해 404 대신 빈 성공 응답 반환
+	router.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	})
 
 	// 서버 시작
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
