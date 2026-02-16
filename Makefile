@@ -5,7 +5,7 @@ help:
 	@echo "Angple Backend - Available Commands:"
 	@echo ""
 	@echo "🚀 초기 설정:"
-	@echo "  make setup            - 환경 설정 파일 초기화 (.env.local 생성)"
+	@echo "  make setup            - 환경 설정 파일 초기화 (.env 생성)"
 	@echo ""
 	@echo "📦 로컬 개발 (Docker All-in-One - 권장):"
 	@echo "  make dev-docker       - Docker로 개발 환경 시작 (MySQL + Redis + API)"
@@ -44,29 +44,15 @@ help:
 
 # 초기 설정
 setup:
-	@echo "============================================"
-	@echo "  Angple Backend 환경 설정 초기화"
-	@echo "============================================"
-	@echo ""
-	@if [ -f .env.local ]; then \
-		echo "[SKIP] .env.local 이미 존재함"; \
+	@if [ -f .env ]; then \
+		echo "[SKIP] .env already exists"; \
 	elif [ -f .env.example ]; then \
-		cp .env.example .env.local; \
-		echo "[OK]   .env.local 생성됨"; \
+		cp .env.example .env; \
+		echo "[OK]   .env created from .env.example"; \
 	else \
-		echo "[ERROR] .env.example 파일 없음"; \
-		exit 1; \
+		echo "[ERROR] .env.example not found"; exit 1; \
 	fi
-	@echo ""
-	@echo "============================================"
-	@echo "  설정 완료!"
-	@echo "============================================"
-	@echo ""
-	@echo "다음 단계:"
-	@echo "  1. .env.local 파일에서 DB_PASSWORD, JWT_SECRET 등 수정"
-	@echo "  2. make dev-docker  # Docker로 개발 환경 시작"
-	@echo "  3. make dev         # 또는 직접 실행"
-	@echo ""
+	@echo "Next: edit .env (set DB_PASSWORD, JWT_SECRET) → make dev"
 
 # 로컬 개발 환경 (Docker All-in-One)
 dev-docker:
@@ -154,25 +140,25 @@ test-load-k6-ci:
 	@echo "Running k6 CI load test..."
 	k6 run --env BASE_URL=http://localhost:8081 --env SCENARIO=ci tests/load/k6-load-test.js
 
-# Docker (프로덕션/스테이징용 - .env.local 필요)
+# Docker (프로덕션/스테이징용 - .env 필요)
 docker-up:
 	@echo "Starting Docker containers..."
-	@if [ ! -f .env.local ]; then \
-		echo "[ERROR] .env.local 파일 없음. 'make setup' 먼저 실행하세요."; \
+	@if [ ! -f .env ]; then \
+		echo "[ERROR] .env not found. Run 'make setup'."; \
 		exit 1; \
 	fi
-	docker compose --env-file .env.local up -d
+	docker compose --env-file .env up -d
 
 docker-down:
 	@echo "Stopping Docker containers..."
-	docker compose --env-file .env.local down
+	docker compose --env-file .env down
 
 docker-logs:
-	docker compose --env-file .env.local logs -f
+	docker compose --env-file .env logs -f
 
 docker-rebuild:
 	@echo "Rebuilding Docker containers..."
-	docker compose --env-file .env.local up -d --build
+	docker compose --env-file .env up -d --build
 
 # 정리
 clean:

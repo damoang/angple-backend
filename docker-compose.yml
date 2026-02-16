@@ -8,7 +8,7 @@
 # 사용법:
 #   ang-gnu와 함께:  docker compose up -d
 #   단독 (자체 DB):  docker compose --profile infra up -d
-#                    (DB_HOST=mysql, REDIS_HOST=redis 를 .env.local에 설정)
+#                    (DB_HOST=mysql, REDIS_HOST=redis 를 .env에 설정)
 #
 #   개발 전용 올인원: docker compose -f docker-compose.dev.yml up -d
 #
@@ -50,8 +50,6 @@ services:
       - "${API_HOST_PORT:-8082}:8081"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    env_file:
-      - .env.local
     environment:
       - APP_ENV=${APP_ENV:-prod}
       - DB_HOST=host.docker.internal

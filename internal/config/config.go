@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -196,6 +197,24 @@ func overrideFromEnv(cfg *Config) {
 	if cdnURL := os.Getenv("CDN_URL"); cdnURL != "" {
 		cfg.Storage.CDNURL = cdnURL
 	}
+}
+
+// LogResolved logs the resolved configuration values (secrets masked).
+func LogResolved(cfg *Config) {
+	mask := func(s string) string {
+		if s == "" {
+			return "(empty)"
+		}
+		if len(s) <= 4 {
+			return "****"
+		}
+		return s[:2] + "****"
+	}
+	log.Printf("[config] database=%s:%d/%s user=%s password=%s",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.DBName,
+		cfg.Database.User, mask(cfg.Database.Password))
+	log.Printf("[config] redis=%s:%d jwt.secret=%s cors=%s",
+		cfg.Redis.Host, cfg.Redis.Port, mask(cfg.JWT.Secret), cfg.CORS.AllowOrigins)
 }
 
 // GetDSN MySQL DSN 문자열 생성

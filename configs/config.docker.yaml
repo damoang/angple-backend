@@ -9,9 +9,9 @@ server:
 database:
   host: mysql
   port: 3306
-  user: angple_user
-  password: dev_pass_2024
-  dbname: angple_db
+  user: ""        # → DB_USER (docker-compose environment:)
+  password: ""    # → DB_PASSWORD (docker-compose environment:)
+  dbname: ""      # → DB_NAME (docker-compose environment:)
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 3600
@@ -24,7 +24,7 @@ redis:
   pool_size: 100
 
 jwt:
-  secret: dev-secret-key-2024-please-change-in-production
+  secret: ""      # → JWT_SECRET (docker-compose environment:)
   expires_in: 900
   refresh_in: 604800
 

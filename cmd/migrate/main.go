@@ -10,7 +10,6 @@ import (
 
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/migration"
-	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -33,8 +32,11 @@ func main() {
 	verbose := flag.Bool("verbose", false, "verbose SQL logging")
 	flag.Parse()
 
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using environment variables")
+	loaded := config.LoadDotEnv()
+	if len(loaded) > 0 {
+		log.Printf("Loaded env files: %v", loaded)
+	} else {
+		log.Println("No .env files found, using OS environment variables")
 	}
 
 	cfg, err := config.Load(*configPath)

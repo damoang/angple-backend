@@ -9,9 +9,9 @@ server:
 database:
   host: 127.0.0.1
   port: 3306
-  user: user
-  password: "1234"
-  dbname: damoang
+  user: ""        # → DB_USER (.env)
+  password: ""    # → DB_PASSWORD (.env)
+  dbname: ""      # → DB_NAME (.env)
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 3600
@@ -24,7 +24,7 @@ redis:
   pool_size: 100
 
 jwt:
-  secret: local-dev-secret-key
+  secret: ""      # → JWT_SECRET (.env)
   expires_in: 900
   refresh_in: 604800
 

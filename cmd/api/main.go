@@ -36,7 +36,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	mysqldriver "github.com/go-sql-driver/mysql"
-	"github.com/joho/godotenv"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -69,16 +69,16 @@ func getConfigPath() string {
 }
 
 func main() {
-	_ = godotenv.Load() //nolint:errcheck
+	dotenvFiles := config.LoadDotEnv()
 
 	// 로거 초기화
 	pkglogger.Init()
 	env := os.Getenv("APP_ENV")
 	if env == "" {
-		env = "development"
+		env = "local"
 	}
 	pkglogger.InitStructured(env)
-	pkglogger.Info("Starting Angple API Server...")
+	pkglogger.Info("APP_ENV=%s, loaded env files: %v", env, dotenvFiles)
 
 	// 설정 로드
 	configPath := getConfigPath()
@@ -87,6 +87,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	config.LogResolved(cfg)
 
 	// MySQL 연결
 	db, err := initDB(cfg)
