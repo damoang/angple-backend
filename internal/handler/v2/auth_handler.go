@@ -31,6 +31,12 @@ type v2RefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+// isSecureCookie returns true if cookies should have the Secure flag.
+// In release mode (production), Secure=true; in debug/local, Secure=false.
+func isSecureCookie() bool {
+	return gin.Mode() == gin.ReleaseMode
+}
+
 // Login handles POST /api/v2/auth/login
 func (h *V2AuthHandler) Login(c *gin.Context) {
 	var req v2LoginRequest
@@ -46,7 +52,7 @@ func (h *V2AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Set refresh token as httpOnly cookie
-	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", "", true, true)
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", "", isSecureCookie(), true)
 
 	common.V2Success(c, gin.H{
 		"access_token": resp.AccessToken,
@@ -73,7 +79,7 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", "", true, true)
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", "", isSecureCookie(), true)
 
 	common.V2Success(c, gin.H{
 		"access_token": resp.AccessToken,
@@ -83,7 +89,7 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 
 // Logout handles POST /api/v2/auth/logout
 func (h *V2AuthHandler) Logout(c *gin.Context) {
-	c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+	c.SetCookie("refresh_token", "", -1, "/", "", isSecureCookie(), true)
 	common.V2Success(c, gin.H{"message": "로그아웃되었습니다"})
 }
 

@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/config"
@@ -98,6 +100,11 @@ func main() {
 		}
 		if err := migration.RunV2Schema(db); err != nil {
 			pkglogger.Info("V2 schema migration warning: %v", err)
+		}
+		if env == "" || env == "development" || env == "local" {
+			if err := migration.MigrateV2Data(db); err != nil {
+				pkglogger.Info("V2 data migration warning: %v", err)
+			}
 		}
 	}
 
@@ -250,6 +257,158 @@ func main() {
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager)
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
 		v2routes.SetupAuth(router, v2AuthHandler, jwtManager)
+
+		// v1 compatibility routes (frontend calls /api/v1/*)
+		v1Auth := router.Group("/api/v1/auth")
+		v1Auth.POST("/login", v2AuthHandler.Login)
+		v1Auth.POST("/refresh", v2AuthHandler.RefreshToken)
+		v1Auth.POST("/logout", v2AuthHandler.Logout)
+		v1Auth.GET("/me", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
+		v1Auth.GET("/profile", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
+		router.GET("/api/v1/menus/sidebar", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+		})
+		router.GET("/api/v1/boards/:slug/notices", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+		})
+		router.GET("/api/ads/celebration/today", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+		})
+		// 추천 글 / 위젯 (프론트엔드 홈페이지용)
+		router.GET("/api/v1/recommended/index-widgets", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"news_tabs":    []any{},
+				"economy_tabs": []any{},
+				"gallery":      []any{},
+				"group_tabs": gin.H{
+					"all":   []any{},
+					"24h":   []any{},
+					"week":  []any{},
+					"month": []any{},
+				},
+			})
+		})
+		// v1 boards routes → adapt v2 data to v1 format
+		v1Boards := router.Group("/api/v1/boards")
+		v1Boards.GET("/:slug", v2Handler.GetBoard)
+		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
+			slug := c.Param("slug")
+			board, err := v2BoardRepo.FindBySlug(slug)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
+				return
+			}
+			page, err2 := strconv.Atoi(c.DefaultQuery("page", "1"))
+			if err2 != nil {
+				page = 1
+			}
+			limit, err3 := strconv.Atoi(c.DefaultQuery("limit", "20"))
+			if err3 != nil {
+				limit = 20
+			}
+			if page < 1 {
+				page = 1
+			}
+			if limit < 1 || limit > 100 {
+				limit = 20
+			}
+			posts, total, err := v2PostRepo.FindByBoard(board.ID, page, limit)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": page, "limit": limit}})
+				return
+			}
+			// batch-load user nicknames
+			userIDs := make([]string, 0, len(posts))
+			for _, p := range posts {
+				userIDs = append(userIDs, fmt.Sprintf("%d", p.UserID))
+			}
+			nickMap, err4 := v2UserRepo.FindNicksByIDs(userIDs)
+			if err4 != nil {
+				nickMap = map[string]string{}
+			}
+			// transform to v1 format
+			items := make([]gin.H, 0, len(posts))
+			for _, p := range posts {
+				uid := fmt.Sprintf("%d", p.UserID)
+				author := nickMap[uid]
+				if author == "" {
+					author = "익명"
+				}
+				items = append(items, gin.H{
+					"id":             p.ID,
+					"title":          p.Title,
+					"content":        p.Content,
+					"author":         author,
+					"author_id":      uid,
+					"views":          p.ViewCount,
+					"likes":          0,
+					"comments_count": p.CommentCount,
+					"is_notice":      p.IsNotice,
+					"created_at":     p.CreatedAt,
+					"updated_at":     p.UpdatedAt,
+				})
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"data": items,
+				"meta": gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
+			})
+		})
+		v1Boards.GET("/:slug/posts/:id", func(c *gin.Context) {
+			id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				return
+			}
+			post, err := v2PostRepo.FindByID(id)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				return
+			}
+			if vcErr := v2PostRepo.IncrementViewCount(id); vcErr != nil {
+				log.Printf("IncrementViewCount error: %v", vcErr)
+			}
+			uid := fmt.Sprintf("%d", post.UserID)
+			nickMap, nickErr := v2UserRepo.FindNicksByIDs([]string{uid})
+			if nickErr != nil {
+				nickMap = map[string]string{}
+			}
+			author := nickMap[uid]
+			if author == "" {
+				author = "익명"
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"data": gin.H{
+					"id":             post.ID,
+					"title":          post.Title,
+					"content":        post.Content,
+					"author":         author,
+					"author_id":      uid,
+					"views":          post.ViewCount,
+					"likes":          0,
+					"comments_count": post.CommentCount,
+					"is_notice":      post.IsNotice,
+					"created_at":     post.CreatedAt,
+					"updated_at":     post.UpdatedAt,
+				},
+			})
+		})
+		v1Boards.GET("/:slug/posts/:id/comments", v2Handler.ListComments)
+
+		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
+			emptySection := func(id, name string) gin.H {
+				return gin.H{"id": id, "name": name, "group_id": "", "count": 0, "posts": []any{}}
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"generated_at": "",
+				"period":       c.Param("period"),
+				"period_hours": 0,
+				"sections": gin.H{
+					"community": emptySection("community", "커뮤니티"),
+					"group":     emptySection("group", "소모임"),
+					"info":      emptySection("info", "정보"),
+				},
+			})
+		})
 
 		// v2 Admin
 		v2AdminSvc := v2svc.NewAdminService(v2UserRepo, v2BoardRepo, v2PostRepo, v2CommentRepo)
@@ -465,6 +624,15 @@ func main() {
 	} else {
 		pkglogger.Info("Skipping API route setup (no DB connection)")
 	}
+
+	// v1 API catch-all: 미매핑 v1 엔드포인트에 대해 404 대신 빈 성공 응답 반환
+	router.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	})
 
 	// 서버 시작
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
