@@ -281,9 +281,9 @@ func main() {
 				"economy_tabs": []any{},
 				"gallery":      []any{},
 				"group_tabs": gin.H{
-					"all":  []any{},
-					"24h":  []any{},
-					"week": []any{},
+					"all":   []any{},
+					"24h":   []any{},
+					"week":  []any{},
 					"month": []any{},
 				},
 			})
@@ -298,8 +298,14 @@ func main() {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
 				return
 			}
-			page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-			limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+			page, err2 := strconv.Atoi(c.DefaultQuery("page", "1"))
+			if err2 != nil {
+				page = 1
+			}
+			limit, err3 := strconv.Atoi(c.DefaultQuery("limit", "20"))
+			if err3 != nil {
+				limit = 20
+			}
 			if page < 1 {
 				page = 1
 			}
@@ -316,7 +322,10 @@ func main() {
 			for _, p := range posts {
 				userIDs = append(userIDs, fmt.Sprintf("%d", p.UserID))
 			}
-			nickMap, _ := v2UserRepo.FindNicksByIDs(userIDs)
+			nickMap, err4 := v2UserRepo.FindNicksByIDs(userIDs)
+			if err4 != nil {
+				nickMap = map[string]string{}
+			}
 			// transform to v1 format
 			items := make([]gin.H, 0, len(posts))
 			for _, p := range posts {
@@ -355,9 +364,14 @@ func main() {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
 				return
 			}
-			_ = v2PostRepo.IncrementViewCount(id)
+			if vcErr := v2PostRepo.IncrementViewCount(id); vcErr != nil {
+				log.Printf("IncrementViewCount error: %v", vcErr)
+			}
 			uid := fmt.Sprintf("%d", post.UserID)
-			nickMap, _ := v2UserRepo.FindNicksByIDs([]string{uid})
+			nickMap, nickErr := v2UserRepo.FindNicksByIDs([]string{uid})
+			if nickErr != nil {
+				nickMap = map[string]string{}
+			}
 			author := nickMap[uid]
 			if author == "" {
 				author = "익명"
