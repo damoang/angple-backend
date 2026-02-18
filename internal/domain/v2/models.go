@@ -6,34 +6,64 @@ import (
 
 // V2User represents a user in the v2 schema
 type V2User struct {
-	ID        uint64    `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Username  string    `gorm:"column:username;type:varchar(50);uniqueIndex" json:"username"`
-	Email     string    `gorm:"column:email;type:varchar(255);uniqueIndex" json:"email"`
-	Password  string    `gorm:"column:password;type:varchar(255)" json:"-"`
-	Nickname  string    `gorm:"column:nickname;type:varchar(100)" json:"nickname"`
-	Level     uint8     `gorm:"column:level;default:1" json:"level"`
-	Status    string    `gorm:"column:status;type:enum('active','inactive','banned');default:'active'" json:"status"`
-	AvatarURL *string   `gorm:"column:avatar_url;type:varchar(500)" json:"avatar_url,omitempty"`
-	Bio       *string   `gorm:"column:bio;type:text" json:"bio,omitempty"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID          uint64    `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Username    string    `gorm:"column:username;type:varchar(50);uniqueIndex" json:"username"`
+	Email       string    `gorm:"column:email;type:varchar(255);uniqueIndex" json:"email"`
+	Password    string    `gorm:"column:password;type:varchar(255)" json:"-"`
+	Nickname    string    `gorm:"column:nickname;type:varchar(100)" json:"nickname"`
+	Level       uint8     `gorm:"column:level;default:1" json:"level"`
+	Point       int       `gorm:"column:point;default:0" json:"point"`
+	Exp         int       `gorm:"column:exp;default:0" json:"exp"`
+	NariyaLevel uint8     `gorm:"column:nariya_level;default:1" json:"nariya_level"`
+	NariyaMax   int       `gorm:"column:nariya_max;default:1000" json:"nariya_max"`
+	Status      string    `gorm:"column:status;type:enum('active','inactive','banned');default:'active'" json:"status"`
+	AvatarURL   *string   `gorm:"column:avatar_url;type:varchar(500)" json:"avatar_url,omitempty"`
+	Bio         *string   `gorm:"column:bio;type:text" json:"bio,omitempty"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (V2User) TableName() string { return "v2_users" }
 
 // V2Board represents a board in the v2 schema
 type V2Board struct {
-	ID          uint64    `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Slug        string    `gorm:"column:slug;type:varchar(50);uniqueIndex" json:"slug"`
-	Name        string    `gorm:"column:name;type:varchar(100)" json:"name"`
-	Description *string   `gorm:"column:description;type:text" json:"description,omitempty"`
-	CategoryID  *uint64   `gorm:"column:category_id" json:"category_id,omitempty"`
-	Settings    *string   `gorm:"column:settings;type:json" json:"settings,omitempty"`
-	IsActive    bool      `gorm:"column:is_active;default:true" json:"is_active"`
-	OrderNum    uint      `gorm:"column:order_num;default:0" json:"order_num"`
-	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID          uint64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Slug        string  `gorm:"column:slug;type:varchar(50);uniqueIndex" json:"slug"`
+	Name        string  `gorm:"column:name;type:varchar(100)" json:"name"`
+	Description *string `gorm:"column:description;type:text" json:"description,omitempty"`
+	CategoryID  *uint64 `gorm:"column:category_id" json:"category_id,omitempty"`
+	Settings    *string `gorm:"column:settings;type:json" json:"settings,omitempty"`
+	IsActive    bool    `gorm:"column:is_active;default:true" json:"is_active"`
+	OrderNum    uint    `gorm:"column:order_num;default:0" json:"order_num"`
+	// 레벨 제어 (그누보드 bo_*_level 대응)
+	ListLevel     uint8 `gorm:"column:list_level;default:0" json:"list_level"`
+	ReadLevel     uint8 `gorm:"column:read_level;default:0" json:"read_level"`
+	WriteLevel    uint8 `gorm:"column:write_level;default:1" json:"write_level"`
+	ReplyLevel    uint8 `gorm:"column:reply_level;default:1" json:"reply_level"`
+	CommentLevel  uint8 `gorm:"column:comment_level;default:1" json:"comment_level"`
+	UploadLevel   uint8 `gorm:"column:upload_level;default:1" json:"upload_level"`
+	DownloadLevel uint8 `gorm:"column:download_level;default:1" json:"download_level"`
+	// 포인트 설정 (양수=지급, 음수=차감)
+	WritePoint    int       `gorm:"column:write_point;default:0" json:"write_point"`
+	CommentPoint  int       `gorm:"column:comment_point;default:0" json:"comment_point"`
+	DownloadPoint int       `gorm:"column:download_point;default:0" json:"download_point"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
+
+// V2Point represents a point transaction log
+type V2Point struct {
+	ID        uint64    `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	UserID    uint64    `gorm:"column:user_id;index" json:"user_id"`
+	Point     int       `gorm:"column:point" json:"point"`
+	Balance   int       `gorm:"column:balance" json:"balance"`
+	Reason    string    `gorm:"column:reason;type:varchar(100)" json:"reason"`
+	RelTable  string    `gorm:"column:rel_table;type:varchar(50)" json:"rel_table"`
+	RelID     uint64    `gorm:"column:rel_id" json:"rel_id"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (V2Point) TableName() string { return "v2_points" }
 
 func (V2Board) TableName() string { return "v2_boards" }
 
