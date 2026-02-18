@@ -223,8 +223,9 @@ func main() {
 	router.Use(middleware.Metrics())
 	router.Use(middleware.RequestLogger())
 
-	if redisClient != nil {
+	if redisClient != nil && !cfg.IsDevelopment() {
 		router.Use(middleware.RateLimit(redisClient, middleware.DefaultRateLimitConfig()))
+		router.Use(middleware.WriteRateLimit(redisClient, middleware.WriteRateLimitConfig(), "/api/v2/media"))
 	}
 
 	// Prometheus metrics
@@ -251,7 +252,17 @@ func main() {
 		v2PostRepo := v2repo.NewPostRepository(db)
 		v2CommentRepo := v2repo.NewCommentRepository(db)
 		v2BoardRepo := v2repo.NewBoardRepository(db)
+		v2PointRepo := v2repo.NewPointRepository(db)
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo)
+
+		// 권한 체크 & 포인트 & 경험치 서비스
+		permChecker := middleware.NewDBBoardPermissionChecker(v2BoardRepo)
+		pointSvc := v2svc.NewPointService(v2UserRepo, v2PointRepo)
+		expSvc := v2svc.NewExpService(v2UserRepo)
+		v2Handler.SetPermissionChecker(permChecker)
+		v2Handler.SetPointService(pointSvc)
+		v2Handler.SetExpService(expSvc)
+
 		v2routes.Setup(router, v2Handler, jwtManager)
 
 		// v2 Auth
@@ -419,6 +430,8 @@ func main() {
 			})
 		})
 		v1Boards.GET("/:slug/posts/:id/comments", v2Handler.ListComments)
+		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), v2Handler.CreatePost)
+		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), v2Handler.CreateComment)
 
 		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
 			emptySection := func(id, name string) gin.H {
@@ -539,10 +552,11 @@ func main() {
 			mediaSvc := service.NewMediaService(s3Client)
 			mediaHandler := handler.NewMediaHandler(mediaSvc)
 
+			uploadRateLimit := middleware.RateLimit(redisClient, middleware.UploadRateLimitConfig())
 			media := router.Group("/api/v2/media", middleware.JWTAuth(jwtManager))
-			media.POST("/images", mediaHandler.UploadImage)
-			media.POST("/attachments", mediaHandler.UploadAttachment)
-			media.POST("/videos", mediaHandler.UploadVideo)
+			media.POST("/images", uploadRateLimit, mediaHandler.UploadImage)
+			media.POST("/attachments", uploadRateLimit, mediaHandler.UploadAttachment)
+			media.POST("/videos", uploadRateLimit, mediaHandler.UploadVideo)
 			media.DELETE("/files", mediaHandler.DeleteFile)
 		}
 
