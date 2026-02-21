@@ -220,7 +220,7 @@ func LogResolved(cfg *Config) {
 // GetDSN MySQL DSN 문자열 생성
 func (c *DatabaseConfig) GetDSN() string {
 	// sql_mode='' 로 STRICT_TRANS_TABLES 비활성화 (NOT NULL 필드 기본값 허용)
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&sql_mode=''",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Asia%%2FSeoul&sql_mode=''",
 		c.User,
 		c.Password,
 		c.Host,

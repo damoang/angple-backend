@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/api ./cmd/api
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates curl
+RUN apk --no-cache add ca-certificates curl tzdata
 
 WORKDIR /app
 

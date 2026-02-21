@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -56,6 +57,13 @@ end
 func RateLimit(redisClient *redis.Client, cfg RateLimitConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if redisClient == nil {
+			c.Next()
+			return
+		}
+
+		// SSR 요청은 rate limit 우회 (SvelteKit 서버 사이드 렌더링)
+		userAgent := c.GetHeader("User-Agent")
+		if strings.HasPrefix(userAgent, "Angple-Web-SSR") {
 			c.Next()
 			return
 		}
