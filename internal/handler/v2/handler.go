@@ -17,6 +17,8 @@ type V2Handler struct {
 	postRepo    v2repo.PostRepository
 	commentRepo v2repo.CommentRepository
 	boardRepo   v2repo.BoardRepository
+	permChecker middleware.BoardPermissionChecker
+	pointRepo   v2repo.PointRepository
 }
 
 // NewV2Handler creates a new V2Handler
@@ -25,13 +27,20 @@ func NewV2Handler(
 	postRepo v2repo.PostRepository,
 	commentRepo v2repo.CommentRepository,
 	boardRepo v2repo.BoardRepository,
+	permChecker middleware.BoardPermissionChecker,
 ) *V2Handler {
 	return &V2Handler{
 		userRepo:    userRepo,
 		postRepo:    postRepo,
 		commentRepo: commentRepo,
 		boardRepo:   boardRepo,
+		permChecker: permChecker,
 	}
+}
+
+// SetPointRepository sets the optional point repository for point operations
+func (h *V2Handler) SetPointRepository(repo v2repo.PointRepository) {
+	h.pointRepo = repo
 }
 
 // === Users ===
@@ -77,6 +86,12 @@ func (h *V2Handler) ListUsers(c *gin.Context) {
 
 // === Boards ===
 
+// boardWithPermissions wraps a board with user-specific permissions
+type boardWithPermissions struct {
+	*v2domain.V2Board
+	Permissions *middleware.BoardPermissions `json:"permissions,omitempty"`
+}
+
 // ListBoards handles GET /api/v2-next/boards
 func (h *V2Handler) ListBoards(c *gin.Context) {
 	boards, err := h.boardRepo.FindAll()
@@ -84,6 +99,19 @@ func (h *V2Handler) ListBoards(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시판 목록 조회 실패", err)
 		return
 	}
+
+	// 인증된 사용자면 각 게시판별 permissions 포함
+	memberLevel := middleware.GetUserLevel(c)
+	if memberLevel > 0 && h.permChecker != nil {
+		result := make([]boardWithPermissions, len(boards))
+		for i, board := range boards {
+			perms, _ := h.permChecker.GetAllPermissions(board.Slug, memberLevel)
+			result[i] = boardWithPermissions{V2Board: board, Permissions: perms}
+		}
+		common.V2Success(c, result)
+		return
+	}
+
 	common.V2Success(c, boards)
 }
 
@@ -95,6 +123,15 @@ func (h *V2Handler) GetBoard(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
 		return
 	}
+
+	// 인증된 사용자면 permissions 포함
+	memberLevel := middleware.GetUserLevel(c)
+	if memberLevel > 0 && h.permChecker != nil {
+		perms, _ := h.permChecker.GetAllPermissions(slug, memberLevel)
+		common.V2Success(c, boardWithPermissions{V2Board: board, Permissions: perms})
+		return
+	}
+
 	common.V2Success(c, board)
 }
 
@@ -160,6 +197,27 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		return
 	}
 
+	// 레벨 체크 (미들웨어 우회 방어)
+	userLevel := middleware.GetUserLevel(c)
+	if userLevel < int(board.WriteLevel) {
+		common.V2ErrorResponse(c, http.StatusForbidden, "글쓰기 권한이 없습니다. 레벨 "+strconv.Itoa(int(board.WriteLevel))+" 이상이 필요합니다.", nil)
+		return
+	}
+
+	// 포인트 차감 게시판인 경우 잔액 확인
+	if board.WritePoint < 0 && h.pointRepo != nil {
+		canAfford, err := h.pointRepo.CanAfford(userID, board.WritePoint)
+		if err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
+			return
+		}
+		if !canAfford {
+			common.V2ErrorResponse(c, http.StatusForbidden,
+				"포인트가 부족합니다. "+strconv.Itoa(-board.WritePoint)+"포인트가 필요합니다.", nil)
+			return
+		}
+	}
+
 	post := &v2domain.V2Post{
 		BoardID: board.ID,
 		UserID:  userID,
@@ -171,6 +229,12 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 작성 실패", err)
 		return
 	}
+
+	// 포인트 처리 (지급 또는 차감)
+	if board.WritePoint != 0 && h.pointRepo != nil {
+		_ = h.pointRepo.AddPoint(userID, board.WritePoint, "글쓰기", "v2_posts", post.ID) //nolint:errcheck
+	}
+
 	common.V2Created(c, post)
 }
 
@@ -245,6 +309,13 @@ func (h *V2Handler) ListComments(c *gin.Context) {
 
 // CreateComment handles POST /api/v2-next/boards/:slug/posts/:id/comments
 func (h *V2Handler) CreateComment(c *gin.Context) {
+	slug := c.Param("slug")
+	board, err := h.boardRepo.FindBySlug(slug)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
+		return
+	}
+
 	postID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
@@ -266,6 +337,27 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		return
 	}
 
+	// 레벨 체크 (미들웨어 우회 방어)
+	userLevel := middleware.GetUserLevel(c)
+	if userLevel < int(board.CommentLevel) {
+		common.V2ErrorResponse(c, http.StatusForbidden, "댓글 작성 권한이 없습니다. 레벨 "+strconv.Itoa(int(board.CommentLevel))+" 이상이 필요합니다.", nil)
+		return
+	}
+
+	// 포인트 차감 게시판인 경우 잔액 확인
+	if board.CommentPoint < 0 && h.pointRepo != nil {
+		canAfford, err := h.pointRepo.CanAfford(userID, board.CommentPoint)
+		if err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
+			return
+		}
+		if !canAfford {
+			common.V2ErrorResponse(c, http.StatusForbidden,
+				"포인트가 부족합니다. "+strconv.Itoa(-board.CommentPoint)+"포인트가 필요합니다.", nil)
+			return
+		}
+	}
+
 	comment := &v2domain.V2Comment{
 		PostID:   postID,
 		UserID:   userID,
@@ -281,6 +373,12 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "댓글 작성 실패", err)
 		return
 	}
+
+	// 포인트 처리 (지급 또는 차감)
+	if board.CommentPoint != 0 && h.pointRepo != nil {
+		_ = h.pointRepo.AddPoint(userID, board.CommentPoint, "댓글작성", "v2_comments", comment.ID) //nolint:errcheck
+	}
+
 	common.V2Created(c, comment)
 }
 

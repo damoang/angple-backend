@@ -9,6 +9,7 @@ import (
 
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
 	v2handler "github.com/damoang/angple-backend/internal/handler/v2"
+	"github.com/damoang/angple-backend/internal/middleware"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
@@ -84,12 +85,13 @@ func (s *V2APISuite) SetupSuite() {
 	commentRepo := v2repo.NewCommentRepository(db)
 	boardRepo := v2repo.NewBoardRepository(db)
 
-	v2Handler := v2handler.NewV2Handler(userRepo, postRepo, commentRepo, boardRepo)
+	permChecker := middleware.NewDBBoardPermissionChecker(boardRepo)
+	v2Handler := v2handler.NewV2Handler(userRepo, postRepo, commentRepo, boardRepo, permChecker)
 	authSvc := v2svc.NewV2AuthService(userRepo, s.jwtManager)
 	authHandler := v2handler.NewV2AuthHandler(authSvc)
 
 	s.router = gin.New()
-	v2routes.Setup(s.router, v2Handler, s.jwtManager)
+	v2routes.Setup(s.router, v2Handler, s.jwtManager, permChecker)
 	v2routes.SetupAuth(s.router, authHandler, s.jwtManager)
 
 	// Seed test data

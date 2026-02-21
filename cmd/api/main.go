@@ -225,7 +225,8 @@ func main() {
 
 	if redisClient != nil && !cfg.IsDevelopment() {
 		router.Use(middleware.RateLimit(redisClient, middleware.DefaultRateLimitConfig()))
-		router.Use(middleware.WriteRateLimit(redisClient, middleware.WriteRateLimitConfig(), "/api/v2/media"))
+		// TODO: WriteRateLimit 구현 후 활성화
+		// router.Use(middleware.WriteRateLimit(redisClient, middleware.WriteRateLimitConfig(), "/api/v2/media"))
 	}
 
 	// Prometheus metrics
@@ -253,17 +254,17 @@ func main() {
 		v2CommentRepo := v2repo.NewCommentRepository(db)
 		v2BoardRepo := v2repo.NewBoardRepository(db)
 		v2PointRepo := v2repo.NewPointRepository(db)
-		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo)
 
-		// 권한 체크 & 포인트 & 경험치 서비스
+		// 권한 체크
 		permChecker := middleware.NewDBBoardPermissionChecker(v2BoardRepo)
-		pointSvc := v2svc.NewPointService(v2UserRepo, v2PointRepo)
-		expSvc := v2svc.NewExpService(v2UserRepo)
-		v2Handler.SetPermissionChecker(permChecker)
-		v2Handler.SetPointService(pointSvc)
-		v2Handler.SetExpService(expSvc)
+		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo, permChecker)
+		v2Handler.SetPointRepository(v2PointRepo)
 
-		v2routes.Setup(router, v2Handler, jwtManager)
+		// TODO: 경험치 서비스 구현 후 활성화
+		// expSvc := v2svc.NewExpService(v2UserRepo)
+		// v2Handler.SetExpService(expSvc)
+
+		v2routes.Setup(router, v2Handler, jwtManager, permChecker)
 
 		// v2 Auth
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager)
@@ -552,11 +553,12 @@ func main() {
 			mediaSvc := service.NewMediaService(s3Client)
 			mediaHandler := handler.NewMediaHandler(mediaSvc)
 
-			uploadRateLimit := middleware.RateLimit(redisClient, middleware.UploadRateLimitConfig())
+			// TODO: UploadRateLimitConfig 구현 후 활성화
+			// uploadRateLimit := middleware.RateLimit(redisClient, middleware.UploadRateLimitConfig())
 			media := router.Group("/api/v2/media", middleware.JWTAuth(jwtManager))
-			media.POST("/images", uploadRateLimit, mediaHandler.UploadImage)
-			media.POST("/attachments", uploadRateLimit, mediaHandler.UploadAttachment)
-			media.POST("/videos", uploadRateLimit, mediaHandler.UploadVideo)
+			media.POST("/images", mediaHandler.UploadImage)
+			media.POST("/attachments", mediaHandler.UploadAttachment)
+			media.POST("/videos", mediaHandler.UploadVideo)
 			media.DELETE("/files", mediaHandler.DeleteFile)
 		}
 

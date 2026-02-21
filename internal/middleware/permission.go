@@ -21,21 +21,40 @@ const (
 	ActionDownload PermissionAction = "download"
 )
 
+// BoardPermissions represents all permission flags for a board
+type BoardPermissions struct {
+	CanList     bool `json:"can_list"`
+	CanRead     bool `json:"can_read"`
+	CanWrite    bool `json:"can_write"`
+	CanReply    bool `json:"can_reply"`
+	CanComment  bool `json:"can_comment"`
+	CanUpload   bool `json:"can_upload"`
+	CanDownload bool `json:"can_download"`
+}
+
 // BoardPermissionChecker interface for checking board permissions
 // This avoids circular dependency with service package
 type BoardPermissionChecker interface {
 	CanList(boardID string, memberLevel int) (bool, error)
 	CanRead(boardID string, memberLevel int) (bool, error)
 	CanWrite(boardID string, memberLevel int) (bool, error)
+	CanReply(boardID string, memberLevel int) (bool, error)
 	CanComment(boardID string, memberLevel int) (bool, error)
+	CanUpload(boardID string, memberLevel int) (bool, error)
+	CanDownload(boardID string, memberLevel int) (bool, error)
 	GetRequiredLevel(boardID string, action string) int
+	GetAllPermissions(boardID string, memberLevel int) (*BoardPermissions, error)
 }
 
 // BoardPermission returns a middleware that checks user's permission level for a board
 // It requires JWTAuth middleware to be applied first
 func BoardPermission(checker BoardPermissionChecker, action PermissionAction) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		boardID := c.Param("board_id")
+		// slug 또는 board_id 파라미터 모두 지원
+		boardID := c.Param("slug")
+		if boardID == "" {
+			boardID = c.Param("board_id")
+		}
 		if boardID == "" {
 			common.ErrorResponse(c, http.StatusBadRequest, "게시판 ID가 필요합니다", nil)
 			c.Abort()
@@ -60,9 +79,18 @@ func BoardPermission(checker BoardPermissionChecker, action PermissionAction) gi
 		case ActionWrite:
 			canAccess, err = checker.CanWrite(boardID, memberLevel)
 			requiredLevel = checker.GetRequiredLevel(boardID, "write")
+		case ActionReply:
+			canAccess, err = checker.CanReply(boardID, memberLevel)
+			requiredLevel = checker.GetRequiredLevel(boardID, "reply")
 		case ActionComment:
 			canAccess, err = checker.CanComment(boardID, memberLevel)
 			requiredLevel = checker.GetRequiredLevel(boardID, "comment")
+		case ActionUpload:
+			canAccess, err = checker.CanUpload(boardID, memberLevel)
+			requiredLevel = checker.GetRequiredLevel(boardID, "upload")
+		case ActionDownload:
+			canAccess, err = checker.CanDownload(boardID, memberLevel)
+			requiredLevel = checker.GetRequiredLevel(boardID, "download")
 		default:
 			// For unsupported actions, allow by default
 			c.Next()
@@ -107,6 +135,21 @@ func RequireComment(checker BoardPermissionChecker) gin.HandlerFunc {
 // RequireRead is a convenience function for read permission check
 func RequireRead(checker BoardPermissionChecker) gin.HandlerFunc {
 	return BoardPermission(checker, ActionRead)
+}
+
+// RequireReply is a convenience function for reply permission check
+func RequireReply(checker BoardPermissionChecker) gin.HandlerFunc {
+	return BoardPermission(checker, ActionReply)
+}
+
+// RequireUpload is a convenience function for upload permission check
+func RequireUpload(checker BoardPermissionChecker) gin.HandlerFunc {
+	return BoardPermission(checker, ActionUpload)
+}
+
+// RequireDownload is a convenience function for download permission check
+func RequireDownload(checker BoardPermissionChecker) gin.HandlerFunc {
+	return BoardPermission(checker, ActionDownload)
 }
 
 // getMemberLevel extracts member level from context

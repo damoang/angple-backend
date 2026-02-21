@@ -18,7 +18,7 @@ func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.M
 }
 
 // Setup configures v2 API routes (new DB schema)
-func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager) {
+func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, boardPermChecker middleware.BoardPermissionChecker) {
 	api := router.Group("/api/v2")
 	auth := middleware.JWTAuth(jwtManager)
 
@@ -28,15 +28,16 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager) 
 	users.GET("/:id", h.GetUser)
 	users.GET("/username/:username", h.GetUserByUsername)
 
-	// Boards
+	// Boards (OptionalJWTAuth로 인증된 사용자에게 permissions 제공)
 	boards := api.Group("/boards")
+	boards.Use(middleware.OptionalJWTAuth(jwtManager))
 	boards.GET("", h.ListBoards)
 	boards.GET("/:slug", h.GetBoard)
 
 	// Posts (nested under boards)
 	boardPosts := boards.Group("/:slug/posts")
 	boardPosts.GET("", h.ListPosts)
-	boardPosts.POST("", auth, h.CreatePost)
+	boardPosts.POST("", auth, middleware.RequireWrite(boardPermChecker), h.CreatePost)
 	boardPosts.GET("/:id", h.GetPost)
 	boardPosts.PUT("/:id", auth, h.UpdatePost)
 	boardPosts.DELETE("/:id", auth, h.DeletePost)
@@ -44,7 +45,7 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager) 
 	// Comments (nested under posts)
 	comments := boardPosts.Group("/:id/comments")
 	comments.GET("", h.ListComments)
-	comments.POST("", auth, h.CreateComment)
+	comments.POST("", auth, middleware.RequireComment(boardPermChecker), h.CreateComment)
 	comments.DELETE("/:comment_id", auth, h.DeleteComment)
 }
 
