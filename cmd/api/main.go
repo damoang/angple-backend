@@ -328,6 +328,7 @@ func main() {
 		})
 		// v1 boards routes → adapt v2 data to v1 format
 		v1Boards := router.Group("/api/v1/boards")
+		v1Boards.Use(middleware.OptionalJWTAuth(jwtManager))
 		v1Boards.GET("/:slug", v2Handler.GetBoard)
 		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
 			slug := c.Param("slug")

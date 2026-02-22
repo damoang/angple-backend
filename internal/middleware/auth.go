@@ -41,29 +41,23 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 	}
 }
 
-// OptionalJWTAuth attempts to authenticate but continues even if no token is present
+// OptionalJWTAuth attempts to authenticate but continues even if no token is present.
+// Invalid or expired tokens are silently ignored (user proceeds as unauthenticated).
 func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" {
 			parts := strings.Split(authHeader, " ")
-			if len(parts) != 2 || parts[0] != "Bearer" {
-				common.ErrorResponse(c, 401, "로그인이 필요합니다", nil)
-				c.Abort()
-				return
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				claims, err := jwtManager.VerifyToken(parts[1])
+				if err == nil {
+					c.Set("userID", claims.UserID)
+					c.Set("nickname", claims.Nickname)
+					c.Set("level", claims.Level)
+					c.Set("v2_user_id", claims.UserID)
+				}
+				// 토큰 검증 실패 시 무시 (비인증 상태로 계속)
 			}
-
-			claims, err := jwtManager.VerifyToken(parts[1])
-			if err != nil {
-				common.ErrorResponse(c, 401, "로그인이 필요합니다", nil)
-				c.Abort()
-				return
-			}
-
-			c.Set("userID", claims.UserID)
-			c.Set("nickname", claims.Nickname)
-			c.Set("level", claims.Level)
-			c.Set("v2_user_id", claims.UserID)
 		}
 
 		c.Next()

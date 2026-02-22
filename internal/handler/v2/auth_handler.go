@@ -37,6 +37,16 @@ func isSecureCookie() bool {
 	return gin.Mode() == gin.ReleaseMode
 }
 
+// cookieDomain returns the cookie domain for cross-subdomain sharing.
+// Production: ".damoang.net" (shared across damoang.net, web.damoang.net, etc.)
+// Development: "" (current host only)
+func cookieDomain() string {
+	if gin.Mode() == gin.ReleaseMode {
+		return ".damoang.net"
+	}
+	return ""
+}
+
 // Login handles POST /api/v2/auth/login
 func (h *V2AuthHandler) Login(c *gin.Context) {
 	var req v2LoginRequest
@@ -51,8 +61,8 @@ func (h *V2AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Set refresh token as httpOnly cookie
-	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", "", isSecureCookie(), true)
+	// Set refresh token as httpOnly cookie (domain shared across subdomains)
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(), isSecureCookie(), true)
 
 	common.V2Success(c, gin.H{
 		"access_token": resp.AccessToken,
@@ -79,7 +89,7 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", "", isSecureCookie(), true)
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(), isSecureCookie(), true)
 
 	common.V2Success(c, gin.H{
 		"access_token": resp.AccessToken,
@@ -89,7 +99,7 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 
 // Logout handles POST /api/v2/auth/logout
 func (h *V2AuthHandler) Logout(c *gin.Context) {
-	c.SetCookie("refresh_token", "", -1, "/", "", isSecureCookie(), true)
+	c.SetCookie("refresh_token", "", -1, "/", cookieDomain(), isSecureCookie(), true)
 	common.V2Success(c, gin.H{"message": "로그아웃되었습니다"})
 }
 
