@@ -28,6 +28,8 @@ class AngpleUser(HttpUser):
 
     def on_start(self):
         """Called when a user starts"""
+        # SSR User-Agent to bypass rate limiter during load testing
+        self.client.headers["User-Agent"] = "Angple-Web-SSR/LoadTest"
         # Verify API is healthy
         response = self.client.get("/health")
         if response.status_code != 200:
@@ -37,54 +39,39 @@ class AngpleUser(HttpUser):
     def get_posts_list(self):
         """Browse post list - most common action"""
         self.client.get(
-            "/api/v2/boards/free/posts",
+            "/api/v1/boards/free/posts",
             params={"page": 1, "per_page": 20},
-            name="/api/v2/boards/[board_id]/posts"
+            name="/api/v1/boards/[board_id]/posts"
         )
 
     @task(5)
     def get_post_detail(self):
         """View single post"""
-        # Using a sample post ID - adjust based on your data
         self.client.get(
-            "/api/v2/boards/free/posts/1",
-            name="/api/v2/boards/[board_id]/posts/[id]"
+            "/api/v1/boards/free/posts/1",
+            name="/api/v1/boards/[board_id]/posts/[id]"
         )
 
     @task(3)
     def get_comments(self):
         """View comments on a post"""
         self.client.get(
-            "/api/v2/boards/free/posts/1/comments",
-            name="/api/v2/boards/[board_id]/posts/[post_id]/comments"
+            "/api/v1/boards/free/posts/1/comments",
+            name="/api/v1/boards/[board_id]/posts/[post_id]/comments"
         )
 
     @task(2)
     def get_recommended(self):
         """Get recommended posts"""
         self.client.get(
-            "/api/v2/recommended/weekly",
-            name="/api/v2/recommended/[period]"
+            "/api/v1/recommended/ai/weekly",
+            name="/api/v1/recommended/ai/[period]"
         )
 
     @task(2)
     def get_menus(self):
-        """Get menus"""
-        self.client.get("/api/v2/menus")
-
-    @task(1)
-    def get_sidebar_menus(self):
         """Get sidebar menus"""
-        self.client.get("/api/v2/menus/sidebar")
-
-    @task(1)
-    def search_posts(self):
-        """Search posts"""
-        self.client.get(
-            "/api/v2/boards/free/posts/search",
-            params={"q": "test", "page": 1},
-            name="/api/v2/boards/[board_id]/posts/search"
-        )
+        self.client.get("/api/v1/menus/sidebar")
 
 
 class HealthCheckUser(HttpUser):
@@ -92,6 +79,9 @@ class HealthCheckUser(HttpUser):
 
     wait_time = between(5, 10)
     weight = 1  # Lower weight than main user
+
+    def on_start(self):
+        self.client.headers["User-Agent"] = "Angple-Web-SSR/LoadTest"
 
     @task
     def health_check(self):

@@ -98,26 +98,13 @@ CREATE TABLE IF NOT EXISTS `site_usage` (
 -- ========================================
 -- 5. 기존 테이블에 site_id 컬럼 추가 (Free 플랜용)
 -- ========================================
+-- 참고: g5_member, g5_board는 05-gnuboard-tables.sql에서 생성되므로
+-- ALTER TABLE은 05a-multitenant-alter.sql에서 실행합니다.
 
--- 회원 테이블
-ALTER TABLE `g5_member`
-ADD COLUMN IF NOT EXISTS `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID (멀티 테넌트)',
-ADD INDEX IF NOT EXISTS `idx_site_id` (`site_id`);
-
--- 게시판 설정 테이블
-ALTER TABLE `g5_board`
-ADD COLUMN IF NOT EXISTS `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID',
-ADD INDEX IF NOT EXISTS `idx_site_id` (`site_id`);
-
--- 메뉴 테이블
+-- 메뉴 테이블 (01-schema.sql에서 이미 생성됨)
 ALTER TABLE `menus`
-ADD COLUMN IF NOT EXISTS `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID',
-ADD INDEX IF NOT EXISTS `idx_site_id` (`site_id`);
-
--- 주의: 동적 게시판 테이블(g5_write_*)은 사이트 생성 시 자동으로 site_id 컬럼 추가
--- 프로비저닝 스크립트에서 처리:
--- ALTER TABLE g5_write_free ADD COLUMN site_id VARCHAR(36) DEFAULT 'default';
--- ALTER TABLE g5_write_qna ADD COLUMN site_id VARCHAR(36) DEFAULT 'default';
+ADD COLUMN `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID',
+ADD INDEX `idx_site_id` (`site_id`);
 
 -- ========================================
 -- 6. 기본 사이트 데이터 삽입 (개발/테스트용)
