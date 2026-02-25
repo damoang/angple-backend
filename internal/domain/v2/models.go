@@ -78,6 +78,7 @@ type V2Post struct {
 	ViewCount    uint      `gorm:"column:view_count;default:0" json:"view_count"`
 	CommentCount uint      `gorm:"column:comment_count;default:0" json:"comment_count"`
 	IsNotice     bool      `gorm:"column:is_notice;default:false" json:"is_notice"`
+	IPAddress    string    `gorm:"column:ip_address;type:varchar(45)" json:"ip_address,omitempty"`
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
@@ -93,6 +94,7 @@ type V2Comment struct {
 	Content   string    `gorm:"column:content;type:text" json:"content"`
 	Depth     uint8     `gorm:"column:depth;default:0" json:"depth"`
 	Status    string    `gorm:"column:status;type:enum('active','deleted');default:'active'" json:"status"`
+	IPAddress string    `gorm:"column:ip_address;type:varchar(45)" json:"ip_address,omitempty"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }

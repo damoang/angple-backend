@@ -260,11 +260,17 @@ func main() {
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo, permChecker)
 		v2Handler.SetPointRepository(v2PointRepo)
 
+		// IP Protection (kg_ip_protection.extend.php 이식)
+		ipProtectCfg := middleware.LoadIPProtectionConfig()
+		if ipProtectCfg.AdminIP != "" || len(ipProtectCfg.MemberList) > 0 {
+			pkglogger.Info("IP Protection enabled: adminIP=%s, members=%d", ipProtectCfg.AdminIP, len(ipProtectCfg.MemberList))
+		}
+
 		// TODO: 경험치 서비스 구현 후 활성화
 		// expSvc := v2svc.NewExpService(v2UserRepo)
 		// v2Handler.SetExpService(expSvc)
 
-		v2routes.Setup(router, v2Handler, jwtManager, permChecker)
+		v2routes.Setup(router, v2Handler, jwtManager, permChecker, ipProtectCfg)
 
 		// v2 Auth
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager)
@@ -432,8 +438,8 @@ func main() {
 			})
 		})
 		v1Boards.GET("/:slug/posts/:id/comments", v2Handler.ListComments)
-		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), v2Handler.CreatePost)
-		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), v2Handler.CreateComment)
+		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), middleware.IPProtection(ipProtectCfg), v2Handler.CreatePost)
+		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), middleware.IPProtection(ipProtectCfg), v2Handler.CreateComment)
 
 		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
 			emptySection := func(id, name string) gin.H {

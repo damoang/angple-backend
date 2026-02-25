@@ -219,11 +219,12 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 	}
 
 	post := &v2domain.V2Post{
-		BoardID: board.ID,
-		UserID:  userID,
-		Title:   req.Title,
-		Content: req.Content,
-		Status:  "published",
+		BoardID:   board.ID,
+		UserID:    userID,
+		Title:     req.Title,
+		Content:   req.Content,
+		Status:    "published",
+		IPAddress: middleware.GetClientIP(c),
 	}
 	if err := h.postRepo.Create(post); err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 작성 실패", err)
@@ -359,11 +360,12 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 	}
 
 	comment := &v2domain.V2Comment{
-		PostID:   postID,
-		UserID:   userID,
-		ParentID: req.ParentID,
-		Content:  req.Content,
-		Status:   "active",
+		PostID:    postID,
+		UserID:    userID,
+		ParentID:  req.ParentID,
+		Content:   req.Content,
+		Status:    "active",
+		IPAddress: middleware.GetClientIP(c),
 	}
 	if req.ParentID != nil {
 		comment.Depth = 1
