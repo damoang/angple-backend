@@ -14,7 +14,7 @@ INSERT IGNORE INTO g5_board (
     bo_list_level, bo_read_level, bo_write_level, bo_reply_level, bo_comment_level,
     bo_upload_level, bo_download_level,
     bo_upload_size, bo_upload_count, bo_page_rows,
-    bo_skin, bo_mobile_skin, bo_include_head, bo_include_tail,
+    bo_skin, bo_mobile_skin,
     bo_use_category, bo_category_list, bo_use_sns, bo_use_search,
     bo_order, bo_device
 ) VALUES
@@ -23,7 +23,7 @@ INSERT IGNORE INTO g5_board (
  1, 1, 2, 2, 2,
  2, 1,
  20971520, 5, 20,
- 'basic', 'basic', '', '',
+ 'basic', 'basic',
  0, '', 1, 1,
  10, 'both'),
 
@@ -32,7 +32,7 @@ INSERT IGNORE INTO g5_board (
  1, 1, 2, 2, 2,
  2, 1,
  20971520, 5, 20,
- 'basic', 'basic', '', '',
+ 'basic', 'basic',
  1, '질문|답변완료|공지', 1, 1,
  20, 'both'),
 
@@ -41,7 +41,7 @@ INSERT IGNORE INTO g5_board (
  1, 1, 10, 10, 2,
  10, 1,
  20971520, 10, 20,
- 'basic', 'basic', '', '',
+ 'basic', 'basic',
  0, '', 0, 1,
  1, 'both'),
 
@@ -50,7 +50,7 @@ INSERT IGNORE INTO g5_board (
  1, 1, 2, 2, 2,
  2, 1,
  52428800, 10, 20,
- 'gallery', 'gallery', '', '',
+ 'gallery', 'gallery',
  0, '', 1, 1,
  30, 'both'),
 
@@ -59,7 +59,7 @@ INSERT IGNORE INTO g5_board (
  1, 1, 2, 2, 2,
  2, 1,
  20971520, 5, 20,
- 'basic', 'basic', '', '',
+ 'basic', 'basic',
  1, 'Frontend|Backend|DevOps|기타', 1, 1,
  40, 'both');
 

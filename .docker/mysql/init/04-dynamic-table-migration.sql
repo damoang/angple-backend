@@ -9,26 +9,8 @@
 -- ========================================
 -- 1. 기존 동적 테이블 마이그레이션 (개발 환경용)
 -- ========================================
-
--- 자유게시판
-ALTER TABLE `g5_write_free`
-ADD COLUMN IF NOT EXISTS `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID',
-ADD INDEX IF NOT EXISTS `idx_site_id` (`site_id`);
-
--- QNA 게시판
-ALTER TABLE `g5_write_qna`
-ADD COLUMN IF NOT EXISTS `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID',
-ADD INDEX IF NOT EXISTS `idx_site_id` (`site_id`);
-
--- 공지사항 게시판
-ALTER TABLE `g5_write_notice`
-ADD COLUMN IF NOT EXISTS `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID',
-ADD INDEX IF NOT EXISTS `idx_site_id` (`site_id`);
-
--- 갤러리 게시판
-ALTER TABLE `g5_write_gallery`
-ADD COLUMN IF NOT EXISTS `site_id` VARCHAR(36) DEFAULT 'default' COMMENT '소속 사이트 ID',
-ADD INDEX IF NOT EXISTS `idx_site_id` (`site_id`);
+-- 참고: g5_write_* 테이블은 07-seed-boards.sql에서 생성되므로
+-- ALTER TABLE은 07a-dynamic-table-alter.sql에서 실행합니다.
 
 -- ========================================
 -- 2. 동적 테이블 자동 마이그레이션 프로시저
