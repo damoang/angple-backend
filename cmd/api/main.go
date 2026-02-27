@@ -132,7 +132,7 @@ func main() {
 		cacheService = pkgcache.NewService(redisClient)
 		pkglogger.Info("Cache service initialized")
 	}
-	_ = cacheService
+	// cacheService is used in v1 API handlers
 
 	// Elasticsearch 연결
 	var esClient *pkges.Client
@@ -320,6 +320,16 @@ func main() {
 		})
 		router.GET("/api/v1/boards/:slug/notices", func(c *gin.Context) {
 			slug := c.Param("slug")
+			ctx := c.Request.Context()
+
+			// Try cache first
+			if cacheService != nil {
+				if cached, err := cacheService.GetNotices(ctx, slug); err == nil {
+					c.Header("X-Cache", "HIT")
+					c.Data(http.StatusOK, "application/json", cached)
+					return
+				}
+			}
 
 			// Get board to find notice IDs
 			board, err := gnuBoardRepo.FindByID(slug)
@@ -346,7 +356,15 @@ func main() {
 			noticeIDMap := v1handler.BuildNoticeIDMap(noticeIDs)
 			items := v1handler.TransformToV1Posts(notices, noticeIDMap)
 
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
+			response := gin.H{"success": true, "data": items}
+
+			// Cache the response
+			if cacheService != nil {
+				_ = cacheService.SetNotices(ctx, slug, response)
+			}
+
+			c.Header("X-Cache", "MISS")
+			c.JSON(http.StatusOK, response)
 		})
 		router.GET("/api/ads/celebration/today", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
@@ -380,27 +398,41 @@ func main() {
 		// GET /api/v1/boards/:slug - Get board info from g5_board
 		v1Boards.GET("/:slug", func(c *gin.Context) {
 			slug := c.Param("slug")
+			ctx := c.Request.Context()
+
+			// Try cache first
+			if cacheService != nil {
+				if cached, err := cacheService.GetBoard(ctx, slug); err == nil {
+					c.Header("X-Cache", "HIT")
+					c.Data(http.StatusOK, "application/json", cached)
+					return
+				}
+			}
+
 			board, err := gnuBoardRepo.FindByID(slug)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Board not found"})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{
+
+			response := gin.H{
 				"success": true,
 				"data":    v1handler.TransformToV1Board(board),
-			})
+			}
+
+			// Cache the response
+			if cacheService != nil {
+				_ = cacheService.SetBoard(ctx, slug, response)
+			}
+
+			c.Header("X-Cache", "MISS")
+			c.JSON(http.StatusOK, response)
 		})
 
 		// GET /api/v1/boards/:slug/posts - Get posts from g5_write_{slug}
 		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
 			slug := c.Param("slug")
-
-			// Check board exists in g5_board
-			board, err := gnuBoardRepo.FindByID(slug)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
-				return
-			}
+			ctx := c.Request.Context()
 
 			page, err2 := strconv.Atoi(c.DefaultQuery("page", "1"))
 			if err2 != nil || page < 1 {
@@ -409,6 +441,22 @@ func main() {
 			limit, err3 := strconv.Atoi(c.DefaultQuery("limit", "20"))
 			if err3 != nil || limit < 1 || limit > 100 {
 				limit = 20
+			}
+
+			// Try cache first
+			if cacheService != nil {
+				if cached, err := cacheService.GetPosts(ctx, slug, page, limit); err == nil {
+					c.Header("X-Cache", "HIT")
+					c.Data(http.StatusOK, "application/json", cached)
+					return
+				}
+			}
+
+			// Check board exists in g5_board
+			board, err := gnuBoardRepo.FindByID(slug)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
+				return
 			}
 
 			// Get posts from g5_write_{slug}
@@ -425,11 +473,19 @@ func main() {
 			// Transform to v1 format
 			items := v1handler.TransformToV1Posts(posts, noticeIDMap)
 
-			c.JSON(http.StatusOK, gin.H{
+			response := gin.H{
 				"success": true,
 				"data":    items,
 				"meta":    gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
-			})
+			}
+
+			// Cache the response
+			if cacheService != nil {
+				_ = cacheService.SetPosts(ctx, slug, page, limit, response)
+			}
+
+			c.Header("X-Cache", "MISS")
+			c.JSON(http.StatusOK, response)
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id - Get single post from g5_write_{slug}

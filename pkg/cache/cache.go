@@ -16,6 +16,8 @@ const (
 	TTLSession = 30 * time.Minute // 세션
 	TTLShort   = 1 * time.Minute  // 짧은 캐시 (실시간성 필요)
 	TTLDefault = 5 * time.Minute  // 기본값
+	TTLPosts   = 30 * time.Second // 게시글 목록 (자주 갱신)
+	TTLNotices = 2 * time.Minute  // 공지사항
 )
 
 // 캐시 키 접두사
@@ -25,6 +27,8 @@ const (
 	PrefixSession = "session:"
 	PrefixUser    = "user:"
 	PrefixPost    = "post:"
+	PrefixPosts   = "posts:"
+	PrefixNotices = "notices:"
 )
 
 // Service Redis 캐시 서비스 인터페이스
@@ -56,6 +60,16 @@ type Service interface {
 	GetUser(ctx context.Context, userID string) ([]byte, error)
 	SetUser(ctx context.Context, userID string, data interface{}) error
 	InvalidateUser(ctx context.Context, userID string) error
+
+	// 게시글 목록 캐시
+	GetPosts(ctx context.Context, boardID string, page, limit int) ([]byte, error)
+	SetPosts(ctx context.Context, boardID string, page, limit int, data interface{}) error
+	InvalidatePosts(ctx context.Context, boardID string) error
+
+	// 공지사항 캐시
+	GetNotices(ctx context.Context, boardID string) ([]byte, error)
+	SetNotices(ctx context.Context, boardID string, data interface{}) error
+	InvalidateNotices(ctx context.Context, boardID string) error
 
 	// 유틸리티
 	IsAvailable() bool
@@ -291,4 +305,70 @@ func (c *redisCache) deleteByPattern(ctx context.Context, pattern string) error 
 		}
 	}
 	return iter.Err()
+}
+
+// ========================================
+// 게시글 목록 캐시
+// ========================================
+
+func (c *redisCache) postsKey(boardID string, page, limit int) string {
+	return fmt.Sprintf("%s%s:%d:%d", PrefixPosts, boardID, page, limit)
+}
+
+func (c *redisCache) GetPosts(ctx context.Context, boardID string, page, limit int) ([]byte, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("redis not available")
+	}
+	return c.client.Get(ctx, c.postsKey(boardID, page, limit)).Bytes()
+}
+
+func (c *redisCache) SetPosts(ctx context.Context, boardID string, page, limit int, data interface{}) error {
+	if c.client == nil {
+		return nil
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return c.client.Set(ctx, c.postsKey(boardID, page, limit), jsonData, TTLPosts).Err()
+}
+
+func (c *redisCache) InvalidatePosts(ctx context.Context, boardID string) error {
+	if c.client == nil {
+		return nil
+	}
+	return c.deleteByPattern(ctx, PrefixPosts+boardID+":*")
+}
+
+// ========================================
+// 공지사항 캐시
+// ========================================
+
+func (c *redisCache) noticesKey(boardID string) string {
+	return PrefixNotices + boardID
+}
+
+func (c *redisCache) GetNotices(ctx context.Context, boardID string) ([]byte, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("redis not available")
+	}
+	return c.client.Get(ctx, c.noticesKey(boardID)).Bytes()
+}
+
+func (c *redisCache) SetNotices(ctx context.Context, boardID string, data interface{}) error {
+	if c.client == nil {
+		return nil
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return c.client.Set(ctx, c.noticesKey(boardID), jsonData, TTLNotices).Err()
+}
+
+func (c *redisCache) InvalidateNotices(ctx context.Context, boardID string) error {
+	if c.client == nil {
+		return nil
+	}
+	return c.client.Del(ctx, c.noticesKey(boardID)).Err()
 }
