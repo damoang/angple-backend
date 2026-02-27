@@ -12,6 +12,7 @@ import (
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/handler"
+	v1handler "github.com/damoang/angple-backend/internal/handler/v1"
 	v2handler "github.com/damoang/angple-backend/internal/handler/v2"
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/damoang/angple-backend/internal/migration"
@@ -20,6 +21,7 @@ import (
 	pluginstoreRepo "github.com/damoang/angple-backend/internal/pluginstore/repository"
 	pluginstoreSvc "github.com/damoang/angple-backend/internal/pluginstore/service"
 	"github.com/damoang/angple-backend/internal/repository"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
@@ -249,6 +251,11 @@ func main() {
 		v2UserRepo := v2repo.NewUserRepository(db)
 		siteRepo := repository.NewSiteRepository(db)
 
+		// Gnuboard repositories for v1 API (g5_* tables)
+		gnuBoardRepo := gnurepo.NewBoardRepository(db)
+		gnuWriteRepo := gnurepo.NewWriteRepository(db)
+		_ = gnurepo.NewMemberRepository(db) // For future auth integration
+
 		// v2 Core API
 		v2PostRepo := v2repo.NewPostRepository(db)
 		v2CommentRepo := v2repo.NewCommentRepository(db)
@@ -312,10 +319,41 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		})
 		router.GET("/api/v1/boards/:slug/notices", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+			slug := c.Param("slug")
+
+			// Get board to find notice IDs
+			board, err := gnuBoardRepo.FindByID(slug)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			// Parse notice IDs from bo_notice
+			noticeIDs := gnurepo.ParseNoticeIDs(board.BoNotice)
+			if len(noticeIDs) == 0 {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			// Get notice posts from g5_write_{slug}
+			notices, err := gnuWriteRepo.FindNotices(slug, noticeIDs)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			// Transform to v1 format (all are notices)
+			noticeIDMap := v1handler.BuildNoticeIDMap(noticeIDs)
+			items := v1handler.TransformToV1Posts(notices, noticeIDMap)
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
 		})
 		router.GET("/api/ads/celebration/today", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+		})
+		// v1 notifications (stub for now)
+		router.GET("/api/v1/notifications/unread-count", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"count": 0}})
 		})
 		// 추천 글 / 위젯 (프론트엔드 홈페이지용)
 		router.GET("/api/v1/recommended/index-widgets", func(c *gin.Context) {
@@ -331,112 +369,132 @@ func main() {
 				},
 			})
 		})
-		// v1 boards routes → adapt v2 data to v1 format
+		// v1 boards routes → use Gnuboard g5_* tables
 		v1Boards := router.Group("/api/v1/boards")
 		v1Boards.Use(middleware.OptionalJWTAuth(jwtManager))
-		v1Boards.GET("/:slug", v2Handler.GetBoard)
+
+		// GET /api/v1/boards/:slug - Get board info from g5_board
+		v1Boards.GET("/:slug", func(c *gin.Context) {
+			slug := c.Param("slug")
+			board, err := gnuBoardRepo.FindByID(slug)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Board not found"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    v1handler.TransformToV1Board(board),
+			})
+		})
+
+		// GET /api/v1/boards/:slug/posts - Get posts from g5_write_{slug}
 		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
 			slug := c.Param("slug")
-			board, err := v2BoardRepo.FindBySlug(slug)
+
+			// Check board exists in g5_board
+			board, err := gnuBoardRepo.FindByID(slug)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
 				return
 			}
+
 			page, err2 := strconv.Atoi(c.DefaultQuery("page", "1"))
-			if err2 != nil {
+			if err2 != nil || page < 1 {
 				page = 1
 			}
 			limit, err3 := strconv.Atoi(c.DefaultQuery("limit", "20"))
-			if err3 != nil {
+			if err3 != nil || limit < 1 || limit > 100 {
 				limit = 20
 			}
-			if page < 1 {
-				page = 1
-			}
-			if limit < 1 || limit > 100 {
-				limit = 20
-			}
-			posts, total, err := v2PostRepo.FindByBoard(board.ID, page, limit)
+
+			// Get posts from g5_write_{slug}
+			posts, total, err := gnuWriteRepo.FindPosts(slug, page, limit)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": page, "limit": limit}})
 				return
 			}
-			// batch-load user nicknames
-			userIDs := make([]string, 0, len(posts))
-			for _, p := range posts {
-				userIDs = append(userIDs, fmt.Sprintf("%d", p.UserID))
-			}
-			nickMap, err4 := v2UserRepo.FindNicksByIDs(userIDs)
-			if err4 != nil {
-				nickMap = map[string]string{}
-			}
-			// transform to v1 format
-			items := make([]gin.H, 0, len(posts))
-			for _, p := range posts {
-				uid := fmt.Sprintf("%d", p.UserID)
-				author := nickMap[uid]
-				if author == "" {
-					author = "익명"
-				}
-				items = append(items, gin.H{
-					"id":             p.ID,
-					"title":          p.Title,
-					"content":        p.Content,
-					"author":         author,
-					"author_id":      uid,
-					"views":          p.ViewCount,
-					"likes":          0,
-					"comments_count": p.CommentCount,
-					"is_notice":      p.IsNotice,
-					"created_at":     p.CreatedAt,
-					"updated_at":     p.UpdatedAt,
-				})
-			}
+
+			// Build notice ID map from board settings
+			noticeIDs := gnurepo.ParseNoticeIDs(board.BoNotice)
+			noticeIDMap := v1handler.BuildNoticeIDMap(noticeIDs)
+
+			// Transform to v1 format
+			items := v1handler.TransformToV1Posts(posts, noticeIDMap)
+
 			c.JSON(http.StatusOK, gin.H{
-				"data": items,
-				"meta": gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
+				"success": true,
+				"data":    items,
+				"meta":    gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
 			})
 		})
+
+		// GET /api/v1/boards/:slug/posts/:id - Get single post from g5_write_{slug}
 		v1Boards.GET("/:slug/posts/:id", func(c *gin.Context) {
-			id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+			slug := c.Param("slug")
+			id, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
 				return
 			}
-			post, err := v2PostRepo.FindByID(id)
+
+			// Check board exists
+			board, err := gnuBoardRepo.FindByID(slug)
 			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Board not found"})
 				return
 			}
-			if vcErr := v2PostRepo.IncrementViewCount(id); vcErr != nil {
-				log.Printf("IncrementViewCount error: %v", vcErr)
+
+			// Get post from g5_write_{slug}
+			post, err := gnuWriteRepo.FindPostByID(slug, id)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
+				return
 			}
-			uid := fmt.Sprintf("%d", post.UserID)
-			nickMap, nickErr := v2UserRepo.FindNicksByIDs([]string{uid})
-			if nickErr != nil {
-				nickMap = map[string]string{}
+
+			// Increment view count
+			if vcErr := gnuWriteRepo.IncrementHit(slug, id); vcErr != nil {
+				log.Printf("IncrementHit error: %v", vcErr)
 			}
-			author := nickMap[uid]
-			if author == "" {
-				author = "익명"
+
+			// Check if this post is a notice
+			noticeIDs := gnurepo.ParseNoticeIDs(board.BoNotice)
+			isNotice := false
+			for _, nid := range noticeIDs {
+				if nid == id {
+					isNotice = true
+					break
+				}
 			}
+
 			c.JSON(http.StatusOK, gin.H{
-				"data": gin.H{
-					"id":             post.ID,
-					"title":          post.Title,
-					"content":        post.Content,
-					"author":         author,
-					"author_id":      uid,
-					"views":          post.ViewCount,
-					"likes":          0,
-					"comments_count": post.CommentCount,
-					"is_notice":      post.IsNotice,
-					"created_at":     post.CreatedAt,
-					"updated_at":     post.UpdatedAt,
-				},
+				"success": true,
+				"data":    v1handler.TransformToV1PostDetail(post, isNotice),
 			})
 		})
-		v1Boards.GET("/:slug/posts/:id/comments", v2Handler.ListComments)
+
+		// GET /api/v1/boards/:slug/posts/:id/comments - Get comments from g5_write_{slug}
+		v1Boards.GET("/:slug/posts/:id/comments", func(c *gin.Context) {
+			slug := c.Param("slug")
+			id, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			// Get comments from g5_write_{slug} where wr_parent = id and wr_is_comment = 1
+			comments, err := gnuWriteRepo.FindComments(slug, id)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    v1handler.TransformToV1Comments(comments),
+			})
+		})
+
+		// POST routes still use v2 handlers for now (will be migrated later)
 		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), v2Handler.CreatePost)
 		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), v2Handler.CreateComment)
 
