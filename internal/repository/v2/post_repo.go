@@ -10,10 +10,15 @@ import (
 // PostRepository v2 post data access
 type PostRepository interface {
 	FindByID(id uint64) (*v2.V2Post, error)
+	FindByIDIncludeDeleted(id uint64) (*v2.V2Post, error)
 	FindByBoard(boardID uint64, page, limit int) ([]*v2.V2Post, int64, error)
+	FindDeleted(page, limit int) ([]*v2.V2Post, int64, error)
 	Create(post *v2.V2Post) error
 	Update(post *v2.V2Post) error
 	Delete(id uint64) error
+	SoftDelete(id uint64, deletedBy uint64) error
+	Restore(id uint64) error
+	PermanentDelete(id uint64) error
 	IncrementViewCount(id uint64) error
 	Count() (int64, error)
 	CountSince(since time.Time) (int64, error)
@@ -32,6 +37,47 @@ func (r *postRepository) FindByID(id uint64) (*v2.V2Post, error) {
 	var post v2.V2Post
 	err := r.db.Where("id = ? AND status != 'deleted'", id).First(&post).Error
 	return &post, err
+}
+
+func (r *postRepository) FindByIDIncludeDeleted(id uint64) (*v2.V2Post, error) {
+	var post v2.V2Post
+	err := r.db.Where("id = ?", id).First(&post).Error
+	return &post, err
+}
+
+func (r *postRepository) FindDeleted(page, limit int) ([]*v2.V2Post, int64, error) {
+	var posts []*v2.V2Post
+	var total int64
+	query := r.db.Model(&v2.V2Post{}).Where("status = 'deleted'")
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * limit
+	if err := query.Order("deleted_at DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+		return nil, 0, err
+	}
+	return posts, total, nil
+}
+
+func (r *postRepository) SoftDelete(id uint64, deletedBy uint64) error {
+	now := time.Now()
+	return r.db.Model(&v2.V2Post{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     "deleted",
+		"deleted_at": now,
+		"deleted_by": deletedBy,
+	}).Error
+}
+
+func (r *postRepository) Restore(id uint64) error {
+	return r.db.Model(&v2.V2Post{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     "published",
+		"deleted_at": nil,
+		"deleted_by": nil,
+	}).Error
+}
+
+func (r *postRepository) PermanentDelete(id uint64) error {
+	return r.db.Where("id = ? AND status = 'deleted'", id).Delete(&v2.V2Post{}).Error
 }
 
 func (r *postRepository) FindByBoard(boardID uint64, page, limit int) ([]*v2.V2Post, int64, error) {

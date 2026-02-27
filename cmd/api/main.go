@@ -195,7 +195,7 @@ func main() {
 		AllowOrigins:     []string{allowOrigins},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-CSRF-Token", "X-Request-ID"},
 		AllowCredentials: true,
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		ExposeHeaders:    []string{"X-Request-ID", "X-RateLimit-Remaining", "X-Cache"},
 		MaxAge:           86400,
 	}
@@ -255,16 +255,21 @@ func main() {
 		v2BoardRepo := v2repo.NewBoardRepository(db)
 		v2PointRepo := v2repo.NewPointRepository(db)
 
+		// 리비전
+		v2RevisionRepo := v2repo.NewRevisionRepository(db)
+
 		// 권한 체크
 		permChecker := middleware.NewDBBoardPermissionChecker(v2BoardRepo)
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo, permChecker)
 		v2Handler.SetPointRepository(v2PointRepo)
+		v2Handler.SetRevisionRepository(v2RevisionRepo)
 
 		// TODO: 경험치 서비스 구현 후 활성화
 		// expSvc := v2svc.NewExpService(v2UserRepo)
 		// v2Handler.SetExpService(expSvc)
 
 		v2routes.Setup(router, v2Handler, jwtManager, permChecker)
+		v2routes.SetupAdminPosts(router, v2Handler, jwtManager)
 
 		// v2 Auth
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager)

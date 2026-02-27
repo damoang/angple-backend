@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"time"
+
 	v2 "github.com/damoang/angple-backend/internal/domain/v2"
 	"gorm.io/gorm"
 )
@@ -12,6 +14,8 @@ type CommentRepository interface {
 	Create(comment *v2.V2Comment) error
 	Update(comment *v2.V2Comment) error
 	Delete(id uint64) error
+	SoftDelete(id uint64, deletedBy uint64) error
+	Restore(id uint64) error
 	Count() (int64, error)
 }
 
@@ -55,6 +59,23 @@ func (r *commentRepository) Update(comment *v2.V2Comment) error {
 
 func (r *commentRepository) Delete(id uint64) error {
 	return r.db.Model(&v2.V2Comment{}).Where("id = ?", id).Update("status", "deleted").Error
+}
+
+func (r *commentRepository) SoftDelete(id uint64, deletedBy uint64) error {
+	now := time.Now()
+	return r.db.Model(&v2.V2Comment{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     "deleted",
+		"deleted_at": now,
+		"deleted_by": deletedBy,
+	}).Error
+}
+
+func (r *commentRepository) Restore(id uint64) error {
+	return r.db.Model(&v2.V2Comment{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     "active",
+		"deleted_at": nil,
+		"deleted_by": nil,
+	}).Error
 }
 
 func (r *commentRepository) Count() (int64, error) {

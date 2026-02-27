@@ -77,9 +77,11 @@ type V2Post struct {
 	Status       string    `gorm:"column:status;type:enum('draft','published','deleted');default:'published'" json:"status"`
 	ViewCount    uint      `gorm:"column:view_count;default:0" json:"view_count"`
 	CommentCount uint      `gorm:"column:comment_count;default:0" json:"comment_count"`
-	IsNotice     bool      `gorm:"column:is_notice;default:false" json:"is_notice"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	IsNotice     bool       `gorm:"column:is_notice;default:false" json:"is_notice"`
+	DeletedAt    *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
+	DeletedBy    *uint64    `gorm:"column:deleted_by" json:"deleted_by,omitempty"`
+	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (V2Post) TableName() string { return "v2_posts" }
@@ -92,9 +94,11 @@ type V2Comment struct {
 	ParentID  *uint64   `gorm:"column:parent_id" json:"parent_id,omitempty"`
 	Content   string    `gorm:"column:content;type:text" json:"content"`
 	Depth     uint8     `gorm:"column:depth;default:0" json:"depth"`
-	Status    string    `gorm:"column:status;type:enum('active','deleted');default:'active'" json:"status"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	Status    string     `gorm:"column:status;type:enum('active','deleted');default:'active'" json:"status"`
+	DeletedAt *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
+	DeletedBy *uint64    `gorm:"column:deleted_by" json:"deleted_by,omitempty"`
+	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (V2Comment) TableName() string { return "v2_comments" }

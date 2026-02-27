@@ -41,12 +41,25 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	boardPosts.GET("/:id", h.GetPost)
 	boardPosts.PUT("/:id", auth, h.UpdatePost)
 	boardPosts.DELETE("/:id", auth, h.DeletePost)
+	boardPosts.PATCH("/:id/soft-delete", auth, h.SoftDeletePost)
+	boardPosts.POST("/:id/restore", auth, middleware.RequireAdmin(), h.RestorePost)
+	boardPosts.DELETE("/:id/permanent", auth, middleware.RequireAdmin(), h.PermanentDeletePost)
+	boardPosts.GET("/:id/revisions", auth, h.GetPostRevisions)
+	boardPosts.POST("/:id/revisions/:version/restore", auth, middleware.RequireAdmin(), h.RestoreRevision)
 
 	// Comments (nested under posts)
 	comments := boardPosts.Group("/:id/comments")
 	comments.GET("", h.ListComments)
 	comments.POST("", auth, middleware.RequireComment(boardPermChecker), h.CreateComment)
+	comments.PUT("/:comment_id", auth, h.UpdateComment)
 	comments.DELETE("/:comment_id", auth, h.DeleteComment)
+}
+
+// SetupAdminPosts configures v2 admin post routes (deleted posts)
+func SetupAdminPosts(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager) {
+	admin := router.Group("/api/v1/admin")
+	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+	admin.GET("/posts/deleted", h.GetDeletedPosts)
 }
 
 // SetupAdmin configures v2 admin API routes

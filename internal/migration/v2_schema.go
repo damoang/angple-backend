@@ -27,6 +27,9 @@ func RunV2Schema(db *gorm.DB) error {
 		&v2.V2Memo{},
 		&v2.V2Message{},
 
+		// Content revisions
+		&v2.V2ContentRevision{},
+
 		// Meta tables (plugin extensibility)
 		&v2.UserMeta{},
 		&v2.PostMeta{},
