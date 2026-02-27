@@ -32,10 +32,14 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			return
 		}
 
-		c.Set("userID", claims.UserID)
+		userID := claims.UserID
+		if userID == "" {
+			userID = claims.Subject // SvelteKit JWT 호환 (sub=mb_id)
+		}
+		c.Set("userID", userID)
 		c.Set("nickname", claims.Nickname)
 		c.Set("level", claims.Level)
-		c.Set("v2_user_id", claims.UserID)
+		c.Set("v2_user_id", userID)
 
 		c.Next()
 	}
@@ -51,10 +55,14 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			if len(parts) == 2 && parts[0] == "Bearer" {
 				claims, err := jwtManager.VerifyToken(parts[1])
 				if err == nil {
-					c.Set("userID", claims.UserID)
+					userID := claims.UserID
+					if userID == "" {
+						userID = claims.Subject // SvelteKit JWT 호환 (sub=mb_id)
+					}
+					c.Set("userID", userID)
 					c.Set("nickname", claims.Nickname)
 					c.Set("level", claims.Level)
-					c.Set("v2_user_id", claims.UserID)
+					c.Set("v2_user_id", userID)
 				}
 				// 토큰 검증 실패 시 무시 (비인증 상태로 계속)
 			}

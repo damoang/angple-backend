@@ -52,8 +52,8 @@ func main() {
 		c.String(http.StatusOK, "Gateway OK")
 	})
 
-	// API v2 → Go Backend (신규)
-	router.Any("/api/v2/*path", func(c *gin.Context) {
+	// API v1 → Go Backend (통합)
+	router.Any("/api/v1/*path", func(c *gin.Context) {
 		log.Printf("Proxying to Go API: %s %s", c.Request.Method, c.Request.URL.Path)
 		goProxy.ServeHTTP(c.Writer, c.Request)
 	})
@@ -64,8 +64,8 @@ func main() {
 		goProxy.ServeHTTP(c.Writer, c.Request)
 	})
 
-	// API v1 → Laravel Backend (기존)
-	router.Any("/api/v1/*path", func(c *gin.Context) {
+	// Legacy fallback
+	router.Any("/api/legacy/*path", func(c *gin.Context) {
 		log.Printf("Proxying to Laravel: %s %s", c.Request.Method, c.Request.URL.Path)
 		laravelProxy.ServeHTTP(c.Writer, c.Request)
 	})

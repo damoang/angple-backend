@@ -154,7 +154,7 @@ func (s *V2APISuite) TestLogin_Success() {
 		"username": "testuser",
 		"password": "password123",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/login", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -177,7 +177,7 @@ func (s *V2APISuite) TestLogin_InvalidPassword() {
 		"username": "testuser",
 		"password": "wrongpassword",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/login", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -191,7 +191,7 @@ func (s *V2APISuite) TestLogin_NonexistentUser() {
 		"username": "nobody",
 		"password": "password123",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/login", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -203,7 +203,7 @@ func (s *V2APISuite) TestLogin_NonexistentUser() {
 // --- Board Tests ---
 
 func (s *V2APISuite) TestListBoards() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/boards", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/boards", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -212,7 +212,7 @@ func (s *V2APISuite) TestListBoards() {
 }
 
 func (s *V2APISuite) TestGetBoard() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/boards/free", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/boards/free", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -221,7 +221,7 @@ func (s *V2APISuite) TestGetBoard() {
 }
 
 func (s *V2APISuite) TestGetBoard_NotFound() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/boards/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/boards/nonexistent", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -232,7 +232,7 @@ func (s *V2APISuite) TestGetBoard_NotFound() {
 // --- Post Tests ---
 
 func (s *V2APISuite) TestListPosts() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/boards/free/posts", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/boards/free/posts", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -241,7 +241,7 @@ func (s *V2APISuite) TestListPosts() {
 }
 
 func (s *V2APISuite) TestGetPost() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/boards/free/posts/1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/boards/free/posts/1", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -254,7 +254,7 @@ func (s *V2APISuite) TestCreatePost_Unauthorized() {
 		"title":   "New Post",
 		"content": "New content",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v2/boards/free/posts", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/boards/free/posts", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -272,7 +272,7 @@ func (s *V2APISuite) TestCreatePost_Authenticated() {
 		"title":   "Authenticated Post",
 		"content": "Created with JWT",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v2/boards/free/posts", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/boards/free/posts", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
@@ -285,7 +285,7 @@ func (s *V2APISuite) TestCreatePost_Authenticated() {
 // --- Comment Tests ---
 
 func (s *V2APISuite) TestListComments() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/boards/free/posts/1/comments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/boards/free/posts/1/comments", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -296,7 +296,7 @@ func (s *V2APISuite) TestListComments() {
 // --- User Tests ---
 
 func (s *V2APISuite) TestListUsers() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/users", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -305,7 +305,7 @@ func (s *V2APISuite) TestListUsers() {
 }
 
 func (s *V2APISuite) TestGetUserByUsername() {
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/users/username/testuser", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/username/testuser", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -320,7 +320,7 @@ func (s *V2APISuite) getAuthToken() string {
 		"username": "testuser",
 		"password": "password123",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/login", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 

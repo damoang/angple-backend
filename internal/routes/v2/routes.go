@@ -9,7 +9,7 @@ import (
 
 // SetupAuth configures v2 authentication routes
 func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.Manager) {
-	authGroup := router.Group("/api/v2/auth")
+	authGroup := router.Group("/api/v1/auth")
 	authGroup.POST("/login", h.Login)
 	authGroup.POST("/refresh", h.RefreshToken)
 	authGroup.POST("/logout", h.Logout)
@@ -19,7 +19,7 @@ func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.M
 
 // Setup configures v2 API routes (new DB schema)
 func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, boardPermChecker middleware.BoardPermissionChecker) {
-	api := router.Group("/api/v2")
+	api := router.Group("/api/v1")
 	auth := middleware.JWTAuth(jwtManager)
 
 	// Users
@@ -51,7 +51,7 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 
 // SetupAdmin configures v2 admin API routes
 func SetupAdmin(router *gin.Engine, h *v2handler.AdminHandler, jwtManager *jwt.Manager) {
-	admin := router.Group("/api/v2/admin")
+	admin := router.Group("/api/v1/admin")
 	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 
 	// Admin Boards
@@ -76,11 +76,11 @@ func SetupAdmin(router *gin.Engine, h *v2handler.AdminHandler, jwtManager *jwt.M
 func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
 
-	posts := router.Group("/api/v2/posts")
+	posts := router.Group("/api/v1/posts")
 	posts.POST("/:id/scrap", auth, h.AddScrap)
 	posts.DELETE("/:id/scrap", auth, h.RemoveScrap)
 
-	me := router.Group("/api/v2/me", auth)
+	me := router.Group("/api/v1/me", auth)
 	me.GET("/scraps", h.ListScraps)
 }
 
@@ -88,7 +88,7 @@ func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.M
 func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
 
-	memo := router.Group("/api/v2/members/:id/memo", auth)
+	memo := router.Group("/api/v1/members/:id/memo", auth)
 	memo.GET("", h.GetMemo)
 	memo.POST("", h.CreateMemo)
 	memo.PUT("", h.UpdateMemo)
@@ -100,20 +100,20 @@ func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.M
 	auth := middleware.JWTAuth(jwtManager)
 
 	// Block/Unblock member
-	members := router.Group("/api/v2/members")
+	members := router.Group("/api/v1/members")
 	members.POST("/:id/block", auth, h.BlockMember)
 	members.DELETE("/:id/block", auth, h.UnblockMember)
 
 	// List blocked members
-	me := router.Group("/api/v2/members/me", auth)
-	me.GET("/blocks", h.ListBlocks)
+	meBlocks := router.Group("/api/v1/members/me", auth)
+	meBlocks.GET("/blocks", h.ListBlocks)
 }
 
 // SetupMessage configures v2 message routes
 func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
 
-	messages := router.Group("/api/v2/messages", auth)
+	messages := router.Group("/api/v1/messages", auth)
 	messages.POST("", h.SendMessage)
 	messages.GET("/inbox", h.GetInbox)
 	messages.GET("/sent", h.GetSent)
@@ -123,7 +123,7 @@ func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *j
 
 // SetupInstall configures v2 installation routes (no authentication required)
 func SetupInstall(router *gin.Engine, h *v2handler.InstallHandler) {
-	install := router.Group("/api/v2/install")
+	install := router.Group("/api/v1/install")
 
 	install.GET("/status", h.CheckInstallStatus)
 	install.POST("/test-db", h.TestDB)

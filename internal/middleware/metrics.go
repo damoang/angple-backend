@@ -86,7 +86,7 @@ func SetDBConnectionsActive(count float64) {
 	dbConnectionsActive.Set(count)
 }
 
-// normalizePath returns the route template (e.g. /api/v2/posts/:id) to avoid cardinality explosion
+// normalizePath returns the route template (e.g. /api/v1/posts/:id) to avoid cardinality explosion
 func normalizePath(path string) string {
 	if path == "" {
 		return "unknown"

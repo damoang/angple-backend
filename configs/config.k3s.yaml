@@ -1,0 +1,46 @@
+# K3s Production Configuration
+# APP_ENV=k3s
+
+server:
+  port: 8081
+  mode: production
+  env: k3s
+
+database:
+  host: damoang-g5-prd.cluster-cduqes60oxt0.ap-northeast-2.rds.amazonaws.com
+  port: 3306
+  user: damoang
+  password: ""  # Set via DB_PASSWORD env var
+  dbname: damoang
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600
+
+redis:
+  host: 10.160.20.165  # Host IP for K3s pods
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 100
+
+jwt:
+  secret: ""  # Set via JWT_SECRET env var
+  expires_in: 900
+  refresh_in: 604800
+  damoang_secret: ""  # Set via DAMOANG_JWT_SECRET env var
+
+data_paths:
+  recommended_path: ""  # RECOMMENDED_DATA_PATH 환경변수로 설정
+
+cors:
+  allow_origins: "https://web.damoang.net, https://damoang.net, https://api.damoang.net"
+
+# 플러그인 설정
+plugins:
+  advertising:
+    enabled: true
+    settings:
+      gam_network_code: "22996793498"
+      adsense_client_id: "ca-pub-5124617752473025"
+      enable_gam: true
+      enable_adsense_fallback: true

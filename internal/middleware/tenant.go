@@ -162,9 +162,9 @@ func shouldSkipTenant(path string) bool {
 	skipPaths := []string{
 		"/health",
 		"/metrics",
-		"/api/v2/auth",
-		"/api/v2/sites/check-subdomain",
-		"/api/v2/sites/verify-domain",
+		"/api/v1/auth",
+		"/api/v1/sites/check-subdomain",
+		"/api/v1/sites/verify-domain",
 		"/webhook",
 	}
 

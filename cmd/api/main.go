@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -52,7 +51,7 @@ import (
 // @license.name    MIT
 //
 // @host            localhost:8082
-// @BasePath        /api/v2
+// @BasePath        /api/v1
 //
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -226,7 +225,7 @@ func main() {
 	if redisClient != nil && !cfg.IsDevelopment() {
 		router.Use(middleware.RateLimit(redisClient, middleware.DefaultRateLimitConfig()))
 		// TODO: WriteRateLimit 구현 후 활성화
-		// router.Use(middleware.WriteRateLimit(redisClient, middleware.WriteRateLimitConfig(), "/api/v2/media"))
+		// router.Use(middleware.WriteRateLimit(redisClient, middleware.WriteRateLimitConfig(), "/api/v1/media"))
 	}
 
 	// Prometheus metrics
@@ -271,13 +270,7 @@ func main() {
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
 		v2routes.SetupAuth(router, v2AuthHandler, jwtManager)
 
-		// v1 compatibility routes (frontend calls /api/v1/*)
-		v1Auth := router.Group("/api/v1/auth")
-		v1Auth.POST("/login", v2AuthHandler.Login)
-		v1Auth.POST("/refresh", v2AuthHandler.RefreshToken)
-		v1Auth.POST("/logout", v2AuthHandler.Logout)
-		v1Auth.GET("/me", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
-		v1Auth.GET("/profile", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
+		// v1 고유 라우트 (routes.go에 없는 것들)
 		router.GET("/api/v1/menus/sidebar", func(c *gin.Context) {
 			var menus []domain.Menu
 			if err := db.Where("is_active = ? AND show_in_sidebar = ?", true, true).
@@ -326,114 +319,16 @@ func main() {
 				},
 			})
 		})
-		// v1 boards routes → adapt v2 data to v1 format
-		v1Boards := router.Group("/api/v1/boards")
-		v1Boards.Use(middleware.OptionalJWTAuth(jwtManager))
-		v1Boards.GET("/:slug", v2Handler.GetBoard)
-		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
-			slug := c.Param("slug")
-			board, err := v2BoardRepo.FindBySlug(slug)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
-				return
-			}
-			page, err2 := strconv.Atoi(c.DefaultQuery("page", "1"))
-			if err2 != nil {
-				page = 1
-			}
-			limit, err3 := strconv.Atoi(c.DefaultQuery("limit", "20"))
-			if err3 != nil {
-				limit = 20
-			}
-			if page < 1 {
-				page = 1
-			}
-			if limit < 1 || limit > 100 {
-				limit = 20
-			}
-			posts, total, err := v2PostRepo.FindByBoard(board.ID, page, limit)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": page, "limit": limit}})
-				return
-			}
-			// batch-load user nicknames
-			userIDs := make([]string, 0, len(posts))
-			for _, p := range posts {
-				userIDs = append(userIDs, fmt.Sprintf("%d", p.UserID))
-			}
-			nickMap, err4 := v2UserRepo.FindNicksByIDs(userIDs)
-			if err4 != nil {
-				nickMap = map[string]string{}
-			}
-			// transform to v1 format
-			items := make([]gin.H, 0, len(posts))
-			for _, p := range posts {
-				uid := fmt.Sprintf("%d", p.UserID)
-				author := nickMap[uid]
-				if author == "" {
-					author = "익명"
-				}
-				items = append(items, gin.H{
-					"id":             p.ID,
-					"title":          p.Title,
-					"content":        p.Content,
-					"author":         author,
-					"author_id":      uid,
-					"views":          p.ViewCount,
-					"likes":          0,
-					"comments_count": p.CommentCount,
-					"is_notice":      p.IsNotice,
-					"created_at":     p.CreatedAt,
-					"updated_at":     p.UpdatedAt,
-				})
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"data": items,
-				"meta": gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
-			})
-		})
-		v1Boards.GET("/:slug/posts/:id", func(c *gin.Context) {
-			id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
-				return
-			}
-			post, err := v2PostRepo.FindByID(id)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
-				return
-			}
-			if vcErr := v2PostRepo.IncrementViewCount(id); vcErr != nil {
-				log.Printf("IncrementViewCount error: %v", vcErr)
-			}
-			uid := fmt.Sprintf("%d", post.UserID)
-			nickMap, nickErr := v2UserRepo.FindNicksByIDs([]string{uid})
-			if nickErr != nil {
-				nickMap = map[string]string{}
-			}
-			author := nickMap[uid]
-			if author == "" {
-				author = "익명"
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"data": gin.H{
-					"id":             post.ID,
-					"title":          post.Title,
-					"content":        post.Content,
-					"author":         author,
-					"author_id":      uid,
-					"views":          post.ViewCount,
-					"likes":          0,
-					"comments_count": post.CommentCount,
-					"is_notice":      post.IsNotice,
-					"created_at":     post.CreatedAt,
-					"updated_at":     post.UpdatedAt,
-				},
-			})
-		})
-		v1Boards.GET("/:slug/posts/:id/comments", v2Handler.ListComments)
-		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), v2Handler.CreatePost)
-		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), v2Handler.CreateComment)
+		// /api/v1/my/* — 포인트/경험치 조회
+		myPointRepo := v2repo.NewMyPointRepository(db)
+		myExpRepo := v2repo.NewMyExpRepository(db)
+		myHandler := v2handler.NewMyHandler(myPointRepo, myExpRepo)
+
+		v1My := router.Group("/api/v1/my", middleware.JWTAuth(jwtManager))
+		v1My.GET("/point", myHandler.GetMyPoint)
+		v1My.GET("/point/history", myHandler.GetMyPointHistory)
+		v1My.GET("/exp", myHandler.GetMyExp)
+		v1My.GET("/exp/history", myHandler.GetMyExpHistory)
 
 		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
 			emptySection := func(id, name string) gin.H {
@@ -475,7 +370,7 @@ func main() {
 		tenantSvc := service.NewTenantService(siteRepo, db, tenantDBResolver)
 		tenantHandler := handler.NewTenantHandler(tenantSvc)
 
-		adminTenants := router.Group("/api/v2/admin/tenants")
+		adminTenants := router.Group("/api/v1/admin/tenants")
 		adminTenants.GET("", tenantHandler.ListTenants)
 		adminTenants.GET("/plans", middleware.CacheWithTTL(redisClient, 10*time.Minute), tenantHandler.GetPlanLimits)
 		adminTenants.GET("/:id", tenantHandler.GetTenant)
@@ -492,7 +387,7 @@ func main() {
 		provisioningSvc := service.NewProvisioningService(siteRepo, subRepo, tenantDBResolver, db, "angple.com")
 		provisioningHandler := handler.NewProvisioningHandler(provisioningSvc)
 
-		saas := router.Group("/api/v2/saas")
+		saas := router.Group("/api/v1/saas")
 		saas.GET("/pricing", middleware.CacheWithTTL(redisClient, 10*time.Minute), provisioningHandler.GetPricing)
 		saas.POST("/communities", provisioningHandler.ProvisionCommunity)
 		saas.DELETE("/communities/:id", provisioningHandler.DeleteCommunity)
@@ -527,11 +422,11 @@ func main() {
 		}
 		oauthHandler := handler.NewOAuthHandler(oauthService)
 
-		oauth := router.Group("/api/v2/auth/oauth")
+		oauth := router.Group("/api/v1/auth/oauth")
 		oauth.GET("/:provider", oauthHandler.Redirect)
 		oauth.GET("/:provider/callback", oauthHandler.Callback)
 
-		apiKeys := router.Group("/api/v2/auth/api-keys", middleware.JWTAuth(jwtManager))
+		apiKeys := router.Group("/api/v1/auth/api-keys", middleware.JWTAuth(jwtManager))
 		apiKeys.POST("", oauthHandler.GenerateAPIKey)
 
 		// Elasticsearch Search (optional)
@@ -539,11 +434,11 @@ func main() {
 			searchSvc := service.NewSearchService(esClient, db)
 			searchHandler := handler.NewSearchHandler(searchSvc)
 
-			search := router.Group("/api/v2/search")
+			search := router.Group("/api/v1/search")
 			search.GET("", searchHandler.Search)
 			search.GET("/autocomplete", searchHandler.Autocomplete)
 
-			adminSearch := router.Group("/api/v2/admin/search")
+			adminSearch := router.Group("/api/v1/admin/search")
 			adminSearch.POST("/index", searchHandler.BulkIndex)
 			adminSearch.POST("/index-post", searchHandler.IndexPost)
 			adminSearch.DELETE("/index/:board_id/:post_id", searchHandler.DeletePostIndex)
@@ -556,7 +451,7 @@ func main() {
 
 			// TODO: UploadRateLimitConfig 구현 후 활성화
 			// uploadRateLimit := middleware.RateLimit(redisClient, middleware.UploadRateLimitConfig())
-			media := router.Group("/api/v2/media", middleware.JWTAuth(jwtManager))
+			media := router.Group("/api/v1/media", middleware.JWTAuth(jwtManager))
 			media.POST("/images", mediaHandler.UploadImage)
 			media.POST("/attachments", mediaHandler.UploadAttachment)
 			media.POST("/videos", mediaHandler.UploadVideo)
@@ -608,7 +503,7 @@ func main() {
 		settingHandler := pluginstoreHandler.NewSettingHandler(settingSvc, pluginManager)
 		permHandler := pluginstoreHandler.NewPermissionHandler(permSvc)
 
-		adminPlugins := router.Group("/api/v2/admin/plugins")
+		adminPlugins := router.Group("/api/v1/admin/plugins")
 		adminPlugins.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		{
 			adminPlugins.GET("", storeHandler.ListPlugins)
@@ -645,20 +540,20 @@ func main() {
 		marketplaceSvc := pluginstoreSvc.NewMarketplaceService(marketplaceRepo)
 		marketplaceHandler := pluginstoreHandler.NewMarketplaceHandler(marketplaceSvc)
 
-		mp := router.Group("/api/v2/marketplace")
+		mp := router.Group("/api/v1/marketplace")
 		mp.GET("", marketplaceHandler.Browse)
 		mp.GET("/:name", marketplaceHandler.GetPlugin)
 		mp.GET("/:name/reviews", marketplaceHandler.GetReviews)
 		mp.POST("/:name/reviews", marketplaceHandler.AddReview)
 		mp.POST("/:name/download", marketplaceHandler.TrackDownload)
 
-		mpDev := router.Group("/api/v2/marketplace/developers")
+		mpDev := router.Group("/api/v1/marketplace/developers")
 		mpDev.POST("/register", marketplaceHandler.RegisterDeveloper)
 		mpDev.GET("/me", marketplaceHandler.GetMyProfile)
 		mpDev.POST("/submissions", marketplaceHandler.SubmitPlugin)
 		mpDev.GET("/submissions", marketplaceHandler.ListMySubmissions)
 
-		mpAdmin := router.Group("/api/v2/admin/marketplace")
+		mpAdmin := router.Group("/api/v1/admin/marketplace")
 		mpAdmin.GET("/submissions/pending", marketplaceHandler.ListPendingSubmissions)
 		mpAdmin.POST("/submissions/:id/review", marketplaceHandler.ReviewSubmission)
 
@@ -668,10 +563,10 @@ func main() {
 		pkglogger.Info("Skipping API route setup (no DB connection)")
 	}
 
-	// v1 API catch-all: 미매핑 v1 엔드포인트에 대해 404 대신 빈 성공 응답 반환
+	// v1 API catch-all: 미매핑 v1 엔드포인트에 대해 501 미구현 반환
 	router.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+			c.JSON(http.StatusNotImplemented, gin.H{"success": false, "error": "미구현 API"})
 			return
 		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
