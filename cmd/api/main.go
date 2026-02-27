@@ -355,6 +355,10 @@ func main() {
 		router.GET("/api/v1/notifications/unread-count", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"count": 0}})
 		})
+		// v1 members memo (stub for now)
+		router.GET("/api/v1/members/:id/memo", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"memo": ""}})
+		})
 		// 추천 글 / 위젯 (프론트엔드 홈페이지용)
 		router.GET("/api/v1/recommended/index-widgets", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
@@ -491,6 +495,25 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data":    v1handler.TransformToV1Comments(comments),
+			})
+		})
+
+		// GET /api/v1/boards/:slug/posts/:id/likers - Get users who liked the post (stub)
+		v1Boards.GET("/:slug/posts/:id/likers", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data": gin.H{
+					"likers": []any{},
+					"total":  0,
+				},
+			})
+		})
+
+		// GET /api/v1/boards/:slug/posts/:id/revisions - Get post revision history (stub)
+		v1Boards.GET("/:slug/posts/:id/revisions", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    []any{},
 			})
 		})
 
