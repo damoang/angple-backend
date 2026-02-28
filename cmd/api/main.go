@@ -21,6 +21,7 @@ import (
 	pluginstoreRepo "github.com/damoang/angple-backend/internal/pluginstore/repository"
 	pluginstoreSvc "github.com/damoang/angple-backend/internal/pluginstore/service"
 	"github.com/damoang/angple-backend/internal/repository"
+	gnuboard "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
@@ -254,6 +255,7 @@ func main() {
 		// Gnuboard repositories for v1 API (g5_* tables)
 		gnuBoardRepo := gnurepo.NewBoardRepository(db)
 		gnuWriteRepo := gnurepo.NewWriteRepository(db)
+		gnuFileRepo := gnurepo.NewFileRepository(db)
 		_ = gnurepo.NewMemberRepository(db) // For future auth integration
 
 		// v2 Core API
@@ -554,13 +556,102 @@ func main() {
 			})
 		})
 
-		// GET /api/v1/boards/:slug/posts/:id/likers - Get users who liked the post (stub)
+		// GET /api/v1/boards/:slug/posts/:id/files - Get attached files from g5_board_file
+		v1Boards.GET("/:slug/posts/:id/files", func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			// Get files from g5_board_file
+			files, err := gnuFileRepo.GetFilesByPost(slug, postID)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			// Build base URL for file paths
+			baseURL := cfg.Storage.CDNURL
+			if baseURL == "" {
+				// Fallback to legacy PHP path
+				baseURL = "https://damoang.net"
+			}
+
+			// Transform to response format
+			var fileResponses []gnuboard.FileResponse
+			for _, f := range files {
+				fileResponses = append(fileResponses, f.ToFileResponse(baseURL))
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    fileResponses,
+			})
+		})
+
+		// GET /api/v1/boards/:slug/posts/:id/likers - Get users who liked the post
 		v1Boards.GET("/:slug/posts/:id/likers", func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+			limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+			if page < 1 {
+				page = 1
+			}
+			if limit < 1 || limit > 100 {
+				limit = 20
+			}
+			offset := (page - 1) * limit
+
+			// LikerInfo struct for response
+			type LikerInfo struct {
+				MbID    string     `json:"mb_id"`
+				MbName  string     `json:"mb_name"`
+				MbNick  string     `json:"mb_nick"`
+				BgIP    string     `json:"bg_ip,omitempty"`
+				LikedAt *time.Time `json:"liked_at"`
+			}
+
+			var likers []LikerInfo
+			var total int64
+
+			if db == nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": true,
+					"data": gin.H{
+						"likers": []any{},
+						"total":  0,
+					},
+				})
+				return
+			}
+
+			// Count total likers
+			db.Table("g5_board_good").
+				Where("bo_table = ? AND wr_id = ? AND bg_flag = ?", slug, postID, "good").
+				Count(&total)
+
+			// Query likers with member info
+			db.Table("g5_board_good bg").
+				Select("bg.mb_id, COALESCE(m.mb_name, '') as mb_name, COALESCE(m.mb_nick, bg.mb_id) as mb_nick, bg.bg_ip, bg.bg_datetime as liked_at").
+				Joins("LEFT JOIN g5_member m ON bg.mb_id = m.mb_id").
+				Where("bg.bo_table = ? AND bg.wr_id = ? AND bg.bg_flag = ?", slug, postID, "good").
+				Order("bg.bg_datetime DESC").
+				Offset(offset).Limit(limit).
+				Scan(&likers)
+
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data": gin.H{
-					"likers": []any{},
-					"total":  0,
+					"likers": likers,
+					"total":  total,
 				},
 			})
 		})
@@ -576,6 +667,61 @@ func main() {
 		// POST routes still use v2 handlers for now (will be migrated later)
 		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), v2Handler.CreatePost)
 		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), v2Handler.CreateComment)
+
+		// PATCH /api/v1/boards/:slug/posts/:id/soft-delete - Soft delete post
+		v1Boards.PATCH("/:slug/posts/:id/soft-delete", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			// Q&A 게시판 삭제 제한 체크
+			if slug == "qa" {
+				comments, err := gnuWriteRepo.FindComments(slug, postID)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 조회 실패"})
+					return
+				}
+				if len(comments) > 0 {
+					c.JSON(http.StatusForbidden, gin.H{
+						"success": false,
+						"error":   "질문게시판은 답변이 있으면 삭제가 불가능합니다",
+					})
+					return
+				}
+			}
+
+			// 게시글 조회 및 권한 확인
+			post, err := gnuWriteRepo.FindPostByID(slug, postID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 작성자 또는 관리자 확인
+			userID := middleware.GetUserID(c)
+			userLevel := middleware.GetUserLevel(c)
+			if post.MbID != userID && userLevel < 10 {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "삭제 권한이 없습니다"})
+				return
+			}
+
+			// 게시글 삭제 (댓글도 함께 삭제됨)
+			if err := gnuWriteRepo.DeletePost(slug, postID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
+		})
+
+		// Board display settings (for admin layout switcher)
+		v2DisplaySettingsRepo := v2repo.NewBoardDisplaySettingsRepository(db)
+		displaySettingsHandler := v2handler.NewDisplaySettingsHandler(v2BoardRepo, v2DisplaySettingsRepo)
+		v1Boards.GET("/:slug/display-settings", displaySettingsHandler.GetDisplaySettings)
+		v1Boards.PUT("/:slug/display-settings", middleware.JWTAuth(jwtManager), displaySettingsHandler.UpdateDisplaySettings)
 
 		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
 			emptySection := func(id, name string) gin.H {

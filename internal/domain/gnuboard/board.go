@@ -75,6 +75,7 @@ type BoardResponse struct {
 	DownloadPoint int    `json:"download_point"`
 	UseGood       bool   `json:"use_good"`
 	UseNogood     bool   `json:"use_nogood"`
+	UseSecret     bool   `json:"use_secret"`
 	PostCount     int    `json:"post_count"`
 	CommentCount  int    `json:"comment_count"`
 }
@@ -102,6 +103,7 @@ func (b *G5Board) ToResponse() BoardResponse {
 		DownloadPoint: b.BoDownloadPoint,
 		UseGood:       b.BoUseGood == 1,
 		UseNogood:     b.BoUseNogood == 1,
+		UseSecret:     b.BoUseSecret == 1,
 		PostCount:     b.BoCountWrite,
 		CommentCount:  b.BoCountComment,
 	}
