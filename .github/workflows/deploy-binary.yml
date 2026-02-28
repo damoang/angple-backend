@@ -15,7 +15,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 env:
   GO_VERSION: '1.24'
@@ -64,6 +64,8 @@ jobs:
     needs: build
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download API binary
         if: inputs.target == 'api' || inputs.target == 'all'
         uses: actions/download-artifact@v4
@@ -78,27 +80,38 @@ jobs:
           name: gateway-binary
           path: ./binaries
 
+      - name: Create GitHub Release
+        id: release
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          TAG="deploy-${TIMESTAMP}"
+          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+
+          # Delete old deploy releases (keep last 5)
+          gh release list --limit 100 | grep "^deploy-" | tail -n +6 | cut -f1 | while read tag; do
+            gh release delete "$tag" --yes --cleanup-tag || true
+          done
+
+          # Create new release with binaries
+          gh release create "${TAG}" \
+            --title "Deploy ${TIMESTAMP}" \
+            --notes "Automated deployment - ${{ inputs.target }}" \
+            ./binaries/*
+
+          echo "Release created: ${TAG}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
           aws-region: ap-northeast-2
 
-      - name: Upload binaries to S3
-        run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          for binary in ./binaries/*; do
-            if [ -f "$binary" ]; then
-              name=$(basename "$binary")
-              aws s3 cp "$binary" "s3://damoang-deploy/angple-backend/${name}-${TIMESTAMP}"
-              aws s3 cp "$binary" "s3://damoang-deploy/angple-backend/${name}-latest"
-              echo "Uploaded: ${name}"
-            fi
-          done
-
       - name: Deploy via SSM
         env:
           TARGET: ${{ inputs.target }}
+          RELEASE_TAG: ${{ steps.release.outputs.TAG }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
@@ -110,7 +123,8 @@ jobs:
               "# API 배포",
               "if [ \"'"$TARGET"'\" = \"api\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
               "  echo Deploying API binary...",
-              "  aws s3 cp s3://damoang-deploy/angple-backend/api-latest ./bin/api-new",
+              "  gh release download '"$RELEASE_TAG"' --repo damoang/angple-backend --pattern api -D ./bin --clobber",
+              "  mv ./bin/api ./bin/api-new",
               "  chmod +x ./bin/api-new",
               "  pkill -f \"./bin/api\" || true",
               "  sleep 2",
@@ -124,7 +138,8 @@ jobs:
               "# Gateway 배포",
               "if [ \"'"$TARGET"'\" = \"gateway\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
               "  echo Deploying Gateway binary...",
-              "  aws s3 cp s3://damoang-deploy/angple-backend/gateway-latest ./bin/gateway-new",
+              "  gh release download '"$RELEASE_TAG"' --repo damoang/angple-backend --pattern gateway -D ./bin --clobber",
+              "  mv ./bin/gateway ./bin/gateway-new",
               "  chmod +x ./bin/gateway-new",
               "  pkill -f \"./bin/gateway\" || true",
               "  sleep 2",
@@ -142,13 +157,11 @@ jobs:
 
           echo "Command ID: $COMMAND_ID"
 
-          # 완료 대기
           echo "Waiting for deployment..."
           aws ssm wait command-executed \
             --command-id "$COMMAND_ID" \
             --instance-id "i-038a1d1f00798d94b" || true
 
-          # 결과 확인
           STATUS=$(aws ssm get-command-invocation \
             --command-id "$COMMAND_ID" \
             --instance-id "i-038a1d1f00798d94b" \
