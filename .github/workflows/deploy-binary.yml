@@ -118,43 +118,47 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
               "set -e",
-
-              "# Run as angple user for gh auth",
-              "sudo -u angple bash -c '\''",
-              "set -e",
               "cd /home/angple/backend",
 
-              "# API 배포",
+              "# Download as angple user (has gh auth)",
               "if [ \"'"$TARGET"'\" = \"api\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
-              "  echo Deploying API binary...",
-              "  gh release download '"$RELEASE_TAG"' --repo damoang/angple-backend --pattern api -D ./bin --clobber",
-              "  mv ./bin/api ./bin/api-new",
+              "  echo Downloading API binary...",
+              "  sudo -u angple gh release download '"$RELEASE_TAG"' --repo damoang/angple-backend --pattern api -D /tmp --clobber",
+              "  mv /tmp/api ./bin/api-new",
               "  chmod +x ./bin/api-new",
+              "fi",
+
+              "if [ \"'"$TARGET"'\" = \"gateway\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
+              "  echo Downloading Gateway binary...",
+              "  sudo -u angple gh release download '"$RELEASE_TAG"' --repo damoang/angple-backend --pattern gateway -D /tmp --clobber",
+              "  mv /tmp/gateway ./bin/gateway-new",
+              "  chmod +x ./bin/gateway-new",
+              "fi",
+
+              "# Deploy API (as root)",
+              "if [ \"'"$TARGET"'\" = \"api\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
+              "  echo Deploying API...",
               "  pkill -f ./bin/api || true",
               "  sleep 2",
               "  mv ./bin/api-new ./bin/api",
               "  source .env 2>/dev/null || true",
               "  nohup ./bin/api > /home/angple/api.log 2>&1 &",
               "  sleep 3",
-              "  pgrep -f ./bin/api && echo API started successfully",
+              "  pgrep -f ./bin/api && echo API started successfully || echo API failed to start",
               "fi",
 
-              "# Gateway 배포",
+              "# Deploy Gateway (as root)",
               "if [ \"'"$TARGET"'\" = \"gateway\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
-              "  echo Deploying Gateway binary...",
-              "  gh release download '"$RELEASE_TAG"' --repo damoang/angple-backend --pattern gateway -D ./bin --clobber",
-              "  mv ./bin/gateway ./bin/gateway-new",
-              "  chmod +x ./bin/gateway-new",
+              "  echo Deploying Gateway...",
               "  pkill -f ./bin/gateway || true",
               "  sleep 2",
               "  mv ./bin/gateway-new ./bin/gateway",
               "  nohup ./bin/gateway > /home/angple/gateway.log 2>&1 &",
               "  sleep 3",
-              "  pgrep -f ./bin/gateway && echo Gateway started successfully",
+              "  pgrep -f ./bin/gateway && echo Gateway started successfully || echo Gateway failed to start",
               "fi",
 
-              "echo Deployed at $(date)",
-              "'\''"
+              "echo Deployed at $(date)"
             ]' \
             --timeout-seconds 300 \
             --query "Command.CommandId" \
