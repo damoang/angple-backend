@@ -84,6 +84,11 @@ jobs:
           role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
           aws-region: ap-northeast-2
 
+      - name: Ensure S3 bucket exists
+        run: |
+          aws s3api head-bucket --bucket damoang-deploy 2>/dev/null || \
+          aws s3 mb s3://damoang-deploy --region ap-northeast-2
+
       - name: Upload binaries to S3
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
