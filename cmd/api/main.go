@@ -320,6 +320,202 @@ func main() {
 			}
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		})
+
+		// ========== Admin Menu API ==========
+		adminMenus := router.Group("/api/v1/admin/menus")
+		adminMenus.Use(middleware.JWTAuth(jwtManager))
+		adminMenus.Use(middleware.RequireAdmin())
+
+		// GET /api/v1/admin/menus - 전체 메뉴 조회 (트리 구조)
+		adminMenus.GET("", func(c *gin.Context) {
+			var menus []domain.Menu
+			if err := db.Order("order_num ASC, id ASC").Find(&menus).Error; err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			// Build tree structure
+			menuMap := make(map[int64]*domain.Menu, len(menus))
+			var roots []*domain.Menu
+			for i := range menus {
+				menus[i].Children = []*domain.Menu{}
+				menuMap[menus[i].ID] = &menus[i]
+			}
+			for i := range menus {
+				if menus[i].ParentID != nil && *menus[i].ParentID != 0 {
+					if parent, ok := menuMap[*menus[i].ParentID]; ok {
+						parent.Children = append(parent.Children, &menus[i])
+						continue
+					}
+				}
+				roots = append(roots, &menus[i])
+			}
+
+			result := make([]domain.AdminMenuResponse, 0, len(roots))
+			for _, r := range roots {
+				result = append(result, r.ToAdminResponse())
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+		})
+
+		// POST /api/v1/admin/menus - 메뉴 생성
+		adminMenus.POST("", func(c *gin.Context) {
+			var req domain.CreateMenuRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+				return
+			}
+
+			// Calculate depth
+			depth := 0
+			if req.ParentID != nil && *req.ParentID != 0 {
+				var parent domain.Menu
+				if err := db.First(&parent, *req.ParentID).Error; err == nil {
+					depth = parent.Depth + 1
+				}
+			}
+
+			// Get max order_num
+			var maxOrder int
+			db.Model(&domain.Menu{}).Select("COALESCE(MAX(order_num), 0)").Scan(&maxOrder)
+
+			menu := domain.Menu{
+				ParentID:      req.ParentID,
+				Title:         req.Title,
+				URL:           req.URL,
+				Icon:          req.Icon,
+				Shortcut:      req.Shortcut,
+				Description:   req.Description,
+				Target:        req.Target,
+				Depth:         depth,
+				OrderNum:      maxOrder + 1,
+				ViewLevel:     req.ViewLevel,
+				ShowInHeader:  req.ShowInHeader,
+				ShowInSidebar: req.ShowInSidebar,
+				IsActive:      req.IsActive,
+			}
+
+			if err := db.Create(&menu).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+				return
+			}
+
+			c.JSON(http.StatusCreated, gin.H{"success": true, "data": menu.ToAdminResponse()})
+		})
+
+		// PUT /api/v1/admin/menus/:id - 메뉴 수정
+		adminMenus.PUT("/:id", func(c *gin.Context) {
+			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": "Invalid menu ID"}})
+				return
+			}
+
+			var menu domain.Menu
+			if err := db.First(&menu, id).Error; err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": gin.H{"message": "Menu not found"}})
+				return
+			}
+
+			var req domain.UpdateMenuRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+				return
+			}
+
+			// Update fields if provided
+			if req.Title != nil {
+				menu.Title = *req.Title
+			}
+			if req.URL != nil {
+				menu.URL = *req.URL
+			}
+			if req.Icon != nil {
+				menu.Icon = *req.Icon
+			}
+			if req.Shortcut != nil {
+				menu.Shortcut = *req.Shortcut
+			}
+			if req.Description != nil {
+				menu.Description = *req.Description
+			}
+			if req.Target != nil {
+				menu.Target = *req.Target
+			}
+			if req.ShowInHeader != nil {
+				menu.ShowInHeader = *req.ShowInHeader
+			}
+			if req.ShowInSidebar != nil {
+				menu.ShowInSidebar = *req.ShowInSidebar
+			}
+			if req.ViewLevel != nil {
+				menu.ViewLevel = *req.ViewLevel
+			}
+			if req.IsActive != nil {
+				menu.IsActive = *req.IsActive
+			}
+
+			if err := db.Save(&menu).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": menu.ToAdminResponse()})
+		})
+
+		// DELETE /api/v1/admin/menus/:id - 메뉴 삭제
+		adminMenus.DELETE("/:id", func(c *gin.Context) {
+			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": "Invalid menu ID"}})
+				return
+			}
+
+			// Delete menu and its children
+			if err := db.Where("id = ? OR parent_id = ?", id, id).Delete(&domain.Menu{}).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+		})
+
+		// POST /api/v1/admin/menus/reorder - 메뉴 순서 변경
+		adminMenus.POST("/reorder", func(c *gin.Context) {
+			var req domain.ReorderMenusRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+				return
+			}
+
+			// Update order in transaction
+			tx := db.Begin()
+			for _, item := range req.Items {
+				updates := map[string]any{
+					"order_num": item.OrderNum,
+					"parent_id": item.ParentID,
+				}
+				// Calculate depth
+				depth := 0
+				if item.ParentID != nil && *item.ParentID != 0 {
+					var parent domain.Menu
+					if err := tx.First(&parent, *item.ParentID).Error; err == nil {
+						depth = parent.Depth + 1
+					}
+				}
+				updates["depth"] = depth
+
+				if err := tx.Model(&domain.Menu{}).Where("id = ?", item.ID).Updates(updates).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+					return
+				}
+			}
+			tx.Commit()
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+		})
+
 		router.GET("/api/v1/boards/:slug/notices", func(c *gin.Context) {
 			slug := c.Param("slug")
 			ctx := c.Request.Context()
