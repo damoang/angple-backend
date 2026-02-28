@@ -472,8 +472,17 @@ func main() {
 			noticeIDs := gnurepo.ParseNoticeIDs(board.BoNotice)
 			noticeIDMap := v1handler.BuildNoticeIDMap(noticeIDs)
 
-			// Transform to v1 format
-			items := v1handler.TransformToV1Posts(posts, noticeIDMap)
+			// Get thumbnails for posts with files
+			postIDs := make([]int, 0, len(posts))
+			for _, p := range posts {
+				if p.WrFile > 0 {
+					postIDs = append(postIDs, p.WrID)
+				}
+			}
+			thumbnails := gnuFileRepo.GetThumbnails(slug, postIDs, "https://s3.damoang.net")
+
+			// Transform to v1 format with thumbnails
+			items := v1handler.TransformToV1PostsWithThumbnails(posts, noticeIDMap, thumbnails)
 
 			response := gin.H{
 				"success": true,

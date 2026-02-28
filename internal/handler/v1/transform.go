@@ -44,6 +44,20 @@ func TransformToV1Posts(posts []*gnuboard.G5Write, noticeIDs map[int]bool) []map
 	return result
 }
 
+// TransformToV1PostsWithThumbnails converts posts with thumbnail URLs
+func TransformToV1PostsWithThumbnails(posts []*gnuboard.G5Write, noticeIDs map[int]bool, thumbnails map[int]string) []map[string]any {
+	result := make([]map[string]any, len(posts))
+	for i, p := range posts {
+		isNotice := noticeIDs[p.WrID]
+		item := TransformToV1Post(p, isNotice)
+		if thumb, ok := thumbnails[p.WrID]; ok {
+			item["thumbnail"] = thumb
+		}
+		result[i] = item
+	}
+	return result
+}
+
 // TransformToV1Comment converts G5Write (comment) to v1 API response format
 func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 	depth := len(w.WrCommentReply)
