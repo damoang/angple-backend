@@ -15,7 +15,7 @@ on:
 
 permissions:
   id-token: write
-  contents: write
+  contents: read
 
 env:
   GO_VERSION: '1.24'
@@ -78,31 +78,27 @@ jobs:
           name: gateway-binary
           path: ./binaries
 
-      - name: Create Release
-        id: create_release
-        run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          echo "RELEASE_TAG=deploy-${TIMESTAMP}" >> $GITHUB_OUTPUT
-
-          # Create release with binaries
-          gh release create "deploy-${TIMESTAMP}" \
-            --title "Deploy ${TIMESTAMP}" \
-            --notes "Automated deployment release" \
-            ./binaries/* || echo "Release creation skipped"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
           aws-region: ap-northeast-2
 
+      - name: Upload binaries to S3
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          for binary in ./binaries/*; do
+            if [ -f "$binary" ]; then
+              name=$(basename "$binary")
+              aws s3 cp "$binary" "s3://damoang-deploy/angple-backend/${name}-${TIMESTAMP}"
+              aws s3 cp "$binary" "s3://damoang-deploy/angple-backend/${name}-latest"
+              echo "Uploaded: ${name}"
+            fi
+          done
+
       - name: Deploy via SSM
         env:
           TARGET: ${{ inputs.target }}
-          GH_TOKEN: ${{ secrets.PREMIUM_REPO_TOKEN }}
-          RELEASE_TAG: ${{ steps.create_release.outputs.RELEASE_TAG }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
@@ -114,7 +110,7 @@ jobs:
               "# API 배포",
               "if [ \"'"$TARGET"'\" = \"api\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
               "  echo Deploying API binary...",
-              "  curl -sL -H \"Authorization: token '"$GH_TOKEN"'\" -H \"Accept: application/octet-stream\" \"https://api.github.com/repos/damoang/angple-backend/releases/tags/'"$RELEASE_TAG"'/assets\" -o ./bin/api-new || wget -q --header=\"Authorization: token '"$GH_TOKEN"'\" \"https://github.com/damoang/angple-backend/releases/download/'"$RELEASE_TAG"'/api\" -O ./bin/api-new",
+              "  aws s3 cp s3://damoang-deploy/angple-backend/api-latest ./bin/api-new",
               "  chmod +x ./bin/api-new",
               "  pkill -f \"./bin/api\" || true",
               "  sleep 2",
@@ -128,7 +124,7 @@ jobs:
               "# Gateway 배포",
               "if [ \"'"$TARGET"'\" = \"gateway\" ] || [ \"'"$TARGET"'\" = \"all\" ]; then",
               "  echo Deploying Gateway binary...",
-              "  curl -sL -H \"Authorization: token '"$GH_TOKEN"'\" -H \"Accept: application/octet-stream\" \"https://api.github.com/repos/damoang/angple-backend/releases/tags/'"$RELEASE_TAG"'/assets\" -o ./bin/gateway-new || wget -q --header=\"Authorization: token '"$GH_TOKEN"'\" \"https://github.com/damoang/angple-backend/releases/download/'"$RELEASE_TAG"'/gateway\" -O ./bin/gateway-new",
+              "  aws s3 cp s3://damoang-deploy/angple-backend/gateway-latest ./bin/gateway-new",
               "  chmod +x ./bin/gateway-new",
               "  pkill -f \"./bin/gateway\" || true",
               "  sleep 2",
