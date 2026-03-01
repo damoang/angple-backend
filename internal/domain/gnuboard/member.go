@@ -58,6 +58,9 @@ type G5Member struct {
 	Mb10            string    `gorm:"column:mb_10" json:"mb_10"`
 	MbIconPath      string    `gorm:"column:mb_icon_path" json:"mb_icon_path"`
 	MbImagePath     string    `gorm:"column:mb_image_path" json:"mb_image_path"`
+	// 경험치/레벨 필드 (nariya 애드온)
+	AsExp   int `gorm:"column:as_exp" json:"as_exp"`
+	AsLevel int `gorm:"column:as_level" json:"as_level"`
 }
 
 // TableName returns the table name for GORM
