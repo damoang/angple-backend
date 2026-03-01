@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"log"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -8,9 +11,63 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// getRemoteIP extracts the actual connection IP from RemoteAddr (ignores X-Forwarded-For)
+// RemoteAddr format: "IP:port" or "[IPv6]:port"
+func getRemoteIP(c *gin.Context) string {
+	remoteAddr := c.Request.RemoteAddr
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		// RemoteAddr에 포트가 없는 경우 그대로 반환
+		return remoteAddr
+	}
+	return host
+}
+
 // JWTAuth JWT authentication middleware (Bearer token or Cookie)
+// 내부 신뢰 요청 (SvelteKit SSR) 또는 JWT 토큰으로 인증
 func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 0. 내부 신뢰 요청 확인 (SvelteKit → Backend, 127.0.0.1에서만 유효)
+		// 세션 인증을 거친 SvelteKit이 전달하는 사용자 정보
+		// 주의: ClientIP()는 X-Forwarded-For를 사용하므로 실제 연결 IP를 확인해야 함
+		remoteIP := getRemoteIP(c)
+		internalAuth := c.GetHeader("X-Internal-Auth")
+		internalSecret := c.GetHeader("X-Internal-Secret")
+		internalUserID := c.GetHeader("X-Internal-User-ID")
+
+		// 디버그: admin 요청 로깅
+		if strings.Contains(c.Request.URL.Path, "admin") {
+			log.Printf("[JWTAuth DEBUG] %s %s | remoteIP=%s clientIP=%s | internalAuth=%s hasSecret=%v userID=%s | hasAuthHeader=%v",
+				c.Request.Method, c.Request.URL.Path,
+				remoteIP, c.ClientIP(),
+				internalAuth, internalSecret != "", internalUserID,
+				c.GetHeader("Authorization") != "")
+		}
+
+		// 내부 신뢰 요청 확인 (두 가지 방식)
+		// 1. 127.0.0.1에서 오는 요청 (nginx → SvelteKit → Backend)
+		// 2. 공유 시크릿 일치 (CloudFront가 직접 Backend로 라우팅하는 경우)
+		isLocalhost := remoteIP == "127.0.0.1" || remoteIP == "::1"
+		hasValidSecret := internalSecret == "angple-internal-dev-2026"
+		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
+			userID := c.GetHeader("X-Internal-User-ID")
+			levelStr := c.GetHeader("X-Internal-User-Level")
+			if userID != "" {
+				level := 0
+				if levelStr != "" {
+					if l, err := strconv.Atoi(levelStr); err == nil {
+						level = l
+					}
+				}
+				c.Set("userID", userID)
+				c.Set("nickname", "")
+				c.Set("level", level)
+				c.Set("v2_user_id", userID)
+				c.Next()
+				return
+			}
+		}
+
 		var token string
 
 		// 1. Authorization 헤더에서 토큰 확인

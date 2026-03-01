@@ -6,6 +6,24 @@ import (
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
 )
 
+// parseWrLast converts DB datetime string to RFC3339 format
+// Returns nil if parsing fails or if the time equals created time (no updates)
+func parseWrLast(wrLast string, createdAt time.Time) any {
+	if wrLast == "" {
+		return nil
+	}
+	// DB stores as "2006-01-02 15:04:05"
+	lastTime, err := time.ParseInLocation("2006-01-02 15:04:05", wrLast, time.Local)
+	if err != nil {
+		return nil
+	}
+	// If updated_at equals created_at, no actual update occurred
+	if lastTime.Equal(createdAt) || lastTime.Sub(createdAt).Abs() < time.Second {
+		return nil
+	}
+	return lastTime.Format(time.RFC3339)
+}
+
 // TransformToV1Post converts G5Write to v1 API response format
 func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 	return map[string]any{
@@ -23,7 +41,7 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 		"link1":          w.WrLink1,
 		"link2":          w.WrLink2,
 		"created_at":     w.WrDatetime.Format(time.RFC3339),
-		"updated_at":     w.WrLast,
+		"updated_at":     parseWrLast(w.WrLast, w.WrDatetime),
 	}
 }
 

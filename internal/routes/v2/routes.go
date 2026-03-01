@@ -142,3 +142,18 @@ func SetupInstall(router *gin.Engine, h *v2handler.InstallHandler) {
 	install.POST("/test-db", h.TestDB)
 	install.POST("/create-admin", h.CreateAdmin)
 }
+
+// SetupMyPage configures user's own data routes (points, exp, etc.)
+func SetupMyPage(router *gin.Engine, pointHandler *v2handler.PointHandler, expHandler *v2handler.ExpHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	my := router.Group("/api/v1/my", auth)
+
+	// Point routes
+	my.GET("/point", pointHandler.GetPointSummary)
+	my.GET("/point/history", pointHandler.GetPointHistory)
+
+	// Exp routes
+	my.GET("/exp", expHandler.GetExpSummary)
+	my.GET("/exp/history", expHandler.GetExpHistory)
+}

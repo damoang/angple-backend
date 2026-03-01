@@ -38,22 +38,40 @@ type G5Write struct {
 
 // PostResponse is the API response format for posts
 type PostResponse struct {
-	ID            int       `json:"id"`
-	Title         string    `json:"title"`
-	Content       string    `json:"content,omitempty"`
-	Author        string    `json:"author"`
-	AuthorID      string    `json:"author_id"`
-	Category      string    `json:"category,omitempty"`
-	Views         int       `json:"views"`
-	Likes         int       `json:"likes"`
-	Dislikes      int       `json:"dislikes"`
-	CommentsCount int       `json:"comments_count"`
-	HasFile       bool      `json:"has_file"`
-	IsNotice      bool      `json:"is_notice"`
-	Link1         string    `json:"link1,omitempty"`
-	Link2         string    `json:"link2,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     string    `json:"updated_at,omitempty"`
+	ID            int        `json:"id"`
+	Title         string     `json:"title"`
+	Content       string     `json:"content,omitempty"`
+	Author        string     `json:"author"`
+	AuthorID      string     `json:"author_id"`
+	Category      string     `json:"category,omitempty"`
+	Views         int        `json:"views"`
+	Likes         int        `json:"likes"`
+	Dislikes      int        `json:"dislikes"`
+	CommentsCount int        `json:"comments_count"`
+	HasFile       bool       `json:"has_file"`
+	IsNotice      bool       `json:"is_notice"`
+	Link1         string     `json:"link1,omitempty"`
+	Link2         string     `json:"link2,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+}
+
+// parseWrLast converts DB datetime string to time.Time
+// Returns nil if parsing fails or if the time equals created time (no updates)
+func parseWrLast(wrLast string, createdAt time.Time) *time.Time {
+	if wrLast == "" {
+		return nil
+	}
+	// DB stores as "2006-01-02 15:04:05"
+	lastTime, err := time.ParseInLocation("2006-01-02 15:04:05", wrLast, time.Local)
+	if err != nil {
+		return nil
+	}
+	// If updated_at equals created_at (within 1 second), no actual update occurred
+	if lastTime.Equal(createdAt) || lastTime.Sub(createdAt).Abs() < time.Second {
+		return nil
+	}
+	return &lastTime
 }
 
 // ToPostResponse converts G5Write to post API response format
@@ -73,7 +91,7 @@ func (w *G5Write) ToPostResponse() PostResponse {
 		Link1:         w.WrLink1,
 		Link2:         w.WrLink2,
 		CreatedAt:     w.WrDatetime,
-		UpdatedAt:     w.WrLast,
+		UpdatedAt:     parseWrLast(w.WrLast, w.WrDatetime),
 	}
 }
 

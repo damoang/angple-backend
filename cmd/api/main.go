@@ -280,6 +280,12 @@ func main() {
 		v2routes.Setup(router, v2Handler, jwtManager, permChecker)
 		v2routes.SetupAdminPosts(router, v2Handler, jwtManager)
 
+		// MyPage routes (point, exp)
+		v2ExpRepo := v2repo.NewExpRepository(db)
+		pointHandler := v2handler.NewPointHandler(v2PointRepo)
+		expHandler := v2handler.NewExpHandler(v2ExpRepo)
+		v2routes.SetupMyPage(router, pointHandler, expHandler, jwtManager)
+
 		// v2 Auth
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager)
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
@@ -455,11 +461,51 @@ func main() {
 				menu.IsActive = *req.IsActive
 			}
 
-			if err := db.Save(&menu).Error; err != nil {
+			// 트랜잭션으로 메뉴 수정 및 하위 메뉴 연동 처리
+			tx := db.Begin()
+			if err := tx.Save(&menu).Error; err != nil {
+				tx.Rollback()
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 				return
 			}
 
+			// 부모 메뉴가 숨겨지면 하위 메뉴도 함께 숨김 처리
+			cascadeUpdates := make(map[string]interface{})
+			if req.IsActive != nil && !*req.IsActive {
+				cascadeUpdates["is_active"] = false
+			}
+			if req.ShowInHeader != nil && !*req.ShowInHeader {
+				cascadeUpdates["show_in_header"] = false
+			}
+			if req.ShowInSidebar != nil && !*req.ShowInSidebar {
+				cascadeUpdates["show_in_sidebar"] = false
+			}
+
+			if len(cascadeUpdates) > 0 {
+				// 재귀적으로 모든 하위 메뉴의 ID를 수집
+				var collectChildIDs func(parentID int64) []int64
+				collectChildIDs = func(parentID int64) []int64 {
+					var childIDs []int64
+					var children []domain.Menu
+					tx.Where("parent_id = ?", parentID).Find(&children)
+					for _, child := range children {
+						childIDs = append(childIDs, child.ID)
+						childIDs = append(childIDs, collectChildIDs(child.ID)...)
+					}
+					return childIDs
+				}
+
+				childIDs := collectChildIDs(menu.ID)
+				if len(childIDs) > 0 {
+					if err := tx.Model(&domain.Menu{}).Where("id IN ?", childIDs).Updates(cascadeUpdates).Error; err != nil {
+						tx.Rollback()
+						c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+						return
+					}
+				}
+			}
+
+			tx.Commit()
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": menu.ToAdminResponse()})
 		})
 
