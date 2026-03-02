@@ -159,3 +159,13 @@ func SetupMyPage(router *gin.Engine, pointHandler *v2handler.PointHandler, expHa
 	my.GET("/exp", expHandler.GetExpSummary)
 	my.GET("/exp/history", expHandler.GetExpHistory)
 }
+
+// SetupDisciplineLog configures discipline log routes (read-only, uses gnuboard g5_write_disciplinelog)
+func SetupDisciplineLog(router *gin.Engine, h *v2handler.DisciplineLogHandler, jwtManager *jwt.Manager) {
+	// Public routes (read-only)
+	disciplineLog := router.Group("/api/v1/discipline-logs")
+	disciplineLog.GET("", h.GetList)
+	disciplineLog.GET("/violation-types", h.GetViolationTypes)
+	disciplineLog.GET("/:id", h.GetDetail)
+	// Note: Admin CRUD is handled by PHP admin (gnuboard)
+}

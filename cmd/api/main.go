@@ -286,6 +286,10 @@ func main() {
 		expHandler := v2handler.NewExpHandler(v2ExpRepo)
 		v2routes.SetupMyPage(router, pointHandler, expHandler, jwtManager)
 
+		// DisciplineLog routes (uses gnuboard g5_write_disciplinelog table)
+		disciplineLogHandler := v2handler.NewDisciplineLogHandler(gnuWriteRepo)
+		v2routes.SetupDisciplineLog(router, disciplineLogHandler, jwtManager)
+
 		// v2 Auth
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager)
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
