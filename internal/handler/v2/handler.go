@@ -217,6 +217,12 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 
 	// 레벨 체크 (미들웨어 우회 방어)
 	userLevel := middleware.GetUserLevel(c)
+
+	// 제휴 링크 차단 검증 (deal, economy 게시판)
+	if err := common.ValidateAffiliateLinks(req.Content, slug, userLevel, false); err != nil {
+		common.V2ErrorResponse(c, http.StatusForbidden, err.Error(), err)
+		return
+	}
 	if userLevel < int(board.WriteLevel) {
 		common.V2ErrorResponse(c, http.StatusForbidden, "글쓰기 권한이 없습니다. 레벨 "+strconv.Itoa(int(board.WriteLevel))+" 이상이 필요합니다.", nil)
 		return
@@ -566,6 +572,13 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 
 	// 레벨 체크 (미들웨어 우회 방어)
 	userLevel := middleware.GetUserLevel(c)
+
+	// 제휴 링크 차단 검증 (deal, economy 게시판)
+	if err := common.ValidateAffiliateLinks(req.Content, slug, userLevel, false); err != nil {
+		common.V2ErrorResponse(c, http.StatusForbidden, err.Error(), err)
+		return
+	}
+
 	if userLevel < int(board.CommentLevel) {
 		common.V2ErrorResponse(c, http.StatusForbidden, "댓글 작성 권한이 없습니다. 레벨 "+strconv.Itoa(int(board.CommentLevel))+" 이상이 필요합니다.", nil)
 		return

@@ -15,7 +15,17 @@ func Run(db *gorm.DB) error {
 	var count int64
 	db.Model(&domain.Menu{}).Count(&count)
 	if count == 0 {
-		return seedMenus(db)
+		if err := seedMenus(db); err != nil {
+			return err
+		}
+	}
+
+	// Add soft delete columns to all board tables and create revisions table
+	if err := AddSoftDeleteColumnsToAllBoards(db); err != nil {
+		return err
+	}
+	if err := CreateWriteRevisionsTable(db); err != nil {
+		return err
 	}
 
 	return nil

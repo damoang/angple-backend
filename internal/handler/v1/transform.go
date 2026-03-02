@@ -26,7 +26,7 @@ func parseWrLast(wrLast string, createdAt time.Time) any {
 
 // TransformToV1Post converts G5Write to v1 API response format
 func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"id":             w.WrID,
 		"title":          w.WrSubject,
 		"author":         w.WrName,
@@ -43,6 +43,14 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 		"created_at":     w.WrDatetime.Format(time.RFC3339),
 		"updated_at":     parseWrLast(w.WrLast, w.WrDatetime),
 	}
+
+	// Add thumbnail/extra_10 if wr_10 has value (for gallery/message layouts)
+	if w.Wr10 != "" {
+		result["thumbnail"] = w.Wr10
+		result["extra_10"] = w.Wr10
+	}
+
+	return result
 }
 
 // TransformToV1PostDetail converts G5Write to detailed v1 API response format

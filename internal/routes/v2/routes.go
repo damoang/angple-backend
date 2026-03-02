@@ -60,6 +60,8 @@ func SetupAdminPosts(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt
 	admin := router.Group("/api/v1/admin")
 	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 	admin.GET("/posts/deleted", h.GetDeletedPosts)
+	admin.POST("/posts/:id/restore", h.RestorePost)
+	admin.DELETE("/posts/:id/permanent", h.PermanentDeletePost)
 }
 
 // SetupAdmin configures v2 admin API routes

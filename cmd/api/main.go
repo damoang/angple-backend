@@ -935,10 +935,16 @@ func main() {
 				}
 			}
 
-			// 게시글 조회 및 권한 확인
-			post, err := gnuWriteRepo.FindPostByID(slug, postID)
+			// 게시글 조회 및 권한 확인 (삭제된 게시글 포함)
+			post, err := gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 이미 삭제된 경우
+			if post.WrDeletedAt != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "이미 삭제된 게시글입니다"})
 				return
 			}
 
@@ -950,9 +956,112 @@ func main() {
 				return
 			}
 
-			// 게시글 삭제 (댓글도 함께 삭제됨)
-			if err := gnuWriteRepo.DeletePost(slug, postID); err != nil {
+			// 게시글 소프트 삭제 (댓글도 함께 소프트 삭제됨)
+			if err := gnuWriteRepo.SoftDeletePost(slug, postID, userID); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
+		})
+
+		// POST /api/v1/boards/:slug/posts/:id/restore - Restore soft deleted post (admin only)
+		v1Boards.POST("/:slug/posts/:id/restore", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			// 관리자 확인
+			userLevel := middleware.GetUserLevel(c)
+			if userLevel < 10 {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "관리자만 복구할 수 있습니다"})
+				return
+			}
+
+			// 게시글 조회 (삭제된 게시글 포함)
+			post, err := gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 삭제되지 않은 경우
+			if post.WrDeletedAt == nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "삭제된 게시글이 아닙니다"})
+				return
+			}
+
+			// 게시글 복구
+			if err := gnuWriteRepo.RestorePost(slug, postID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 복구 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "복구 완료"})
+		})
+
+		// DELETE /api/v1/boards/:slug/posts/:id/permanent - Permanently delete post (admin only)
+		v1Boards.DELETE("/:slug/posts/:id/permanent", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			// 관리자 확인
+			userLevel := middleware.GetUserLevel(c)
+			if userLevel < 10 {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "관리자만 영구 삭제할 수 있습니다"})
+				return
+			}
+
+			// 게시글 조회 (삭제된 게시글 포함)
+			_, err = gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 게시글 영구 삭제
+			if err := gnuWriteRepo.DeletePost(slug, postID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 영구 삭제 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "영구 삭제 완료"})
+		})
+
+		// DELETE /api/v1/boards/:slug/posts/:id/comments/:comment_id - Soft delete comment
+		v1Boards.DELETE("/:slug/posts/:id/comments/:comment_id", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			slug := c.Param("slug")
+			commentID, err := strconv.Atoi(c.Param("comment_id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid comment ID"})
+				return
+			}
+
+			// 댓글 조회
+			comment, err := gnuWriteRepo.FindCommentByID(slug, commentID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "댓글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 작성자 또는 관리자 확인
+			userID := middleware.GetUserID(c)
+			userLevel := middleware.GetUserLevel(c)
+			if comment.MbID != userID && userLevel < 10 {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "삭제 권한이 없습니다"})
+				return
+			}
+
+			// 댓글 소프트 삭제
+			if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 				return
 			}
 
