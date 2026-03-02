@@ -1,6 +1,8 @@
 name: Deploy ECR to Prod
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       confirm:
@@ -16,6 +18,10 @@ on:
           - api
           - gateway
           - all
+      image_tag:
+        description: '배포할 이미지 태그 (비워두면 latest)'
+        required: false
+        type: string
 
 permissions:
   id-token: write
@@ -24,25 +30,16 @@ permissions:
 env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: angple-backend
+  ECR_REGISTRY: 891376997084.dkr.ecr.ap-northeast-2.amazonaws.com
 
 jobs:
   build:
     name: Build & Push to ECR
     runs-on: ubuntu-latest
-    if: inputs.confirm == 'deploy'
-    outputs:
-      api_tag: ${{ steps.meta.outputs.API_TAG }}
-      gateway_tag: ${{ steps.meta.outputs.GATEWAY_TAG }}
+    if: github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set image tags
-        id: meta
-        run: |
-          TAG=$(date +%Y%m%d-%H%M%S)
-          echo "API_TAG=${TAG}" >> $GITHUB_OUTPUT
-          echo "GATEWAY_TAG=gateway-${TAG}" >> $GITHUB_OUTPUT
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -61,7 +58,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push API
-        if: inputs.target == 'api' || inputs.target == 'all'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -69,31 +65,26 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.API_TAG }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
           cache-from: type=gha,scope=backend-api
           cache-to: type=gha,mode=max,scope=backend-api
-
-      - name: Build and push Gateway
-        if: inputs.target == 'gateway' || inputs.target == 'all'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deployments/docker/gateway.Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.GATEWAY_TAG }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:gateway-latest
-          cache-from: type=gha,scope=backend-gateway
-          cache-to: type=gha,mode=max,scope=backend-gateway
 
   deploy:
     name: Deploy to K8s
     runs-on: ubuntu-latest
-    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm == 'deploy'
 
     steps:
+      - name: Set image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "TAG=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=latest" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -103,14 +94,13 @@ jobs:
       - name: Deploy API via SSM
         if: inputs.target == 'api' || inputs.target == 'all'
         env:
-          IMAGE_TAG: ${{ needs.build.outputs.api_tag }}
-          ECR_REGISTRY: 891376997084.dkr.ecr.ap-northeast-2.amazonaws.com
+          IMAGE_TAG: ${{ steps.tag.outputs.TAG }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "kubectl set image deployment/angple-backend -n angple backend='"$ECR_REGISTRY"'/'"${{ env.ECR_REPOSITORY }}"':'"$IMAGE_TAG"'",
+              "kubectl set image deployment/angple-backend -n angple backend='"${{ env.ECR_REGISTRY }}"'/'"${{ env.ECR_REPOSITORY }}"':'"$IMAGE_TAG"'",
               "kubectl rollout status deployment/angple-backend -n angple --timeout=120s"
             ]' \
             --timeout-seconds 300 \
@@ -151,14 +141,13 @@ jobs:
       - name: Deploy Gateway via SSM
         if: inputs.target == 'gateway' || inputs.target == 'all'
         env:
-          IMAGE_TAG: ${{ needs.build.outputs.gateway_tag }}
-          ECR_REGISTRY: 891376997084.dkr.ecr.ap-northeast-2.amazonaws.com
+          IMAGE_TAG: gateway-${{ steps.tag.outputs.TAG }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "kubectl set image deployment/angple-gateway -n angple gateway='"$ECR_REGISTRY"'/'"${{ env.ECR_REPOSITORY }}"':'"$IMAGE_TAG"'",
+              "kubectl set image deployment/angple-gateway -n angple gateway='"${{ env.ECR_REGISTRY }}"'/'"${{ env.ECR_REPOSITORY }}"':'"$IMAGE_TAG"'",
               "kubectl rollout status deployment/angple-gateway -n angple --timeout=120s"
             ]' \
             --timeout-seconds 300 \
