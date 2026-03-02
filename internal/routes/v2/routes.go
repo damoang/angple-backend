@@ -15,6 +15,12 @@ func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.M
 	authGroup.POST("/logout", h.Logout)
 	authGroup.GET("/me", middleware.JWTAuth(jwtManager), h.GetMe)
 	authGroup.GET("/profile", middleware.JWTAuth(jwtManager), h.GetMe) // alias for /me
+	// TODO: v2 마이그레이션 - exchange는 레거시 SSO용, 향후 세션 기반으로 전환
+	authGroup.POST("/exchange", h.ExchangeToken)
+
+	// v1 미러
+	v1Auth := router.Group("/api/v1/auth")
+	v1Auth.POST("/exchange", h.ExchangeToken)
 }
 
 // Setup configures v2 API routes (new DB schema)
@@ -168,4 +174,40 @@ func SetupDisciplineLog(router *gin.Engine, h *v2handler.DisciplineLogHandler, j
 	disciplineLog.GET("/violation-types", h.GetViolationTypes)
 	disciplineLog.GET("/:id", h.GetDetail)
 	// Note: Admin CRUD is handled by PHP admin (gnuboard)
+}
+
+// SetupBanner configures banner routes (v1 + v2)
+// TODO: v2 마이그레이션 - DB 재설계 후 v2 전용 배너 테이블로 전환
+func SetupBanner(router *gin.Engine, h *v2handler.BannerHandler) {
+	// v1 routes (primary)
+	v1Banners := router.Group("/api/v1/banners")
+	v1Banners.GET("", h.GetBanners)
+	v1Banners.GET("/:id/click", h.TrackClick)
+
+	// v2 routes (frontend 호환 - 기존 플러그인이 v2로 호출)
+	v2Banners := router.Group("/api/v2/banners")
+	v2Banners.GET("", h.GetBanners)
+	v2Banners.GET("/:id/click", h.TrackClick)
+}
+
+// SetupPromotion configures promotion routes (v1 + v2)
+// TODO: v2 마이그레이션 - DB 재설계 후 v2 전용 프로모션 테이블로 전환
+func SetupPromotion(router *gin.Engine, h *v2handler.PromotionHandler) {
+	// v1 routes (primary)
+	v1Promo := router.Group("/api/v1/promotion")
+	v1Promo.GET("/posts/insert", h.GetInsertPosts)
+
+	// v2 routes (frontend 호환 - 기존 플러그인이 v2로 호출)
+	v2Promo := router.Group("/api/v2/promotion")
+	v2Promo.GET("/posts/insert", h.GetInsertPosts)
+}
+
+// SetupLicense configures license verification routes (v1 + v2)
+// TODO: v2 마이그레이션 - 라이선스 테이블 설계 후 실제 검증 로직 구현
+func SetupLicense(router *gin.Engine, h *v2handler.LicenseHandler) {
+	// v1 routes (primary)
+	router.POST("/api/v1/licenses/verify", h.Verify)
+
+	// v2 routes (frontend 호환)
+	router.POST("/api/v2/licenses/verify", h.Verify)
 }

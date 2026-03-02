@@ -103,6 +103,30 @@ func (h *V2AuthHandler) Logout(c *gin.Context) {
 	common.V2Success(c, gin.H{"message": "로그아웃되었습니다"})
 }
 
+// ExchangeToken handles POST /api/v1/auth/exchange
+// Exchanges a refresh_token cookie for a new access token (legacy damoang.net SSO flow)
+// TODO: v2 마이그레이션 - DB 재설계 후 세션 기반 인증으로 전환
+func (h *V2AuthHandler) ExchangeToken(c *gin.Context) {
+	refreshToken, err := c.Cookie("refresh_token")
+	if err != nil || refreshToken == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증 쿠키가 없습니다", nil)
+		return
+	}
+
+	resp, err := h.authService.RefreshToken(refreshToken)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "토큰 교환에 실패했습니다", err)
+		return
+	}
+
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(), isSecureCookie(), true)
+
+	common.V2Success(c, gin.H{
+		"access_token": resp.AccessToken,
+		"user":         resp.User,
+	})
+}
+
 // GetMe handles GET /api/v2/auth/me
 func (h *V2AuthHandler) GetMe(c *gin.Context) {
 	userIDStr := middleware.GetUserID(c)

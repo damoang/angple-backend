@@ -1109,6 +1109,15 @@ func main() {
 		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo), jwtManager)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager)
 
+		// Banner, Promotion, License (v1 + v2 dual routes)
+		bannerRepo := v2repo.NewBannerRepository(db)
+		v2routes.SetupBanner(router, v2handler.NewBannerHandler(bannerRepo))
+
+		promotionRepo := v2repo.NewPromotionRepository(db)
+		v2routes.SetupPromotion(router, v2handler.NewPromotionHandler(promotionRepo))
+
+		v2routes.SetupLicense(router, v2handler.NewLicenseHandler())
+
 		// Installation API
 		v2InstallHandler := v2handler.NewInstallHandler(db)
 		v2routes.SetupInstall(router, v2InstallHandler)
