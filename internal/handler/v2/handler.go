@@ -201,8 +201,9 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 	}
 
 	var req struct {
-		Title   string `json:"title" binding:"required"`
-		Content string `json:"content" binding:"required"`
+		Title    string `json:"title" binding:"required"`
+		Content  string `json:"content" binding:"required"`
+		IsSecret *bool  `json:"is_secret,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
@@ -243,11 +244,12 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 	}
 
 	post := &v2domain.V2Post{
-		BoardID: board.ID,
-		UserID:  userID,
-		Title:   req.Title,
-		Content: req.Content,
-		Status:  "published",
+		BoardID:  board.ID,
+		UserID:   userID,
+		Title:    req.Title,
+		Content:  req.Content,
+		Status:   "published",
+		IsSecret: req.IsSecret != nil && *req.IsSecret,
 	}
 	if err := h.postRepo.Create(post); err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 작성 실패", err)

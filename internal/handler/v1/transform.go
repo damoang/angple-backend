@@ -1,6 +1,7 @@
 package v1handler
 
 import (
+	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
@@ -38,6 +39,7 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 		"comments_count": w.WrComment,
 		"has_file":       w.WrFile > 0,
 		"is_notice":      isNotice,
+		"is_secret":      strings.Contains(w.WrOption, "secret"),
 		"link1":          w.WrLink1,
 		"link2":          w.WrLink2,
 		"created_at":     w.WrDatetime.Format(time.RFC3339),
@@ -83,6 +85,7 @@ func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 		"dislikes":   w.WrNogood,
 		"depth":      depth,
 		"created_at": w.WrDatetime.Format(time.RFC3339),
+		"is_secret":  strings.Contains(w.WrOption, "secret"),
 	}
 }
 
@@ -118,6 +121,7 @@ func TransformToV1Board(b *gnuboard.G5Board) map[string]any {
 		"download_point": b.BoDownloadPoint,
 		"use_good":       b.BoUseGood == 1,
 		"use_nogood":     b.BoUseNogood == 1,
+		"use_secret":     b.BoUseSecret > 0,
 		"post_count":     b.BoCountWrite,
 		"comment_count":  b.BoCountComment,
 	}

@@ -78,6 +78,7 @@ type V2Post struct {
 	ViewCount    uint      `gorm:"column:view_count;default:0" json:"view_count"`
 	CommentCount uint      `gorm:"column:comment_count;default:0" json:"comment_count"`
 	IsNotice     bool       `gorm:"column:is_notice;default:false" json:"is_notice"`
+	IsSecret     bool       `gorm:"column:is_secret;default:false" json:"is_secret"`
 	DeletedAt    *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
 	DeletedBy    *uint64    `gorm:"column:deleted_by" json:"deleted_by,omitempty"`
 	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`

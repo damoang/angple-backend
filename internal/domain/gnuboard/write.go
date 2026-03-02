@@ -1,6 +1,9 @@
 package gnuboard
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // G5Write represents the g5_write_* dynamic tables (posts and comments)
 // TableName is set dynamically in repository using Table()
@@ -55,6 +58,7 @@ type PostResponse struct {
 	CommentsCount int        `json:"comments_count"`
 	HasFile       bool       `json:"has_file"`
 	IsNotice      bool       `json:"is_notice"`
+	IsSecret      bool       `json:"is_secret"`
 	Link1         string     `json:"link1,omitempty"`
 	Link2         string     `json:"link2,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -95,6 +99,7 @@ func (w *G5Write) ToPostResponse() PostResponse {
 		CommentsCount: w.WrComment,
 		HasFile:       w.WrFile > 0,
 		IsNotice:      false, // Will be set externally based on board notice list
+		IsSecret:      strings.Contains(w.WrOption, "secret"),
 		Link1:         w.WrLink1,
 		Link2:         w.WrLink2,
 		CreatedAt:     w.WrDatetime,
@@ -123,6 +128,7 @@ type CommentResponse struct {
 	Dislikes  int        `json:"dislikes"`
 	Depth     int        `json:"depth"`
 	CreatedAt time.Time  `json:"created_at"`
+	IsSecret  bool       `json:"is_secret"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	DeletedBy *string    `json:"deleted_by,omitempty"`
 }
@@ -141,6 +147,7 @@ func (w *G5Write) ToCommentResponse() CommentResponse {
 		Dislikes:  w.WrNogood,
 		Depth:     depth,
 		CreatedAt: w.WrDatetime,
+		IsSecret:  strings.Contains(w.WrOption, "secret"),
 		DeletedAt: w.WrDeletedAt,
 		DeletedBy: w.WrDeletedBy,
 	}
