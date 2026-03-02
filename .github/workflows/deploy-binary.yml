@@ -35,7 +35,7 @@ jobs:
             output: gateway
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -64,7 +64,7 @@ jobs:
     needs: build
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download API binary
         if: inputs.target == 'api' || inputs.target == 'all'
