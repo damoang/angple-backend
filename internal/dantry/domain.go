@@ -48,3 +48,11 @@ type TimeBucket struct {
 	Bucket time.Time `json:"bucket"`
 	Count  uint64    `json:"count"`
 }
+
+// ErrorMember represents a member who triggered a specific error
+type ErrorMember struct {
+	MemberID  string    `json:"member_id"`
+	Count     uint64    `json:"count"`
+	LastSeen  time.Time `json:"last_seen"`
+	SampleURL string    `json:"sample_url"`
+}

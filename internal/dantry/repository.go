@@ -156,6 +156,40 @@ func (r *Repository) GetTimeseries(ctx context.Context, dateFrom, dateTo string,
 	return buckets, nil
 }
 
+// GetMembersByMessage returns members who triggered a specific error message
+func (r *Repository) GetMembersByMessage(ctx context.Context, message, dateFrom, dateTo string) ([]ErrorMember, error) {
+	where := "message = ?"
+	args := []interface{}{message}
+	if dateFrom != "" {
+		where += " AND date_partition >= toDate(?)"
+		args = append(args, dateFrom)
+	}
+	if dateTo != "" {
+		where += " AND date_partition <= toDate(?)"
+		args = append(args, dateTo)
+	}
+
+	query := fmt.Sprintf(`SELECT member_id, count() as count, max(timestamp) as last_seen, any(url) as sample_url
+		FROM error_logs.js_errors WHERE %s AND member_id != ''
+		GROUP BY member_id ORDER BY count DESC LIMIT 100`, where)
+
+	rows, err := r.ch.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("members query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var members []ErrorMember
+	for rows.Next() {
+		var m ErrorMember
+		if err := rows.Scan(&m.MemberID, &m.Count, &m.LastSeen, &m.SampleURL); err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
+		members = append(members, m)
+	}
+	return members, nil
+}
+
 func buildWhere(dateFrom, dateTo, errorType, search string, excludeScriptError bool) (string, []interface{}) {
 	where := "1=1"
 	var args []interface{}

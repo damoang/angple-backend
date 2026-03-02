@@ -622,9 +622,191 @@ func main() {
 		router.GET("/api/v1/notifications/unread-count", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"count": 0}})
 		})
-		// v1 members memo (stub for now)
-		router.GET("/api/v1/members/:id/memo", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"memo": ""}})
+		// v1 members memo — 관리자가 회원에 대해 남긴 메모 (g5_member_memo)
+		router.GET("/api/v1/members/:id/memo", middleware.OptionalJWTAuth(jwtManager), func(c *gin.Context) {
+			// 관리자만 메모 조회 가능
+			userLevel := middleware.GetUserLevel(c)
+			if userLevel < 10 {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				return
+			}
+			currentUserID := middleware.GetUserID(c)
+			targetID := c.Param("id")
+
+			type memoRow struct {
+				ID       int    `gorm:"column:id" json:"id"`
+				MemberID string `gorm:"column:member_id" json:"member_id"`
+				TargetID string `gorm:"column:target_member_id" json:"target_member_id"`
+				Memo     string `gorm:"column:memo" json:"memo"`
+				Color    string `gorm:"column:color" json:"color"`
+			}
+			var memo memoRow
+			err := db.Table("g5_member_memo").
+				Where("member_id = ? AND target_member_id = ?", currentUserID, targetID).
+				First(&memo).Error
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": memo})
+		})
+
+		// Admin member memo CRUD
+		adminMemoGroup := router.Group("/api/v1/admin/members")
+		adminMemoGroup.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+
+		// GET /api/v1/admin/members/:mbId/memos — 특정 회원에 대한 메모 목록
+		adminMemoGroup.GET("/:mbId/memos", func(c *gin.Context) {
+			targetID := c.Param("mbId")
+
+			type memoResult struct {
+				ID         int     `gorm:"column:id" json:"id"`
+				MemberID   string  `gorm:"column:member_id" json:"member_id"`
+				TargetID   string  `gorm:"column:target_member_id" json:"target_member_id"`
+				Memo       string  `gorm:"column:memo" json:"memo"`
+				MemoDetail *string `gorm:"column:memo_detail" json:"memo_detail"`
+				Color      string  `gorm:"column:color" json:"color"`
+				CreatedAt  string  `gorm:"column:created_at" json:"created_at"`
+				UpdatedAt  *string `gorm:"column:updated_at" json:"updated_at"`
+			}
+			var memos []memoResult
+			if err := db.Table("g5_member_memo").
+				Where("target_member_id = ?", targetID).
+				Order("created_at DESC").
+				Find(&memos).Error; err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": memos})
+		})
+
+		// POST /api/v1/admin/members/:mbId/memos — 메모 작성
+		adminMemoGroup.POST("/:mbId/memos", func(c *gin.Context) {
+			targetID := c.Param("mbId")
+			currentUserID := middleware.GetUserID(c)
+
+			var req struct {
+				Memo       string `json:"memo" binding:"required"`
+				MemoDetail string `json:"memo_detail"`
+				Color      string `json:"color"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "memo is required"})
+				return
+			}
+
+			color := req.Color
+			if color == "" {
+				color = "yellow"
+			}
+
+			memo := map[string]interface{}{
+				"member_id":        currentUserID,
+				"target_member_id": targetID,
+				"memo":             req.Memo,
+				"memo_detail":      req.MemoDetail,
+				"color":            color,
+			}
+			if err := db.Table("g5_member_memo").Create(memo).Error; err != nil {
+				// 이미 존재하면 UPDATE
+				if err := db.Table("g5_member_memo").
+					Where("member_id = ? AND target_member_id = ?", currentUserID, targetID).
+					Updates(map[string]interface{}{
+						"memo":        req.Memo,
+						"memo_detail": req.MemoDetail,
+						"color":       color,
+					}).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "메모 저장 실패"})
+					return
+				}
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "메모 저장 완료"})
+		})
+
+		// PUT /api/v1/admin/memos/:id — 메모 수정
+		router.PUT("/api/v1/admin/memos/:id", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+			memoID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid memo ID"})
+				return
+			}
+
+			var req struct {
+				Memo       string `json:"memo"`
+				MemoDetail string `json:"memo_detail"`
+				Color      string `json:"color"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "요청 형식 오류"})
+				return
+			}
+
+			updates := map[string]interface{}{}
+			if req.Memo != "" {
+				updates["memo"] = req.Memo
+			}
+			if req.MemoDetail != "" {
+				updates["memo_detail"] = req.MemoDetail
+			}
+			if req.Color != "" {
+				updates["color"] = req.Color
+			}
+
+			if len(updates) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "수정할 내용이 없습니다"})
+				return
+			}
+
+			if err := db.Table("g5_member_memo").Where("id = ?", memoID).Updates(updates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "메모 수정 실패"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "메모 수정 완료"})
+		})
+
+		// DELETE /api/v1/admin/memos/:id — 메모 삭제
+		router.DELETE("/api/v1/admin/memos/:id", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+			memoID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid memo ID"})
+				return
+			}
+
+			if err := db.Table("g5_member_memo").Where("id = ?", memoID).Delete(nil).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "메모 삭제 실패"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "메모 삭제 완료"})
+		})
+
+		// GET /api/v1/admin/members/memos/bulk — 다수 회원 메모 존재 여부 (게시판 목록용)
+		router.GET("/api/v1/admin/members/memos/bulk", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+			memberIDs := c.Query("member_ids")
+			if memberIDs == "" {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": map[string]any{}})
+				return
+			}
+
+			currentUserID := middleware.GetUserID(c)
+			ids := strings.Split(memberIDs, ",")
+
+			type memoCheck struct {
+				TargetID string `gorm:"column:target_member_id"`
+				Memo     string `gorm:"column:memo"`
+				Color    string `gorm:"column:color"`
+			}
+			var memos []memoCheck
+			db.Table("g5_member_memo").
+				Select("target_member_id, memo, color").
+				Where("member_id = ? AND target_member_id IN ?", currentUserID, ids).
+				Find(&memos)
+
+			result := make(map[string]gin.H, len(memos))
+			for _, m := range memos {
+				result[m.TargetID] = gin.H{"memo": m.Memo, "color": m.Color}
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		})
 		// 추천 글 / 위젯 (프론트엔드 홈페이지용)
 		router.GET("/api/v1/recommended/index-widgets", func(c *gin.Context) {
@@ -775,9 +957,22 @@ func main() {
 				}
 			}
 
+			postDetail := v1handler.TransformToV1PostDetail(post, isNotice)
+
+			// 비밀글 접근 제어: 작성자 또는 관리자만 내용 열람 가능
+			if strings.Contains(post.WrOption, "secret") {
+				currentUserID := middleware.GetUserID(c)
+				currentUserLevel := middleware.GetUserLevel(c)
+				isAuthor := currentUserID != "" && currentUserID == post.MbID
+				isAdmin := currentUserLevel >= 10
+				if !isAuthor && !isAdmin {
+					postDetail["content"] = ""
+				}
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
-				"data":    v1handler.TransformToV1PostDetail(post, isNotice),
+				"data":    postDetail,
 			})
 		})
 
@@ -1079,6 +1274,165 @@ func main() {
 		v1Boards.GET("/:slug/display-settings", displaySettingsHandler.GetDisplaySettings)
 		v1Boards.PUT("/:slug/display-settings", middleware.JWTAuth(jwtManager), displaySettingsHandler.UpdateDisplaySettings)
 
+		// POST /api/v1/boards/:slug/posts/:id/move - Move post to another board (admin only)
+		v1Boards.POST("/:slug/posts/:id/move", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			srcBoard := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			// 관리자 확인
+			userLevel := middleware.GetUserLevel(c)
+			if userLevel < 10 {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "관리자만 게시글을 이동할 수 있습니다"})
+				return
+			}
+
+			var req struct {
+				TargetBoardID string `json:"target_board_id" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "target_board_id is required"})
+				return
+			}
+
+			if srcBoard == req.TargetBoardID {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "같은 게시판으로는 이동할 수 없습니다"})
+				return
+			}
+
+			// 원본 게시판/대상 게시판 존재 확인
+			if !gnuBoardRepo.Exists(srcBoard) {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "원본 게시판을 찾을 수 없습니다"})
+				return
+			}
+			if !gnuBoardRepo.Exists(req.TargetBoardID) {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "대상 게시판을 찾을 수 없습니다"})
+				return
+			}
+			if !gnuWriteRepo.TableExists(req.TargetBoardID) {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "대상 게시판 테이블이 존재하지 않습니다"})
+				return
+			}
+
+			// 원본 게시글 조회 (전체 컬럼)
+			post, err := gnuWriteRepo.FindPostByID(srcBoard, postID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 댓글 조회
+			comments, _ := gnuWriteRepo.FindCommentsIncludeDeleted(srcBoard, postID)
+
+			// 대상 테이블에 새 wr_num 할당
+			newWrNum, err := gnuWriteRepo.GetNextWrNum(req.TargetBoardID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "wr_num 생성 실패"})
+				return
+			}
+
+			// 트랜잭션으로 이동 처리
+			tx := db.Begin()
+
+			// 1. 대상 테이블에 게시글 INSERT (새 ID로)
+			newPost := *post
+			newPost.WrID = 0 // auto increment
+			newPost.WrNum = newWrNum
+			if err := tx.Table(fmt.Sprintf("g5_write_%s", req.TargetBoardID)).Create(&newPost).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 이동 실패 (INSERT)"})
+				return
+			}
+
+			// 2. 댓글도 이동
+			for _, comment := range comments {
+				newComment := *comment
+				newComment.WrID = 0
+				newComment.WrParent = newPost.WrID
+				if err := tx.Table(fmt.Sprintf("g5_write_%s", req.TargetBoardID)).Create(&newComment).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 이동 실패"})
+					return
+				}
+			}
+
+			// 3. 첨부파일 이동 (g5_board_file의 bo_table 업데이트)
+			tx.Table("g5_board_file").
+				Where("bo_table = ? AND wr_id = ?", srcBoard, postID).
+				Updates(map[string]interface{}{
+					"bo_table": req.TargetBoardID,
+					"wr_id":    newPost.WrID,
+				})
+
+			// 4. 원본 게시글 + 댓글 삭제
+			tx.Table(fmt.Sprintf("g5_write_%s", srcBoard)).Where("wr_parent = ? AND wr_is_comment = 1", postID).Delete(&gnuboard.G5Write{})
+			tx.Table(fmt.Sprintf("g5_write_%s", srcBoard)).Where("wr_id = ?", postID).Delete(&gnuboard.G5Write{})
+
+			if err := tx.Commit().Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "이동 트랜잭션 커밋 실패"})
+				return
+			}
+
+			// 캐시 무효화
+			if cacheService != nil {
+				ctx := c.Request.Context()
+				_ = cacheService.InvalidateBoard(ctx, srcBoard)
+				_ = cacheService.InvalidateBoard(ctx, req.TargetBoardID)
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success":         true,
+				"new_post_id":     newPost.WrID,
+				"target_board_id": req.TargetBoardID,
+			})
+		})
+
+		// GET /api/v1/board-groups - Get board groups with boards
+		router.GET("/api/v1/board-groups", func(c *gin.Context) {
+			type boardGroupRow struct {
+				GrID      string `gorm:"column:gr_id"`
+				GrSubject string `gorm:"column:gr_subject"`
+				GrOrder   int    `gorm:"column:gr_order"`
+			}
+			var groups []boardGroupRow
+			if err := db.Table("g5_board_group").Order("gr_order, gr_id").Find(&groups).Error; err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			// 전체 게시판 조회
+			boards, _ := gnuBoardRepo.FindAll()
+
+			// 그룹별로 게시판 분류
+			boardsByGroup := make(map[string][]gin.H)
+			for _, b := range boards {
+				boardsByGroup[b.GrID] = append(boardsByGroup[b.GrID], gin.H{
+					"board_id": b.BoTable,
+					"subject":  b.BoSubject,
+				})
+			}
+
+			result := make([]gin.H, 0, len(groups))
+			for _, g := range groups {
+				groupBoards := boardsByGroup[g.GrID]
+				if groupBoards == nil {
+					groupBoards = []gin.H{}
+				}
+				result = append(result, gin.H{
+					"id":         g.GrID,
+					"name":       g.GrSubject,
+					"sort_order": g.GrOrder,
+					"is_visible": true,
+					"boards":     groupBoards,
+				})
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+		})
+
 		router.GET("/api/v1/recommended/ai/:period", func(c *gin.Context) {
 			emptySection := func(id, name string) gin.H {
 				return gin.H{"id": id, "name": name, "group_id": "", "count": 0, "posts": []any{}}
@@ -1220,6 +1574,239 @@ func main() {
 		wsHandler := handler.NewWSHandler(wsHub, cfg.CORS.AllowOrigins)
 		router.GET("/ws/notifications", middleware.JWTAuth(jwtManager), wsHandler.Connect)
 
+		// ========================================
+		// 투표/설문 (Poll) API — g5_poll / g5_poll_etc
+		// ========================================
+
+		pollGroup := router.Group("/api/v1/polls")
+		pollGroup.Use(middleware.OptionalJWTAuth(jwtManager))
+
+		// GET /api/v1/polls — 투표 목록
+		pollGroup.GET("", func(c *gin.Context) {
+			var polls []gnuboard.G5Poll
+			query := db.Table("g5_poll").Order("po_id DESC")
+
+			// 비관리자는 활성 투표만
+			userLevel := middleware.GetUserLevel(c)
+			if userLevel < 10 {
+				query = query.Where("po_use = 1")
+			}
+
+			if err := query.Find(&polls).Error; err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+
+			currentUserID := middleware.GetUserID(c)
+			result := make([]gnuboard.PollResponse, 0, len(polls))
+			for _, p := range polls {
+				hasVoted := currentUserID != "" && strings.Contains(p.MbIDs, currentUserID)
+				result = append(result, p.ToPollResponse(hasVoted))
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+		})
+
+		// GET /api/v1/polls/latest — 최신 활성 투표 1개 (위젯용)
+		pollGroup.GET("/latest", func(c *gin.Context) {
+			var poll gnuboard.G5Poll
+			if err := db.Table("g5_poll").Where("po_use = 1").Order("po_id DESC").First(&poll).Error; err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
+				return
+			}
+
+			currentUserID := middleware.GetUserID(c)
+			hasVoted := currentUserID != "" && strings.Contains(poll.MbIDs, currentUserID)
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": poll.ToPollResponse(hasVoted)})
+		})
+
+		// GET /api/v1/polls/:id — 투표 상세 + 결과
+		pollGroup.GET("/:id", func(c *gin.Context) {
+			pollID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid poll ID"})
+				return
+			}
+
+			var poll gnuboard.G5Poll
+			if err := db.Table("g5_poll").Where("po_id = ?", pollID).First(&poll).Error; err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "투표를 찾을 수 없습니다"})
+				return
+			}
+
+			currentUserID := middleware.GetUserID(c)
+			hasVoted := currentUserID != "" && strings.Contains(poll.MbIDs, currentUserID)
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": poll.ToPollResponse(hasVoted)})
+		})
+
+		// POST /api/v1/polls/:id/vote — 투표 참여
+		pollGroup.POST("/:id/vote", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			pollID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid poll ID"})
+				return
+			}
+
+			var req struct {
+				OptionIndex int `json:"option_index" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "option_index is required"})
+				return
+			}
+
+			if req.OptionIndex < 1 || req.OptionIndex > 9 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "option_index must be 1-9"})
+				return
+			}
+
+			var poll gnuboard.G5Poll
+			if err := db.Table("g5_poll").Where("po_id = ?", pollID).First(&poll).Error; err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "투표를 찾을 수 없습니다"})
+				return
+			}
+
+			if poll.PoUse != 1 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "종료된 투표입니다"})
+				return
+			}
+
+			// 레벨 체크
+			userLevel := middleware.GetUserLevel(c)
+			if userLevel < poll.PoLevel {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": fmt.Sprintf("레벨 %d 이상만 투표할 수 있습니다", poll.PoLevel)})
+				return
+			}
+
+			// 중복 투표 체크
+			currentUserID := middleware.GetUserID(c)
+			if strings.Contains(poll.MbIDs, currentUserID) {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "이미 투표에 참여하셨습니다"})
+				return
+			}
+
+			// 투표 카운트 증가
+			cntColumn := fmt.Sprintf("po_cnt%d", req.OptionIndex)
+			newMbIDs := poll.MbIDs
+			if newMbIDs != "" {
+				newMbIDs += ","
+			}
+			newMbIDs += currentUserID
+
+			if err := db.Table("g5_poll").Where("po_id = ?", pollID).Updates(map[string]interface{}{
+				cntColumn: gorm.Expr(cntColumn+" + 1"),
+				"mb_ids":  newMbIDs,
+			}).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "투표 처리 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "투표 완료"})
+		})
+
+		// Admin Poll Management
+		adminPollGroup := router.Group("/api/v1/admin/polls")
+		adminPollGroup.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+
+		// POST /api/v1/admin/polls — 투표 생성
+		adminPollGroup.POST("", func(c *gin.Context) {
+			var req struct {
+				Subject string   `json:"subject" binding:"required"`
+				Options []string `json:"options" binding:"required"`
+				Level   int      `json:"level"`
+				Point   int      `json:"point"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "subject and options are required"})
+				return
+			}
+
+			if len(req.Options) < 2 || len(req.Options) > 9 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "options must be 2-9 items"})
+				return
+			}
+
+			poll := gnuboard.G5Poll{
+				PoSubject: req.Subject,
+				PoLevel:   req.Level,
+				PoPoint:   req.Point,
+				PoDate:    time.Now().Format("2006-01-02"),
+				PoUse:     1,
+			}
+
+			// 옵션 설정
+			optionFields := []*string{&poll.PoPoll1, &poll.PoPoll2, &poll.PoPoll3, &poll.PoPoll4, &poll.PoPoll5, &poll.PoPoll6, &poll.PoPoll7, &poll.PoPoll8, &poll.PoPoll9}
+			for i, opt := range req.Options {
+				*optionFields[i] = opt
+			}
+
+			if err := db.Table("g5_poll").Create(&poll).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "투표 생성 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": poll.ToPollResponse(false)})
+		})
+
+		// PUT /api/v1/admin/polls/:id — 투표 수정 (활성/비활성)
+		adminPollGroup.PUT("/:id", func(c *gin.Context) {
+			pollID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid poll ID"})
+				return
+			}
+
+			var req struct {
+				Subject  *string `json:"subject"`
+				IsActive *bool   `json:"is_active"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "요청 형식 오류"})
+				return
+			}
+
+			updates := map[string]interface{}{}
+			if req.Subject != nil {
+				updates["po_subject"] = *req.Subject
+			}
+			if req.IsActive != nil {
+				if *req.IsActive {
+					updates["po_use"] = 1
+				} else {
+					updates["po_use"] = 0
+				}
+			}
+
+			if len(updates) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "수정할 내용이 없습니다"})
+				return
+			}
+
+			if err := db.Table("g5_poll").Where("po_id = ?", pollID).Updates(updates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "투표 수정 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "수정 완료"})
+		})
+
+		// DELETE /api/v1/admin/polls/:id — 투표 삭제
+		adminPollGroup.DELETE("/:id", func(c *gin.Context) {
+			pollID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid poll ID"})
+				return
+			}
+
+			// 관련 etc 삭제 후 poll 삭제
+			db.Table("g5_poll_etc").Where("po_id = ?", pollID).Delete(nil)
+			if err := db.Table("g5_poll").Where("po_id = ?", pollID).Delete(nil).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "투표 삭제 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
+		})
+
 		// Dantry (에러 리포트 - ClickHouse)
 		if chHost := os.Getenv("CLICKHOUSE_HOST"); chHost != "" {
 			chPort := 9000
@@ -1241,6 +1828,7 @@ func main() {
 				dantryGroup := router.Group("/api/v1/dantry", middleware.JWTAuth(jwtManager))
 				dantryGroup.GET("/errors", dantryHandler.ListErrors)
 				dantryGroup.GET("/errors/grouped", dantryHandler.ListGrouped)
+				dantryGroup.GET("/errors/members", dantryHandler.GetMembersByMessage)
 				dantryGroup.GET("/errors/:id", dantryHandler.GetByID)
 				dantryGroup.GET("/stats", dantryHandler.GetStats)
 				dantryGroup.GET("/timeseries", dantryHandler.GetTimeseries)

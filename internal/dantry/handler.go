@@ -160,3 +160,30 @@ func (h *Handler) GetTimeseries(c *gin.Context) {
 
 	common.V2Success(c, buckets)
 }
+
+// GetMembersByMessage handles GET /api/v1/dantry/errors/members
+func (h *Handler) GetMembersByMessage(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+
+	message := c.Query("message")
+	if message == "" {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "message 파라미터가 필요합니다", nil)
+		return
+	}
+
+	dateFrom := c.Query("date_from")
+	dateTo := c.Query("date_to")
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+
+	members, err := h.repo.GetMembersByMessage(ctx, message, dateFrom, dateTo)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "멤버 목록 조회 실패", err)
+		return
+	}
+
+	common.V2Success(c, members)
+}
