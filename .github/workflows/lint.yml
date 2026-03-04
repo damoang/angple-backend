@@ -28,7 +28,7 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        version: v1.64.5
+        version: v2.1.6
         args: --timeout=5m --skip-dirs=plugins
 
   golangci-reviewdog:
@@ -49,7 +49,7 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        version: v1.64.5
+        version: v2.1.6
         args: --timeout=5m --skip-dirs=plugins
         only-new-issues: true
 
