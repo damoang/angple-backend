@@ -136,8 +136,12 @@ issues:
       linters:
         - errcheck
         - revive
-        - gocyclo
       text: "stutters|Error return value"
+
+    # v2 Handler 복잡도 허용 (CreateComment 등 CRUD 핸들러)
+    - path: internal/handler/v2/.*\.go
+      linters:
+        - gocyclo
 
     # Middleware 규칙 완화
     - path: internal/middleware/.*\.go
