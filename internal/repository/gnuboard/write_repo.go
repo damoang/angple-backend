@@ -87,7 +87,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	// Posts count with in-memory cache (avoids expensive COUNT on large tables)
 	cacheKey := "count:" + boardID
 	if cached, ok := postCountCache.Load(cacheKey); ok {
-		if cc := cached.(*cachedCount); time.Now().Before(cc.expiresAt) {
+		if cc, ok2 := cached.(*cachedCount); ok2 && time.Now().Before(cc.expiresAt) {
 			total = cc.total
 		}
 	}

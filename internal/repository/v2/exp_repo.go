@@ -293,7 +293,9 @@ func (r *expRepository) UpdateXPConfig(config *XPConfig) error {
 	// Parse existing JSON to preserve other fields
 	existing := make(map[string]interface{})
 	if err == nil && row.SettingsJSON != nil && *row.SettingsJSON != "" && *row.SettingsJSON != "null" {
-		_ = json.Unmarshal([]byte(*row.SettingsJSON), &existing)
+		if unmarshalErr := json.Unmarshal([]byte(*row.SettingsJSON), &existing); unmarshalErr != nil {
+			existing = make(map[string]interface{})
+		}
 	}
 
 	existing["xp_config"] = config

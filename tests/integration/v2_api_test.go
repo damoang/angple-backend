@@ -81,6 +81,21 @@ func (s *V2APISuite) SetupSuite() {
 			parent_id INTEGER, content TEXT,
 			depth INTEGER DEFAULT 0, status TEXT DEFAULT 'active',
 			created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE IF NOT EXISTS g5_na_xp (
+			xp_id INTEGER PRIMARY KEY AUTOINCREMENT,
+			mb_id VARCHAR(50), xp_datetime DATETIME,
+			xp_content TEXT, xp_point INTEGER DEFAULT 0,
+			xp_rel_table VARCHAR(50), xp_rel_id VARCHAR(50),
+			xp_rel_action VARCHAR(50))`,
+		`CREATE TABLE IF NOT EXISTS site_settings (
+			site_id VARCHAR(50) PRIMARY KEY,
+			settings_json TEXT, active_theme VARCHAR(100) DEFAULT 'damoang-official',
+			logo_url VARCHAR(500), favicon_url VARCHAR(500),
+			site_description TEXT, site_keywords TEXT,
+			primary_color VARCHAR(20) DEFAULT '#3b82f6',
+			secondary_color VARCHAR(20) DEFAULT '#8b5cf6',
+			ssl_enabled BOOLEAN DEFAULT 1,
+			created_at DATETIME, updated_at DATETIME)`,
 	} {
 		s.Require().NoError(db.Exec(ddl).Error)
 	}

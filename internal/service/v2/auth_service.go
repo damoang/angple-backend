@@ -84,37 +84,7 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 
 	// Grant daily login XP (best-effort, errors don't affect login)
 	if s.expRepo != nil {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[v2-auth] login XP panic recovered for user %s: %v", username, r)
-				}
-			}()
-
-			// Read configurable login XP amount
-			xpConfig, cfgErr := s.expRepo.GetXPConfig()
-			if cfgErr != nil {
-				log.Printf("[v2-auth] XP config read failed for user %s: %v", username, cfgErr)
-				return
-			}
-			if xpConfig.LoginXP <= 0 {
-				return // login XP disabled
-			}
-
-			already, err := s.expRepo.HasTodayAction(username, "@login")
-			if err != nil {
-				log.Printf("[v2-auth] login XP check failed for user %s: %v", username, err)
-				return
-			}
-			if already {
-				return
-			}
-			today := time.Now().Format("2006-01-02")
-			content := today + " 로그인"
-			if addErr := s.expRepo.AddExp(username, xpConfig.LoginXP, content, "@login", username, today); addErr != nil {
-				log.Printf("[v2-auth] login XP grant failed for user %s: %v", username, addErr)
-			}
-		}()
+		go s.grantLoginXP(username)
 	}
 
 	return &V2LoginResponse{
@@ -122,6 +92,38 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 	}, nil
+}
+
+// grantLoginXP grants daily login XP to a user (best-effort, panics are recovered)
+func (s *V2AuthService) grantLoginXP(username string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[v2-auth] login XP panic recovered for user %s: %v", username, r)
+		}
+	}()
+
+	xpConfig, cfgErr := s.expRepo.GetXPConfig()
+	if cfgErr != nil {
+		log.Printf("[v2-auth] XP config read failed for user %s: %v", username, cfgErr)
+		return
+	}
+	if xpConfig.LoginXP <= 0 {
+		return
+	}
+
+	already, err := s.expRepo.HasTodayAction(username, "@login")
+	if err != nil {
+		log.Printf("[v2-auth] login XP check failed for user %s: %v", username, err)
+		return
+	}
+	if already {
+		return
+	}
+
+	today := time.Now().Format("2006-01-02")
+	if addErr := s.expRepo.AddExp(username, xpConfig.LoginXP, today+" 로그인", "@login", username, today); addErr != nil {
+		log.Printf("[v2-auth] login XP grant failed for user %s: %v", username, addErr)
+	}
 }
 
 // RefreshToken validates a refresh token and issues new token pair

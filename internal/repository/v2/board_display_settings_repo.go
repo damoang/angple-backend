@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"errors"
+
 	v2 "github.com/damoang/angple-backend/internal/domain/v2"
 	"gorm.io/gorm"
 )
@@ -24,7 +26,7 @@ func NewBoardDisplaySettingsRepository(db *gorm.DB) BoardDisplaySettingsReposito
 func (r *boardDisplaySettingsRepository) FindByBoardSlug(slug string) (*v2.V2BoardDisplaySettings, error) {
 	var settings v2.V2BoardDisplaySettings
 	err := r.db.Where("board_id = ?", slug).First(&settings).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// Return default settings if not found
 		return &v2.V2BoardDisplaySettings{
 			BoardID:       slug,
@@ -44,7 +46,7 @@ func (r *boardDisplaySettingsRepository) Upsert(settings *v2.V2BoardDisplaySetti
 	var existing v2.V2BoardDisplaySettings
 	err := r.db.Where("board_id = ?", settings.BoardID).First(&existing).Error
 
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// Create new
 		return r.db.Create(settings).Error
 	} else if err != nil {
