@@ -1401,7 +1401,7 @@ func main() {
 			if board.BoWritePoint != 0 {
 				var mbNo uint64
 				if err := db.Table("g5_member").Select("mb_no").Where("mb_id = ?", mbID).Scan(&mbNo).Error; err == nil {
-					_ = v2PointRepo.AddPoint(mbNo, board.BoWritePoint, "글쓰기", tableName, uint64(post.WrID))
+					_ = v2PointRepo.AddPoint(mbNo, board.BoWritePoint, "글쓰기", tableName, uint64(post.WrID)) //nolint:gosec // WrID is always positive
 				}
 			}
 
@@ -1507,7 +1507,7 @@ func main() {
 			if board.BoCommentPoint != 0 {
 				var mbNo uint64
 				if err := db.Table("g5_member").Select("mb_no").Where("mb_id = ?", mbID).Scan(&mbNo).Error; err == nil {
-					_ = v2PointRepo.AddPoint(mbNo, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), uint64(comment.WrID))
+					_ = v2PointRepo.AddPoint(mbNo, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), uint64(comment.WrID)) //nolint:gosec // WrID is always positive
 				}
 			}
 
@@ -2332,9 +2332,7 @@ func main() {
 			if req.UseNogood != nil {
 				board.BoUseNogood = *req.UseNogood
 			}
-			if req.UploadCount != nil {
-				// bo_num_list_count 컬럼은 DB에 없으므로 무시
-			}
+			// req.UploadCount: bo_num_list_count 컬럼은 DB에 없으므로 무시
 
 			if err := gnuBoardRepo.Create(board); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "게시판 생성 실패: " + err.Error()}})
@@ -2469,9 +2467,7 @@ func main() {
 			if req.UseSns != nil {
 				board.BoUseSns = *req.UseSns
 			}
-			if req.UploadCount != nil {
-				// bo_num_list_count 컬럼은 DB에 없으므로 무시
-			}
+			// req.UploadCount: bo_num_list_count 컬럼은 DB에 없으므로 무시
 			if req.Order != nil {
 				board.BoOrder = *req.Order
 			}
