@@ -114,7 +114,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	orderClause := "wr_num, wr_reply"
 	now := time.Now()
 	if cached, ok := sortFieldCache.Load(boardID); ok {
-		if entry := cached.(*cachedSortField); now.Before(entry.expiresAt) {
+		if entry, valid := cached.(*cachedSortField); valid && now.Before(entry.expiresAt) {
 			if entry.field != "" {
 				orderClause = entry.field
 			}
