@@ -1117,11 +1117,14 @@ func main() {
 				return
 			}
 
-			// Increment view count (skip for deleted posts)
+			// Increment view count async (skip for deleted posts)
+			// 응답 지연 방지: goroutine으로 비동기 처리
 			if post.WrDeletedAt == nil {
-				if vcErr := gnuWriteRepo.IncrementHit(slug, id); vcErr != nil {
-					log.Printf("IncrementHit error: %v", vcErr)
-				}
+				go func(boardID string, wrID int) {
+					if vcErr := gnuWriteRepo.IncrementHit(boardID, wrID); vcErr != nil {
+						log.Printf("IncrementHit error: %v", vcErr)
+					}
+				}(slug, id)
 			}
 
 			// Check if this post is a notice
@@ -3285,8 +3288,14 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 	}
 	mysqlCfg.Params["time_zone"] = "'+09:00'"
 
+	// 프로덕션: Warn (SQL 로깅 비활성화로 I/O 대폭 감소)
+	// 개발: Info (디버깅용 SQL 로깅)
+	logLevel := gormlogger.Warn
+	if appEnv := os.Getenv("APP_ENV"); appEnv == "" || appEnv == "local" || appEnv == "development" {
+		logLevel = gormlogger.Info
+	}
 	db, err := gorm.Open(mysql.Open(mysqlCfg.FormatDSN()), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Info),
+		Logger: gormlogger.Default.LogMode(logLevel),
 	})
 	if err != nil {
 		return nil, err
