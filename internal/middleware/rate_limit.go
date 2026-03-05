@@ -22,7 +22,7 @@ type RateLimitConfig struct {
 // DefaultRateLimitConfig returns default rate limit configuration
 func DefaultRateLimitConfig() RateLimitConfig {
 	return RateLimitConfig{
-		RequestsPerMinute: 120,
+		RequestsPerMinute: 600,
 		KeyPrefix:         "api:ratelimit:",
 		Message:           "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
 	}

@@ -49,6 +49,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
 )
 
@@ -1670,23 +1671,27 @@ func main() {
 			wrCommentReply := ""
 			depth := 0
 
-			if req.ParentID != nil && *req.ParentID > 0 {
-				// 대댓글: 부모 댓글 조회
-				var parentComment gnuboard.G5Write
-				if err := db.Table(tableName).
-					Where("wr_id = ? AND wr_is_comment = 1", *req.ParentID).
-					First(&parentComment).Error; err == nil {
+			// 트랜잭션으로 댓글 생성 (wr_comment 레이스 컨디션 방지)
+			var createdComment gnuboard.G5Write
+			txErr := db.Transaction(func(tx *gorm.DB) error {
+				if req.ParentID != nil && *req.ParentID > 0 {
+					// 대댓글: 부모 댓글 조회 (FOR UPDATE로 잠금)
+					var parentComment gnuboard.G5Write
+					if err := tx.Table(tableName).
+						Clauses(clause.Locking{Strength: "UPDATE"}).
+						Where("wr_id = ? AND wr_is_comment = 1", *req.ParentID).
+						First(&parentComment).Error; err != nil {
+						return fmt.Errorf("PARENT_NOT_FOUND")
+					}
 
-					// 부모의 wr_comment (순서 번호)를 그대로 사용
 					wrComment = parentComment.WrComment
 
-					// wr_comment_reply 계산: 부모의 reply + 다음 문자
 					parentReply := parentComment.WrCommentReply
 					replyLen := len(parentReply) + 1
 					depth = replyLen
 
 					var lastReply string
-					db.Table(tableName).
+					tx.Table(tableName).
 						Select("wr_comment_reply").
 						Where("wr_parent = ? AND wr_is_comment = 1 AND wr_comment = ? AND LENGTH(wr_comment_reply) = ? AND wr_comment_reply LIKE ?",
 							postID, wrComment, replyLen, parentReply+"%").
@@ -1701,46 +1706,63 @@ func main() {
 						if lastChar < 'Z' {
 							wrCommentReply = parentReply + string(lastChar+1)
 						} else {
-							c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "더 이상 대댓글을 작성할 수 없습니다."})
-							return
+							return fmt.Errorf("REPLY_LIMIT")
 						}
 					}
+				} else {
+					// 루트 댓글: FOR UPDATE로 게시글 행 잠금 후 MAX(wr_comment) + 1
+					tx.Table(tableName).
+						Clauses(clause.Locking{Strength: "UPDATE"}).
+						Select("wr_id").
+						Where("wr_id = ? AND wr_is_comment = 0", postID).
+						Scan(&struct{}{})
+
+					var maxComment int
+					tx.Table(tableName).
+						Select("COALESCE(MAX(wr_comment), -1)").
+						Where("wr_parent = ? AND wr_is_comment = 1", postID).
+						Scan(&maxComment)
+					wrComment = maxComment + 1
 				}
-			} else {
-				// 루트 댓글: 현재 게시글의 MAX(wr_comment) + 1
-				var maxComment int
-				db.Table(tableName).
-					Select("COALESCE(MAX(wr_comment), -1)").
-					Where("wr_parent = ? AND wr_is_comment = 1", postID).
-					Scan(&maxComment)
-				wrComment = maxComment + 1
-			}
 
-			comment := gnuboard.G5Write{
-				WrNum:          0,
-				WrParent:       postID,
-				WrIsComment:    1,
-				WrComment:      wrComment,
-				WrCommentReply: wrCommentReply,
-				WrContent:      req.Content,
-				MbID:           mbID,
-				WrName:         authorName,
-				WrDatetime:     now,
-				WrLast:         nowStr,
-				WrIP:           middleware.GetClientIP(c),
-			}
+				createdComment = gnuboard.G5Write{
+					WrNum:          0,
+					WrParent:       postID,
+					WrIsComment:    1,
+					WrComment:      wrComment,
+					WrCommentReply: wrCommentReply,
+					WrContent:      req.Content,
+					MbID:           mbID,
+					WrName:         authorName,
+					WrDatetime:     now,
+					WrLast:         nowStr,
+					WrIP:           middleware.GetClientIP(c),
+				}
 
-			if err := gnuWriteRepo.CreateComment(slug, &comment); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 작성 실패"})
+				if err := tx.Table(tableName).Create(&createdComment).Error; err != nil {
+					return err
+				}
+
+				// 부모 게시글의 wr_comment 카운트 갱신
+				var commentCount int64
+				tx.Table(tableName).Where("wr_parent = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", postID).Count(&commentCount)
+				tx.Table(tableName).Where("wr_id = ?", postID).Update("wr_comment", commentCount)
+
+				return nil
+			})
+
+			if txErr != nil {
+				switch txErr.Error() {
+				case "PARENT_NOT_FOUND":
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "부모 댓글을 찾을 수 없습니다"})
+				case "REPLY_LIMIT":
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "더 이상 대댓글을 작성할 수 없습니다."})
+				default:
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 작성 실패"})
+				}
 				return
 			}
-
-			// (wr_comment는 INSERT 시 이미 올바른 순서 번호로 설정됨)
-
-			// 부모 게시글의 wr_comment 카운트 갱신
-			var commentCount int64
-			db.Table(tableName).Where("wr_parent = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", postID).Count(&commentCount)
-			db.Table(tableName).Where("wr_id = ?", postID).Update("wr_comment", commentCount)
+			comment := createdComment
 
 			// 포인트 처리
 			if board.BoCommentPoint != 0 {
