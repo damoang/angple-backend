@@ -91,10 +91,16 @@ jobs:
 
     - name: Check failure rate
       run: |
-        # Extract failure rate from CSV
+        # Locust _stats.csv columns: Type, Name, Request Count, Failure Count, Median, Avg, ...
         if [ -f load-test-results_stats.csv ]; then
-          FAIL_RATE=$(tail -1 load-test-results_stats.csv | cut -d',' -f5)
-          echo "Failure rate: ${FAIL_RATE}%"
+          TOTAL_REQS=$(tail -1 load-test-results_stats.csv | cut -d',' -f3)
+          TOTAL_FAILS=$(tail -1 load-test-results_stats.csv | cut -d',' -f4)
+          if [ "$TOTAL_REQS" -gt 0 ] 2>/dev/null; then
+            FAIL_RATE=$(echo "scale=2; $TOTAL_FAILS * 100 / $TOTAL_REQS" | bc -l)
+          else
+            FAIL_RATE=0
+          fi
+          echo "Requests: $TOTAL_REQS, Failures: $TOTAL_FAILS, Failure rate: ${FAIL_RATE}%"
           # Fail if error rate > 1%
           if [ $(echo "$FAIL_RATE > 1" | bc -l) -eq 1 ]; then
             echo "Error rate too high: ${FAIL_RATE}%"
