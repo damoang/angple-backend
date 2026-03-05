@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -241,8 +242,29 @@ func main() {
 	// Prometheus metrics
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	// Health Check
+	// Health Check (DB ping 포함 — 커넥션 죽으면 K8s가 파드 재시작)
 	router.GET("/health", func(c *gin.Context) {
+		sqlDB, err := db.DB()
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "error",
+				"service": "angple-backend",
+				"error":   "db connection pool error",
+				"time":    time.Now().Unix(),
+			})
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer cancel()
+		if err := sqlDB.PingContext(ctx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "error",
+				"service": "angple-backend",
+				"error":   "db ping failed",
+				"time":    time.Now().Unix(),
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"service": "angple-backend",
@@ -3355,6 +3377,7 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 	sqlDB.SetMaxIdleConns(cfg.Database.MaxIdleConns)
 	sqlDB.SetMaxOpenConns(cfg.Database.MaxOpenConns)
 	sqlDB.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 
 	return db, nil
 }
