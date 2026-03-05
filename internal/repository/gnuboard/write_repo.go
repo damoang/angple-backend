@@ -21,6 +21,17 @@ type cachedCount struct {
 
 const countCacheTTL = 30 * time.Second
 
+// sortFieldCache caches bo_sort_field per board (60s TTL)
+// Eliminates extra g5_board query on every post list request
+var sortFieldCache sync.Map
+
+type cachedSortField struct {
+	field     string
+	expiresAt time.Time
+}
+
+const sortFieldCacheTTL = 60 * time.Second
+
 // coreColumns are the columns that exist in all g5_write_* tables
 var coreColumns = []string{
 	"wr_id", "wr_num", "wr_reply", "wr_parent", "wr_is_comment",
@@ -99,12 +110,25 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		postCountCache.Store(cacheKey, &cachedCount{total: total, expiresAt: time.Now().Add(countCacheTTL)})
 	}
 
-	// 게시판별 커스텀 정렬 (bo_sort_field)
+	// 게시판별 커스텀 정렬 (bo_sort_field) — 캐시 사용
 	orderClause := "wr_num, wr_reply"
-	var sortField string
-	r.db.Table("g5_board").Select("bo_sort_field").Where("bo_table = ?", boardID).Scan(&sortField)
-	if sortField != "" {
-		orderClause = sortField
+	now := time.Now()
+	if cached, ok := sortFieldCache.Load(boardID); ok {
+		if entry, valid := cached.(*cachedSortField); valid && now.Before(entry.expiresAt) {
+			if entry.field != "" {
+				orderClause = entry.field
+			}
+		} else {
+			sortFieldCache.Delete(boardID)
+		}
+	}
+	if orderClause == "wr_num, wr_reply" {
+		var sortField string
+		r.db.Table("g5_board").Select("bo_sort_field").Where("bo_table = ?", boardID).Scan(&sortField)
+		sortFieldCache.Store(boardID, &cachedSortField{field: sortField, expiresAt: now.Add(sortFieldCacheTTL)})
+		if sortField != "" {
+			orderClause = sortField
+		}
 	}
 
 	// Select only core columns to avoid errors with missing columns

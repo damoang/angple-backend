@@ -212,7 +212,7 @@ func (h *V2Handler) GetPost(c *gin.Context) {
 		return
 	}
 
-	_ = h.postRepo.IncrementViewCount(id) //nolint:errcheck
+	go func() { _ = h.postRepo.IncrementViewCount(id) }() //nolint:errcheck
 	common.V2Success(c, post)
 }
 
