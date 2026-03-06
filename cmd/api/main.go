@@ -1789,6 +1789,59 @@ func main() {
 				commentIP = comment.WrIP
 			}
 
+			// 알림 생성 (비동기)
+			go func() {
+				// 게시글 작성자 조회
+				var postAuthor struct {
+					MbID      string `gorm:"column:mb_id"`
+					WrSubject string `gorm:"column:wr_subject"`
+				}
+				if err := db.Table(tableName).Select("mb_id, wr_subject").Where("wr_id = ? AND wr_is_comment = 0", postID).Scan(&postAuthor).Error; err != nil || postAuthor.MbID == "" {
+					return
+				}
+
+				// 대댓글인 경우: 부모 댓글 작성자에게 알림
+				if req.ParentID != nil && *req.ParentID > 0 {
+					var parentAuthorMbID string
+					if err := db.Table(tableName).Select("mb_id").Where("wr_id = ?", *req.ParentID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != mbID {
+						_ = notiRepo.Create(&gnurepo.Notification{
+							PhToCase:      "comment_reply",
+							PhFromCase:    "comment",
+							BoTable:       slug,
+							WrID:          comment.WrID,
+							MbID:          parentAuthorMbID,
+							RelMbID:       mbID,
+							RelMbNick:     authorName,
+							RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", authorName),
+							RelURL:        fmt.Sprintf("/%s/%d#comment_%d", slug, postID, comment.WrID),
+							PhReaded:      "N",
+							PhDatetime:    now,
+							ParentSubject: postAuthor.WrSubject,
+							WrParent:      postID,
+						})
+					}
+				}
+
+				// 게시글 작성자에게 알림 (자기 댓글은 제외)
+				if postAuthor.MbID != mbID {
+					_ = notiRepo.Create(&gnurepo.Notification{
+						PhToCase:      "comment",
+						PhFromCase:    "comment",
+						BoTable:       slug,
+						WrID:          comment.WrID,
+						MbID:          postAuthor.MbID,
+						RelMbID:       mbID,
+						RelMbNick:     authorName,
+						RelMsg:        fmt.Sprintf("%s님이 회원님의 글에 댓글을 남겼습니다.", authorName),
+						RelURL:        fmt.Sprintf("/%s/%d#comment_%d", slug, postID, comment.WrID),
+						PhReaded:      "N",
+						PhDatetime:    now,
+						ParentSubject: postAuthor.WrSubject,
+						WrParent:      postID,
+					})
+				}
+			}()
+
 			c.JSON(http.StatusCreated, gin.H{
 				"success": true,
 				"data": gin.H{
