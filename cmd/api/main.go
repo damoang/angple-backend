@@ -301,6 +301,7 @@ func main() {
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo, permChecker)
 		v2Handler.SetPointRepository(v2PointRepo)
 		v2Handler.SetRevisionRepository(v2RevisionRepo)
+		v2Handler.SetNotiRepository(gnurepo.NewNotiRepository(db))
 		v2Handler.SetGnuDB(db)
 
 		// TODO: 경험치 서비스 구현 후 활성화
@@ -3072,6 +3073,11 @@ func main() {
 			search := router.Group("/api/v2/search")
 			search.GET("", searchHandler.Search)
 			search.GET("/autocomplete", searchHandler.Autocomplete)
+
+			// v1 검색 라우트 (프론트엔드 호환)
+			searchV1 := router.Group("/api/v1/search")
+			searchV1.GET("", searchHandler.Search)
+			searchV1.GET("/autocomplete", searchHandler.Autocomplete)
 
 			adminSearch := router.Group("/api/v2/admin/search")
 			adminSearch.POST("/index", searchHandler.BulkIndex)

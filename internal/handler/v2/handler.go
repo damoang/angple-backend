@@ -4,9 +4,13 @@ import (
 	"net/http"
 	"strconv"
 
+	"fmt"
+	"time"
+
 	"github.com/damoang/angple-backend/internal/common"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
 	"github.com/damoang/angple-backend/internal/middleware"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -21,6 +25,7 @@ type V2Handler struct {
 	permChecker  middleware.BoardPermissionChecker
 	pointRepo    v2repo.PointRepository
 	revisionRepo v2repo.RevisionRepository
+	notiRepo     gnurepo.NotiRepository
 	gnuDB        *gorm.DB // gnuboard g5_member 조회용
 }
 
@@ -49,6 +54,11 @@ func (h *V2Handler) SetPointRepository(repo v2repo.PointRepository) {
 // SetRevisionRepository sets the optional revision repository for revision history
 func (h *V2Handler) SetRevisionRepository(repo v2repo.RevisionRepository) {
 	h.revisionRepo = repo
+}
+
+// SetNotiRepository sets the notification repository for creating notifications
+func (h *V2Handler) SetNotiRepository(repo gnurepo.NotiRepository) {
+	h.notiRepo = repo
 }
 
 // SetGnuDB sets the gnuboard database connection for mb_id → mb_no lookup
@@ -227,7 +237,19 @@ func (h *V2Handler) ListPosts(c *gin.Context) {
 	}
 
 	page, perPage := parsePagination(c)
-	posts, total, err := h.postRepo.FindByBoard(board.ID, page, perPage)
+
+	// 검색 파라미터 (sfl: 검색 필드, stx: 검색어)
+	searchField := c.Query("sfl")
+	searchQuery := c.Query("stx")
+
+	var posts []*v2domain.V2Post
+	var total int64
+
+	if searchField != "" && searchQuery != "" {
+		posts, total, err = h.postRepo.SearchByBoard(board.ID, searchField, searchQuery, page, perPage)
+	} else {
+		posts, total, err = h.postRepo.FindByBoard(board.ID, page, perPage)
+	}
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 목록 조회 실패", err)
 		return
@@ -249,7 +271,8 @@ func (h *V2Handler) GetPost(c *gin.Context) {
 		return
 	}
 
-	go func() { _ = h.postRepo.IncrementViewCount(id) }() //nolint:errcheck
+	// 조회수는 프론트엔드 /api/viewcount 에서 쿠키 기반 중복방지로 처리
+	// 백엔드에서 매 요청마다 증가시키면 새로고침할 때마다 무한 증가 (버그)
 	common.V2Success(c, post)
 }
 
@@ -695,12 +718,17 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		_ = h.pointRepo.AddPoint(userID, board.CommentPoint, "댓글작성", "v2_comments", comment.ID) //nolint:errcheck
 	}
 
-	// FreeComment 형태로 응답 (프론트엔드 호환)
+	// 알림 생성 (비동기, 에러 무시)
 	mbID := middleware.GetUserID(c)
 	authorName := middleware.GetNickname(c)
 	if authorName == "" && h.gnuDB != nil {
 		h.gnuDB.Table("g5_member").Select("mb_nick").Where("mb_id = ?", mbID).Scan(&authorName)
 	}
+	if h.notiRepo != nil {
+		go h.createCommentNotification(slug, postID, comment, mbID, authorName)
+	}
+
+	// FreeComment 형태로 응답 (프론트엔드 호환)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
@@ -795,4 +823,72 @@ func parsePagination(c *gin.Context) (int, int) {
 		perPage = l
 	}
 	return page, perPage
+}
+
+// createCommentNotification creates a notification for the post author when a comment is posted
+func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, comment *v2domain.V2Comment, commenterMbID, commenterNick string) {
+	if h.gnuDB == nil || h.notiRepo == nil {
+		return
+	}
+
+	// 게시글 작성자 조회
+	post, err := h.postRepo.FindByID(postID)
+	if err != nil {
+		return
+	}
+
+	// 게시글 작성자의 mb_id 조회
+	var postAuthorMbID string
+	if err := h.gnuDB.Table("g5_member").Select("mb_id").Where("mb_no = ?", post.UserID).Scan(&postAuthorMbID).Error; err != nil || postAuthorMbID == "" {
+		return
+	}
+
+	// 자기 글에 자기가 댓글 달면 알림 안 보냄
+	if postAuthorMbID == commenterMbID {
+		return
+	}
+
+	// 대댓글인 경우 부모 댓글 작성자에게도 알림
+	if comment.ParentID != nil {
+		parentComment, err := h.commentRepo.FindByID(*comment.ParentID)
+		if err == nil {
+			var parentAuthorMbID string
+			if err := h.gnuDB.Table("g5_member").Select("mb_id").Where("mb_no = ?", parentComment.UserID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != commenterMbID {
+				noti := &gnurepo.Notification{
+					PhToCase:      "comment_reply",
+					PhFromCase:    "comment",
+					BoTable:       boardSlug,
+					WrID:          int(comment.ID),
+					MbID:          parentAuthorMbID,
+					RelMbID:       commenterMbID,
+					RelMbNick:     commenterNick,
+					RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", commenterNick),
+					RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
+					PhReaded:      "N",
+					PhDatetime:    time.Now(),
+					ParentSubject: post.Title,
+					WrParent:      int(postID),
+				}
+				_ = h.notiRepo.Create(noti)
+			}
+		}
+	}
+
+	// 게시글 작성자에게 알림
+	noti := &gnurepo.Notification{
+		PhToCase:      "comment",
+		PhFromCase:    "comment",
+		BoTable:       boardSlug,
+		WrID:          int(comment.ID),
+		MbID:          postAuthorMbID,
+		RelMbID:       commenterMbID,
+		RelMbNick:     commenterNick,
+		RelMsg:        fmt.Sprintf("%s님이 회원님의 글에 댓글을 남겼습니다.", commenterNick),
+		RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
+		PhReaded:      "N",
+		PhDatetime:    time.Now(),
+		ParentSubject: post.Title,
+		WrParent:      int(postID),
+	}
+	_ = h.notiRepo.Create(noti)
 }

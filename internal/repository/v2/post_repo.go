@@ -12,6 +12,7 @@ type PostRepository interface {
 	FindByID(id uint64) (*v2.V2Post, error)
 	FindByIDIncludeDeleted(id uint64) (*v2.V2Post, error)
 	FindByBoard(boardID uint64, page, limit int) ([]*v2.V2Post, int64, error)
+	SearchByBoard(boardID uint64, field, query string, page, limit int) ([]*v2.V2Post, int64, error)
 	FindDeleted(page, limit int) ([]*v2.V2Post, int64, error)
 	Create(post *v2.V2Post) error
 	Update(post *v2.V2Post) error
@@ -90,6 +91,37 @@ func (r *postRepository) FindByBoard(boardID uint64, page, limit int) ([]*v2.V2P
 	}
 	offset := (page - 1) * limit
 	if err := query.Order("is_notice DESC, id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+		return nil, 0, err
+	}
+	return posts, total, nil
+}
+
+// SearchByBoard searches posts by field (title, content, title_content, author)
+func (r *postRepository) SearchByBoard(boardID uint64, field, keyword string, page, limit int) ([]*v2.V2Post, int64, error) {
+	var posts []*v2.V2Post
+	var total int64
+
+	query := r.db.Model(&v2.V2Post{}).Where("board_id = ? AND status = 'published'", boardID)
+
+	like := "%" + keyword + "%"
+	switch field {
+	case "title":
+		query = query.Where("title LIKE ?", like)
+	case "content":
+		query = query.Where("content LIKE ?", like)
+	case "title_content":
+		query = query.Where("(title LIKE ? OR content LIKE ?)", like, like)
+	case "author":
+		query = query.Where("author_name LIKE ?", like)
+	default:
+		query = query.Where("(title LIKE ? OR content LIKE ?)", like, like)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * limit
+	if err := query.Order("id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}
 	return posts, total, nil

@@ -34,6 +34,7 @@ type NotiRepository interface {
 	MarkAsRead(mbID string, phID int) error
 	MarkAllAsRead(mbID string) error
 	Delete(mbID string, phID int) error
+	Create(noti *Notification) error
 }
 
 type notiRepository struct {
@@ -90,4 +91,9 @@ func (r *notiRepository) MarkAllAsRead(mbID string) error {
 func (r *notiRepository) Delete(mbID string, phID int) error {
 	return r.db.Where("ph_id = ? AND mb_id = ?", phID, mbID).
 		Delete(&Notification{}).Error
+}
+
+// Create inserts a new notification
+func (r *notiRepository) Create(noti *Notification) error {
+	return r.db.Create(noti).Error
 }
