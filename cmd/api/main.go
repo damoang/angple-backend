@@ -1083,8 +1083,13 @@ func main() {
 				limit = 20
 			}
 
-			// Try cache first
-			if cacheService != nil {
+			// Search parameters
+			sfl := c.Query("sfl") // search field: title, content, title_content, author
+			stx := c.Query("stx") // search text
+			isSearching := sfl != "" && stx != ""
+
+			// Try cache first (only for non-search requests)
+			if !isSearching && cacheService != nil {
 				if cached, err := cacheService.GetPosts(ctx, slug, page, limit); err == nil {
 					c.Header("X-Cache", "HIT")
 					c.Data(http.StatusOK, "application/json", cached)
@@ -1100,7 +1105,13 @@ func main() {
 			}
 
 			// Get posts from g5_write_{slug}
-			posts, total, err := gnuWriteRepo.FindPosts(slug, page, limit)
+			var posts []*gnuboard.G5Write
+			var total int64
+			if isSearching {
+				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
+			} else {
+				posts, total, err = gnuWriteRepo.FindPosts(slug, page, limit)
+			}
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": page, "limit": limit}})
 				return
@@ -1149,8 +1160,8 @@ func main() {
 				"meta":    gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
 			}
 
-			// Cache the response
-			if cacheService != nil {
+			// Cache the response (only for non-search requests)
+			if !isSearching && cacheService != nil {
 				_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 			}
 
@@ -1617,12 +1628,12 @@ func main() {
 					_ = notiRepo.Create(&gnurepo.Notification{
 						PhToCase: "follow", PhFromCase: "write", BoTable: slug,
 						WrID: post.WrID, MbID: fid, RelMbID: mbID,
-						RelMbNick:    authorName,
-						RelMsg:       fmt.Sprintf("%s님이 새 글을 작성했습니다: %s", authorName, subject),
-						RelURL:       fmt.Sprintf("/%s/%d", slug, post.WrID),
-						PhReaded:     "N",
-						PhDatetime:   now,
-						WrParent:     post.WrID,
+						RelMbNick:  authorName,
+						RelMsg:     fmt.Sprintf("%s님이 새 글을 작성했습니다: %s", authorName, subject),
+						RelURL:     fmt.Sprintf("/%s/%d", slug, post.WrID),
+						PhReaded:   "N",
+						PhDatetime: now,
+						WrParent:   post.WrID,
 					})
 				}
 
@@ -1640,12 +1651,12 @@ func main() {
 					_ = notiRepo.Create(&gnurepo.Notification{
 						PhToCase: "subscribe", PhFromCase: "write", BoTable: slug,
 						WrID: post.WrID, MbID: sid, RelMbID: mbID,
-						RelMbNick:    authorName,
-						RelMsg:       fmt.Sprintf("%s 게시판에 새 글: %s", slug, subject),
-						RelURL:       fmt.Sprintf("/%s/%d", slug, post.WrID),
-						PhReaded:     "N",
-						PhDatetime:   now,
-						WrParent:     post.WrID,
+						RelMbNick:  authorName,
+						RelMsg:     fmt.Sprintf("%s 게시판에 새 글: %s", slug, subject),
+						RelURL:     fmt.Sprintf("/%s/%d", slug, post.WrID),
+						PhReaded:   "N",
+						PhDatetime: now,
+						WrParent:   post.WrID,
 					})
 				}
 			}()

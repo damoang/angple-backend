@@ -48,6 +48,7 @@ var coreColumns = []string{
 type WriteRepository interface {
 	// Posts
 	FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostByID(boardID string, wrID int) (*gnuboard.G5Write, error)
 	FindPostByIDIncludeDeleted(boardID string, wrID int) (*gnuboard.G5Write, error)
 	FindNotices(boardID string, noticeIDs []int) ([]*gnuboard.G5Write, error)
@@ -135,6 +136,67 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	err := r.db.Table(table).
 		Select(coreColumns).
 		Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").
+		Order(orderClause).
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
+
+	return posts, total, err
+}
+
+// SearchPosts retrieves posts matching search criteria (sfl/stx) with pagination
+func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	var posts []*gnuboard.G5Write
+	var total int64
+
+	offset := (page - 1) * limit
+	table := tableName(boardID)
+
+	// Build search condition based on field
+	var searchCond string
+	var searchArgs []interface{}
+	likeQuery := "%" + searchQuery + "%"
+
+	switch searchField {
+	case "title":
+		searchCond = "wr_subject LIKE ?"
+		searchArgs = []interface{}{likeQuery}
+	case "content":
+		searchCond = "wr_content LIKE ?"
+		searchArgs = []interface{}{likeQuery}
+	case "title_content":
+		searchCond = "(wr_subject LIKE ? OR wr_content LIKE ?)"
+		searchArgs = []interface{}{likeQuery, likeQuery}
+	case "author":
+		searchCond = "(wr_name LIKE ? OR mb_id LIKE ?)"
+		searchArgs = []interface{}{likeQuery, likeQuery}
+	default:
+		searchCond = "(wr_subject LIKE ? OR wr_content LIKE ?)"
+		searchArgs = []interface{}{likeQuery, likeQuery}
+	}
+
+	baseCond := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND " + searchCond
+	baseArgs := searchArgs
+
+	// Count
+	if err := r.db.Table(table).Where(baseCond, baseArgs...).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Order
+	orderClause := "wr_num, wr_reply"
+	now := time.Now()
+	if cached, ok := sortFieldCache.Load(boardID); ok {
+		if entry, valid := cached.(*cachedSortField); valid && now.Before(entry.expiresAt) {
+			if entry.field != "" {
+				orderClause = entry.field
+			}
+		}
+	}
+
+	err := r.db.Table(table).
+		Select(coreColumns).
+		Where(baseCond, baseArgs...).
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
