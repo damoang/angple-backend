@@ -1628,12 +1628,12 @@ func main() {
 					_ = notiRepo.Create(&gnurepo.Notification{
 						PhToCase: "follow", PhFromCase: "write", BoTable: slug,
 						WrID: post.WrID, MbID: fid, RelMbID: mbID,
-						RelMbNick:    authorName,
-						RelMsg:       fmt.Sprintf("%s님이 새 글을 작성했습니다: %s", authorName, subject),
-						RelURL:       fmt.Sprintf("/%s/%d", slug, post.WrID),
-						PhReaded:     "N",
-						PhDatetime:   now,
-						WrParent:     post.WrID,
+						RelMbNick:  authorName,
+						RelMsg:     fmt.Sprintf("%s님이 새 글을 작성했습니다: %s", authorName, subject),
+						RelURL:     fmt.Sprintf("/%s/%d", slug, post.WrID),
+						PhReaded:   "N",
+						PhDatetime: now,
+						WrParent:   post.WrID,
 					})
 				}
 
@@ -1651,12 +1651,12 @@ func main() {
 					_ = notiRepo.Create(&gnurepo.Notification{
 						PhToCase: "subscribe", PhFromCase: "write", BoTable: slug,
 						WrID: post.WrID, MbID: sid, RelMbID: mbID,
-						RelMbNick:    authorName,
-						RelMsg:       fmt.Sprintf("%s 게시판에 새 글: %s", slug, subject),
-						RelURL:       fmt.Sprintf("/%s/%d", slug, post.WrID),
-						PhReaded:     "N",
-						PhDatetime:   now,
-						WrParent:     post.WrID,
+						RelMbNick:  authorName,
+						RelMsg:     fmt.Sprintf("%s 게시판에 새 글: %s", slug, subject),
+						RelURL:     fmt.Sprintf("/%s/%d", slug, post.WrID),
+						PhReaded:   "N",
+						PhDatetime: now,
+						WrParent:   post.WrID,
 					})
 				}
 			}()
