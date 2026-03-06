@@ -2504,37 +2504,35 @@ func main() {
 				return
 			}
 
-			// 중복 신고 확인
+			// 중복 신고 확인 (g5_na_singo 테이블)
 			var count int64
-			db.Table("g5_singo").Where("sg_table = ? AND sg_parent = ? AND mb_id = ?", "write_"+slug, postID, userID).Count(&count)
+			db.Table("g5_na_singo").Where("sg_table = ? AND sg_id = ? AND mb_id = ?", slug, postID, userID).Count(&count)
 			if count > 0 {
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고한 게시글입니다"})
 				return
 			}
 
-			// 신고 사유 조합 (첫 번째 reason을 코드로, 나머지 + detail을 sg_reason에)
-			reasonText := req.Detail
-			if reasonText == "" && len(req.Reasons) > 0 {
-				reasonParts := make([]string, len(req.Reasons))
-				for i, r := range req.Reasons {
-					reasonParts[i] = strconv.Itoa(r)
-				}
-				reasonText = strings.Join(reasonParts, ",")
-			}
+			// 신고자 IP
+			sgIP := c.ClientIP()
 
-			// g5_singo INSERT
-			result := db.Table("g5_singo").Create(map[string]interface{}{
-				"sg_table":     "write_" + slug,
-				"sg_parent":    postID,
-				"mb_id":        userID,
-				"target_mb_id": post.MbID,
-				"sg_reason":    reasonText,
-				"sg_status":    "pending",
-				"sg_datetime":  time.Now(),
-			})
-			if result.Error != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "신고 접수 실패"})
-				return
+			// 사유별 1행씩 INSERT (nariya 호환: sg_type = reason code)
+			now := time.Now()
+			for _, reason := range req.Reasons {
+				db.Table("g5_na_singo").Create(map[string]interface{}{
+					"sg_flag":        0,
+					"mb_id":          userID,
+					"sg_table":       slug,
+					"sg_id":          postID,
+					"sg_parent":      postID,
+					"sg_type":        reason,
+					"sg_desc":        req.Detail,
+					"wr_time":        post.WrDatetime,
+					"sg_time":        now,
+					"sg_ip":          sgIP,
+					"target_mb_id":   post.MbID,
+					"target_content": post.WrContent,
+					"target_title":   post.WrSubject,
+				})
 			}
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "신고가 접수되었습니다"})
@@ -2585,37 +2583,34 @@ func main() {
 				return
 			}
 
-			// 중복 신고 확인
+			// 중복 신고 확인 (g5_na_singo 테이블)
 			var count int64
-			db.Table("g5_singo").Where("sg_table = ? AND sg_parent = ? AND mb_id = ?", "write_"+slug, commentID, userID).Count(&count)
+			db.Table("g5_na_singo").Where("sg_table = ? AND sg_id = ? AND mb_id = ?", slug, commentID, userID).Count(&count)
 			if count > 0 {
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고한 댓글입니다"})
 				return
 			}
 
-			// 신고 사유
-			reasonText := req.Detail
-			if reasonText == "" && len(req.Reasons) > 0 {
-				reasonParts := make([]string, len(req.Reasons))
-				for i, r := range req.Reasons {
-					reasonParts[i] = strconv.Itoa(r)
-				}
-				reasonText = strings.Join(reasonParts, ",")
-			}
+			// 신고자 IP
+			sgIP := c.ClientIP()
+			now := time.Now()
 
-			// g5_singo INSERT
-			result := db.Table("g5_singo").Create(map[string]interface{}{
-				"sg_table":     "write_" + slug,
-				"sg_parent":    commentID,
-				"mb_id":        userID,
-				"target_mb_id": comment.MbID,
-				"sg_reason":    reasonText,
-				"sg_status":    "pending",
-				"sg_datetime":  time.Now(),
-			})
-			if result.Error != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "신고 접수 실패"})
-				return
+			// 사유별 1행씩 INSERT (nariya 호환)
+			for _, reason := range req.Reasons {
+				db.Table("g5_na_singo").Create(map[string]interface{}{
+					"sg_flag":        0,
+					"mb_id":          userID,
+					"sg_table":       slug,
+					"sg_id":          commentID,
+					"sg_parent":      postID,
+					"sg_type":        reason,
+					"sg_desc":        req.Detail,
+					"wr_time":        comment.WrDatetime,
+					"sg_time":        now,
+					"sg_ip":          sgIP,
+					"target_mb_id":   comment.MbID,
+					"target_content": comment.WrContent,
+				})
 			}
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "신고가 접수되었습니다"})
