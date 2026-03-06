@@ -1601,6 +1601,55 @@ func main() {
 				}
 			}
 
+			// 팔로워/구독자 알림 (비동기)
+			go func() {
+				authorName := post.WrName
+				if authorName == "" {
+					authorName = mbID
+				}
+				subject := post.WrSubject
+				now := time.Now()
+
+				// 1. 팔로워 알림: 이 작성자를 팔로우한 사람들
+				var followerIDs []string
+				db.Table("g5_member_follow").Select("mb_id").Where("target_id = ?", mbID).Pluck("mb_id", &followerIDs)
+				for _, fid := range followerIDs {
+					_ = notiRepo.Create(&gnurepo.Notification{
+						PhToCase: "follow", PhFromCase: "write", BoTable: slug,
+						WrID: post.WrID, MbID: fid, RelMbID: mbID,
+						RelMbNick:    authorName,
+						RelMsg:       fmt.Sprintf("%s님이 새 글을 작성했습니다: %s", authorName, subject),
+						RelURL:       fmt.Sprintf("/%s/%d", slug, post.WrID),
+						PhReaded:     "N",
+						PhDatetime:   now,
+						WrParent:     post.WrID,
+					})
+				}
+
+				// 2. 게시판 구독자 알림: 이 게시판을 구독한 사람들 (작성자 제외, 팔로워 중복 제외)
+				var subscriberIDs []string
+				db.Table("g5_board_subscribe").Select("mb_id").Where("bo_table = ? AND mb_id != ?", slug, mbID).Pluck("mb_id", &subscriberIDs)
+				followerSet := make(map[string]bool, len(followerIDs))
+				for _, fid := range followerIDs {
+					followerSet[fid] = true
+				}
+				for _, sid := range subscriberIDs {
+					if followerSet[sid] {
+						continue // 이미 팔로워 알림 받음
+					}
+					_ = notiRepo.Create(&gnurepo.Notification{
+						PhToCase: "subscribe", PhFromCase: "write", BoTable: slug,
+						WrID: post.WrID, MbID: sid, RelMbID: mbID,
+						RelMbNick:    authorName,
+						RelMsg:       fmt.Sprintf("%s 게시판에 새 글: %s", slug, subject),
+						RelURL:       fmt.Sprintf("/%s/%d", slug, post.WrID),
+						PhReaded:     "N",
+						PhDatetime:   now,
+						WrParent:     post.WrID,
+					})
+				}
+			}()
+
 			c.JSON(http.StatusCreated, gin.H{
 				"success": true,
 				"data":    v1handler.TransformToV1PostDetail(&post, false),
@@ -3033,7 +3082,7 @@ func main() {
 
 		// v1 message routes (uses g5_memo table directly)
 		gnuMemoRepo := gnurepo.NewMemoRepository(db)
-		v1MsgHandler := handler.NewV1MessageHandler(gnuMemoRepo, gnuMemberRepo)
+		v1MsgHandler := handler.NewV1MessageHandler(gnuMemoRepo, gnuMemberRepo, notiRepo)
 		v1Messages := router.Group("/api/v1/messages", middleware.JWTAuth(jwtManager))
 		v1Messages.GET("", v1MsgHandler.GetMessages)
 		v1Messages.GET("/unread-count", v1MsgHandler.GetUnreadCount)

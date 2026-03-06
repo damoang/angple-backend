@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
@@ -16,11 +18,12 @@ import (
 type V1MessageHandler struct {
 	memoRepo   gnurepo.MemoRepository
 	memberRepo gnurepo.MemberRepository
+	notiRepo   gnurepo.NotiRepository
 }
 
 // NewV1MessageHandler creates a new V1MessageHandler using g5_memo
-func NewV1MessageHandler(memoRepo gnurepo.MemoRepository, memberRepo gnurepo.MemberRepository) *V1MessageHandler {
-	return &V1MessageHandler{memoRepo: memoRepo, memberRepo: memberRepo}
+func NewV1MessageHandler(memoRepo gnurepo.MemoRepository, memberRepo gnurepo.MemberRepository, notiRepo gnurepo.NotiRepository) *V1MessageHandler {
+	return &V1MessageHandler{memoRepo: memoRepo, memberRepo: memberRepo, notiRepo: notiRepo}
 }
 
 // v1MessageResponse matches frontend Message type
@@ -215,6 +218,25 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 	if nickMap == nil {
 		nickMap = make(map[string]string)
 	}
+
+	// 쪽지 알림 (비동기)
+	go func() {
+		senderNick := nickMap[mbID]
+		if senderNick == "" {
+			senderNick = mbID
+		}
+		_ = h.notiRepo.Create(&gnurepo.Notification{
+			PhToCase:   "memo",
+			PhFromCase: "memo",
+			MbID:       req.ReceiverID,
+			RelMbID:    mbID,
+			RelMbNick:  senderNick,
+			RelMsg:     fmt.Sprintf("%s님이 쪽지를 보냈습니다.", senderNick),
+			RelURL:     fmt.Sprintf("/member/messages/%d", memo.MeID),
+			PhReaded:   "N",
+			PhDatetime: time.Now(),
+		})
+	}()
 
 	common.V2Created(c, h.toV1Message(memo, nickMap))
 }
