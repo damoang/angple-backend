@@ -1371,6 +1371,11 @@ func main() {
 				Offset(offset).Limit(limit).
 				Scan(&likers)
 
+			// IP 마스킹: 마지막 옥텟을 ***로 변환
+			for i := range likers {
+				likers[i].BgIP = maskIP(likers[i].BgIP)
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data": gin.H{
@@ -3481,6 +3486,22 @@ func main() {
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+// maskIP masks the second octet of an IPv4 address with ♡ (e.g. 222.114.55.158 → 222.♡.55.158)
+func maskIP(ip string) string {
+	if ip == "" {
+		return ""
+	}
+	parts := strings.Split(ip, ".")
+	if len(parts) == 4 {
+		parts[1] = "♡"
+		return strings.Join(parts, ".")
+	}
+	if len(ip) > 3 {
+		return ip[:3] + ".♡"
+	}
+	return "♡"
 }
 
 // splitAndTrim splits a string by delimiter and trims spaces
