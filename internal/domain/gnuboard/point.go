@@ -44,7 +44,7 @@ func (p *G5Point) ToHistoryItem() PointHistoryItem {
 		MbID:         p.MbID,
 		PoContent:    p.PoContent,
 		PoPoint:      p.PoPoint,
-		PoDatetime:   p.PoDatetime.Format("2006-01-02T15:04:05Z"),
+		PoDatetime:   p.PoDatetime.Format(time.RFC3339),
 		PoExpired:    p.PoExpired,
 		PoExpireDate: p.PoExpireDate,
 		PoRelTable:   p.PoRelTable,

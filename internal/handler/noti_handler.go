@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/middleware"
@@ -125,7 +126,7 @@ func toV1Notification(n gnurepo.Notification) v1NotificationResponse {
 		SenderID:   n.RelMbID,
 		SenderName: n.RelMbNick,
 		IsRead:     n.PhReaded == "Y",
-		CreatedAt:  n.PhDatetime.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:  n.PhDatetime.Format(time.RFC3339),
 	}
 }
 

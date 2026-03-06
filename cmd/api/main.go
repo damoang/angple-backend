@@ -2348,6 +2348,160 @@ func main() {
 			})
 		})
 
+		// POST /api/v1/boards/:slug/posts/:id/report - Report a post
+		v1Boards.POST("/:slug/posts/:id/report", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			userID := middleware.GetUserID(c)
+			if userID == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "로그인이 필요합니다"})
+				return
+			}
+
+			var req struct {
+				Reasons []int  `json:"reasons" binding:"required"`
+				Detail  string `json:"detail"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "reasons is required"})
+				return
+			}
+
+			// 게시글 존재 확인 & 작성자 조회
+			post, err := gnuWriteRepo.FindPostByID(slug, postID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 자신의 글은 신고 불가
+			if post.MbID == userID {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "자신의 글은 신고할 수 없습니다"})
+				return
+			}
+
+			// 중복 신고 확인
+			var count int64
+			db.Table("g5_singo").Where("sg_table = ? AND sg_parent = ? AND mb_id = ?", "write_"+slug, postID, userID).Count(&count)
+			if count > 0 {
+				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고한 게시글입니다"})
+				return
+			}
+
+			// 신고 사유 조합 (첫 번째 reason을 코드로, 나머지 + detail을 sg_reason에)
+			reasonText := req.Detail
+			if reasonText == "" && len(req.Reasons) > 0 {
+				reasonParts := make([]string, len(req.Reasons))
+				for i, r := range req.Reasons {
+					reasonParts[i] = strconv.Itoa(r)
+				}
+				reasonText = strings.Join(reasonParts, ",")
+			}
+
+			// g5_singo INSERT
+			result := db.Table("g5_singo").Create(map[string]interface{}{
+				"sg_table":     "write_" + slug,
+				"sg_parent":    postID,
+				"mb_id":        userID,
+				"target_mb_id": post.MbID,
+				"sg_reason":    reasonText,
+				"sg_status":    "pending",
+				"sg_datetime":  time.Now(),
+			})
+			if result.Error != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "신고 접수 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "신고가 접수되었습니다"})
+		})
+
+		// POST /api/v1/boards/:slug/posts/:id/comments/:comment_id/report - Report a comment
+		v1Boards.POST("/:slug/posts/:id/comments/:comment_id/report", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+			commentID, err := strconv.Atoi(c.Param("comment_id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid comment ID"})
+				return
+			}
+
+			userID := middleware.GetUserID(c)
+			if userID == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "로그인이 필요합니다"})
+				return
+			}
+
+			var req struct {
+				Reasons []int  `json:"reasons" binding:"required"`
+				Detail  string `json:"detail"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "reasons is required"})
+				return
+			}
+
+			// 댓글 존재 확인 & 작성자 조회
+			var comment gnuboard.G5Write
+			err = db.Table(fmt.Sprintf("g5_write_%s", slug)).
+				Where("wr_id = ? AND wr_parent = ? AND wr_is_comment = 1", commentID, postID).
+				First(&comment).Error
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "댓글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 자신의 댓글은 신고 불가
+			if comment.MbID == userID {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "자신의 댓글은 신고할 수 없습니다"})
+				return
+			}
+
+			// 중복 신고 확인
+			var count int64
+			db.Table("g5_singo").Where("sg_table = ? AND sg_parent = ? AND mb_id = ?", "write_"+slug, commentID, userID).Count(&count)
+			if count > 0 {
+				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고한 댓글입니다"})
+				return
+			}
+
+			// 신고 사유
+			reasonText := req.Detail
+			if reasonText == "" && len(req.Reasons) > 0 {
+				reasonParts := make([]string, len(req.Reasons))
+				for i, r := range req.Reasons {
+					reasonParts[i] = strconv.Itoa(r)
+				}
+				reasonText = strings.Join(reasonParts, ",")
+			}
+
+			// g5_singo INSERT
+			result := db.Table("g5_singo").Create(map[string]interface{}{
+				"sg_table":     "write_" + slug,
+				"sg_parent":    commentID,
+				"mb_id":        userID,
+				"target_mb_id": comment.MbID,
+				"sg_reason":    reasonText,
+				"sg_status":    "pending",
+				"sg_datetime":  time.Now(),
+			})
+			if result.Error != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "신고 접수 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "신고가 접수되었습니다"})
+		})
+
 		// GET /api/v1/board-groups - Get board groups with boards
 		router.GET("/api/v1/board-groups", func(c *gin.Context) {
 			type boardGroupRow struct {

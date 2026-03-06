@@ -36,7 +36,7 @@ func (p *MyPost) ToPostResponse() map[string]interface{} {
 		"comments_count": p.WrComment,
 		"has_file":       p.WrFile > 0,
 		"is_secret":      strings.Contains(p.WrOption, "secret"),
-		"created_at":     p.WrDatetime.Format("2006-01-02T15:04:05Z"),
+		"created_at":     p.WrDatetime.Format(time.RFC3339),
 	}
 }
 
@@ -69,7 +69,7 @@ func (c *MyCommentRow) ToCommentResponse() map[string]interface{} {
 		"post_title": c.PostTitle,
 		"board_id":   c.BoardID,
 		"is_secret":  strings.Contains(c.WrOption, "secret"),
-		"created_at": c.WrDatetime.Format("2006-01-02T15:04:05Z"),
+		"created_at": c.WrDatetime.Format(time.RFC3339),
 	}
 }
 
