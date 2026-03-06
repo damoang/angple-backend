@@ -1083,8 +1083,13 @@ func main() {
 				limit = 20
 			}
 
-			// Try cache first
-			if cacheService != nil {
+			// Search parameters
+			sfl := c.Query("sfl") // search field: title, content, title_content, author
+			stx := c.Query("stx") // search text
+			isSearching := sfl != "" && stx != ""
+
+			// Try cache first (only for non-search requests)
+			if !isSearching && cacheService != nil {
 				if cached, err := cacheService.GetPosts(ctx, slug, page, limit); err == nil {
 					c.Header("X-Cache", "HIT")
 					c.Data(http.StatusOK, "application/json", cached)
@@ -1100,7 +1105,13 @@ func main() {
 			}
 
 			// Get posts from g5_write_{slug}
-			posts, total, err := gnuWriteRepo.FindPosts(slug, page, limit)
+			var posts []*gnuboard.G5Write
+			var total int64
+			if isSearching {
+				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
+			} else {
+				posts, total, err = gnuWriteRepo.FindPosts(slug, page, limit)
+			}
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": page, "limit": limit}})
 				return
@@ -1149,8 +1160,8 @@ func main() {
 				"meta":    gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
 			}
 
-			// Cache the response
-			if cacheService != nil {
+			// Cache the response (only for non-search requests)
+			if !isSearching && cacheService != nil {
 				_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 			}
 
