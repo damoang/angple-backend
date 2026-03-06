@@ -76,13 +76,18 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.confirm == 'deploy'
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Set image tag
         id: tag
         run: |
           if [ -n "${{ inputs.image_tag }}" ]; then
             echo "TAG=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "TAG=latest" >> $GITHUB_OUTPUT
+            SHA=$(git rev-parse HEAD)
+            echo "TAG=sha-${SHA}" >> $GITHUB_OUTPUT
           fi
 
       - name: Configure AWS credentials
@@ -100,8 +105,7 @@ jobs:
             --instance-ids "i-038a1d1f00798d94b" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "kubectl set image deployment/angple-backend -n angple backend='"${{ env.ECR_REGISTRY }}"'/'"${{ env.ECR_REPOSITORY }}"':'"$IMAGE_TAG"'",
-              "kubectl rollout status deployment/angple-backend -n angple --timeout=120s"
+              "/home/angple/k8s/prod/deploy.sh backend '"$IMAGE_TAG"'"
             ]' \
             --timeout-seconds 300 \
             --query "Command.CommandId" \
@@ -147,8 +151,7 @@ jobs:
             --instance-ids "i-038a1d1f00798d94b" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "kubectl set image deployment/angple-gateway -n angple gateway='"${{ env.ECR_REGISTRY }}"'/'"${{ env.ECR_REPOSITORY }}"':'"$IMAGE_TAG"'",
-              "kubectl rollout status deployment/angple-gateway -n angple --timeout=120s"
+              "/home/angple/k8s/prod/deploy.sh gateway '"$IMAGE_TAG"'"
             ]' \
             --timeout-seconds 300 \
             --query "Command.CommandId" \
