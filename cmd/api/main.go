@@ -132,10 +132,24 @@ func main() {
 	}
 	config.LogResolved(cfg)
 
-	// MySQL 연결
-	db, err := initDB(cfg)
+	// MySQL 연결 (DNS 실패 등 일시적 장애에 대비하여 최대 5회 재시도)
+	var db *gorm.DB
+	for attempt := 1; attempt <= 5; attempt++ {
+		db, err = initDB(cfg)
+		if err == nil {
+			break
+		}
+		pkglogger.Info("DB connection attempt %d/5 failed: %v", attempt, err)
+		if attempt < 5 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second) // 2s, 4s, 6s, 8s backoff
+		}
+	}
 	if err != nil {
-		pkglogger.Info("Warning: Failed to connect to database: %v (continuing without DB)", err)
+		appEnv := os.Getenv("APP_ENV")
+		if appEnv == "production" || appEnv == "staging" {
+			log.Fatalf("CRITICAL: All DB connection attempts failed: %v (aborting — DB required in %s)", err, appEnv)
+		}
+		pkglogger.Info("CRITICAL: All DB connection attempts failed: %v (continuing without DB)", err)
 		db = nil
 	} else {
 		pkglogger.Info("Connected to MySQL")
