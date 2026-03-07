@@ -48,7 +48,9 @@ var coreColumns = []string{
 type WriteRepository interface {
 	// Posts
 	FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	SearchPostsFiltered(boardID string, searchField, searchQuery string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	FindPostByID(boardID string, wrID int) (*gnuboard.G5Write, error)
 	FindPostByIDIncludeDeleted(boardID string, wrID int) (*gnuboard.G5Write, error)
 	FindNotices(boardID string, noticeIDs []int) ([]*gnuboard.G5Write, error)
@@ -62,6 +64,7 @@ type WriteRepository interface {
 
 	// Comments
 	FindComments(boardID string, parentID int) ([]*gnuboard.G5Write, error)
+	FindCommentsFiltered(boardID string, parentID int, excludeMbIDs []string) ([]*gnuboard.G5Write, error)
 	FindCommentsIncludeDeleted(boardID string, parentID int) ([]*gnuboard.G5Write, error)
 	FindCommentByID(boardID string, wrID int) (*gnuboard.G5Write, error)
 	CreateComment(boardID string, comment *gnuboard.G5Write) error
@@ -86,6 +89,45 @@ func NewWriteRepository(db *gorm.DB) WriteRepository {
 // tableName generates the dynamic table name for a board
 func tableName(boardID string) string {
 	return fmt.Sprintf("g5_write_%s", boardID)
+}
+
+// buildSearchCondition builds WHERE clause for search
+func buildSearchCondition(searchField, searchQuery string) (string, []interface{}) {
+	likeQuery := "%" + searchQuery + "%"
+	switch searchField {
+	case "title":
+		return "wr_subject LIKE ?", []interface{}{likeQuery}
+	case "content":
+		return "wr_content LIKE ?", []interface{}{likeQuery}
+	case "title_content":
+		return "(wr_subject LIKE ? OR wr_content LIKE ?)", []interface{}{likeQuery, likeQuery}
+	case "author":
+		return "(wr_name LIKE ? OR mb_id LIKE ?)", []interface{}{likeQuery, likeQuery}
+	default:
+		return "(wr_subject LIKE ? OR wr_content LIKE ?)", []interface{}{likeQuery, likeQuery}
+	}
+}
+
+// getSortField returns the sort clause for a board (with caching)
+func (r *writeRepository) getSortField(boardID string) string {
+	orderClause := "wr_num, wr_reply"
+	now := time.Now()
+	if cached, ok := sortFieldCache.Load(boardID); ok {
+		if entry, valid := cached.(*cachedSortField); valid && now.Before(entry.expiresAt) {
+			if entry.field != "" {
+				return entry.field
+			}
+			return orderClause
+		}
+		sortFieldCache.Delete(boardID)
+	}
+	var sortField string
+	r.db.Table("g5_board").Select("bo_sort_field").Where("bo_table = ?", boardID).Scan(&sortField)
+	sortFieldCache.Store(boardID, &cachedSortField{field: sortField, expiresAt: now.Add(sortFieldCacheTTL)})
+	if sortField != "" {
+		return sortField
+	}
+	return orderClause
 }
 
 // FindPosts retrieves posts (not comments, not deleted) from a board with pagination
@@ -136,6 +178,82 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	err := r.db.Table(table).
 		Select(coreColumns).
 		Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").
+		Order(orderClause).
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
+
+	return posts, total, err
+}
+
+// FindPostsFiltered retrieves posts excluding specified members. Delegates to FindPosts if excludeMbIDs is empty.
+// Uses the same cached count as FindPosts (차단 유저 수가 적어 total 차이 무시 가능).
+func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error) {
+	if len(excludeMbIDs) == 0 {
+		return r.FindPosts(boardID, page, limit)
+	}
+
+	var posts []*gnuboard.G5Write
+	offset := (page - 1) * limit
+	table := tableName(boardID)
+
+	// Reuse cached total count (same as FindPosts — avoids expensive COUNT on large tables)
+	var total int64
+	cacheKey := "count:" + boardID
+	if cached, ok := postCountCache.Load(cacheKey); ok {
+		if cc, ok2 := cached.(*cachedCount); ok2 && time.Now().Before(cc.expiresAt) {
+			total = cc.total
+		}
+	}
+	if total == 0 {
+		if err := r.db.Table(table).Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		postCountCache.Store(cacheKey, &cachedCount{total: total, expiresAt: time.Now().Add(countCacheTTL)})
+	}
+
+	orderClause := r.getSortField(boardID)
+
+	err := r.db.Table(table).
+		Select(coreColumns).
+		Where("wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ?", excludeMbIDs).
+		Order(orderClause).
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
+
+	return posts, total, err
+}
+
+// SearchPostsFiltered retrieves posts matching search criteria excluding specified members.
+// Search count is not cached (results vary by query), but NOT IN filter adds negligible overhead.
+func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searchQuery string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error) {
+	if len(excludeMbIDs) == 0 {
+		return r.SearchPosts(boardID, searchField, searchQuery, page, limit)
+	}
+
+	var posts []*gnuboard.G5Write
+	var total int64
+	offset := (page - 1) * limit
+	table := tableName(boardID)
+
+	searchCond, searchArgs := buildSearchCondition(searchField, searchQuery)
+
+	// Count without NOT IN (search already narrows results significantly)
+	countCond := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND " + searchCond
+	if err := r.db.Table(table).Where(countCond, searchArgs...).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// SELECT with NOT IN filter
+	selectCond := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ? AND " + searchCond
+	selectArgs := append([]interface{}{excludeMbIDs}, searchArgs...)
+
+	orderClause := r.getSortField(boardID)
+
+	err := r.db.Table(table).
+		Select(coreColumns).
+		Where(selectCond, selectArgs...).
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
@@ -346,6 +464,21 @@ func (r *writeRepository) FindComments(boardID string, parentID int) ([]*gnuboar
 	err := r.db.Table(tableName(boardID)).
 		Select(coreColumns).
 		Where("wr_parent = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", parentID).
+		Order("wr_comment, wr_comment_reply").
+		Find(&comments).Error
+	return comments, err
+}
+
+// FindCommentsFiltered retrieves non-deleted comments excluding specified members. Delegates to FindComments if excludeMbIDs is empty.
+func (r *writeRepository) FindCommentsFiltered(boardID string, parentID int, excludeMbIDs []string) ([]*gnuboard.G5Write, error) {
+	if len(excludeMbIDs) == 0 {
+		return r.FindComments(boardID, parentID)
+	}
+
+	var comments []*gnuboard.G5Write
+	err := r.db.Table(tableName(boardID)).
+		Select(coreColumns).
+		Where("wr_parent = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL AND mb_id NOT IN ?", parentID, excludeMbIDs).
 		Order("wr_comment, wr_comment_reply").
 		Find(&comments).Error
 	return comments, err

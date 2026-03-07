@@ -7,17 +7,19 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/middleware"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 	"github.com/gin-gonic/gin"
 )
 
 // BlockHandler handles v2 block API endpoints
 type BlockHandler struct {
-	blockRepo v2repo.BlockRepository
+	blockRepo    v2repo.BlockRepository
+	cacheService pkgcache.Service
 }
 
 // NewBlockHandler creates a new BlockHandler
-func NewBlockHandler(blockRepo v2repo.BlockRepository) *BlockHandler {
-	return &BlockHandler{blockRepo: blockRepo}
+func NewBlockHandler(blockRepo v2repo.BlockRepository, cacheService pkgcache.Service) *BlockHandler {
+	return &BlockHandler{blockRepo: blockRepo, cacheService: cacheService}
 }
 
 // BlockMember handles POST /api/v2/members/:id/block
@@ -55,6 +57,11 @@ func (h *BlockHandler) BlockMember(c *gin.Context) {
 		return
 	}
 
+	// Invalidate blocked user cache
+	if h.cacheService != nil {
+		_ = h.cacheService.Delete(c.Request.Context(), "block:"+userID)
+	}
+
 	common.V2Created(c, gin.H{
 		"block_id":   block.ID,
 		"user_id":    targetID,
@@ -79,6 +86,11 @@ func (h *BlockHandler) UnblockMember(c *gin.Context) {
 	if err := h.blockRepo.Delete(userID, targetID); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, err.Error(), err)
 		return
+	}
+
+	// Invalidate blocked user cache
+	if h.cacheService != nil {
+		_ = h.cacheService.Delete(c.Request.Context(), "block:"+userID)
 	}
 
 	c.Status(http.StatusNoContent)

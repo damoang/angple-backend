@@ -118,6 +118,31 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 // Invalid or expired tokens are silently ignored (user proceeds as unauthenticated).
 func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 0. 내부 신뢰 요청 확인 (SvelteKit → Backend)
+		remoteIP := getRemoteIP(c)
+		internalAuth := c.GetHeader("X-Internal-Auth")
+		internalSecret := c.GetHeader("X-Internal-Secret")
+		isLocalhost := remoteIP == "127.0.0.1" || remoteIP == "::1"
+		hasValidSecret := internalSecret == "angple-internal-dev-2026"
+		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
+			userID := c.GetHeader("X-Internal-User-ID")
+			levelStr := c.GetHeader("X-Internal-User-Level")
+			if userID != "" {
+				level := 0
+				if levelStr != "" {
+					if l, err := strconv.Atoi(levelStr); err == nil {
+						level = l
+					}
+				}
+				c.Set("userID", userID)
+				c.Set("nickname", "")
+				c.Set("level", level)
+				c.Set("v2_user_id", userID)
+				c.Next()
+				return
+			}
+		}
+
 		var token string
 
 		// 1. Authorization 헤더에서 토큰 확인

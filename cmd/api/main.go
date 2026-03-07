@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -74,6 +76,38 @@ func getConfigPath() string {
 		env = "local"
 	}
 	return fmt.Sprintf("configs/config.%s.yaml", env)
+}
+
+// memCachedPosts holds parsed post data in memory for fast filtering.
+type memCachedPosts struct {
+	items     []map[string]any // parsed post items (for filtering)
+	jsonBytes []byte           // pre-serialized full response JSON (for zero-block users)
+	meta      gin.H            // meta object for response reconstruction
+	expiresAt time.Time
+}
+
+var postMemCache sync.Map // key: "posts:{boardID}:{page}:{limit}"
+
+// filterItems filters blocked users' posts from parsed items slice, preserving notice posts.
+func filterItems(items []map[string]any, blockedIDs []string) []map[string]any {
+	blockedSet := make(map[string]struct{}, len(blockedIDs))
+	for _, id := range blockedIDs {
+		blockedSet[id] = struct{}{}
+	}
+	filtered := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if isNotice, _ := item["is_notice"].(bool); isNotice {
+			filtered = append(filtered, item)
+			continue
+		}
+		if authorID, ok := item["author_id"].(string); ok {
+			if _, blocked := blockedSet[authorID]; blocked {
+				continue
+			}
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func main() {
@@ -1030,6 +1064,109 @@ func main() {
 				},
 			})
 		})
+		// Block repository (used for filtering blocked users' posts/comments)
+		blockRepo := v2repo.NewBlockRepository(db)
+
+		// getBlockedIDs returns blocked user IDs with Redis cache (5 min TTL).
+		// Empty results are also cached to avoid repeated DB queries for users with no blocks.
+		getBlockedIDs := func(ctx context.Context, userID string) []string {
+			if userID == "" {
+				return nil
+			}
+			cacheKey := "block:" + userID
+			if cacheService != nil {
+				var ids []string
+				if err := cacheService.Get(ctx, cacheKey, &ids); err == nil {
+					if len(ids) == 0 {
+						return nil
+					}
+					return ids
+				}
+			}
+			ids, err := blockRepo.GetBlockedUserIDs(userID)
+			if err != nil {
+				return nil
+			}
+			// Cache even empty results to prevent repeated DB queries
+			if cacheService != nil {
+				_ = cacheService.Set(ctx, cacheKey, ids, 5*time.Minute)
+			}
+			if len(ids) == 0 {
+				return nil
+			}
+			return ids
+		}
+
+		// v1 block routes
+		v1Members := router.Group("/api/v1/members")
+		v1Members.POST("/:id/block", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			userID := middleware.GetUserID(c)
+			targetID := c.Param("id")
+			if userID == targetID {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "자기 자신을 차단할 수 없습니다"})
+				return
+			}
+			exists, err := blockRepo.Exists(userID, targetID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "차단 확인 실패"})
+				return
+			}
+			if exists {
+				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 차단한 회원입니다"})
+				return
+			}
+			if _, err := blockRepo.Create(userID, targetID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "차단 실패"})
+				return
+			}
+			if cacheService != nil {
+				_ = cacheService.Delete(c.Request.Context(), "block:"+userID)
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "차단 완료"})
+		})
+		v1Members.DELETE("/:id/block", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			userID := middleware.GetUserID(c)
+			targetID := c.Param("id")
+			if err := blockRepo.Delete(userID, targetID); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+				return
+			}
+			if cacheService != nil {
+				_ = cacheService.Delete(c.Request.Context(), "block:"+userID)
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "차단 해제 완료"})
+		})
+		router.GET("/api/v1/my/blocked", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			userID := middleware.GetUserID(c)
+			ids, err := blockRepo.GetBlockedUserIDs(userID)
+			if err != nil || len(ids) == 0 {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+			// Batch query for all blocked user nicks (N+1 → 1 query)
+			type memberNick struct {
+				MbID string `gorm:"column:mb_id"`
+				Nick string `gorm:"column:mb_nick"`
+			}
+			var members []memberNick
+			db.Table("g5_member").Select("mb_id, mb_nick").Where("mb_id IN ?", ids).Find(&members)
+			nickMap := make(map[string]string, len(members))
+			for _, m := range members {
+				nickMap[m.MbID] = m.Nick
+			}
+
+			type blockedItem struct {
+				MbID      string `json:"mb_id"`
+				MbName    string `json:"mb_name"`
+				BlockedAt string `json:"blocked_at"`
+			}
+			items := make([]blockedItem, 0, len(ids))
+			for _, id := range ids {
+				items = append(items, blockedItem{MbID: id, MbName: nickMap[id]})
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
+		})
+
 		// v1 boards routes → use Gnuboard g5_* tables
 		v1Boards := router.Group("/api/v1/boards")
 		v1Boards.Use(middleware.OptionalJWTAuth(jwtManager))
@@ -1091,23 +1228,74 @@ func main() {
 			stx := c.Query("stx") // search text
 			isSearching := sfl != "" && stx != ""
 
-			// Try cache first (only for non-search requests)
-			if !isSearching && cacheService != nil {
-				if cached, err := cacheService.GetPosts(ctx, slug, page, limit); err == nil {
-					c.Header("X-Cache", "HIT")
-					c.Data(http.StatusOK, "application/json", cached)
-					return
+			// Get blocked user IDs (skip for admins)
+			var blockedIDs []string
+			if middleware.GetUserLevel(c) < 10 {
+				blockedIDs = getBlockedIDs(ctx, middleware.GetUserID(c))
+			}
+
+			// --- 2-layer cache: in-memory → Redis → DB ---
+			memKey := fmt.Sprintf("posts:%s:%d:%d", slug, page, limit)
+
+			if !isSearching {
+				// Layer 1: In-memory cache (30s TTL)
+				if cached, ok := postMemCache.Load(memKey); ok {
+					mc := cached.(*memCachedPosts)
+					if time.Now().Before(mc.expiresAt) {
+						c.Header("X-Cache", "HIT")
+						if len(blockedIDs) == 0 {
+							// Zero blocks: return pre-serialized JSON (zero parsing)
+							c.Data(http.StatusOK, "application/json", mc.jsonBytes)
+							return
+						}
+						// Has blocks: filter from parsed items, marshal once
+						filtered := filterItems(mc.items, blockedIDs)
+						c.JSON(http.StatusOK, gin.H{"success": true, "data": filtered, "meta": mc.meta})
+						return
+					}
+					// Expired, remove from cache
+					postMemCache.Delete(memKey)
+				}
+
+				// Layer 2: Redis cache
+				if cacheService != nil {
+					if cached, err := cacheService.GetPosts(ctx, slug, page, limit); err == nil {
+						// Parse Redis JSON once → store in memory
+						var parsed struct {
+							Success bool               `json:"success"`
+							Data    []map[string]any    `json:"data"`
+							Meta    map[string]any      `json:"meta"`
+						}
+						if json.Unmarshal(cached, &parsed) == nil && parsed.Data != nil {
+							mc := &memCachedPosts{
+								items:     parsed.Data,
+								jsonBytes: cached,
+								meta:      parsed.Meta,
+								expiresAt: time.Now().Add(30 * time.Second),
+							}
+							postMemCache.Store(memKey, mc)
+
+							c.Header("X-Cache", "HIT")
+							if len(blockedIDs) == 0 {
+								c.Data(http.StatusOK, "application/json", cached)
+								return
+							}
+							filtered := filterItems(parsed.Data, blockedIDs)
+							c.JSON(http.StatusOK, gin.H{"success": true, "data": filtered, "meta": parsed.Meta})
+							return
+						}
+						// Parse failed, fall through to DB
+					}
 				}
 			}
 
-			// Check board exists in g5_board
+			// Layer 3: DB query
 			board, err := gnuBoardRepo.FindByID(slug)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
 				return
 			}
 
-			// Get posts from g5_write_{slug}
 			var posts []*gnuboard.G5Write
 			var total int64
 			if isSearching {
@@ -1157,15 +1345,34 @@ func main() {
 				}
 			}
 
+			meta := gin.H{"board_id": slug, "page": page, "limit": limit, "total": total}
 			response := gin.H{
 				"success": true,
 				"data":    items,
-				"meta":    gin.H{"board_id": slug, "page": page, "limit": limit, "total": total},
+				"meta":    meta,
 			}
 
-			// Cache the response (only for non-search requests)
-			if !isSearching && cacheService != nil {
-				_ = cacheService.SetPosts(ctx, slug, page, limit, response)
+			// Store in both caches (only for non-search requests, unfiltered data)
+			if !isSearching {
+				if cacheService != nil {
+					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
+				}
+				// Pre-serialize for in-memory cache
+				if jsonBytes, err := json.Marshal(response); err == nil {
+					mc := &memCachedPosts{
+						items:     items,
+						jsonBytes: jsonBytes,
+						meta:      meta,
+						expiresAt: time.Now().Add(30 * time.Second),
+					}
+					postMemCache.Store(memKey, mc)
+				}
+			}
+
+			// Filter blocked users from response (in-memory, after caching)
+			if len(blockedIDs) > 0 {
+				filtered := filterItems(items, blockedIDs)
+				response["data"] = filtered
 			}
 
 			c.Header("X-Cache", "MISS")
@@ -1249,7 +1456,11 @@ func main() {
 			}
 
 			// Get comments from g5_write_{slug} where wr_parent = id and wr_is_comment = 1
-			comments, err := gnuWriteRepo.FindComments(slug, id)
+			var blockedIDs []string
+			if middleware.GetUserLevel(c) < 10 {
+				blockedIDs = getBlockedIDs(c.Request.Context(), middleware.GetUserID(c))
+			}
+			comments, err := gnuWriteRepo.FindCommentsFiltered(slug, id, blockedIDs)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
 				return
@@ -3086,7 +3297,7 @@ func main() {
 		v2MessageRepo := v2repo.NewMessageRepository(db)
 		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager)
 		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager)
-		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo), jwtManager)
+		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager)
 
 		// v1 message routes (uses g5_memo table directly)
