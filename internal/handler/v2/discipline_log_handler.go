@@ -114,6 +114,7 @@ type DisciplineLogListItem struct {
 	PenaltyDateFrom string   `json:"penalty_date_from"`
 	ViolationTypes  []int    `json:"violation_types"`
 	ViolationTitles []string `json:"violation_titles"`
+	Memo            string   `json:"memo,omitempty"`
 }
 
 // DisciplineLogDetail represents detailed discipline log
@@ -126,6 +127,7 @@ type DisciplineLogDetail struct {
 	PenaltyDateTo   *string         `json:"penalty_date_to,omitempty"`
 	ViolationTypes  []ViolationType `json:"violation_types"`
 	ReportedItems   []ReportedItem  `json:"reported_items,omitempty"`
+	Memo            string          `json:"memo,omitempty"`
 	CreatedBy       string          `json:"created_by"`
 	CreatedAt       string          `json:"created_at"`
 }
@@ -164,9 +166,17 @@ func parseContentJSON(content string) (*DisciplineLogContent, error) {
 }
 
 // getMemberNickFromTitle extracts member nickname from title
-// Title format is usually: "닉네임 (아이디) 님에 대한 이용제한 안내"
+// Title formats:
+//   - "member_id(닉네임)" → "닉네임"
+//   - "닉네임 (아이디) 님에 대한 이용제한 안내" → "닉네임"
 func getMemberNickFromTitle(title string) string {
-	// Try to extract nickname before "(" or "님"
+	// Format: "member_id(닉네임)" or "member_id(닉네임) ..."
+	if openIdx := strings.Index(title, "("); openIdx > 0 {
+		if closeIdx := strings.Index(title[openIdx:], ")"); closeIdx > 1 {
+			return title[openIdx+1 : openIdx+closeIdx]
+		}
+	}
+	// Fallback: "닉네임 (아이디)" format
 	if idx := strings.Index(title, " ("); idx > 0 {
 		return title[:idx]
 	}
@@ -251,6 +261,7 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 			PenaltyDateFrom: dateFrom,
 			ViolationTypes:  data.SgTypes,
 			ViolationTitles: titles,
+			Memo:            data.Content,
 		})
 	}
 
@@ -315,6 +326,7 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		PenaltyDateTo:   penaltyDateTo,
 		ViolationTypes:  violations,
 		ReportedItems:   reportedItems,
+		Memo:            data.Content,
 		CreatedBy:       post.MbID,
 		CreatedAt:       post.WrDatetime.Format("2006-01-02 15:04:05"),
 	}
