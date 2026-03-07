@@ -186,13 +186,13 @@ jobs:
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MSG}" >/dev/null 2>&1 || true
 
-      - name: Notify deploy complete (Discord)
-        if: success()
-        run: |
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
-          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-
-          curl -s -H "Content-Type: application/json" \
-            -d "{\"embeds\":[{\"title\":\"🚀 백엔드 배포 완료 (${{ inputs.target }})\",\"description\":\"커밋: \`${SHORT_SHA}\` - ${COMMIT_MSG}\\n이미지: \`angple-backend:sha-${SHORT_SHA}\`\",\"color\":3066993,\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
-            "${{ secrets.DISCORD_WEBHOOK }}" >/dev/null 2>&1 || true
+      # Discord 알림 비활성화 — 텔레그램만 사용
+      # - name: Notify deploy complete (Discord)
+      #   if: success()
+      #   run: |
+      #     SHORT_SHA="${{ github.sha }}"
+      #     SHORT_SHA="${SHORT_SHA:0:7}"
+      #     COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+      #     curl -s -H "Content-Type: application/json" \
+      #       -d "{\"embeds\":[{\"title\":\"🚀 백엔드 배포 완료 (${{ inputs.target }})\",\"description\":\"커밋: \`${SHORT_SHA}\` - ${COMMIT_MSG}\\n이미지: \`angple-backend:sha-${SHORT_SHA}\`\",\"color\":3066993,\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
+      #       "${{ secrets.DISCORD_WEBHOOK }}" >/dev/null 2>&1 || true
