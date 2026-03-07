@@ -1,8 +1,6 @@
 name: Deploy ECR to Prod
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       confirm:
@@ -18,10 +16,6 @@ on:
           - api
           - gateway
           - all
-      image_tag:
-        description: '배포할 이미지 태그 (비워두면 latest)'
-        required: false
-        type: string
 
 permissions:
   id-token: write
@@ -33,10 +27,10 @@ env:
   ECR_REGISTRY: 891376997084.dkr.ecr.ap-northeast-2.amazonaws.com
 
 jobs:
-  build:
-    name: Build & Push to ECR
+  build-and-deploy:
+    name: Build & Deploy
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: inputs.confirm == 'deploy'
 
     steps:
       - uses: actions/checkout@v6
@@ -58,6 +52,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push API
+        if: inputs.target == 'api' || inputs.target == 'all'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -70,36 +65,24 @@ jobs:
           cache-from: type=gha,scope=backend-api
           cache-to: type=gha,mode=max,scope=backend-api
 
-  deploy:
-    name: Deploy to K8s
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.confirm == 'deploy'
-
-    steps:
-      - uses: actions/checkout@v4
+      - name: Build and push Gateway
+        if: inputs.target == 'gateway' || inputs.target == 'all'
+        uses: docker/build-push-action@v6
         with:
-          fetch-depth: 1
-
-      - name: Set image tag
-        id: tag
-        run: |
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            echo "TAG=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
-          else
-            SHA=$(git rev-parse HEAD)
-            echo "TAG=sha-${SHA}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
-          aws-region: ${{ env.AWS_REGION }}
+          context: .
+          file: deployments/docker/gateway.Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:gateway-sha-${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:gateway-latest
+          cache-from: type=gha,scope=backend-gateway
+          cache-to: type=gha,mode=max,scope=backend-gateway
 
       - name: Deploy API via SSM
         if: inputs.target == 'api' || inputs.target == 'all'
         env:
-          IMAGE_TAG: ${{ steps.tag.outputs.TAG }}
+          IMAGE_TAG: sha-${{ github.sha }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
@@ -145,7 +128,7 @@ jobs:
       - name: Deploy Gateway via SSM
         if: inputs.target == 'gateway' || inputs.target == 'all'
         env:
-          IMAGE_TAG: gateway-${{ steps.tag.outputs.TAG }}
+          IMAGE_TAG: gateway-sha-${{ github.sha }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
