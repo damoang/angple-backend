@@ -27,15 +27,16 @@ func NewNotiHandler(repo gnurepo.NotiRepository) *NotiHandler {
 
 // v1NotificationResponse matches frontend Notification type
 type v1NotificationResponse struct {
-	ID         int    `json:"id"`
-	Type       string `json:"type"`
-	Title      string `json:"title"`
-	Content    string `json:"content"`
-	URL        string `json:"url,omitempty"`
-	SenderID   string `json:"sender_id,omitempty"`
-	SenderName string `json:"sender_name,omitempty"`
-	IsRead     bool   `json:"is_read"`
-	CreatedAt  string `json:"created_at"`
+	ID            int    `json:"id"`
+	Type          string `json:"type"`
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+	URL           string `json:"url,omitempty"`
+	SenderID      string `json:"sender_id,omitempty"`
+	SenderName    string `json:"sender_name,omitempty"`
+	IsRead        bool   `json:"is_read"`
+	CreatedAt     string `json:"created_at"`
+	ParentSubject string `json:"parent_subject,omitempty"`
 }
 
 // v1NotificationListResponse matches frontend NotificationListResponse type
@@ -118,15 +119,16 @@ func convertLegacyURL(rawURL string) string {
 
 func toV1Notification(n gnurepo.Notification) v1NotificationResponse {
 	return v1NotificationResponse{
-		ID:         n.PhID,
-		Type:       mapFromCase(n.PhFromCase),
-		Title:      generateTitle(n.PhFromCase, n.RelMbNick),
-		Content:    n.RelMsg,
-		URL:        convertLegacyURL(n.RelURL),
-		SenderID:   n.RelMbID,
-		SenderName: n.RelMbNick,
-		IsRead:     n.PhReaded == "Y",
-		CreatedAt:  n.PhDatetime.Format(time.RFC3339),
+		ID:            n.PhID,
+		Type:          mapFromCase(n.PhFromCase),
+		Title:         generateTitle(n.PhFromCase, n.RelMbNick),
+		Content:       n.RelMsg,
+		URL:           convertLegacyURL(n.RelURL),
+		SenderID:      n.RelMbID,
+		SenderName:    n.RelMbNick,
+		IsRead:        n.PhReaded == "Y",
+		CreatedAt:     n.PhDatetime.Format(time.RFC3339),
+		ParentSubject: n.ParentSubject,
 	}
 }
 
