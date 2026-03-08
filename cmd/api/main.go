@@ -361,6 +361,7 @@ func main() {
 			gnuWriteRepo = gnurepo.NewWriteRepository(db)
 		}
 		gnuFileRepo := gnurepo.NewFileRepository(db)
+		gnuTagRepo := gnurepo.NewTagRepository(db)
 		gnuMemberRepo := gnurepo.NewMemberRepository(db)
 		scheduledDeleteRepo := gnurepo.NewScheduledDeleteRepository(db)
 
@@ -1467,6 +1468,11 @@ func main() {
 
 			postDetail := v1handler.TransformToV1PostDetail(post, isNotice)
 
+			// 태그 조회
+			if tags, err := gnuTagRepo.GetPostTags(slug, id); err == nil && len(tags) > 0 {
+				postDetail["tags"] = tags
+			}
+
 			// Admin sees full (unmasked) IP
 			if middleware.GetUserLevel(c) >= 10 {
 				v1handler.OverrideIPForAdminSingle(postDetail, post)
@@ -1732,15 +1738,16 @@ func main() {
 
 			// 요청 바디 파싱
 			var req struct {
-				Title    string  `json:"title" binding:"required"`
-				Content  string  `json:"content" binding:"required"`
-				Category *string `json:"category"`
-				IsSecret *bool   `json:"is_secret"`
-				Link1    *string `json:"link1"`
-				Link2    *string `json:"link2"`
-				Extra1   *string `json:"extra_1"`
-				Extra2   *string `json:"extra_2"`
-				Extra3   *string `json:"extra_3"`
+				Title    string   `json:"title" binding:"required"`
+				Content  string   `json:"content" binding:"required"`
+				Category *string  `json:"category"`
+				IsSecret *bool    `json:"is_secret"`
+				Link1    *string  `json:"link1"`
+				Link2    *string  `json:"link2"`
+				Extra1   *string  `json:"extra_1"`
+				Extra2   *string  `json:"extra_2"`
+				Extra3   *string  `json:"extra_3"`
+				Tags     []string `json:"tags"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "제목과 내용을 입력해주세요"})
@@ -1845,6 +1852,13 @@ func main() {
 
 			// wr_parent를 자기 자신의 wr_id로 UPDATE (gnuboard 규칙)
 			db.Table(tableName).Where("wr_id = ?", post.WrID).Update("wr_parent", post.WrID)
+
+			// 태그 저장 (g5_na_tag / g5_na_tag_log)
+			if len(req.Tags) > 0 {
+				if err := gnuTagRepo.SetPostTags(slug, post.WrID, req.Tags, mbID); err != nil {
+					fmt.Printf("[WARN] tag save failed for %s/%d: %v\n", slug, post.WrID, err)
+				}
+			}
 
 			// extra 필드 업데이트 (있는 경우)
 			extras := map[string]interface{}{}
@@ -2203,14 +2217,15 @@ func main() {
 
 			// 요청 바디 파싱
 			var req struct {
-				Title    *string `json:"title"`
-				Content  *string `json:"content"`
-				Category *string `json:"category"`
-				Link1    *string `json:"link1"`
-				Link2    *string `json:"link2"`
-				Extra1   *string `json:"extra_1"`
-				Extra2   *string `json:"extra_2"`
-				Extra3   *string `json:"extra_3"`
+				Title    *string  `json:"title"`
+				Content  *string  `json:"content"`
+				Category *string  `json:"category"`
+				Link1    *string  `json:"link1"`
+				Link2    *string  `json:"link2"`
+				Extra1   *string  `json:"extra_1"`
+				Extra2   *string  `json:"extra_2"`
+				Extra3   *string  `json:"extra_3"`
+				Tags     []string `json:"tags"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "잘못된 요청입니다"})
@@ -2261,6 +2276,13 @@ func main() {
 			if err := db.Table(tableName).Where("wr_id = ?", postID).Updates(updates).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 수정 실패"})
 				return
+			}
+
+			// 태그 업데이트 (tags 필드가 전송된 경우)
+			if req.Tags != nil {
+				if err := gnuTagRepo.SetPostTags(slug, postID, req.Tags, userID); err != nil {
+					fmt.Printf("[WARN] tag update failed for %s/%d: %v\n", slug, postID, err)
+				}
 			}
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "수정 완료"})
