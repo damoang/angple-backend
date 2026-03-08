@@ -1490,8 +1490,22 @@ func main() {
 				v1handler.OverrideIPForAdminSingle(postDetail, post)
 			}
 
+			// 삭제된 글: 일반 유저는 본문 숨김, 관리자는 본문 + 리비전 이력 표시
+			if post.WrDeletedAt != nil {
+				if middleware.GetUserLevel(c) >= 10 {
+					// 관리자: 리비전 이력 조회
+					var revisions []map[string]any
+					db.Raw("SELECT id, version, change_type, title, content, edited_by, edited_by_name, edited_at, metadata FROM g5_write_revisions WHERE board_id = ? AND wr_id = ? ORDER BY version DESC", slug, id).Scan(&revisions)
+					postDetail["revisions"] = revisions
+				} else {
+					// 일반 유저: 본문 숨김
+					postDetail["content"] = ""
+					postDetail["title"] = "[삭제된 게시물입니다]"
+				}
+			}
+
 			// 비밀글 접근 제어: 작성자 또는 관리자만 내용 열람 가능
-			if strings.Contains(post.WrOption, "secret") {
+			if post.WrDeletedAt == nil && strings.Contains(post.WrOption, "secret") {
 				currentUserID := middleware.GetUserID(c)
 				currentUserLevel := middleware.GetUserLevel(c)
 				isAuthor := currentUserID != "" && currentUserID == post.MbID
@@ -2499,19 +2513,9 @@ func main() {
 				return
 			}
 
-			// 일반 사용자: 댓글 수에 따라 지연 삭제 적용
+			// 일반 사용자: 무조건 지연 소프트 삭제
 			commentCount := post.WrComment
 			delayMinutes := gnuboard.CalculateDelay(commentCount)
-
-			if delayMinutes == 0 {
-				// 댓글 없으면 즉시 삭제
-				if err := gnuWriteRepo.SoftDeletePost(slug, postID, userID); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
-				return
-			}
 
 			// 이미 삭제 예약된 경우 체크
 			existing, _ := scheduledDeleteRepo.FindByPost(slug, postID)
