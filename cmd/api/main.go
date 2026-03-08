@@ -1531,11 +1531,14 @@ func main() {
 			}
 
 			// Get comments from g5_write_{slug} where wr_parent = id and wr_is_comment = 1
-			var blockedIDs []string
-			if middleware.GetUserLevel(c) < 10 {
-				blockedIDs = getBlockedIDs(c.Request.Context(), middleware.GetUserID(c))
+			var comments []*gnuboard.G5Write
+			if middleware.GetUserLevel(c) >= 10 {
+				// 관리자: 삭제된 댓글 포함 전체 조회
+				comments, err = gnuWriteRepo.FindCommentsIncludeDeleted(slug, id)
+			} else {
+				blockedIDs := getBlockedIDs(c.Request.Context(), middleware.GetUserID(c))
+				comments, err = gnuWriteRepo.FindCommentsFiltered(slug, id, blockedIDs)
 			}
-			comments, err := gnuWriteRepo.FindCommentsFiltered(slug, id, blockedIDs)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
 				return
