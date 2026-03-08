@@ -27,8 +27,9 @@ env:
   ECR_REGISTRY: 891376997084.dkr.ecr.ap-northeast-2.amazonaws.com
 
 jobs:
-  build-and-deploy:
-    name: Build & Deploy
+  # ── Stage 1: Build & ECR Push (auto) ──
+  build:
+    name: Build & Push ECR
     runs-on: ubuntu-24.04-arm
     if: inputs.confirm == 'deploy'
 
@@ -75,6 +76,79 @@ jobs:
             ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:gateway-latest
           cache-from: type=gha,scope=backend-gateway
           cache-to: type=gha,mode=max,scope=backend-gateway
+
+  # ── Stage 2: Verify & Notify (auto, staging env) ──
+  deploy-staging:
+    name: Verify & Notify
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify API image in ECR
+        if: inputs.target == 'api' || inputs.target == 'all'
+        run: |
+          echo "Verifying image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}"
+          aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --image-ids imageTag=sha-${{ github.sha }} \
+            --query 'imageDetails[0].{size:imageSizeInBytes,pushed:imagePushedAt,tags:imageTags}' \
+            --output table
+          echo "API image verified."
+
+      - name: Verify Gateway image in ECR
+        if: inputs.target == 'gateway' || inputs.target == 'all'
+        run: |
+          echo "Verifying image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:gateway-sha-${{ github.sha }}"
+          aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --image-ids imageTag=gateway-sha-${{ github.sha }} \
+            --query 'imageDetails[0].{size:imageSizeInBytes,pushed:imagePushedAt,tags:imageTags}' \
+            --output table
+          echo "Gateway image verified."
+
+      - name: Notify build complete + request approval (Telegram)
+        if: success()
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          MSG="✅ 백엔드 빌드 완료 (${{ inputs.target }})
+
+          커밋: ${SHORT_SHA} - ${COMMIT_MSG}
+          이미지: angple-backend:sha-${SHORT_SHA}
+
+          ECR 이미지 검증 통과. 프로덕션 배포 승인 대기 중.
+          👉 ${RUN_URL}"
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MSG}" >/dev/null 2>&1 || true
+
+  # ── Stage 3: Production deploy (manual approval required) ──
+  deploy-production:
+    name: Production Deploy
+    needs: deploy-staging
+    runs-on: ubuntu-24.04-arm
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy API via SSM
         if: inputs.target == 'api' || inputs.target == 'all'
@@ -171,25 +245,14 @@ jobs:
       - name: Notify deploy complete (Telegram)
         if: success()
         run: |
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
           COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+
           MSG="🚀 백엔드 배포 완료 (${{ inputs.target }})
 
           커밋: ${SHORT_SHA} - ${COMMIT_MSG}
           이미지: angple-backend:sha-${SHORT_SHA}"
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MSG}" >/dev/null 2>&1 || true
-
-      # Discord 알림 비활성화 — 텔레그램만 사용
-      # - name: Notify deploy complete (Discord)
-      #   if: success()
-      #   run: |
-      #     SHORT_SHA="${{ github.sha }}"
-      #     SHORT_SHA="${SHORT_SHA:0:7}"
-      #     COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-      #     curl -s -H "Content-Type: application/json" \
-      #       -d "{\"embeds\":[{\"title\":\"🚀 백엔드 배포 완료 (${{ inputs.target }})\",\"description\":\"커밋: \`${SHORT_SHA}\` - ${COMMIT_MSG}\\n이미지: \`angple-backend:sha-${SHORT_SHA}\`\",\"color\":3066993,\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
-      #       "${{ secrets.DISCORD_WEBHOOK }}" >/dev/null 2>&1 || true
