@@ -90,6 +90,11 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 		"updated_at":     parseWrLast(w.WrLast, w.WrDatetime),
 	}
 
+	// Add deleted_at if post is soft deleted
+	if w.WrDeletedAt != nil {
+		result["deleted_at"] = w.WrDeletedAt.Format(time.RFC3339)
+	}
+
 	// Add thumbnail: priority is wr_10 > first <img> in content
 	if w.Wr10 != "" {
 		result["thumbnail"] = w.Wr10

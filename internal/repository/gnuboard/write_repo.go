@@ -2,6 +2,7 @@ package gnuboard
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -156,7 +157,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		}
 	}
 	if total == 0 {
-		countQuery := r.db.Table(table).Where("wr_is_comment = 0 AND wr_deleted_at IS NULL")
+		countQuery := r.db.Table(table).Where("wr_is_comment = 0")
 		if err := countQuery.Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
@@ -190,14 +191,14 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	if orderClause == "wr_num, wr_reply" {
 		selectCols := strings.Join(coreColumns, ", ")
 		err := r.db.Raw(
-			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND wr_deleted_at IS NULL ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
 			limit, offset,
 		).Scan(&posts).Error
 		// Fallback if idx_list_page doesn't exist on this table
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
 				Select(coreColumns).
-				Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").
+				Where("wr_is_comment = 0").
 				Order(orderClause).
 				Offset(offset).
 				Limit(limit).
@@ -208,7 +209,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 
 	err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").
+		Where("wr_is_comment = 0").
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
@@ -237,7 +238,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 		}
 	}
 	if total == 0 {
-		if err := r.db.Table(table).Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").Count(&total).Error; err != nil {
+		if err := r.db.Table(table).Where("wr_is_comment = 0").Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
 		postCountCache.Store(cacheKey, &cachedCount{total: total, expiresAt: time.Now().Add(countCacheTTL)})
@@ -249,13 +250,13 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	if orderClause == "wr_num, wr_reply" {
 		selectCols := strings.Join(coreColumns, ", ")
 		err := r.db.Raw(
-			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
 			excludeMbIDs, limit, offset,
 		).Scan(&posts).Error
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
 				Select(coreColumns).
-				Where("wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ?", excludeMbIDs).
+				Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
 				Order(orderClause).
 				Offset(offset).
 				Limit(limit).
@@ -266,7 +267,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 
 	err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ?", excludeMbIDs).
+		Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
@@ -290,13 +291,13 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 	searchCond, searchArgs := buildSearchCondition(searchField, searchQuery)
 
 	// Count without NOT IN (search already narrows results significantly)
-	countCond := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND " + searchCond
+	countCond := "wr_is_comment = 0 AND " + searchCond
 	if err := r.db.Table(table).Where(countCond, searchArgs...).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	// SELECT with NOT IN filter
-	selectCond := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ? AND " + searchCond
+	selectCond := "wr_is_comment = 0 AND mb_id NOT IN ? AND " + searchCond
 	selectArgs := append([]interface{}{excludeMbIDs}, searchArgs...)
 
 	orderClause := r.getSortField(boardID)
@@ -327,7 +328,7 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 			table := tableName(boardID)
 			if err := r.db.Table(table).
 				Select(coreColumns).
-				Where("wr_id IN ? AND wr_deleted_at IS NULL", result.IDs).
+				Where("wr_id IN ?", result.IDs).
 				Find(&posts).Error; err != nil {
 				return nil, 0, err
 			}
@@ -355,7 +356,7 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 	table := tableName(boardID)
 
 	searchCond, searchArgs := buildSearchCondition(searchField, searchQuery)
-	baseCond := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND " + searchCond
+	baseCond := "wr_is_comment = 0 AND " + searchCond
 	baseArgs := searchArgs
 
 	if err := r.db.Table(table).Where(baseCond, baseArgs...).Count(&total).Error; err != nil {
@@ -462,11 +463,29 @@ func (r *writeRepository) DeletePost(boardID string, wrID int) error {
 	return r.db.Table(table).Where("wr_id = ?", wrID).Delete(&gnuboard.G5Write{}).Error
 }
 
-// SoftDeletePost marks a post and its comments as deleted
+// SoftDeletePost marks a post and its comments as deleted, and records revision history
 func (r *writeRepository) SoftDeletePost(boardID string, wrID int, deletedBy string) error {
 	InvalidatePostCount(boardID)
 	table := tableName(boardID)
 	now := time.Now()
+
+	// Record revision before deletion (g5_write_revisions)
+	var post struct {
+		WrSubject string `gorm:"column:wr_subject"`
+		WrContent string `gorm:"column:wr_content"`
+		WrName    string `gorm:"column:wr_name"`
+	}
+	if err := r.db.Table(table).Select("wr_subject, wr_content, wr_name").Where("wr_id = ?", wrID).Scan(&post).Error; err == nil {
+		var nextVersion int
+		r.db.Raw("SELECT COALESCE(MAX(version), 0) + 1 FROM g5_write_revisions WHERE board_id = ? AND wr_id = ?", boardID, wrID).Scan(&nextVersion)
+		if err := r.db.Exec(`INSERT INTO g5_write_revisions
+			(board_id, wr_id, version, change_type, title, content, edited_by, edited_by_name, edited_at)
+			VALUES (?, ?, ?, 'soft_delete', ?, ?, ?, ?, ?)`,
+			boardID, wrID, nextVersion, post.WrSubject, post.WrContent, deletedBy, post.WrName, now,
+		).Error; err != nil {
+			log.Printf("[SoftDeletePost] Failed to record revision for %s/%d: %v", boardID, wrID, err)
+		}
+	}
 
 	// Soft delete the post
 	if err := r.db.Table(table).Where("wr_id = ?", wrID).Updates(map[string]interface{}{
