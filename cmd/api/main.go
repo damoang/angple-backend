@@ -2464,6 +2464,9 @@ func main() {
 				return
 			}
 
+			// 캐시 무효화
+			middleware.InvalidateCacheByPath(redisClient, fmt.Sprintf("/api/v1/boards/%s/posts/%d/delete-status", slug, postID))
+
 			c.JSON(http.StatusOK, gin.H{
 				"success":       true,
 				"message":       fmt.Sprintf("댓글이 %d개 있어 %d분 후 삭제됩니다", commentCount, delayMinutes),
@@ -2626,6 +2629,9 @@ func main() {
 				return
 			}
 
+			// 캐시 무효화
+			middleware.InvalidateCacheByPath(redisClient, fmt.Sprintf("/api/v1/boards/%s/posts/%d/delete-status", slug, commentID))
+
 			c.JSON(http.StatusOK, gin.H{
 				"success":       true,
 				"message":       fmt.Sprintf("답글이 %d개 있어 %d분 후 삭제됩니다", replyCount, delayMinutes),
@@ -2663,11 +2669,14 @@ func main() {
 				return
 			}
 
+			// 캐시 무효화
+			middleware.InvalidateCacheByPath(redisClient, fmt.Sprintf("/api/v1/boards/%s/posts/%d/delete-status", slug, wrID))
+
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제가 취소되었습니다"})
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/delete-status - Check scheduled delete status
-		v1Boards.GET("/:slug/posts/:id/delete-status", func(c *gin.Context) {
+		v1Boards.GET("/:slug/posts/:id/delete-status", middleware.CacheWithTTL(redisClient, 30*time.Second), func(c *gin.Context) {
 			slug := c.Param("slug")
 			wrID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {

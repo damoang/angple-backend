@@ -112,6 +112,15 @@ func InvalidateCache(redisClient *redis.Client, prefix string) {
 	}
 }
 
+// InvalidateCacheByPath deletes the cache entry for a specific path
+func InvalidateCacheByPath(redisClient *redis.Client, path string) {
+	if redisClient == nil {
+		return
+	}
+	key := DefaultCacheConfig().KeyPrefix + cacheKey(path, "")
+	redisClient.Del(context.Background(), key)
+}
+
 func cacheKey(path, query string) string {
 	raw := path
 	if query != "" {
