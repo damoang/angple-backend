@@ -418,7 +418,7 @@ func main() {
 		v1Auth.GET("/profile", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
 		router.GET("/api/v1/menus/sidebar", func(c *gin.Context) {
 			var menus []domain.Menu
-			if err := db.Where("is_active = ? AND show_in_sidebar = ?", true, true).
+			if err := db.Where("is_active = ? AND (show_in_sidebar = ? OR show_in_header = ?)", true, true, true).
 				Order("order_num ASC, id ASC").Find(&menus).Error; err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
 				return
