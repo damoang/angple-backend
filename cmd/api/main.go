@@ -3610,7 +3610,7 @@ func main() {
 		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager)
 		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager)
 		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager)
-		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager)
+		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager, db)
 
 		// v1 message routes (uses g5_memo table directly)
 		gnuMemoRepo := gnurepo.NewMemoRepository(db)
@@ -3619,7 +3619,7 @@ func main() {
 		v1Messages.GET("", v1MsgHandler.GetMessages)
 		v1Messages.GET("/unread-count", v1MsgHandler.GetUnreadCount)
 		v1Messages.GET("/:id", v1MsgHandler.GetMessage)
-		v1Messages.POST("", v1MsgHandler.SendMessage)
+		v1Messages.POST("", banCheck, v1MsgHandler.SendMessage)
 		v1Messages.DELETE("/:id", v1MsgHandler.DeleteMessage)
 
 		// Banner, Promotion, License (v1 + v2 dual routes)

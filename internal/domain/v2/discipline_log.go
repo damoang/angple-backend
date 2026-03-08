@@ -126,6 +126,7 @@ type DisciplineLogListResponse struct {
 	MemberNickname  string   `json:"member_nickname"`
 	PenaltyPeriod   int      `json:"penalty_period"`
 	PenaltyDateFrom string   `json:"penalty_date_from"`
+	PenaltyDateTo   *string  `json:"penalty_date_to,omitempty"`
 	ViolationTypes  []int    `json:"violation_types"`
 	ViolationTitles []string `json:"violation_titles"`
 }
@@ -164,7 +165,7 @@ func (d *DisciplineLog) ToListResponse() DisciplineLogListResponse {
 		}
 	}
 
-	return DisciplineLogListResponse{
+	resp := DisciplineLogListResponse{
 		ID:              d.ID,
 		MemberID:        d.MemberID,
 		MemberNickname:  d.MemberNickname,
@@ -173,6 +174,11 @@ func (d *DisciplineLog) ToListResponse() DisciplineLogListResponse {
 		ViolationTypes:  d.ViolationTypes,
 		ViolationTitles: titles,
 	}
+	if d.PenaltyDateTo != nil {
+		to := d.PenaltyDateTo.Format("2006-01-02")
+		resp.PenaltyDateTo = &to
+	}
+	return resp
 }
 
 // ToDetailResponse converts DisciplineLog to detail response

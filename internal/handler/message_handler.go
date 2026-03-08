@@ -201,6 +201,12 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	// Block messages to admin account
+	if req.ReceiverID == "admin" {
+		common.V2ErrorResponse(c, http.StatusForbidden, "관리자에게는 쪽지를 보낼 수 없습니다", nil)
+		return
+	}
+
 	// Verify receiver exists
 	_, err := h.memberRepo.FindByID(req.ReceiverID)
 	if err != nil {

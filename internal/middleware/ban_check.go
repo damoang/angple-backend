@@ -79,7 +79,7 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 			banEndStr = "영구 제재"
 		}
 		common.ErrorResponse(c, http.StatusForbidden,
-			"제재 기간 중에는 글을 작성할 수 없습니다. (해제일: "+banEndStr+")", nil)
+			"이용제한 기간 중에는 해당 기능을 사용할 수 없습니다. (해제일: "+banEndStr+")", nil)
 		c.Abort()
 	}
 }

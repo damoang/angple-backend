@@ -50,8 +50,8 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	boardPosts.POST("", auth, banCheck, middleware.RequireWrite(boardPermChecker), h.CreatePost)
 	boardPosts.GET("/:id", h.GetPost)
 	boardPosts.PUT("/:id", auth, banCheck, h.UpdatePost)
-	boardPosts.DELETE("/:id", auth, h.DeletePost)
-	boardPosts.PATCH("/:id/soft-delete", auth, h.SoftDeletePost)
+	boardPosts.DELETE("/:id", auth, banCheck, h.DeletePost)
+	boardPosts.PATCH("/:id/soft-delete", auth, banCheck, h.SoftDeletePost)
 	boardPosts.POST("/:id/restore", auth, middleware.RequireAdmin(), h.RestorePost)
 	boardPosts.DELETE("/:id/permanent", auth, middleware.RequireAdmin(), h.PermanentDeletePost)
 	boardPosts.GET("/:id/revisions", auth, h.GetPostRevisions)
@@ -62,7 +62,7 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	comments.GET("", h.ListComments)
 	comments.POST("", auth, banCheck, middleware.RequireComment(boardPermChecker), h.CreateComment)
 	comments.PUT("/:comment_id", auth, banCheck, h.UpdateComment)
-	comments.DELETE("/:comment_id", auth, h.DeleteComment)
+	comments.DELETE("/:comment_id", auth, banCheck, h.DeleteComment)
 }
 
 // SetupAdminPosts configures v2 admin post routes (deleted posts)
@@ -152,11 +152,15 @@ func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.M
 }
 
 // SetupMessage configures v2 message routes
-func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *jwt.Manager) {
+func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *jwt.Manager, gnuDB ...*gorm.DB) {
 	auth := middleware.JWTAuth(jwtManager)
 
 	messages := router.Group("/api/v2/messages", auth)
-	messages.POST("", h.SendMessage)
+	if len(gnuDB) > 0 && gnuDB[0] != nil {
+		messages.POST("", middleware.BanCheck(gnuDB[0]), h.SendMessage)
+	} else {
+		messages.POST("", h.SendMessage)
+	}
 	messages.GET("/inbox", h.GetInbox)
 	messages.GET("/sent", h.GetSent)
 	messages.GET("/:id", h.GetMessage)
