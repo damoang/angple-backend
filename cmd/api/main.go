@@ -348,12 +348,16 @@ func main() {
 		siteRepo := repository.NewSiteRepository(db)
 
 		// Sphinx full-text search (SphinxQL on port 9306)
+		sphinxHost := os.Getenv("SPHINX_HOST")
+		if sphinxHost == "" {
+			sphinxHost = "127.0.0.1"
+		}
 		var sphinxClient *pkgsphinx.Client
-		if sc, err := pkgsphinx.New("127.0.0.1", 9306); err != nil {
+		if sc, err := pkgsphinx.New(sphinxHost, 9306); err != nil {
 			pkglogger.Info("Sphinx unavailable, falling back to MySQL LIKE: %v", err)
 		} else {
 			sphinxClient = sc
-			pkglogger.Info("Sphinx connected (127.0.0.1:9306)")
+			pkglogger.Info("Sphinx connected (%s:9306)", sphinxHost)
 		}
 
 		// Gnuboard repositories for v1 API (g5_* tables)
