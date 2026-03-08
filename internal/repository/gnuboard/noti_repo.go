@@ -1,10 +1,17 @@
 package gnuboard
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// joinOr joins SQL conditions with OR
+func joinOr(conditions []string) string {
+	return strings.Join(conditions, " OR ")
+}
 
 // Notification represents a row in g5_na_noti table
 type Notification struct {
@@ -118,6 +125,7 @@ func (r *notiRepository) Create(noti *Notification) error {
 }
 
 // GetGroupedNotifications returns notifications grouped by (bo_table, wr_id, ph_from_case)
+// Optimized: 2-pass approach — first identify top N groups (lightweight), then enrich only those groups
 func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, filterType string) ([]GroupedNotification, int64, int64, error) {
 	// Build filter condition
 	fromCaseFilter := ""
@@ -132,18 +140,7 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 		fromCaseFilter = "AND ph_from_case IN ('write', 'inquire', 'answer')"
 	}
 
-	// Count total groups
-	var totalGroups int64
-	countSQL := `SELECT COUNT(*) FROM (
-		SELECT 1 FROM g5_na_noti
-		WHERE mb_id = ? ` + fromCaseFilter + `
-		GROUP BY bo_table, wr_id, ph_from_case
-	) t`
-	if err := r.db.Raw(countSQL, mbID).Scan(&totalGroups).Error; err != nil {
-		return nil, 0, 0, err
-	}
-
-	// Count total unread
+	// Count total unread (fast — uses idx_mb_readed index)
 	var unreadCount int64
 	if err := r.db.Model(&Notification{}).
 		Where("mb_id = ? AND ph_readed = 'N'", mbID).
@@ -151,30 +148,158 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 		return nil, 0, 0, err
 	}
 
-	// Get grouped notifications
+	// Pass 1: Identify top N groups by MAX(ph_id) — lightweight, no GROUP_CONCAT
 	offset := (page - 1) * limit
-	groupSQL := `SELECT
-		bo_table,
-		wr_id,
-		ph_from_case,
+	topGroupsSQL := `SELECT
+		bo_table, wr_id, ph_from_case,
 		MAX(ph_id) as latest_ph_id,
-		MAX(ph_datetime) as latest_at,
-		COUNT(*) as sender_count,
-		SUM(CASE WHEN ph_readed = 'N' THEN 1 ELSE 0 END) as unread_count,
-		SUBSTRING_INDEX(GROUP_CONCAT(rel_mb_nick ORDER BY ph_datetime DESC SEPARATOR '||'), '||', 1) as latest_sender,
-		SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT rel_mb_nick ORDER BY ph_datetime DESC SEPARATOR '||'), '||', 5) as senders,
-		SUBSTRING_INDEX(GROUP_CONCAT(rel_url ORDER BY ph_datetime DESC SEPARATOR '||'), '||', 1) as rel_url,
-		SUBSTRING_INDEX(GROUP_CONCAT(parent_subject ORDER BY ph_datetime DESC SEPARATOR '||'), '||', 1) as parent_subject,
-		SUBSTRING_INDEX(GROUP_CONCAT(rel_msg ORDER BY ph_datetime DESC SEPARATOR '||'), '||', 1) as rel_msg
+		COUNT(*) as sender_count
 	FROM g5_na_noti
 	WHERE mb_id = ? ` + fromCaseFilter + `
 	GROUP BY bo_table, wr_id, ph_from_case
 	ORDER BY latest_ph_id DESC
 	LIMIT ? OFFSET ?`
 
-	var groups []GroupedNotification
-	if err := r.db.Raw(groupSQL, mbID, limit, offset).Scan(&groups).Error; err != nil {
+	type topGroup struct {
+		BoTable     string `gorm:"column:bo_table"`
+		WrID        int    `gorm:"column:wr_id"`
+		PhFromCase  string `gorm:"column:ph_from_case"`
+		LatestPhID  int    `gorm:"column:latest_ph_id"`
+		SenderCount int    `gorm:"column:sender_count"`
+	}
+	var tops []topGroup
+	if err := r.db.Raw(topGroupsSQL, mbID, limit, offset).Scan(&tops).Error; err != nil {
 		return nil, 0, 0, err
+	}
+
+	if len(tops) == 0 {
+		return []GroupedNotification{}, 0, unreadCount, nil
+	}
+
+	// Estimate total groups from first page (avoid expensive COUNT subquery)
+	var totalGroups int64
+	if page == 1 && len(tops) < limit {
+		totalGroups = int64(len(tops))
+	} else {
+		countSQL := `SELECT COUNT(*) FROM (
+			SELECT 1 FROM g5_na_noti
+			WHERE mb_id = ? ` + fromCaseFilter + `
+			GROUP BY bo_table, wr_id, ph_from_case
+		) t`
+		if err := r.db.Raw(countSQL, mbID).Scan(&totalGroups).Error; err != nil {
+			return nil, 0, 0, err
+		}
+	}
+
+	// Pass 2a: Get the latest notification row for each group (PK lookup)
+	phIDs := make([]int, len(tops))
+	for i, t := range tops {
+		phIDs[i] = t.LatestPhID
+	}
+
+	var latestRows []Notification
+	if err := r.db.Where("ph_id IN ?", phIDs).Find(&latestRows).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	latestMap := make(map[int]Notification, len(latestRows))
+	for _, row := range latestRows {
+		latestMap[row.PhID] = row
+	}
+
+	// Pass 2b: Get unread counts per group (only if there are unread notifications)
+	type unreadResult struct {
+		BoTable    string `gorm:"column:bo_table"`
+		WrID       int    `gorm:"column:wr_id"`
+		PhFromCase string `gorm:"column:ph_from_case"`
+		Cnt        int    `gorm:"column:cnt"`
+	}
+	var unreadResults []unreadResult
+	if unreadCount > 0 {
+		conditions := make([]string, 0, len(tops))
+		args := make([]interface{}, 0, len(tops)*3+1)
+		args = append(args, mbID)
+		for _, t := range tops {
+			conditions = append(conditions, "(bo_table = ? AND wr_id = ? AND ph_from_case = ?)")
+			args = append(args, t.BoTable, t.WrID, t.PhFromCase)
+		}
+		unreadSQL := `SELECT bo_table, wr_id, ph_from_case, COUNT(*) as cnt
+			FROM g5_na_noti
+			WHERE mb_id = ? AND ph_readed = 'N' AND (` + joinOr(conditions) + `)
+			GROUP BY bo_table, wr_id, ph_from_case`
+		r.db.Raw(unreadSQL, args...).Scan(&unreadResults)
+	}
+	unreadMap := make(map[string]int, len(unreadResults))
+	for _, u := range unreadResults {
+		key := u.BoTable + "|" + fmt.Sprintf("%d", u.WrID) + "|" + u.PhFromCase
+		unreadMap[key] = u.Cnt
+	}
+
+	// Pass 2c: Get senders (skip GROUP_CONCAT for single-sender groups)
+	senderMap := make(map[string]string, len(tops))
+	var multiSenderTops []topGroup
+	for _, t := range tops {
+		key := t.BoTable + "|" + fmt.Sprintf("%d", t.WrID) + "|" + t.PhFromCase
+		if t.SenderCount <= 1 {
+			if latest, ok := latestMap[t.LatestPhID]; ok {
+				senderMap[key] = latest.RelMbNick
+			}
+		} else {
+			multiSenderTops = append(multiSenderTops, t)
+		}
+	}
+
+	if len(multiSenderTops) > 0 {
+		type senderResult struct {
+			BoTable    string `gorm:"column:bo_table"`
+			WrID       int    `gorm:"column:wr_id"`
+			PhFromCase string `gorm:"column:ph_from_case"`
+			Senders    string `gorm:"column:senders"`
+		}
+		senderConditions := make([]string, 0, len(multiSenderTops))
+		senderArgs := make([]interface{}, 0, len(multiSenderTops)*3+1)
+		senderArgs = append(senderArgs, mbID)
+		for _, t := range multiSenderTops {
+			senderConditions = append(senderConditions, "(bo_table = ? AND wr_id = ? AND ph_from_case = ?)")
+			senderArgs = append(senderArgs, t.BoTable, t.WrID, t.PhFromCase)
+		}
+		var senderResults []senderResult
+		sendersSQL := `SELECT bo_table, wr_id, ph_from_case,
+			SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT rel_mb_nick ORDER BY ph_datetime DESC SEPARATOR '||'), '||', 5) as senders
+			FROM g5_na_noti
+			WHERE mb_id = ? AND (` + joinOr(senderConditions) + `)
+			GROUP BY bo_table, wr_id, ph_from_case`
+		r.db.Raw(sendersSQL, senderArgs...).Scan(&senderResults)
+		for _, s := range senderResults {
+			key := s.BoTable + "|" + fmt.Sprintf("%d", s.WrID) + "|" + s.PhFromCase
+			senderMap[key] = s.Senders
+		}
+	}
+
+	// Assemble results in the same order as tops
+	groups := make([]GroupedNotification, 0, len(tops))
+	for _, t := range tops {
+		latest, ok := latestMap[t.LatestPhID]
+		if !ok {
+			continue
+		}
+		key := t.BoTable + "|" + fmt.Sprintf("%d", t.WrID) + "|" + t.PhFromCase
+		uc := unreadMap[key]
+		senders := senderMap[key]
+
+		groups = append(groups, GroupedNotification{
+			BoTable:       t.BoTable,
+			WrID:          t.WrID,
+			PhFromCase:    t.PhFromCase,
+			LatestPhID:    t.LatestPhID,
+			LatestAt:      latest.PhDatetime,
+			SenderCount:   t.SenderCount,
+			UnreadCount:   uc,
+			LatestSender:  latest.RelMbNick,
+			Senders:       senders,
+			RelURL:        latest.RelURL,
+			ParentSubject: latest.ParentSubject,
+			RelMsg:        latest.RelMsg,
+		})
 	}
 
 	return groups, totalGroups, unreadCount, nil
