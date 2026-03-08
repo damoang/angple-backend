@@ -1,5 +1,5 @@
 # Build stage - cross-compile without QEMU emulation
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 ARG TARGETARCH
 
