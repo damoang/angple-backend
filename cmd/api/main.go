@@ -33,6 +33,7 @@ import (
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
+	"github.com/damoang/angple-backend/internal/cron"
 	"github.com/damoang/angple-backend/internal/worker"
 	"github.com/damoang/angple-backend/internal/ws"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
@@ -4068,6 +4069,14 @@ func main() {
 
 		pluginManager.StartScheduler()
 		pkglogger.Info("Plugin Store & Marketplace initialized")
+
+		// Internal cron endpoints (curl-based cron jobs)
+		cronHandler := cron.NewHandler(db)
+		cronGroup := router.Group("/api/internal/cron")
+		cronGroup.POST("/member-lock-release", cronHandler.MemberLockRelease)
+		cronGroup.POST("/update-member-levels", cronHandler.UpdateMemberLevels)
+		cronGroup.POST("/process-approved-reports", cronHandler.ProcessApprovedReports)
+		cronGroup.POST("/update-report-pattern", cronHandler.UpdateReportPattern)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(gnuWriteRepo, scheduledDeleteRepo)
