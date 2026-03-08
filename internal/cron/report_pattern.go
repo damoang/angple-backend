@@ -520,6 +520,13 @@ func saveReportPost(db *gorm.DB, stats *reportStats, subject string, now time.Ti
 		return result.Error
 	}
 
+	// wr_parent = wr_id 설정 (Gnuboard 호환: 게시글은 반드시 wr_parent = wr_id)
+	var wrID int
+	db.Raw("SELECT LAST_INSERT_ID()").Scan(&wrID)
+	if wrID > 0 {
+		db.Exec("UPDATE g5_write_report SET wr_parent = ? WHERE wr_id = ?", wrID, wrID)
+	}
+
 	// 게시판 글 수 업데이트
 	db.Exec("UPDATE g5_board SET bo_count_write = bo_count_write + 1 WHERE bo_table = 'report'")
 

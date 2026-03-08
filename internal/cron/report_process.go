@@ -289,11 +289,6 @@ func createDisciplineLogPost(
 	isBulk bool,
 	now time.Time,
 ) (int, error) {
-	// 다음 wr_id 조회
-	var maxWrID int
-	tx.Raw("SELECT COALESCE(MAX(wr_id), 0) FROM g5_write_disciplinelog").Scan(&maxWrID)
-	wrID := maxWrID + 1
-
 	// penalty_type 변환
 	penaltyType := convertDisciplineType(disciplineType)
 
@@ -344,13 +339,11 @@ func createDisciplineLogPost(
 	nowStr := now.Format("2006-01-02 15:04:05")
 	subject := fmt.Sprintf("%s(%s)", targetMbID, targetNick)
 
-	// INSERT
+	// INSERT (AUTO_INCREMENT로 wr_id 자동 생성)
 	if err := tx.Exec(`
 		INSERT INTO g5_write_disciplinelog
-		SET wr_id = ?,
-			wr_num = (SELECT IFNULL(MIN(wr_num), 0) - 1 FROM g5_write_disciplinelog tmp),
+		SET wr_num = (SELECT IFNULL(MIN(wr_num), 0) - 1 FROM g5_write_disciplinelog tmp),
 			wr_reply = '',
-			wr_parent = ?,
 			wr_is_comment = 0,
 			wr_comment = 0,
 			wr_comment_reply = '',
@@ -377,11 +370,18 @@ func createDisciplineLogPost(
 			wr_1 = ?,
 			wr_2 = '', wr_3 = '', wr_4 = '', wr_5 = '',
 			wr_6 = '', wr_7 = '', wr_8 = '', wr_9 = '', wr_10 = ''
-	`, wrID, wrID, subject, string(contentJSON),
+	`, subject, string(contentJSON),
 		"https://damoang.net"+reportedPath,
 		nowStr, nowStr, wr1Value,
 	).Error; err != nil {
 		return 0, err
+	}
+
+	// LAST_INSERT_ID로 wr_id 획득 후 wr_parent = wr_id 설정 (Gnuboard 호환)
+	var wrID int
+	tx.Raw("SELECT LAST_INSERT_ID()").Scan(&wrID)
+	if wrID > 0 {
+		tx.Exec("UPDATE g5_write_disciplinelog SET wr_parent = ? WHERE wr_id = ?", wrID, wrID)
 	}
 
 	// 게시판 글 수 증가
