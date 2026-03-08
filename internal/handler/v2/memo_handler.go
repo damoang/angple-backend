@@ -125,6 +125,22 @@ func (h *MemoHandler) UpdateMemo(c *gin.Context) {
 	common.V2Success(c, memo)
 }
 
+// GetAllMemos handles GET /api/v2/members/:id/memo/all (admin only)
+func (h *MemoHandler) GetAllMemos(c *gin.Context) {
+	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+
+	memos, err := h.memoRepo.FindAllByTarget(targetUserID)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "메모 조회 실패", err)
+		return
+	}
+	common.V2Success(c, memos)
+}
+
 // DeleteMemo handles DELETE /api/v2/members/:id/memo
 func (h *MemoHandler) DeleteMemo(c *gin.Context) {
 	userID, targetUserID, err := h.parseUserAndTarget(c)

@@ -64,6 +64,47 @@ func AddSoftDeleteColumns(db *gorm.DB, boardID string) error {
 	return nil
 }
 
+// CreateScheduledDeletesTable creates the g5_scheduled_deletes table for delayed deletion
+func CreateScheduledDeletesTable(db *gorm.DB) error {
+	var count int64
+	db.Raw(`
+		SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		AND TABLE_NAME = 'g5_scheduled_deletes'
+	`).Scan(&count)
+
+	if count > 0 {
+		log.Printf("[Migration] g5_scheduled_deletes table already exists, skipping")
+		return nil
+	}
+
+	sql := `
+		CREATE TABLE g5_scheduled_deletes (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			bo_table VARCHAR(20) NOT NULL,
+			wr_id INT NOT NULL,
+			wr_is_comment TINYINT NOT NULL DEFAULT 0,
+			reply_count INT NOT NULL DEFAULT 0 COMMENT 'Number of comments/replies at time of request',
+			delay_minutes INT NOT NULL DEFAULT 0 COMMENT 'Delay in minutes before execution',
+			scheduled_at DATETIME NOT NULL COMMENT 'When the delete will be executed',
+			requested_by VARCHAR(20) NOT NULL,
+			requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			cancelled_at DATETIME NULL,
+			executed_at DATETIME NULL,
+			status ENUM('pending','cancelled','executed') NOT NULL DEFAULT 'pending',
+			UNIQUE KEY uk_bo_wr (bo_table, wr_id),
+			KEY idx_status_scheduled (status, scheduled_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+	`
+
+	if err := db.Exec(sql).Error; err != nil {
+		return fmt.Errorf("failed to create g5_scheduled_deletes table: %w", err)
+	}
+
+	log.Printf("[Migration] Created g5_scheduled_deletes table")
+	return nil
+}
+
 // CreateWriteRevisionsTable creates the g5_write_revisions table for post history tracking
 func CreateWriteRevisionsTable(db *gorm.DB) error {
 	// Check if table already exists

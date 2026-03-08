@@ -73,6 +73,9 @@ type WriteRepository interface {
 	SoftDeleteComment(boardID string, wrID int, deletedBy string) error
 	RestoreComment(boardID string, wrID int) error
 
+	// Counting
+	CountCommentReplies(boardID string, parentID int, commentID int) (int64, error)
+
 	// Utility
 	TableExists(boardID string) bool
 	GetNextWrNum(boardID string) (int, error)
@@ -182,6 +185,27 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	}
 
 	// Select only core columns to avoid errors with missing columns
+	// Use FORCE INDEX for default sort order — MySQL optimizer incorrectly prefers idx_list_order
+	// over idx_list_page, causing 1M+ row scans instead of 15K (verified with EXPLAIN)
+	if orderClause == "wr_num, wr_reply" {
+		selectCols := strings.Join(coreColumns, ", ")
+		err := r.db.Raw(
+			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND wr_deleted_at IS NULL ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			limit, offset,
+		).Scan(&posts).Error
+		// Fallback if idx_list_page doesn't exist on this table
+		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
+			err = r.db.Table(table).
+				Select(coreColumns).
+				Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").
+				Order(orderClause).
+				Offset(offset).
+				Limit(limit).
+				Find(&posts).Error
+		}
+		return posts, total, err
+	}
+
 	err := r.db.Table(table).
 		Select(coreColumns).
 		Where("wr_is_comment = 0 AND wr_deleted_at IS NULL").
@@ -220,6 +244,25 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	}
 
 	orderClause := r.getSortField(boardID)
+
+	// Use FORCE INDEX for default sort order (same as FindPosts)
+	if orderClause == "wr_num, wr_reply" {
+		selectCols := strings.Join(coreColumns, ", ")
+		err := r.db.Raw(
+			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			excludeMbIDs, limit, offset,
+		).Scan(&posts).Error
+		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
+			err = r.db.Table(table).
+				Select(coreColumns).
+				Where("wr_is_comment = 0 AND wr_deleted_at IS NULL AND mb_id NOT IN ?", excludeMbIDs).
+				Order(orderClause).
+				Offset(offset).
+				Limit(limit).
+				Find(&posts).Error
+		}
+		return posts, total, err
+	}
 
 	err := r.db.Table(table).
 		Select(coreColumns).
@@ -545,6 +588,34 @@ func (r *writeRepository) RestoreComment(boardID string, wrID int) error {
 			"wr_deleted_at": nil,
 			"wr_deleted_by": nil,
 		}).Error
+}
+
+// CountCommentReplies counts the number of replies to a specific comment.
+// For a comment with wr_comment=X and wr_comment_reply=Y, replies are those
+// with the same wr_comment and wr_comment_reply starting with Y (but longer).
+func (r *writeRepository) CountCommentReplies(boardID string, parentID int, commentID int) (int64, error) {
+	// First get the comment to find its wr_comment and wr_comment_reply
+	comment, err := r.FindCommentByID(boardID, commentID)
+	if err != nil {
+		return 0, err
+	}
+
+	var count int64
+	query := r.db.Table(tableName(boardID)).
+		Where("wr_parent = ? AND wr_is_comment = 1 AND wr_id != ? AND wr_deleted_at IS NULL", parentID, commentID).
+		Where("wr_comment = ?", comment.WrComment)
+
+	if comment.WrCommentReply == "" {
+		// Top-level comment: all replies under this wr_comment are its replies
+		query = query.Where("wr_comment_reply != ''")
+	} else {
+		// Nested reply: count replies with longer wr_comment_reply starting with this prefix
+		query = query.Where("wr_comment_reply LIKE ? AND LENGTH(wr_comment_reply) > ?",
+			comment.WrCommentReply+"%", len(comment.WrCommentReply))
+	}
+
+	err = query.Count(&count).Error
+	return count, err
 }
 
 // TableExists checks if the write table exists for a board

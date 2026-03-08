@@ -76,19 +76,29 @@ func (r *blockRepository) FindByMember(mbID string, page, perPage int) ([]*Block
 		return nil, 0, err
 	}
 
-	results := make([]*BlockWithMember, len(blocks))
+	// Batch fetch nicknames for all blocked members
+	mbIDs := make([]string, len(blocks))
 	for i, b := range blocks {
-		nickname := ""
-		var member struct {
+		mbIDs[i] = b.BlockedMbID
+	}
+	nickMap := make(map[string]string)
+	if len(mbIDs) > 0 {
+		var members []struct {
+			MbID     string `gorm:"column:mb_id"`
 			Nickname string `gorm:"column:mb_nick"`
 		}
-		if err := r.db.Table("g5_member").Select("mb_nick").Where("mb_id = ?", b.BlockedMbID).First(&member).Error; err == nil {
-			nickname = member.Nickname
+		r.db.Table("g5_member").Select("mb_id, mb_nick").Where("mb_id IN ?", mbIDs).Find(&members)
+		for _, m := range members {
+			nickMap[m.MbID] = m.Nickname
 		}
+	}
+
+	results := make([]*BlockWithMember, len(blocks))
+	for i, b := range blocks {
 		results[i] = &BlockWithMember{
 			BlockID:   b.ID,
 			UserID:    b.BlockedMbID,
-			Nickname:  nickname,
+			Nickname:  nickMap[b.BlockedMbID],
 			BlockedAt: b.CreatedAt,
 		}
 	}

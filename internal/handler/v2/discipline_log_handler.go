@@ -34,6 +34,7 @@ type DisciplineLogContent struct {
 	PenaltyDateFrom string         `json:"penalty_date_from"`
 	SgTypes         []int          `json:"sg_types"`
 	ReportedItems   []ReportedItem `json:"reported_items,omitempty"`
+	Content         string         `json:"content,omitempty"`
 }
 
 // ReportedItem represents a reported post or comment

@@ -7,9 +7,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// MemoWithWriter represents a memo with writer member info
+type MemoWithWriter struct {
+	v2.V2Memo
+	MbID   string `gorm:"column:mb_id" json:"mb_id"`
+	MbNick string `gorm:"column:mb_nick" json:"mb_nick"`
+}
+
 // MemoRepository v2 memo data access
 type MemoRepository interface {
 	FindByUserAndTarget(userID, targetUserID uint64) (*v2.V2Memo, error)
+	FindAllByTarget(targetUserID uint64) ([]MemoWithWriter, error)
 	Upsert(memo *v2.V2Memo) error
 	Delete(userID, targetUserID uint64) error
 }
@@ -41,6 +49,18 @@ func (r *memoRepository) Upsert(memo *v2.V2Memo) error {
 	existing.Content = memo.Content
 	existing.Color = memo.Color
 	return r.db.Save(existing).Error
+}
+
+// FindAllByTarget returns all memos about a target member with writer info (admin only)
+func (r *memoRepository) FindAllByTarget(targetUserID uint64) ([]MemoWithWriter, error) {
+	var memos []MemoWithWriter
+	err := r.db.Table("v2_memos").
+		Select("v2_memos.*, g5_member.mb_id, g5_member.mb_nick").
+		Joins("LEFT JOIN g5_member ON g5_member.mb_no = v2_memos.user_id").
+		Where("v2_memos.target_user_id = ?", targetUserID).
+		Order("v2_memos.created_at DESC").
+		Find(&memos).Error
+	return memos, err
 }
 
 func (r *memoRepository) Delete(userID, targetUserID uint64) error {

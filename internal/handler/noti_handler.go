@@ -246,3 +246,175 @@ func (h *NotiHandler) Delete(c *gin.Context) {
 	}
 	common.V2Success(c, gin.H{"message": "삭제 완료"})
 }
+
+// groupedNotificationResponse is the response for a single grouped notification
+type groupedNotificationResponse struct {
+	Type          string   `json:"type"`
+	BoTable       string   `json:"bo_table"`
+	WrID          int      `json:"wr_id"`
+	Title         string   `json:"title"`
+	URL           string   `json:"url,omitempty"`
+	ParentSubject string   `json:"parent_subject,omitempty"`
+	Content       string   `json:"content,omitempty"`
+	LatestSender  string   `json:"latest_sender"`
+	Senders       []string `json:"senders"`
+	SenderCount   int      `json:"sender_count"`
+	UnreadCount   int      `json:"unread_count"`
+	HasUnread     bool     `json:"has_unread"`
+	LatestAt      string   `json:"latest_at"`
+	FromCase      string   `json:"from_case"`
+}
+
+// groupedNotificationListResponse is the paginated response for grouped notifications
+type groupedNotificationListResponse struct {
+	Items       []groupedNotificationResponse `json:"items"`
+	Total       int64                         `json:"total"`
+	UnreadCount int64                         `json:"unread_count"`
+	Page        int                           `json:"page"`
+	Limit       int                           `json:"limit"`
+	TotalPages  int64                         `json:"total_pages"`
+}
+
+// generateGroupTitle generates a title for grouped notifications
+func generateGroupTitle(fromCase, latestSender string, senderCount int) string {
+	action := ""
+	switch fromCase {
+	case "board":
+		action = "댓글을 달았습니다"
+	case "comment", "reply":
+		action = "답글을 달았습니다"
+	case "mention":
+		action = "회원님을 멘션했습니다"
+	case "good":
+		action = "추천했습니다"
+	case "nogood":
+		action = "비추천했습니다"
+	case "write":
+		action = "새 글을 작성했습니다"
+	case "inquire":
+		return "새 문의가 등록되었습니다"
+	case "answer":
+		return "문의에 답변이 등록되었습니다"
+	default:
+		return "새 알림이 있습니다"
+	}
+
+	if senderCount > 1 {
+		return fmt.Sprintf("%s님 외 %d명이 %s", latestSender, senderCount-1, action)
+	}
+	return fmt.Sprintf("%s님이 %s", latestSender, action)
+}
+
+// GetGroupedNotifications handles GET /api/v1/notifications/grouped
+func (h *NotiHandler) GetGroupedNotifications(c *gin.Context) {
+	mbID := middleware.GetUserID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	filterType := c.DefaultQuery("type", "") // "", "comment", "like", "mention", "system"
+
+	groups, totalGroups, unreadCount, err := h.repo.GetGroupedNotifications(mbID, page, limit, filterType)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "알림 목록 조회 실패", err)
+		return
+	}
+
+	items := make([]groupedNotificationResponse, 0, len(groups))
+	for _, g := range groups {
+		senders := strings.Split(g.Senders, "||")
+		// Remove empty strings
+		filteredSenders := make([]string, 0, len(senders))
+		for _, s := range senders {
+			if s != "" {
+				filteredSenders = append(filteredSenders, s)
+			}
+		}
+
+		items = append(items, groupedNotificationResponse{
+			Type:          mapFromCase(g.PhFromCase),
+			BoTable:       g.BoTable,
+			WrID:          g.WrID,
+			Title:         generateGroupTitle(g.PhFromCase, g.LatestSender, g.SenderCount),
+			URL:           convertLegacyURL(g.RelURL),
+			ParentSubject: g.ParentSubject,
+			Content:       g.RelMsg,
+			LatestSender:  g.LatestSender,
+			Senders:       filteredSenders,
+			SenderCount:   g.SenderCount,
+			UnreadCount:   g.UnreadCount,
+			HasUnread:     g.UnreadCount > 0,
+			LatestAt:      g.LatestAt.Format(time.RFC3339),
+			FromCase:      g.PhFromCase,
+		})
+	}
+
+	totalPages := int64(math.Ceil(float64(totalGroups) / float64(limit)))
+
+	common.V2Success(c, groupedNotificationListResponse{
+		Items:       items,
+		Total:       totalGroups,
+		UnreadCount: unreadCount,
+		Page:        page,
+		Limit:       limit,
+		TotalPages:  totalPages,
+	})
+}
+
+// MarkGroupAsRead handles POST /api/v1/notifications/group/read
+func (h *NotiHandler) MarkGroupAsRead(c *gin.Context) {
+	mbID := middleware.GetUserID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+
+	var req struct {
+		BoTable  string `json:"bo_table"`
+		WrID     int    `json:"wr_id"`
+		FromCase string `json:"from_case"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+
+	if err := h.repo.MarkGroupAsRead(mbID, req.BoTable, req.WrID, req.FromCase); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "그룹 읽음 처리 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"message": "그룹 읽음 처리 완료"})
+}
+
+// DeleteGroup handles DELETE /api/v1/notifications/group
+func (h *NotiHandler) DeleteGroup(c *gin.Context) {
+	mbID := middleware.GetUserID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+
+	boTable := c.Query("bo_table")
+	wrID, _ := strconv.Atoi(c.Query("wr_id"))
+	fromCase := c.Query("from_case")
+
+	if boTable == "" || fromCase == "" {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "필수 파라미터 누락", nil)
+		return
+	}
+
+	if err := h.repo.DeleteGroup(mbID, boTable, wrID, fromCase); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "그룹 삭제 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"message": "그룹 삭제 완료"})
+}

@@ -33,6 +33,7 @@ import (
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
+	"github.com/damoang/angple-backend/internal/worker"
 	"github.com/damoang/angple-backend/internal/ws"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
@@ -294,6 +295,15 @@ func main() {
 
 	// Health Check (DB ping 포함 — 커넥션 죽으면 K8s가 파드 재시작)
 	router.GET("/health", func(c *gin.Context) {
+		if db == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "error",
+				"service": "angple-backend",
+				"error":   "db not initialized",
+				"time":    time.Now().Unix(),
+			})
+			return
+		}
 		sqlDB, err := db.DB()
 		if err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -352,6 +362,7 @@ func main() {
 		}
 		gnuFileRepo := gnurepo.NewFileRepository(db)
 		gnuMemberRepo := gnurepo.NewMemberRepository(db)
+		scheduledDeleteRepo := gnurepo.NewScheduledDeleteRepository(db)
 
 		// v2 Core API
 		v2PostRepo := v2repo.NewPostRepository(db)
@@ -731,9 +742,12 @@ func main() {
 		notiGroup := router.Group("/api/v1/notifications", middleware.JWTAuth(jwtManager))
 		notiGroup.GET("/unread-count", notiHandler.GetUnreadCount)
 		notiGroup.GET("", notiHandler.GetNotifications)
+		notiGroup.GET("/grouped", notiHandler.GetGroupedNotifications)
 		notiGroup.POST("/:id/read", notiHandler.MarkAsRead)
 		notiGroup.POST("/read-all", notiHandler.MarkAllAsRead)
+		notiGroup.POST("/group/read", notiHandler.MarkGroupAsRead)
 		notiGroup.DELETE("/:id", notiHandler.Delete)
+		notiGroup.DELETE("/group", notiHandler.DeleteGroup)
 		// v1 members memo — 회원이 다른 회원에 대해 남긴 메모 (g5_member_memo)
 		memberMemoGroup := router.Group("/api/v1/members/:id/memo")
 		memberMemoGroup.Use(middleware.JWTAuth(jwtManager))
@@ -2397,13 +2411,66 @@ func main() {
 				return
 			}
 
-			// 게시글 소프트 삭제 (댓글도 함께 소프트 삭제됨)
-			if err := gnuWriteRepo.SoftDeletePost(slug, postID, userID); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
+			// 관리자(level >= 10)는 즉시 삭제
+			if userLevel >= 10 {
+				if err := gnuWriteRepo.SoftDeletePost(slug, postID, userID); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
 			}
 
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
+			// 일반 사용자: 댓글 수에 따라 지연 삭제 적용
+			commentCount := post.WrComment
+			delayMinutes := gnuboard.CalculateDelay(commentCount)
+
+			if delayMinutes == 0 {
+				// 댓글 없으면 즉시 삭제
+				if err := gnuWriteRepo.SoftDeletePost(slug, postID, userID); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
+				return
+			}
+
+			// 이미 삭제 예약된 경우 체크
+			existing, _ := scheduledDeleteRepo.FindByPost(slug, postID)
+			if existing != nil {
+				c.JSON(http.StatusConflict, gin.H{
+					"success":      false,
+					"error":        "이미 삭제가 예약되어 있습니다",
+					"scheduled_at": existing.ScheduledAt,
+				})
+				return
+			}
+
+			// 지연 삭제 예약
+			now := time.Now()
+			sd := &gnuboard.ScheduledDelete{
+				BoTable:      slug,
+				WrID:         postID,
+				WrIsComment:  0,
+				ReplyCount:   commentCount,
+				DelayMinutes: delayMinutes,
+				ScheduledAt:  now.Add(time.Duration(delayMinutes) * time.Minute),
+				RequestedBy:  userID,
+				RequestedAt:  now,
+				Status:       "pending",
+			}
+			if err := scheduledDeleteRepo.Create(sd); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "삭제 예약 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success":       true,
+				"message":       fmt.Sprintf("댓글이 %d개 있어 %d분 후 삭제됩니다", commentCount, delayMinutes),
+				"scheduled":     true,
+				"scheduled_at":  sd.ScheduledAt,
+				"delay_minutes": delayMinutes,
+			})
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/restore - Restore soft deleted post (admin only)
@@ -2500,13 +2567,130 @@ func main() {
 				return
 			}
 
-			// 댓글 소프트 삭제
-			if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
+			// 관리자(level >= 10)는 즉시 삭제
+			if userLevel >= 10 {
+				if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
 			}
 
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
+			// 일반 사용자: 답글 수에 따라 지연 삭제 적용
+			postID, _ := strconv.Atoi(c.Param("id"))
+			replyCount, err := gnuWriteRepo.CountCommentReplies(slug, postID, commentID)
+			if err != nil {
+				// 카운트 실패 시 즉시 삭제로 fallback
+				replyCount = 0
+			}
+
+			delayMinutes := gnuboard.CalculateDelay(int(replyCount))
+
+			if delayMinutes == 0 {
+				// 답글 없으면 즉시 삭제
+				if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
+				return
+			}
+
+			// 이미 삭제 예약된 경우 체크
+			existing, _ := scheduledDeleteRepo.FindByPost(slug, commentID)
+			if existing != nil {
+				c.JSON(http.StatusConflict, gin.H{
+					"success":      false,
+					"error":        "이미 삭제가 예약되어 있습니다",
+					"scheduled_at": existing.ScheduledAt,
+				})
+				return
+			}
+
+			// 지연 삭제 예약
+			now := time.Now()
+			sd := &gnuboard.ScheduledDelete{
+				BoTable:      slug,
+				WrID:         commentID,
+				WrIsComment:  1,
+				ReplyCount:   int(replyCount),
+				DelayMinutes: delayMinutes,
+				ScheduledAt:  now.Add(time.Duration(delayMinutes) * time.Minute),
+				RequestedBy:  userID,
+				RequestedAt:  now,
+				Status:       "pending",
+			}
+			if err := scheduledDeleteRepo.Create(sd); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "삭제 예약 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success":       true,
+				"message":       fmt.Sprintf("답글이 %d개 있어 %d분 후 삭제됩니다", replyCount, delayMinutes),
+				"scheduled":     true,
+				"scheduled_at":  sd.ScheduledAt,
+				"delay_minutes": delayMinutes,
+			})
+		})
+
+		// POST /api/v1/boards/:slug/posts/:id/cancel-delete - Cancel a scheduled delete
+		v1Boards.POST("/:slug/posts/:id/cancel-delete", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			slug := c.Param("slug")
+			wrID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid ID"})
+				return
+			}
+
+			sd, err := scheduledDeleteRepo.FindByPost(slug, wrID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "삭제 예약을 찾을 수 없습니다"})
+				return
+			}
+
+			// 작성자 또는 관리자만 취소 가능
+			userID := middleware.GetUserID(c)
+			userLevel := middleware.GetUserLevel(c)
+			if sd.RequestedBy != userID && userLevel < 10 {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "취소 권한이 없습니다"})
+				return
+			}
+
+			if err := scheduledDeleteRepo.Cancel(sd.ID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "삭제 취소 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제가 취소되었습니다"})
+		})
+
+		// GET /api/v1/boards/:slug/posts/:id/delete-status - Check scheduled delete status
+		v1Boards.GET("/:slug/posts/:id/delete-status", func(c *gin.Context) {
+			slug := c.Param("slug")
+			wrID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid ID"})
+				return
+			}
+
+			sd, err := scheduledDeleteRepo.FindByPost(slug, wrID)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "scheduled": false})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success":       true,
+				"scheduled":     true,
+				"scheduled_at":  sd.ScheduledAt,
+				"requested_at":  sd.RequestedAt,
+				"requested_by":  sd.RequestedBy,
+				"delay_minutes": sd.DelayMinutes,
+				"reply_count":   sd.ReplyCount,
+				"is_comment":    sd.WrIsComment == 1,
+			})
 		})
 
 		// Board display settings (for admin layout switcher)
@@ -3818,6 +4002,11 @@ func main() {
 
 		pluginManager.StartScheduler()
 		pkglogger.Info("Plugin Store & Marketplace initialized")
+
+		// Start delete worker for delayed deletion processing
+		deleteWorker := worker.NewDeleteWorker(gnuWriteRepo, scheduledDeleteRepo)
+		deleteWorker.Start()
+		defer deleteWorker.Stop()
 	} else {
 		pkglogger.Info("Skipping API route setup (no DB connection)")
 	}

@@ -32,13 +32,21 @@ func (r *myPageRepository) getActiveBoards() []string {
 	if err != nil {
 		return nil
 	}
+	// Batch check all tables at once (1 query instead of N)
+	tableNames := make([]string, len(boards))
+	for i, b := range boards {
+		tableNames[i] = fmt.Sprintf("g5_write_%s", b.BoTable)
+	}
+	var existingTables []string
+	r.db.Raw("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ?", tableNames).Scan(&existingTables)
+
+	existSet := make(map[string]bool, len(existingTables))
+	for _, t := range existingTables {
+		existSet[t] = true
+	}
 	var ids []string
 	for _, b := range boards {
-		// Check table actually exists
-		var count int64
-		r.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?",
-			fmt.Sprintf("g5_write_%s", b.BoTable)).Scan(&count)
-		if count > 0 {
+		if existSet[fmt.Sprintf("g5_write_%s", b.BoTable)] {
 			ids = append(ids, b.BoTable)
 		}
 	}
@@ -207,27 +215,57 @@ func (r *myPageRepository) GetBoardStats(mbID string) ([]gnuboard.BoardStat, err
 		return nil, err
 	}
 
+	if len(boards) == 0 {
+		return nil, nil
+	}
+
+	// 1. Batch check which tables exist via information_schema (1 query instead of N)
+	tableNames := make([]string, len(boards))
+	boardMap := make(map[string]string) // table_name -> bo_subject
+	for i, b := range boards {
+		tableName := fmt.Sprintf("g5_write_%s", b.BoTable)
+		tableNames[i] = tableName
+		boardMap[tableName] = b.BoSubject
+	}
+
+	var existingTables []string
+	r.db.Raw("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ?", tableNames).Scan(&existingTables)
+
+	if len(existingTables) == 0 {
+		return nil, nil
+	}
+
+	// 2. Build UNION ALL for post/comment counts (1 query instead of 2N)
+	var unions []string
+	var args []interface{}
+	for _, tableName := range existingTables {
+		boardID := strings.TrimPrefix(tableName, "g5_write_")
+		unions = append(unions, fmt.Sprintf(
+			"(SELECT '%s' as board_id, SUM(CASE WHEN wr_is_comment = 0 THEN 1 ELSE 0 END) as post_count, SUM(CASE WHEN wr_is_comment = 1 THEN 1 ELSE 0 END) as comment_count FROM `%s` WHERE mb_id = ? AND wr_deleted_at IS NULL)",
+			boardID, tableName))
+		args = append(args, mbID)
+	}
+
+	type boardCount struct {
+		BoardID      string `gorm:"column:board_id"`
+		PostCount    int64  `gorm:"column:post_count"`
+		CommentCount int64  `gorm:"column:comment_count"`
+	}
+	var counts []boardCount
+	unionSQL := strings.Join(unions, " UNION ALL ")
+	if err := r.db.Raw(unionSQL, args...).Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+
 	var stats []gnuboard.BoardStat
-	for _, b := range boards {
-		table := fmt.Sprintf("g5_write_%s", b.BoTable)
-
-		// Check table exists
-		var tableExists int64
-		r.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", table).Scan(&tableExists)
-		if tableExists == 0 {
-			continue
-		}
-
-		var postCount, commentCount int64
-		r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL", table), mbID).Scan(&postCount)
-		r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", table), mbID).Scan(&commentCount)
-
-		if postCount > 0 || commentCount > 0 {
+	for _, c := range counts {
+		if c.PostCount > 0 || c.CommentCount > 0 {
+			tableName := fmt.Sprintf("g5_write_%s", c.BoardID)
 			stats = append(stats, gnuboard.BoardStat{
-				BoardID:      b.BoTable,
-				BoardName:    b.BoSubject,
-				PostCount:    postCount,
-				CommentCount: commentCount,
+				BoardID:      c.BoardID,
+				BoardName:    boardMap[tableName],
+				PostCount:    c.PostCount,
+				CommentCount: c.CommentCount,
 			})
 		}
 	}

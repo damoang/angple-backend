@@ -59,6 +59,7 @@ type G5Member struct {
 	MbIconPath      string    `gorm:"column:mb_icon_path" json:"mb_icon_path"`
 	MbImagePath     string    `gorm:"column:mb_image_path" json:"mb_image_path"`
 	MbImageUrl      string    `gorm:"column:mb_image_url" json:"mb_image_url"`
+	MbImageExists   *int      `gorm:"column:mb_image_exists" json:"-"`
 	// 경험치/레벨 필드 (nariya 애드온)
 	AsExp   int `gorm:"column:as_exp" json:"as_exp"`
 	AsLevel int `gorm:"column:as_level" json:"as_level"`

@@ -131,6 +131,7 @@ func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Man
 	memo.POST("", h.CreateMemo)
 	memo.PUT("", h.UpdateMemo)
 	memo.DELETE("", h.DeleteMemo)
+	memo.GET("/all", middleware.RequireAdmin(), h.GetAllMemos)
 }
 
 // SetupBlock configures v2 block routes
