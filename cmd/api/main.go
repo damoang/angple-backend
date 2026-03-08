@@ -738,11 +738,14 @@ func main() {
 		})
 		// v1 notifications (g5_na_noti)
 		notiRepo := gnurepo.NewNotiRepository(db)
-		notiHandler := handler.NewNotiHandler(notiRepo)
+		notiPrefRepo := gnurepo.NewNotiPreferenceRepository(db)
+		notiHandler := handler.NewNotiHandler(notiRepo, notiPrefRepo)
 		notiGroup := router.Group("/api/v1/notifications", middleware.JWTAuth(jwtManager))
 		notiGroup.GET("/unread-count", notiHandler.GetUnreadCount)
 		notiGroup.GET("", notiHandler.GetNotifications)
 		notiGroup.GET("/grouped", notiHandler.GetGroupedNotifications)
+		notiGroup.GET("/preferences", notiHandler.GetPreferences)
+		notiGroup.PUT("/preferences", notiHandler.UpdatePreferences)
 		notiGroup.POST("/:id/read", notiHandler.MarkAsRead)
 		notiGroup.POST("/read-all", notiHandler.MarkAllAsRead)
 		notiGroup.POST("/group/read", notiHandler.MarkGroupAsRead)
@@ -1882,6 +1885,9 @@ func main() {
 				var followerIDs []string
 				db.Table("g5_member_follow").Select("mb_id").Where("target_id = ?", mbID).Pluck("mb_id", &followerIDs)
 				for _, fid := range followerIDs {
+					if pref, _ := notiPrefRepo.Get(fid); !pref.NotiFollow {
+						continue
+					}
 					_ = notiRepo.Create(&gnurepo.Notification{
 						PhToCase: "follow", PhFromCase: "write", BoTable: slug,
 						WrID: post.WrID, MbID: fid, RelMbID: mbID,
@@ -1904,6 +1910,9 @@ func main() {
 				for _, sid := range subscriberIDs {
 					if followerSet[sid] {
 						continue // 이미 팔로워 알림 받음
+					}
+					if pref, _ := notiPrefRepo.Get(sid); !pref.NotiFollow {
+						continue
 					}
 					_ = notiRepo.Create(&gnurepo.Notification{
 						PhToCase: "subscribe", PhFromCase: "write", BoTable: slug,
@@ -2121,15 +2130,38 @@ func main() {
 				if req.ParentID != nil && *req.ParentID > 0 {
 					var parentAuthorMbID string
 					if err := db.Table(tableName).Select("mb_id").Where("wr_id = ?", *req.ParentID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != mbID {
+						if pref, _ := notiPrefRepo.Get(parentAuthorMbID); pref.NotiReply {
+							_ = notiRepo.Create(&gnurepo.Notification{
+								PhToCase:      "comment_reply",
+								PhFromCase:    "comment",
+								BoTable:       slug,
+								WrID:          comment.WrID,
+								MbID:          parentAuthorMbID,
+								RelMbID:       mbID,
+								RelMbNick:     authorName,
+								RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", authorName),
+								RelURL:        fmt.Sprintf("/%s/%d#comment_%d", slug, postID, comment.WrID),
+								PhReaded:      "N",
+								PhDatetime:    now,
+								ParentSubject: postAuthor.WrSubject,
+								WrParent:      postID,
+							})
+						}
+					}
+				}
+
+				// 게시글 작성자에게 알림 (자기 댓글은 제외)
+				if postAuthor.MbID != mbID {
+					if pref, _ := notiPrefRepo.Get(postAuthor.MbID); pref.NotiComment {
 						_ = notiRepo.Create(&gnurepo.Notification{
-							PhToCase:      "comment_reply",
+							PhToCase:      "comment",
 							PhFromCase:    "comment",
 							BoTable:       slug,
 							WrID:          comment.WrID,
-							MbID:          parentAuthorMbID,
+							MbID:          postAuthor.MbID,
 							RelMbID:       mbID,
 							RelMbNick:     authorName,
-							RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", authorName),
+							RelMsg:        fmt.Sprintf("%s님이 회원님의 글에 댓글을 남겼습니다.", authorName),
 							RelURL:        fmt.Sprintf("/%s/%d#comment_%d", slug, postID, comment.WrID),
 							PhReaded:      "N",
 							PhDatetime:    now,
@@ -2137,25 +2169,6 @@ func main() {
 							WrParent:      postID,
 						})
 					}
-				}
-
-				// 게시글 작성자에게 알림 (자기 댓글은 제외)
-				if postAuthor.MbID != mbID {
-					_ = notiRepo.Create(&gnurepo.Notification{
-						PhToCase:      "comment",
-						PhFromCase:    "comment",
-						BoTable:       slug,
-						WrID:          comment.WrID,
-						MbID:          postAuthor.MbID,
-						RelMbID:       mbID,
-						RelMbNick:     authorName,
-						RelMsg:        fmt.Sprintf("%s님이 회원님의 글에 댓글을 남겼습니다.", authorName),
-						RelURL:        fmt.Sprintf("/%s/%d#comment_%d", slug, postID, comment.WrID),
-						PhReaded:      "N",
-						PhDatetime:    now,
-						ParentSubject: postAuthor.WrSubject,
-						WrParent:      postID,
-					})
 				}
 			}()
 

@@ -17,12 +17,13 @@ import (
 
 // NotiHandler handles /api/v1/notifications endpoints using g5_na_noti
 type NotiHandler struct {
-	repo gnurepo.NotiRepository
+	repo     gnurepo.NotiRepository
+	prefRepo gnurepo.NotiPreferenceRepository
 }
 
 // NewNotiHandler creates a new NotiHandler
-func NewNotiHandler(repo gnurepo.NotiRepository) *NotiHandler {
-	return &NotiHandler{repo: repo}
+func NewNotiHandler(repo gnurepo.NotiRepository, prefRepo gnurepo.NotiPreferenceRepository) *NotiHandler {
+	return &NotiHandler{repo: repo, prefRepo: prefRepo}
 }
 
 // v1NotificationResponse matches frontend Notification type
@@ -393,6 +394,104 @@ func (h *NotiHandler) MarkGroupAsRead(c *gin.Context) {
 		return
 	}
 	common.V2Success(c, gin.H{"message": "그룹 읽음 처리 완료"})
+}
+
+// notiPreferenceResponse is the response for notification preferences
+type notiPreferenceResponse struct {
+	NotiComment   bool `json:"noti_comment"`
+	NotiReply     bool `json:"noti_reply"`
+	NotiMention   bool `json:"noti_mention"`
+	NotiLike      bool `json:"noti_like"`
+	NotiFollow    bool `json:"noti_follow"`
+	LikeThreshold int  `json:"like_threshold"`
+}
+
+// GetPreferences handles GET /api/v1/notifications/preferences
+func (h *NotiHandler) GetPreferences(c *gin.Context) {
+	mbID := middleware.GetUserID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+
+	pref, err := h.prefRepo.Get(mbID)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "알림 설정 조회 실패", err)
+		return
+	}
+
+	common.V2Success(c, notiPreferenceResponse{
+		NotiComment:   pref.NotiComment,
+		NotiReply:     pref.NotiReply,
+		NotiMention:   pref.NotiMention,
+		NotiLike:      pref.NotiLike,
+		NotiFollow:    pref.NotiFollow,
+		LikeThreshold: pref.LikeThreshold,
+	})
+}
+
+// UpdatePreferences handles PUT /api/v1/notifications/preferences
+func (h *NotiHandler) UpdatePreferences(c *gin.Context) {
+	mbID := middleware.GetUserID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+
+	var req struct {
+		NotiComment   *bool `json:"noti_comment"`
+		NotiReply     *bool `json:"noti_reply"`
+		NotiMention   *bool `json:"noti_mention"`
+		NotiLike      *bool `json:"noti_like"`
+		NotiFollow    *bool `json:"noti_follow"`
+		LikeThreshold *int  `json:"like_threshold"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+
+	pref, err := h.prefRepo.Get(mbID)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "알림 설정 조회 실패", err)
+		return
+	}
+
+	if req.NotiComment != nil {
+		pref.NotiComment = *req.NotiComment
+	}
+	if req.NotiReply != nil {
+		pref.NotiReply = *req.NotiReply
+	}
+	if req.NotiMention != nil {
+		pref.NotiMention = *req.NotiMention
+	}
+	if req.NotiLike != nil {
+		pref.NotiLike = *req.NotiLike
+	}
+	if req.NotiFollow != nil {
+		pref.NotiFollow = *req.NotiFollow
+	}
+	if req.LikeThreshold != nil {
+		if *req.LikeThreshold < 1 {
+			*req.LikeThreshold = 1
+		}
+		pref.LikeThreshold = *req.LikeThreshold
+	}
+
+	if err := h.prefRepo.Upsert(pref); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "알림 설정 저장 실패", err)
+		return
+	}
+
+	common.V2Success(c, notiPreferenceResponse{
+		NotiComment:   pref.NotiComment,
+		NotiReply:     pref.NotiReply,
+		NotiMention:   pref.NotiMention,
+		NotiLike:      pref.NotiLike,
+		NotiFollow:    pref.NotiFollow,
+		LikeThreshold: pref.LikeThreshold,
+	})
 }
 
 // DeleteGroup handles DELETE /api/v1/notifications/group
