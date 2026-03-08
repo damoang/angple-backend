@@ -1643,11 +1643,12 @@ func main() {
 
 			// LikerInfo struct for response
 			type LikerInfo struct {
-				MbID    string     `json:"mb_id"`
-				MbName  string     `json:"mb_name"`
-				MbNick  string     `json:"mb_nick"`
-				BgIP    string     `json:"bg_ip,omitempty"`
-				LikedAt *time.Time `json:"liked_at"`
+				MbID       string     `json:"mb_id"`
+				MbName     string     `json:"mb_name"`
+				MbNick     string     `json:"mb_nick"`
+				MbImageUrl string     `json:"mb_image_url,omitempty"`
+				BgIP       string     `json:"bg_ip,omitempty"`
+				LikedAt    *time.Time `json:"liked_at"`
 			}
 
 			var likers []LikerInfo
@@ -1671,7 +1672,7 @@ func main() {
 
 			// Query likers with member info
 			db.Table("g5_board_good bg").
-				Select("bg.mb_id, COALESCE(m.mb_name, '') as mb_name, COALESCE(m.mb_nick, bg.mb_id) as mb_nick, bg.bg_ip, bg.bg_datetime as liked_at").
+				Select("bg.mb_id, COALESCE(m.mb_name, '') as mb_name, COALESCE(m.mb_nick, bg.mb_id) as mb_nick, COALESCE(m.mb_image_url, '') as mb_image_url, bg.bg_ip, bg.bg_datetime as liked_at").
 				Joins("LEFT JOIN g5_member m ON bg.mb_id = m.mb_id").
 				Where("bg.bo_table = ? AND bg.wr_id = ? AND bg.bg_flag = ?", slug, postID, "good").
 				Order("bg.bg_datetime DESC").
