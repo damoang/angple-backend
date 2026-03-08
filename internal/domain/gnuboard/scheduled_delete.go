@@ -27,15 +27,15 @@ func (ScheduledDelete) TableName() string {
 func CalculateDelay(replyCount int) int {
 	switch {
 	case replyCount == 0:
-		return 0
+		return 10
 	case replyCount <= 4:
-		return 5
-	case replyCount <= 9:
 		return 30
+	case replyCount <= 9:
+		return 60
 	case replyCount <= 29:
-		return 120
+		return 180
 	case replyCount <= 99:
-		return 360
+		return 720
 	default:
 		return 1440
 	}

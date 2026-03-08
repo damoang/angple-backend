@@ -105,6 +105,46 @@ func CreateScheduledDeletesTable(db *gorm.DB) error {
 	return nil
 }
 
+// FixListPageIndexes removes wr_deleted_at from idx_list_page on all board tables.
+// Since list queries no longer filter by wr_deleted_at, the index should be (wr_is_comment, wr_num, wr_reply).
+func FixListPageIndexes(db *gorm.DB) error {
+	var boardIDs []string
+	if err := db.Table("g5_board").Pluck("bo_table", &boardIDs).Error; err != nil {
+		return fmt.Errorf("failed to get board IDs: %w", err)
+	}
+
+	fixedCount := 0
+	for _, boardID := range boardIDs {
+		table := fmt.Sprintf("g5_write_%s", boardID)
+
+		// Check if idx_list_page exists and contains wr_deleted_at
+		var hasDeletedAt int64
+		db.Raw(`
+			SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+			WHERE TABLE_SCHEMA = DATABASE()
+			AND TABLE_NAME = ?
+			AND INDEX_NAME = 'idx_list_page'
+			AND COLUMN_NAME = 'wr_deleted_at'
+		`, table).Scan(&hasDeletedAt)
+
+		if hasDeletedAt == 0 {
+			continue
+		}
+
+		sql := fmt.Sprintf(`ALTER TABLE %s DROP INDEX idx_list_page, ADD INDEX idx_list_page (wr_is_comment, wr_num, wr_reply), ALGORITHM=INPLACE, LOCK=NONE`, table)
+		if err := db.Exec(sql).Error; err != nil {
+			log.Printf("[Migration] Warning: Failed to fix idx_list_page on %s: %v", table, err)
+			continue
+		}
+		fixedCount++
+	}
+
+	if fixedCount > 0 {
+		log.Printf("[Migration] Fixed idx_list_page on %d tables (removed wr_deleted_at)", fixedCount)
+	}
+	return nil
+}
+
 // CreateWriteRevisionsTable creates the g5_write_revisions table for post history tracking
 func CreateWriteRevisionsTable(db *gorm.DB) error {
 	// Check if table already exists
