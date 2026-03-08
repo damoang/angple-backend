@@ -2244,10 +2244,22 @@ func main() {
 				return
 			}
 
-			// 게시글 조회
-			post, err := gnuWriteRepo.FindPostByID(slug, postID)
+			// 게시글 조회 (삭제된 글 포함 — 삭제 여부 체크용)
+			post, err := gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 소프트 삭제된 글 수정 차단
+			if post.WrDeletedAt != nil {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "삭제된 게시물은 수정할 수 없습니다"})
+				return
+			}
+
+			// 삭제 예약된 글 수정 차단
+			if pending, _ := scheduledDeleteRepo.FindByPost(slug, postID); pending != nil {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "삭제 대기 중인 게시물은 수정할 수 없습니다"})
 				return
 			}
 

@@ -30,7 +30,6 @@ func Run(db *gorm.DB) error {
 	if err := CreateScheduledDeletesTable(db); err != nil {
 		return err
 	}
-
 	return nil
 }
 
