@@ -1869,6 +1869,17 @@ func main() {
 				}
 			}
 
+			// 게시글 목록 캐시 무효화 (새 글이 목록에 즉시 반영되도록)
+			if cacheService != nil {
+				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
+			}
+			postMemCache.Range(func(key, value interface{}) bool {
+				if strings.HasPrefix(key.(string), "posts:"+slug+":") {
+					postMemCache.Delete(key)
+				}
+				return true
+			})
+
 			// 팔로워/구독자 알림 (비동기)
 			go func() {
 				authorName := post.WrName
@@ -2099,6 +2110,17 @@ func main() {
 					_ = v2PointRepo.AddPoint(mbNo, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), uint64(comment.WrID)) //nolint:gosec // WrID is always positive
 				}
 			}
+
+			// 게시글 목록 캐시 무효화 (댓글 수 변경 반영)
+			if cacheService != nil {
+				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
+			}
+			postMemCache.Range(func(key, value interface{}) bool {
+				if strings.HasPrefix(key.(string), "posts:"+slug+":") {
+					postMemCache.Delete(key)
+				}
+				return true
+			})
 
 			// Admin sees full IP, others see masked
 			commentIP := v1handler.MaskIP(comment.WrIP)
