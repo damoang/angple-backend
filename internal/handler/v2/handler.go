@@ -18,16 +18,18 @@ import (
 
 // V2Handler handles all v2 API endpoints
 type V2Handler struct {
-	userRepo     v2repo.UserRepository
-	postRepo     v2repo.PostRepository
-	commentRepo  v2repo.CommentRepository
-	boardRepo    v2repo.BoardRepository
-	permChecker  middleware.BoardPermissionChecker
-	pointRepo    v2repo.PointRepository
-	revisionRepo v2repo.RevisionRepository
-	notiRepo     gnurepo.NotiRepository
-	expRepo      v2repo.ExpRepository
-	gnuDB        *gorm.DB // gnuboard g5_member 조회용
+	userRepo           v2repo.UserRepository
+	postRepo           v2repo.PostRepository
+	commentRepo        v2repo.CommentRepository
+	boardRepo          v2repo.BoardRepository
+	permChecker        middleware.BoardPermissionChecker
+	pointRepo          v2repo.PointRepository
+	revisionRepo       v2repo.RevisionRepository
+	notiRepo           gnurepo.NotiRepository
+	expRepo            v2repo.ExpRepository
+	gnuDB              *gorm.DB // gnuboard g5_member 조회용
+	gnuPointWriteRepo  v2repo.GnuboardPointWriteRepository
+	pointConfigRepo    v2repo.PointConfigRepository
 }
 
 // NewV2Handler creates a new V2Handler
@@ -70,6 +72,16 @@ func (h *V2Handler) SetGnuDB(db *gorm.DB) {
 // SetExpRepository sets the optional exp repository for XP operations
 func (h *V2Handler) SetExpRepository(repo v2repo.ExpRepository) {
 	h.expRepo = repo
+}
+
+// SetGnuboardPointWriteRepository sets the gnuboard point write repository for g5_point operations
+func (h *V2Handler) SetGnuboardPointWriteRepository(repo v2repo.GnuboardPointWriteRepository) {
+	h.gnuPointWriteRepo = repo
+}
+
+// SetPointConfigRepository sets the point config repository for point expiry settings
+func (h *V2Handler) SetPointConfigRepository(repo v2repo.PointConfigRepository) {
+	h.pointConfigRepo = repo
 }
 
 // createLevelUpNoti inserts a level-up notification into g5_na_noti
@@ -347,16 +359,30 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 	}
 
 	// 포인트 차감 게시판인 경우 잔액 확인
-	if board.WritePoint < 0 && h.pointRepo != nil {
-		canAfford, err := h.pointRepo.CanAfford(userID, board.WritePoint)
-		if err != nil {
-			common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
-			return
-		}
-		if !canAfford {
-			common.V2ErrorResponse(c, http.StatusForbidden,
-				"포인트가 부족합니다. "+strconv.Itoa(-board.WritePoint)+"포인트가 필요합니다.", nil)
-			return
+	if board.WritePoint < 0 {
+		mbIDForCheck := middleware.GetUserID(c)
+		if h.gnuPointWriteRepo != nil {
+			canAfford, err := h.gnuPointWriteRepo.CanAfford(mbIDForCheck, board.WritePoint)
+			if err != nil {
+				common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
+				return
+			}
+			if !canAfford {
+				common.V2ErrorResponse(c, http.StatusForbidden,
+					"포인트가 부족합니다. "+strconv.Itoa(-board.WritePoint)+"포인트가 필요합니다.", nil)
+				return
+			}
+		} else if h.pointRepo != nil {
+			canAfford, err := h.pointRepo.CanAfford(userID, board.WritePoint)
+			if err != nil {
+				common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
+				return
+			}
+			if !canAfford {
+				common.V2ErrorResponse(c, http.StatusForbidden,
+					"포인트가 부족합니다. "+strconv.Itoa(-board.WritePoint)+"포인트가 필요합니다.", nil)
+				return
+			}
 		}
 	}
 
@@ -373,9 +399,18 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		return
 	}
 
-	// 포인트 처리 (지급 또는 차감)
-	if board.WritePoint != 0 && h.pointRepo != nil {
-		_ = h.pointRepo.AddPoint(userID, board.WritePoint, "글쓰기", "v2_posts", post.ID) //nolint:errcheck
+	// 포인트 처리 (지급 또는 차감) — g5_point 기반 FIFO 소비
+	if board.WritePoint != 0 {
+		mbID := middleware.GetUserID(c)
+		if h.gnuPointWriteRepo != nil {
+			var pc *v2repo.PointConfig
+			if h.pointConfigRepo != nil {
+				pc, _ = h.pointConfigRepo.GetPointConfig()
+			}
+			_ = h.gnuPointWriteRepo.AddPoint(mbID, board.WritePoint, "글쓰기", "v2_posts", fmt.Sprintf("%d", post.ID), "@write", pc) //nolint:errcheck
+		} else if h.pointRepo != nil {
+			_ = h.pointRepo.AddPoint(userID, board.WritePoint, "글쓰기", "v2_posts", post.ID) //nolint:errcheck
+		}
 	}
 
 	// 경험치 부여 (비동기, best-effort)
@@ -736,16 +771,30 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 	}
 
 	// 포인트 차감 게시판인 경우 잔액 확인
-	if board.CommentPoint < 0 && h.pointRepo != nil {
-		canAfford, err := h.pointRepo.CanAfford(userID, board.CommentPoint)
-		if err != nil {
-			common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
-			return
-		}
-		if !canAfford {
-			common.V2ErrorResponse(c, http.StatusForbidden,
-				"포인트가 부족합니다. "+strconv.Itoa(-board.CommentPoint)+"포인트가 필요합니다.", nil)
-			return
+	if board.CommentPoint < 0 {
+		mbIDForCheck := middleware.GetUserID(c)
+		if h.gnuPointWriteRepo != nil {
+			canAfford, err := h.gnuPointWriteRepo.CanAfford(mbIDForCheck, board.CommentPoint)
+			if err != nil {
+				common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
+				return
+			}
+			if !canAfford {
+				common.V2ErrorResponse(c, http.StatusForbidden,
+					"포인트가 부족합니다. "+strconv.Itoa(-board.CommentPoint)+"포인트가 필요합니다.", nil)
+				return
+			}
+		} else if h.pointRepo != nil {
+			canAfford, err := h.pointRepo.CanAfford(userID, board.CommentPoint)
+			if err != nil {
+				common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 확인 실패", err)
+				return
+			}
+			if !canAfford {
+				common.V2ErrorResponse(c, http.StatusForbidden,
+					"포인트가 부족합니다. "+strconv.Itoa(-board.CommentPoint)+"포인트가 필요합니다.", nil)
+				return
+			}
 		}
 	}
 
@@ -772,16 +821,26 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		isOldPost = time.Since(parentPost.CreatedAt) > 30*24*time.Hour
 	}
 
+	// 알림 + 포인트 + XP에서 사용할 mb_id
+	mbID := middleware.GetUserID(c)
+
 	// 포인트 처리 (지급 또는 차감) — 30일 이전 글에는 지급 포인트 미부여
-	if board.CommentPoint != 0 && h.pointRepo != nil {
+	if board.CommentPoint != 0 {
 		// 차감 포인트(음수)는 항상 적용, 지급 포인트(양수)는 30일 이내만
 		if board.CommentPoint < 0 || !isOldPost {
-			_ = h.pointRepo.AddPoint(userID, board.CommentPoint, "댓글작성", "v2_comments", comment.ID) //nolint:errcheck
+			if h.gnuPointWriteRepo != nil {
+				var pc *v2repo.PointConfig
+				if h.pointConfigRepo != nil {
+					pc, _ = h.pointConfigRepo.GetPointConfig()
+				}
+				_ = h.gnuPointWriteRepo.AddPoint(mbID, board.CommentPoint, "댓글작성", fmt.Sprintf("v2_comments_%s", slug), fmt.Sprintf("%d", comment.ID), "@comment", pc) //nolint:errcheck
+			} else if h.pointRepo != nil {
+				_ = h.pointRepo.AddPoint(userID, board.CommentPoint, "댓글작성", "v2_comments", comment.ID) //nolint:errcheck
+			}
 		}
 	}
 
 	// 알림 생성 (비동기, 에러 무시)
-	mbID := middleware.GetUserID(c)
 	authorName := middleware.GetNickname(c)
 	if authorName == "" && h.gnuDB != nil {
 		h.gnuDB.Table("g5_member").Select("mb_nick").Where("mb_id = ?", mbID).Scan(&authorName)

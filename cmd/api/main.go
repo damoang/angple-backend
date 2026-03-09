@@ -402,14 +402,22 @@ func main() {
 		expHandler := v2handler.NewExpHandler(v2ExpRepo)
 		expHandler.SetNotiRepository(gnurepo.NewNotiRepository(db))
 
+		// Point config + write repos
+		pointConfigRepo := v2repo.NewPointConfigRepository(db)
+		gnuPointWriteRepo := v2repo.NewGnuboardPointWriteRepository(db)
+		expHandler.SetPointConfigRepository(pointConfigRepo)
+		v2Handler.SetGnuboardPointWriteRepository(gnuPointWriteRepo)
+		v2Handler.SetPointConfigRepository(pointConfigRepo)
+
 		// Inject expRepo into V2Handler for write/comment XP
 		v2Handler.SetExpRepository(v2ExpRepo)
 		myPageRepo := gnurepo.NewMyPageRepository(db, gnuBoardRepo)
 		myPageHandler := handler.NewMyPageHandler(myPageRepo)
 		v2routes.SetupMyPage(router, pointHandler, expHandler, myPageHandler, jwtManager)
 
-		// Admin XP management routes
+		// Admin XP + Point config management routes
 		v2routes.SetupAdminXP(router, expHandler, jwtManager)
+		v2routes.SetupAdminPoint(router, expHandler, jwtManager)
 
 		// DisciplineLog routes (uses gnuboard g5_write_disciplinelog table)
 		disciplineLogHandler := v2handler.NewDisciplineLogHandler(gnuWriteRepo, db)
@@ -1805,19 +1813,16 @@ func main() {
 				return
 			}
 
-			// 포인트 차감 게시판인 경우 잔액 확인
+			// 포인트 차감 게시판인 경우 잔액 확인 (g5_member.mb_point 기반)
 			if board.BoWritePoint < 0 {
-				var mbNo uint64
-				if err := db.Table("g5_member").Select("mb_no").Where("mb_id = ?", mbID).Scan(&mbNo).Error; err == nil {
-					canAfford, err := v2PointRepo.CanAfford(mbNo, board.BoWritePoint)
-					if err != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "포인트 확인 실패"})
-						return
-					}
-					if !canAfford {
-						c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "포인트가 부족합니다. " + strconv.Itoa(-board.BoWritePoint) + "포인트가 필요합니다."})
-						return
-					}
+				canAfford, err := gnuPointWriteRepo.CanAfford(mbID, board.BoWritePoint)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "포인트 확인 실패"})
+					return
+				}
+				if !canAfford {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "포인트가 부족합니다. " + strconv.Itoa(-board.BoWritePoint) + "포인트가 필요합니다."})
+					return
 				}
 			}
 
@@ -1911,12 +1916,13 @@ func main() {
 				db.Table(tableName).Where("wr_id = ?", post.WrID).Updates(extras)
 			}
 
-			// 포인트 처리
+			// 포인트 처리 (g5_point 기반 FIFO 소비)
 			if board.BoWritePoint != 0 {
-				var mbNo uint64
-				if err := db.Table("g5_member").Select("mb_no").Where("mb_id = ?", mbID).Scan(&mbNo).Error; err == nil {
-					_ = v2PointRepo.AddPoint(mbNo, board.BoWritePoint, "글쓰기", tableName, uint64(post.WrID)) //nolint:gosec // WrID is always positive
+				var pc *v2repo.PointConfig
+				if pointConfigRepo != nil {
+					pc, _ = pointConfigRepo.GetPointConfig()
 				}
+				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoWritePoint, "글쓰기", tableName, fmt.Sprintf("%d", post.WrID), "@write", pc) //nolint:errcheck
 			}
 
 			// 게시글 목록 캐시 무효화 (새 글이 목록에 즉시 반영되도록)
@@ -2032,19 +2038,16 @@ func main() {
 				return
 			}
 
-			// 포인트 차감 게시판인 경우 잔액 확인
+			// 포인트 차감 게시판인 경우 잔액 확인 (g5_member.mb_point 기반)
 			if board.BoCommentPoint < 0 {
-				var mbNo uint64
-				if err := db.Table("g5_member").Select("mb_no").Where("mb_id = ?", mbID).Scan(&mbNo).Error; err == nil {
-					canAfford, err := v2PointRepo.CanAfford(mbNo, board.BoCommentPoint)
-					if err != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "포인트 확인 실패"})
-						return
-					}
-					if !canAfford {
-						c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "포인트가 부족합니다. " + strconv.Itoa(-board.BoCommentPoint) + "포인트가 필요합니다."})
-						return
-					}
+				canAfford, err := gnuPointWriteRepo.CanAfford(mbID, board.BoCommentPoint)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "포인트 확인 실패"})
+					return
+				}
+				if !canAfford {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "포인트가 부족합니다. " + strconv.Itoa(-board.BoCommentPoint) + "포인트가 필요합니다."})
+					return
 				}
 			}
 
@@ -2159,12 +2162,13 @@ func main() {
 			}
 			comment := createdComment
 
-			// 포인트 처리
+			// 포인트 처리 (g5_point 기반 FIFO 소비)
 			if board.BoCommentPoint != 0 {
-				var mbNo uint64
-				if err := db.Table("g5_member").Select("mb_no").Where("mb_id = ?", mbID).Scan(&mbNo).Error; err == nil {
-					_ = v2PointRepo.AddPoint(mbNo, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), uint64(comment.WrID)) //nolint:gosec // WrID is always positive
+				var pc *v2repo.PointConfig
+				if pointConfigRepo != nil {
+					pc, _ = pointConfigRepo.GetPointConfig()
 				}
+				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), fmt.Sprintf("%d", comment.WrID), "@comment", pc) //nolint:errcheck
 			}
 
 			// 게시글 목록 캐시 무효화 (댓글 수 변경 반영)
@@ -4120,12 +4124,15 @@ func main() {
 
 		// Internal cron endpoints (curl-based cron jobs)
 		cronHandler := cron.NewHandler(db)
+		cronHandler.SetPointExpiryDeps(pointConfigRepo, gnuPointWriteRepo, gnurepo.NewNotiRepository(db))
 		cronGroup := router.Group("/api/internal/cron")
 		cronGroup.POST("/member-lock-release", cronHandler.MemberLockRelease)
 		cronGroup.POST("/update-member-levels", cronHandler.UpdateMemberLevels)
 		cronGroup.POST("/process-approved-reports", cronHandler.ProcessApprovedReports)
 		cronGroup.POST("/update-report-pattern", cronHandler.UpdateReportPattern)
 		cronGroup.POST("/discipline-release", cronHandler.DisciplineRelease)
+		cronGroup.POST("/point-expiry", cronHandler.PointExpiry)
+		cronGroup.POST("/point-expiry-notify", cronHandler.PointExpiryNotify)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(gnuWriteRepo, scheduledDeleteRepo)

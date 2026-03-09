@@ -16,8 +16,9 @@ import (
 
 // ExpHandler handles experience point-related endpoints
 type ExpHandler struct {
-	expRepo  v2repo.ExpRepository
-	notiRepo gnurepo.NotiRepository
+	expRepo         v2repo.ExpRepository
+	notiRepo        gnurepo.NotiRepository
+	pointConfigRepo v2repo.PointConfigRepository
 }
 
 // NewExpHandler creates a new ExpHandler
@@ -28,6 +29,11 @@ func NewExpHandler(expRepo v2repo.ExpRepository) *ExpHandler {
 // SetNotiRepository sets the optional notification repository for level-up notifications
 func (h *ExpHandler) SetNotiRepository(repo gnurepo.NotiRepository) {
 	h.notiRepo = repo
+}
+
+// SetPointConfigRepository sets the point config repository for point expiry settings
+func (h *ExpHandler) SetPointConfigRepository(repo v2repo.PointConfigRepository) {
+	h.pointConfigRepo = repo
 }
 
 // createLevelUpNotification inserts a level-up notification into g5_na_noti
@@ -304,6 +310,69 @@ func (h *ExpHandler) AdminUpdateXPConfig(c *gin.Context) {
 	}
 
 	if err := h.expRepo.UpdateXPConfig(existing); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "설정 저장에 실패했습니다", err)
+		return
+	}
+
+	common.V2Success(c, existing)
+}
+
+// ========================================
+// Admin Point Config Handlers
+// ========================================
+
+// AdminGetPointConfig handles GET /api/v2/admin/point/config
+func (h *ExpHandler) AdminGetPointConfig(c *gin.Context) {
+	if h.pointConfigRepo == nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 설정 기능이 비활성화되어 있습니다", nil)
+		return
+	}
+
+	config, err := h.pointConfigRepo.GetPointConfig()
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "설정 조회에 실패했습니다", err)
+		return
+	}
+	common.V2Success(c, config)
+}
+
+// adminUpdatePointConfigRequest represents the request body for updating point config
+type adminUpdatePointConfigRequest struct {
+	ExpiryEnabled *bool `json:"expiry_enabled"`
+	ExpiryDays    *int  `json:"expiry_days"`
+}
+
+// AdminUpdatePointConfig handles PUT /api/v2/admin/point/config
+func (h *ExpHandler) AdminUpdatePointConfig(c *gin.Context) {
+	if h.pointConfigRepo == nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "포인트 설정 기능이 비활성화되어 있습니다", nil)
+		return
+	}
+
+	var req adminUpdatePointConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청입니다", err)
+		return
+	}
+
+	existing, err := h.pointConfigRepo.GetPointConfig()
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "설정 조회에 실패했습니다", err)
+		return
+	}
+
+	if req.ExpiryEnabled != nil {
+		existing.ExpiryEnabled = *req.ExpiryEnabled
+	}
+	if req.ExpiryDays != nil {
+		if *req.ExpiryDays < 1 {
+			common.V2ErrorResponse(c, http.StatusBadRequest, "유효기간은 1일 이상이어야 합니다", nil)
+			return
+		}
+		existing.ExpiryDays = *req.ExpiryDays
+	}
+
+	if err := h.pointConfigRepo.UpdatePointConfig(existing); err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "설정 저장에 실패했습니다", err)
 		return
 	}
