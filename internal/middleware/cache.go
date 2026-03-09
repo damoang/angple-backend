@@ -121,6 +121,30 @@ func InvalidateCacheByPath(redisClient *redis.Client, path string) {
 	redisClient.Del(context.Background(), key)
 }
 
+// APICacheControl sets Cache-Control headers on GET JSON responses.
+// Authenticated requests get "private", anonymous get "public".
+// This allows browsers to cache responses and reduce redundant requests.
+func APICacheControl(maxAge int) gin.HandlerFunc {
+	privateVal := fmt.Sprintf("private, max-age=%d", maxAge)
+	publicVal := fmt.Sprintf("public, max-age=%d", maxAge)
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet {
+			c.Next()
+			return
+		}
+		c.Next()
+
+		// Only set on successful JSON responses
+		if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
+			if c.GetString("userID") != "" {
+				c.Header("Cache-Control", privateVal)
+			} else {
+				c.Header("Cache-Control", publicVal)
+			}
+		}
+	}
+}
+
 func cacheKey(path, query string) string {
 	raw := path
 	if query != "" {

@@ -1236,6 +1236,7 @@ func main() {
 		v1Boards := router.Group("/api/v1/boards")
 		v1Boards.Use(middleware.OptionalJWTAuth(jwtManager))
 		v1Boards.Use(middleware.ArchiveBoardCheck())
+		v1Boards.Use(middleware.APICacheControl(10)) // 브라우저 캐시 10초
 
 		// Board extended settings repo & write restriction service (used by multiple handlers)
 		v2ExtendedSettingsRepo := v2repo.NewBoardExtendedSettingsRepository(db)
