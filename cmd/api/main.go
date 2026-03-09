@@ -4109,6 +4109,13 @@ func main() {
 		pluginManager.StartScheduler()
 		pkglogger.Info("Plugin Store & Marketplace initialized")
 
+		// Giving plugin API
+		givingHandler := handler.NewGivingHandler(db)
+		givingGroup := router.Group("/api/plugins/giving")
+		{
+			givingGroup.GET("/list", givingHandler.List)
+		}
+
 		// Internal cron endpoints (curl-based cron jobs)
 		cronHandler := cron.NewHandler(db)
 		cronGroup := router.Group("/api/internal/cron")
