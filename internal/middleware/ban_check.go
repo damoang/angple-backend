@@ -35,8 +35,22 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 			Where("mb_id = ?", mbID).
 			Row().Scan(&interceptDate)
 		if err != nil || interceptDate == "" {
-			c.Next()
-			return
+			// mb_intercept_date가 비어있어도 g5_da_member_discipline에 활성 제재가 있으면 차단
+			var penaltyEndDate string
+			fallbackErr := gnuDB.Raw(
+				`SELECT DATE_FORMAT(DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY), '%Y%m%d')
+				 FROM g5_da_member_discipline
+				 WHERE penalty_mb_id = ? AND penalty_period > 0
+				   AND DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY) > NOW()
+				 ORDER BY id DESC LIMIT 1`, mbID,
+			).Row().Scan(&penaltyEndDate)
+			if fallbackErr != nil || penaltyEndDate == "" {
+				c.Next()
+				return
+			}
+			// 활성 제재 발견 — mb_intercept_date 자동 복구(backfill, varchar(8) YYYYMMDD)
+			gnuDB.Exec("UPDATE g5_member SET mb_intercept_date = ? WHERE mb_id = ?", penaltyEndDate, mbID)
+			interceptDate = penaltyEndDate
 		}
 
 		// Parse intercept date (end date of ban)
