@@ -26,7 +26,7 @@ jobs:
         go-version: '1.25'
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v7
       with:
         version: v2.11.2
         args: --timeout=5m --exclude-dirs=plugins
@@ -47,7 +47,7 @@ jobs:
         go-version: '1.25'
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v7
       with:
         version: v2.11.2
         args: --timeout=5m --exclude-dirs=plugins

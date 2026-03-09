@@ -31,11 +31,11 @@ type ExpSummary struct {
 // XPConfig represents configurable XP settings (stored in site_settings.settings_json)
 type XPConfig struct {
 	LoginXP        int  `json:"login_xp"`        // XP granted per daily login (default: 500)
-	WriteXP        int  `json:"write_xp"`         // XP granted per post (default: 100)
-	CommentXP      int  `json:"comment_xp"`       // XP granted per comment (default: 50)
-	LoginEnabled   bool `json:"login_enabled"`    // Enable login XP (default: true)
-	WriteEnabled   bool `json:"write_enabled"`    // Enable write XP (default: false)
-	CommentEnabled bool `json:"comment_enabled"`  // Enable comment XP (default: false)
+	WriteXP        int  `json:"write_xp"`        // XP granted per post (default: 100)
+	CommentXP      int  `json:"comment_xp"`      // XP granted per comment (default: 50)
+	LoginEnabled   bool `json:"login_enabled"`   // Enable login XP (default: true)
+	WriteEnabled   bool `json:"write_enabled"`   // Enable write XP (default: false)
+	CommentEnabled bool `json:"comment_enabled"` // Enable comment XP (default: false)
 }
 
 // DefaultXPConfig returns the default XP configuration
@@ -316,8 +316,8 @@ func DefaultPointConfig() *PointConfig {
 
 // settingsJSONWrapper wraps the full settings_json content (preserves unknown fields)
 type settingsJSONWrapper struct {
-	XPConfig    *XPConfig    `json:"xp_config,omitempty"`
-	PointConfig *PointConfig `json:"point_config,omitempty"`
+	XPConfig    *XPConfig              `json:"xp_config,omitempty"`
+	PointConfig *PointConfig           `json:"point_config,omitempty"`
 	Extra       map[string]interface{} `json:"-"`
 }
 

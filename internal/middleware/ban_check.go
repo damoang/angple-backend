@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	interceptDateFormat     = "2006-01-02 15:04:05"
+	interceptDateFormat      = "2006-01-02 15:04:05"
 	interceptDateShortFormat = "20060102"
-	claimBoardSlug          = "claim"
-	claimWindowDays         = 15
+	claimBoardSlug           = "claim"
+	claimWindowDays          = 15
 )
 
 // BanCheck checks if the authenticated user is banned (mb_intercept_date).

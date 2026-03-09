@@ -14,6 +14,7 @@ import (
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/config"
+	"github.com/damoang/angple-backend/internal/cron"
 	"github.com/damoang/angple-backend/internal/dantry"
 	"github.com/damoang/angple-backend/internal/domain"
 	gnuboard "github.com/damoang/angple-backend/internal/domain/gnuboard"
@@ -33,16 +34,15 @@ import (
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
-	"github.com/damoang/angple-backend/internal/cron"
 	"github.com/damoang/angple-backend/internal/worker"
 	"github.com/damoang/angple-backend/internal/ws"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
-	pkgsphinx "github.com/damoang/angple-backend/pkg/sphinx"
 	"github.com/damoang/angple-backend/pkg/i18n"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
+	pkgsphinx "github.com/damoang/angple-backend/pkg/sphinx"
 	pkgstorage "github.com/damoang/angple-backend/pkg/storage"
 
 	"github.com/gin-contrib/cors"
@@ -1329,9 +1329,9 @@ func main() {
 					if cached, err := cacheService.GetPosts(ctx, slug, page, limit); err == nil {
 						// Parse Redis JSON once → store in memory
 						var parsed struct {
-							Success bool               `json:"success"`
-							Data    []map[string]any    `json:"data"`
-							Meta    map[string]any      `json:"meta"`
+							Success bool             `json:"success"`
+							Data    []map[string]any `json:"data"`
+							Meta    map[string]any   `json:"meta"`
 						}
 						if json.Unmarshal(cached, &parsed) == nil && parsed.Data != nil {
 							mc := &memCachedPosts{
