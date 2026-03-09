@@ -111,7 +111,10 @@ func ArchiveBoardCheck() gin.HandlerFunc {
 	}
 }
 
-// parseInterceptDate parses mb_intercept_date which can be "2006-01-02 15:04:05" or "20060102" format.
+// parseInterceptDate parses mb_intercept_date which can be:
+//   - "2006-01-02 15:04:05" (datetime)
+//   - "20060102" (short date, varchar(8) native)
+//   - "2006-01-" (truncated YYYY-MM-DD stored in varchar(8))
 func parseInterceptDate(s string) (time.Time, error) {
 	if t, err := time.ParseInLocation(interceptDateFormat, s, time.Local); err == nil {
 		return t, nil
@@ -119,6 +122,14 @@ func parseInterceptDate(s string) (time.Time, error) {
 	if t, err := time.ParseInLocation(interceptDateShortFormat, s, time.Local); err == nil {
 		// Short format has no time component — treat as end of day
 		return t.Add(24*time.Hour - time.Second), nil
+	}
+	// Handle truncated "YYYY-MM-" format (varchar(8) truncation of "YYYY-MM-DD")
+	if len(s) == 8 && s[4] == '-' && s[7] == '-' {
+		if t, err := time.ParseInLocation("2006-01-", s, time.Local); err == nil {
+			// Truncated — treat as last day of that month (conservative: assume banned)
+			lastDay := t.AddDate(0, 1, -1)
+			return lastDay.Add(24*time.Hour - time.Second), nil
+		}
 	}
 	return time.Time{}, fmt.Errorf("unknown date format: %s", s)
 }

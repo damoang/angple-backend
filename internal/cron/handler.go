@@ -84,6 +84,26 @@ func (h *Handler) ProcessApprovedReports(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
+// DisciplineRelease handles POST /api/internal/cron/discipline-release
+// Restores levels and clears intercept dates for expired disciplines
+func (h *Handler) DisciplineRelease(c *gin.Context) {
+	if !h.verifySecret(c) {
+		return
+	}
+
+	result, err := runDisciplineRelease(h.db)
+	if err != nil {
+		log.Printf("[Cron:discipline-release] error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	log.Printf("[Cron:discipline-release] levels restored: %d %v, intercepts released: %d %v",
+		result.LevelRestoredCount, result.LevelRestoredIDs,
+		result.InterceptReleasedCount, result.InterceptReleasedIDs)
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
 // UpdateReportPattern handles POST /api/internal/cron/update-report-pattern
 func (h *Handler) UpdateReportPattern(c *gin.Context) {
 	if !h.verifySecret(c) {

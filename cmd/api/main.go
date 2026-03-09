@@ -4123,6 +4123,7 @@ func main() {
 		cronGroup.POST("/update-member-levels", cronHandler.UpdateMemberLevels)
 		cronGroup.POST("/process-approved-reports", cronHandler.ProcessApprovedReports)
 		cronGroup.POST("/update-report-pattern", cronHandler.UpdateReportPattern)
+		cronGroup.POST("/discipline-release", cronHandler.DisciplineRelease)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(gnuWriteRepo, scheduledDeleteRepo)
