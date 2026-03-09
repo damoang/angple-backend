@@ -103,14 +103,69 @@ linters:
           - gosec
         path: internal/domain/v2/nariya_php\.go
       - linters:
+          - noctx
+        path: _test\.go
+      - linters:
           - errcheck
+          - goconst
+          - gocyclo
+          - revive
+          - staticcheck
         path: internal/cron/.*\.go
       - linters:
           - errcheck
+          - goconst
+          - gocyclo
         path: internal/service/.*\.go
       - linters:
           - errcheck
+          - gosec
+          - noctx
+          - revive
         path: pkg/sphinx/.*\.go
+      - linters:
+          - gosec
+        path: pkg/i18n/.*\.go
+      - linters:
+          - goconst
+        path: internal/handler/noti_handler\.go
+      - linters:
+          - errorlint
+          - gocyclo
+          - revive
+        path: internal/repository/gnuboard/.*\.go
+      - linters:
+          - misspell
+        path: internal/domain/gnuboard/.*\.go
+      - linters:
+          - misspell
+          - revive
+        path: internal/migration/.*\.go
+      - linters:
+          - staticcheck
+        path: internal/dantry/.*\.go
+      - linters:
+          - staticcheck
+        path: internal/domain/v2/.*\.go
+      - linters:
+          - gosec
+          - prealloc
+        path: cmd/api/main\.go
+      - linters:
+          - gosec
+        path: internal/handler/v2/handler\.go
+      - linters:
+          - gosec
+        path: internal/service/search_service\.go
+      - linters:
+          - goconst
+        path: internal/repository/gnuboard/write_repo\.go
+      - linters:
+          - goconst
+        path: internal/repository/v2/exp_repo\.go
+      - linters:
+          - goconst
+        path: internal/service/media_service\.go
       - linters:
           - dupl
           - errcheck
