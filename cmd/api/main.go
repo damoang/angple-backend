@@ -1465,11 +1465,29 @@ func main() {
 				return
 			}
 
-			// Get post from g5_write_{slug}
-			post, err := gnuWriteRepo.FindPostByIDIncludeDeleted(slug, id)
-			if err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
-				return
+			// Redis 캐시에서 게시글 조회 (raw post data)
+			var post *gnuboard.G5Write
+			ctx := c.Request.Context()
+			if cacheService != nil {
+				if cached, cacheErr := cacheService.GetPost(ctx, slug, id); cacheErr == nil {
+					var cachedPost gnuboard.G5Write
+					if json.Unmarshal(cached, &cachedPost) == nil {
+						post = &cachedPost
+					}
+				}
+			}
+
+			if post == nil {
+				// Cache miss: DB에서 조회
+				post, err = gnuWriteRepo.FindPostByIDIncludeDeleted(slug, id)
+				if err != nil {
+					c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
+					return
+				}
+				// Redis에 캐시 저장
+				if cacheService != nil {
+					_ = cacheService.SetPost(ctx, slug, id, post)
+				}
 			}
 
 			// Increment view count async (skip for deleted posts)
@@ -1544,14 +1562,51 @@ func main() {
 				return
 			}
 
+			ctx := c.Request.Context()
+			isAdmin := middleware.GetUserLevel(c) >= 10
+
 			// Get comments from g5_write_{slug} where wr_parent = id and wr_is_comment = 1
 			var comments []*gnuboard.G5Write
-			if middleware.GetUserLevel(c) >= 10 {
-				// 관리자: 삭제된 댓글 포함 전체 조회
+
+			if isAdmin {
+				// 관리자: 삭제된 댓글 포함 — 캐시 사용하지 않음 (데이터 다름)
 				comments, err = gnuWriteRepo.FindCommentsIncludeDeleted(slug, id)
 			} else {
-				blockedIDs := getBlockedIDs(c.Request.Context(), middleware.GetUserID(c))
-				comments, err = gnuWriteRepo.FindCommentsFiltered(slug, id, blockedIDs)
+				// 일반 사용자: Redis 캐시에서 전체 댓글 조회 후 차단 필터링
+				var cacheHit bool
+				if cacheService != nil {
+					if cached, cacheErr := cacheService.GetComments(ctx, slug, id); cacheErr == nil {
+						var cachedComments []*gnuboard.G5Write
+						if json.Unmarshal(cached, &cachedComments) == nil {
+							comments = cachedComments
+							cacheHit = true
+						}
+					}
+				}
+
+				if !cacheHit {
+					// Cache miss: DB에서 조회 (차단 필터 없이 전체)
+					comments, err = gnuWriteRepo.FindCommentsFiltered(slug, id, nil)
+					if err == nil && cacheService != nil {
+						_ = cacheService.SetComments(ctx, slug, id, comments)
+					}
+				}
+
+				// 차단 사용자 필터링 (캐시 후 인메모리)
+				blockedIDs := getBlockedIDs(ctx, middleware.GetUserID(c))
+				if len(blockedIDs) > 0 {
+					blockedSet := make(map[string]struct{}, len(blockedIDs))
+					for _, bid := range blockedIDs {
+						blockedSet[bid] = struct{}{}
+					}
+					filtered := make([]*gnuboard.G5Write, 0, len(comments))
+					for _, comment := range comments {
+						if _, blocked := blockedSet[comment.MbID]; !blocked {
+							filtered = append(filtered, comment)
+						}
+					}
+					comments = filtered
+				}
 			}
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
@@ -1560,8 +1615,8 @@ func main() {
 
 			// 댓글별 수정 횟수 배치 조회
 			commentIDs := make([]int, len(comments))
-			for i, c := range comments {
-				commentIDs[i] = c.WrID
+			for i, cm := range comments {
+				commentIDs[i] = cm.WrID
 			}
 			editCountMap := map[int]int{}
 			if len(commentIDs) > 0 {
@@ -1582,7 +1637,7 @@ func main() {
 
 			transformed := v1handler.TransformToV1Comments(comments)
 			// Admin sees full (unmasked) IP
-			if middleware.GetUserLevel(c) >= 10 {
+			if isAdmin {
 				v1handler.OverrideIPForAdmin(transformed, comments)
 			}
 			for i, comment := range comments {
@@ -2171,8 +2226,9 @@ func main() {
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), fmt.Sprintf("%d", comment.WrID), "@comment", pc) //nolint:errcheck
 			}
 
-			// 게시글 목록 캐시 무효화 (댓글 수 변경 반영)
+			// 캐시 무효화: 댓글 목록 + 게시글 목록 (댓글 수 변경 반영)
 			if cacheService != nil {
+				_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
 				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 			}
 			postMemCache.Range(func(key, value interface{}) bool {
@@ -2369,6 +2425,18 @@ func main() {
 				}
 			}
 
+			// 캐시 무효화: 게시글 상세 + 목록
+			if cacheService != nil {
+				_ = cacheService.InvalidatePost(c.Request.Context(), slug, postID)
+				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
+			}
+			postMemCache.Range(func(key, value interface{}) bool {
+				if strings.HasPrefix(key.(string), "posts:"+slug+":") {
+					postMemCache.Delete(key)
+				}
+				return true
+			})
+
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "수정 완료"})
 		})
 
@@ -2422,6 +2490,12 @@ func main() {
 			}).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 수정 실패"})
 				return
+			}
+
+			// 캐시 무효화: 댓글 목록
+			if cacheService != nil {
+				postID, _ := strconv.Atoi(c.Param("id"))
+				_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
 			}
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "수정 완료"})
@@ -2523,6 +2597,17 @@ func main() {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
 				}
+				// 캐시 무효화: 게시글 상세 + 목록
+				if cacheService != nil {
+					_ = cacheService.InvalidatePost(c.Request.Context(), slug, postID)
+					_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
+				}
+				postMemCache.Range(func(key, value interface{}) bool {
+					if strings.HasPrefix(key.(string), "posts:"+slug+":") {
+						postMemCache.Delete(key)
+					}
+					return true
+				})
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
 			}
@@ -2667,17 +2752,22 @@ func main() {
 			}
 
 			// 관리자(level >= 10)는 즉시 삭제
+			postID, _ := strconv.Atoi(c.Param("id"))
 			if userLevel >= 10 {
 				if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
+				}
+				// 캐시 무효화: 댓글 + 게시글 목록 (댓글 수 변경)
+				if cacheService != nil {
+					_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
+					_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
 			}
 
 			// 일반 사용자: 답글 수에 따라 지연 삭제 적용
-			postID, _ := strconv.Atoi(c.Param("id"))
 			replyCount, err := gnuWriteRepo.CountCommentReplies(slug, postID, commentID)
 			if err != nil {
 				// 카운트 실패 시 즉시 삭제로 fallback
@@ -2691,6 +2781,11 @@ func main() {
 				if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
+				}
+				// 캐시 무효화: 댓글 + 게시글 목록 (댓글 수 변경)
+				if cacheService != nil {
+					_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
+					_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return

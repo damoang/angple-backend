@@ -11,24 +11,27 @@ import (
 
 // TTL 상수 정의
 const (
-	TTLBoard   = 10 * time.Minute // 게시판 설정 (변경 빈도 낮음)
-	TTLPopular = 5 * time.Minute  // 인기 게시글
-	TTLSession = 30 * time.Minute // 세션
-	TTLShort   = 1 * time.Minute  // 짧은 캐시 (실시간성 필요)
-	TTLDefault = 5 * time.Minute  // 기본값
-	TTLPosts   = 30 * time.Second // 게시글 목록 (자주 갱신)
-	TTLNotices = 2 * time.Minute  // 공지사항
+	TTLBoard    = 10 * time.Minute // 게시판 설정 (변경 빈도 낮음)
+	TTLPopular  = 5 * time.Minute  // 인기 게시글
+	TTLSession  = 30 * time.Minute // 세션
+	TTLShort    = 1 * time.Minute  // 짧은 캐시 (실시간성 필요)
+	TTLDefault  = 5 * time.Minute  // 기본값
+	TTLPosts    = 30 * time.Second // 게시글 목록 (자주 갱신)
+	TTLNotices  = 2 * time.Minute  // 공지사항
+	TTLPost     = 30 * time.Second // 게시글 상세 (자주 갱신)
+	TTLComments = 30 * time.Second // 댓글 목록 (자주 갱신)
 )
 
 // 캐시 키 접두사
 const (
-	PrefixBoard   = "board:"
-	PrefixPopular = "popular:"
-	PrefixSession = "session:"
-	PrefixUser    = "user:"
-	PrefixPost    = "post:"
-	PrefixPosts   = "posts:"
-	PrefixNotices = "notices:"
+	PrefixBoard    = "board:"
+	PrefixPopular  = "popular:"
+	PrefixSession  = "session:"
+	PrefixUser     = "user:"
+	PrefixPost     = "post:"
+	PrefixPosts    = "posts:"
+	PrefixNotices  = "notices:"
+	PrefixComments = "comments:"
 )
 
 // Service Redis 캐시 서비스 인터페이스
@@ -65,6 +68,16 @@ type Service interface {
 	GetPosts(ctx context.Context, boardID string, page, limit int) ([]byte, error)
 	SetPosts(ctx context.Context, boardID string, page, limit int, data interface{}) error
 	InvalidatePosts(ctx context.Context, boardID string) error
+
+	// 게시글 상세 캐시
+	GetPost(ctx context.Context, boardID string, postID int) ([]byte, error)
+	SetPost(ctx context.Context, boardID string, postID int, data interface{}) error
+	InvalidatePost(ctx context.Context, boardID string, postID int) error
+
+	// 댓글 캐시
+	GetComments(ctx context.Context, boardID string, postID int) ([]byte, error)
+	SetComments(ctx context.Context, boardID string, postID int, data interface{}) error
+	InvalidateComments(ctx context.Context, boardID string, postID int) error
 
 	// 공지사항 캐시
 	GetNotices(ctx context.Context, boardID string) ([]byte, error)
@@ -338,6 +351,72 @@ func (c *redisCache) InvalidatePosts(ctx context.Context, boardID string) error 
 		return nil
 	}
 	return c.deleteByPattern(ctx, PrefixPosts+boardID+":*")
+}
+
+// ========================================
+// 게시글 상세 캐시
+// ========================================
+
+func (c *redisCache) postKey(boardID string, postID int) string {
+	return fmt.Sprintf("%s%s:%d", PrefixPost, boardID, postID)
+}
+
+func (c *redisCache) GetPost(ctx context.Context, boardID string, postID int) ([]byte, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("redis not available")
+	}
+	return c.client.Get(ctx, c.postKey(boardID, postID)).Bytes()
+}
+
+func (c *redisCache) SetPost(ctx context.Context, boardID string, postID int, data interface{}) error {
+	if c.client == nil {
+		return nil
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return c.client.Set(ctx, c.postKey(boardID, postID), jsonData, TTLPost).Err()
+}
+
+func (c *redisCache) InvalidatePost(ctx context.Context, boardID string, postID int) error {
+	if c.client == nil {
+		return nil
+	}
+	return c.client.Del(ctx, c.postKey(boardID, postID)).Err()
+}
+
+// ========================================
+// 댓글 캐시
+// ========================================
+
+func (c *redisCache) commentsKey(boardID string, postID int) string {
+	return fmt.Sprintf("%s%s:%d", PrefixComments, boardID, postID)
+}
+
+func (c *redisCache) GetComments(ctx context.Context, boardID string, postID int) ([]byte, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("redis not available")
+	}
+	return c.client.Get(ctx, c.commentsKey(boardID, postID)).Bytes()
+}
+
+func (c *redisCache) SetComments(ctx context.Context, boardID string, postID int, data interface{}) error {
+	if c.client == nil {
+		return nil
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return c.client.Set(ctx, c.commentsKey(boardID, postID), jsonData, TTLComments).Err()
+}
+
+func (c *redisCache) InvalidateComments(ctx context.Context, boardID string, postID int) error {
+	if c.client == nil {
+		return nil
+	}
+	return c.client.Del(ctx, c.commentsKey(boardID, postID)).Err()
 }
 
 // ========================================
