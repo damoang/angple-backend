@@ -2,11 +2,21 @@ package v2
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"gorm.io/gorm"
 )
+
+// xpConfigCache caches XPConfig to avoid hitting site_settings on every write/comment
+var (
+	xpConfigCacheMu    sync.RWMutex
+	xpConfigCacheVal   *XPConfig
+	xpConfigCacheExpAt time.Time
+)
+
+const xpConfigCacheTTL = 30 * time.Second
 
 // ExpSummary represents experience point summary statistics
 type ExpSummary struct {
@@ -20,12 +30,24 @@ type ExpSummary struct {
 
 // XPConfig represents configurable XP settings (stored in site_settings.settings_json)
 type XPConfig struct {
-	LoginXP int `json:"login_xp"` // XP granted per daily login (default: 500)
+	LoginXP        int  `json:"login_xp"`        // XP granted per daily login (default: 500)
+	WriteXP        int  `json:"write_xp"`         // XP granted per post (default: 100)
+	CommentXP      int  `json:"comment_xp"`       // XP granted per comment (default: 50)
+	LoginEnabled   bool `json:"login_enabled"`    // Enable login XP (default: true)
+	WriteEnabled   bool `json:"write_enabled"`    // Enable write XP (default: false)
+	CommentEnabled bool `json:"comment_enabled"`  // Enable comment XP (default: false)
 }
 
 // DefaultXPConfig returns the default XP configuration
 func DefaultXPConfig() *XPConfig {
-	return &XPConfig{LoginXP: 500}
+	return &XPConfig{
+		LoginXP:        500,
+		WriteXP:        100,
+		CommentXP:      50,
+		LoginEnabled:   true,
+		WriteEnabled:   false,
+		CommentEnabled: false,
+	}
 }
 
 // MemberXPInfo represents a member's XP summary for admin listing
@@ -37,14 +59,21 @@ type MemberXPInfo struct {
 	MbLevel int    `json:"mb_level"`
 }
 
+// AddExpResult contains the result of an AddExp operation
+type AddExpResult struct {
+	LevelUp  bool `json:"level_up"`
+	OldLevel int  `json:"old_level"`
+	NewLevel int  `json:"new_level"`
+}
+
 // ExpRepository handles experience point data access
 type ExpRepository interface {
 	// GetSummary returns exp summary for a user (by mb_id)
 	GetSummary(mbID string) (*ExpSummary, error)
 	// GetHistory returns exp history with pagination
 	GetHistory(mbID string, page, limit int) ([]gnuboard.ExpHistory, int64, error)
-	// AddExp adds experience points to a user
-	AddExp(mbID string, point int, content, relTable, relID, action string) error
+	// AddExp adds experience points to a user and returns level change info
+	AddExp(mbID string, point int, content, relTable, relID, action string) (*AddExpResult, error)
 	// HasTodayAction checks if the user already has a specific action logged today
 	HasTodayAction(mbID, action string) (bool, error)
 	// ListMembersWithXP returns paginated member list with XP info for admin
@@ -164,8 +193,25 @@ func (r *expRepository) GetHistory(mbID string, page, limit int) ([]gnuboard.Exp
 	return history, total, nil
 }
 
-func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID, action string) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+// maxXPLevel is the highest XP level; users at this level stop earning XP from actions
+var maxXPLevel = len(levelThresholds)
+
+func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID, action string) (*AddExpResult, error) {
+	result := &AddExpResult{}
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// Get current level before update
+		var member gnuboard.G5Member
+		if err := tx.Select("as_exp, as_level").Where("mb_id = ?", mbID).First(&member).Error; err != nil {
+			return err
+		}
+		result.OldLevel = member.AsLevel
+		result.NewLevel = member.AsLevel
+
+		// 최대 레벨 도달 시 자동 적립(양수) 차단 — 관리자 수동 지급/차감은 허용
+		if member.AsLevel >= maxXPLevel && point > 0 && relTable != "@admin" {
+			return nil // 적립 없이 조용히 반환
+		}
+
 		// Update member exp
 		if err := tx.Model(&gnuboard.G5Member{}).
 			Where("mb_id = ?", mbID).
@@ -173,15 +219,12 @@ func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID,
 			return err
 		}
 
-		// Get updated exp to check level
-		var member gnuboard.G5Member
-		if err := tx.Select("as_exp, as_level").Where("mb_id = ?", mbID).First(&member).Error; err != nil {
-			return err
-		}
-
 		// Check if level up is needed
-		newLevel, _, _, _, _ := calculateLevelInfo(member.AsExp)
+		newExp := member.AsExp + point
+		newLevel, _, _, _, _ := calculateLevelInfo(newExp)
+		result.NewLevel = newLevel
 		if newLevel > member.AsLevel {
+			result.LevelUp = true
 			if err := tx.Model(&gnuboard.G5Member{}).
 				Where("mb_id = ?", mbID).
 				UpdateColumn("as_level", newLevel).Error; err != nil {
@@ -200,14 +243,22 @@ func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID,
 		}
 		return tx.Create(log).Error
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // HasTodayAction checks if the user already has a specific action logged today
+// Uses range query on xp_datetime to leverage idx_mb_action_date index
 func (r *expRepository) HasTodayAction(mbID, action string) (bool, error) {
-	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	var count int64
 	err := r.db.Model(&gnuboard.G5NaXP{}).
-		Where("mb_id = ? AND xp_rel_action = ? AND DATE(xp_datetime) = ?", mbID, action, today).
+		Where("mb_id = ? AND xp_rel_action = ? AND xp_datetime >= ? AND xp_datetime < ?",
+			mbID, action, todayStart, tomorrowStart).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -255,8 +306,34 @@ type settingsJSONWrapper struct {
 	Extra    map[string]interface{} `json:"-"`
 }
 
-// GetXPConfig reads XP configuration from site_settings.settings_json
+// GetXPConfig reads XP configuration from site_settings.settings_json (cached 30s)
 func (r *expRepository) GetXPConfig() (*XPConfig, error) {
+	// Check cache first
+	xpConfigCacheMu.RLock()
+	if xpConfigCacheVal != nil && time.Now().Before(xpConfigCacheExpAt) {
+		cached := *xpConfigCacheVal // copy
+		xpConfigCacheMu.RUnlock()
+		return &cached, nil
+	}
+	xpConfigCacheMu.RUnlock()
+
+	config, err := r.getXPConfigFromDB()
+	if err != nil {
+		return nil, err
+	}
+
+	// Update cache
+	xpConfigCacheMu.Lock()
+	cp := *config
+	xpConfigCacheVal = &cp
+	xpConfigCacheExpAt = time.Now().Add(xpConfigCacheTTL)
+	xpConfigCacheMu.Unlock()
+
+	return config, nil
+}
+
+// getXPConfigFromDB fetches XPConfig directly from database
+func (r *expRepository) getXPConfigFromDB() (*XPConfig, error) {
 	var row siteSettingsJSON
 	err := r.db.Select("settings_json").Where("site_id = ?", defaultSiteID).First(&row).Error
 	if err != nil {
@@ -277,16 +354,30 @@ func (r *expRepository) GetXPConfig() (*XPConfig, error) {
 		return DefaultXPConfig(), nil
 	}
 
-	// Validate: if login_xp is 0, return default
+	// Fill defaults for zero values on legacy configs (only LoginXP had a value before)
 	if wrapper.XPConfig.LoginXP == 0 {
 		wrapper.XPConfig.LoginXP = 500
+	}
+	if wrapper.XPConfig.WriteXP == 0 {
+		wrapper.XPConfig.WriteXP = 100
+	}
+	if wrapper.XPConfig.CommentXP == 0 {
+		wrapper.XPConfig.CommentXP = 50
 	}
 
 	return wrapper.XPConfig, nil
 }
 
 // UpdateXPConfig writes XP configuration to site_settings.settings_json (preserving other fields)
+// Invalidates the XPConfig cache on success
 func (r *expRepository) UpdateXPConfig(config *XPConfig) error {
+	// Invalidate cache before update (will be repopulated on next read)
+	defer func() {
+		xpConfigCacheMu.Lock()
+		xpConfigCacheVal = nil
+		xpConfigCacheMu.Unlock()
+	}()
+
 	var row siteSettingsJSON
 	err := r.db.Select("settings_json").Where("site_id = ?", defaultSiteID).First(&row).Error
 

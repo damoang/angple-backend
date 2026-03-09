@@ -107,7 +107,7 @@ func (s *V2AuthService) grantLoginXP(username string) {
 		log.Printf("[v2-auth] XP config read failed for user %s: %v", username, cfgErr)
 		return
 	}
-	if xpConfig.LoginXP <= 0 {
+	if !xpConfig.LoginEnabled || xpConfig.LoginXP <= 0 {
 		return
 	}
 
@@ -121,7 +121,7 @@ func (s *V2AuthService) grantLoginXP(username string) {
 	}
 
 	today := time.Now().Format("2006-01-02")
-	if addErr := s.expRepo.AddExp(username, xpConfig.LoginXP, today+" 로그인", "@login", username, today); addErr != nil {
+	if _, addErr := s.expRepo.AddExp(username, xpConfig.LoginXP, today+" 로그인", "@login", username, today); addErr != nil {
 		log.Printf("[v2-auth] login XP grant failed for user %s: %v", username, addErr)
 	}
 }

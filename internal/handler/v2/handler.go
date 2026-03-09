@@ -1,10 +1,10 @@
 package v2
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
-
-	"fmt"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -26,6 +26,7 @@ type V2Handler struct {
 	pointRepo    v2repo.PointRepository
 	revisionRepo v2repo.RevisionRepository
 	notiRepo     gnurepo.NotiRepository
+	expRepo      v2repo.ExpRepository
 	gnuDB        *gorm.DB // gnuboard g5_member 조회용
 }
 
@@ -64,6 +65,31 @@ func (h *V2Handler) SetNotiRepository(repo gnurepo.NotiRepository) {
 // SetGnuDB sets the gnuboard database connection for mb_id → mb_no lookup
 func (h *V2Handler) SetGnuDB(db *gorm.DB) {
 	h.gnuDB = db
+}
+
+// SetExpRepository sets the optional exp repository for XP operations
+func (h *V2Handler) SetExpRepository(repo v2repo.ExpRepository) {
+	h.expRepo = repo
+}
+
+// createLevelUpNoti inserts a level-up notification into g5_na_noti
+func (h *V2Handler) createLevelUpNoti(mbID string, newLevel int) {
+	noti := &gnurepo.Notification{
+		MbID:          mbID,
+		PhFromCase:    "levelup",
+		PhToCase:      "me",
+		BoTable:       "@system",
+		WrID:          0,
+		RelMbID:       "system",
+		RelMbNick:     "시스템",
+		RelMsg:        fmt.Sprintf("레벨 %d로 승급했습니다!", newLevel),
+		RelURL:        "/mypage/exp",
+		PhReaded:      "N",
+		ParentSubject: fmt.Sprintf("레벨 %d 달성", newLevel),
+	}
+	if err := h.notiRepo.Create(noti); err != nil {
+		log.Printf("[xp] levelup notification failed for %s: %v", mbID, err)
+	}
 }
 
 // resolveUserIDToMbNo converts gnuboard mb_id (string) to mb_no (uint64)
@@ -350,6 +376,32 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 	// 포인트 처리 (지급 또는 차감)
 	if board.WritePoint != 0 && h.pointRepo != nil {
 		_ = h.pointRepo.AddPoint(userID, board.WritePoint, "글쓰기", "v2_posts", post.ID) //nolint:errcheck
+	}
+
+	// 경험치 부여 (비동기, best-effort)
+	if h.expRepo != nil {
+		mbID := middleware.GetUserID(c)
+		tableName := fmt.Sprintf("v2_posts_%s", slug)
+		wrID := fmt.Sprintf("%d", post.ID)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[xp] write XP panic for %s: %v", mbID, r)
+				}
+			}()
+			xpConfig, err := h.expRepo.GetXPConfig()
+			if err != nil || xpConfig == nil || !xpConfig.WriteEnabled || xpConfig.WriteXP <= 0 {
+				return
+			}
+			result, err := h.expRepo.AddExp(mbID, xpConfig.WriteXP, "글쓰기", tableName, wrID, "@write")
+			if err != nil {
+				log.Printf("[xp] write XP grant failed for %s: %v", mbID, err)
+				return
+			}
+			if result.LevelUp && h.notiRepo != nil {
+				h.createLevelUpNoti(mbID, result.NewLevel)
+			}
+		}()
 	}
 
 	common.V2Created(c, post)
@@ -713,9 +765,19 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		return
 	}
 
-	// 포인트 처리 (지급 또는 차감)
+	// 30일 이전 글 체크 (포인트 + XP 모두 적용)
+	// postRepo.FindByID는 PK 조회이므로 빠름 (1회만 조회)
+	isOldPost := false
+	if parentPost, postErr := h.postRepo.FindByID(postID); postErr == nil {
+		isOldPost = time.Since(parentPost.CreatedAt) > 30*24*time.Hour
+	}
+
+	// 포인트 처리 (지급 또는 차감) — 30일 이전 글에는 지급 포인트 미부여
 	if board.CommentPoint != 0 && h.pointRepo != nil {
-		_ = h.pointRepo.AddPoint(userID, board.CommentPoint, "댓글작성", "v2_comments", comment.ID) //nolint:errcheck
+		// 차감 포인트(음수)는 항상 적용, 지급 포인트(양수)는 30일 이내만
+		if board.CommentPoint < 0 || !isOldPost {
+			_ = h.pointRepo.AddPoint(userID, board.CommentPoint, "댓글작성", "v2_comments", comment.ID) //nolint:errcheck
+		}
 	}
 
 	// 알림 생성 (비동기, 에러 무시)
@@ -726,6 +788,32 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 	}
 	if h.notiRepo != nil {
 		go h.createCommentNotification(slug, postID, comment, mbID, authorName)
+	}
+
+	// 경험치 부여 (비동기, best-effort)
+	// 30일 이전 글에 달린 댓글은 XP 미부여 (스팸 방지)
+	if h.expRepo != nil && !isOldPost {
+		tableName := fmt.Sprintf("v2_comments_%s", slug)
+		wrID := fmt.Sprintf("%d", comment.ID)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[xp] comment XP panic for %s: %v", mbID, r)
+				}
+			}()
+			xpConfig, err := h.expRepo.GetXPConfig()
+			if err != nil || xpConfig == nil || !xpConfig.CommentEnabled || xpConfig.CommentXP <= 0 {
+				return
+			}
+			result, err := h.expRepo.AddExp(mbID, xpConfig.CommentXP, "댓글 작성", tableName, wrID, "@comment")
+			if err != nil {
+				log.Printf("[xp] comment XP grant failed for %s: %v", mbID, err)
+				return
+			}
+			if result.LevelUp && h.notiRepo != nil {
+				h.createLevelUpNoti(mbID, result.NewLevel)
+			}
+		}()
 	}
 
 	// FreeComment 형태로 응답 (프론트엔드 호환)

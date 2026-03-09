@@ -390,9 +390,7 @@ func main() {
 		v2Handler.SetNotiRepository(gnurepo.NewNotiRepository(db))
 		v2Handler.SetGnuDB(db)
 
-		// TODO: 경험치 서비스 구현 후 활성화
-		// expSvc := v2svc.NewExpService(v2UserRepo)
-		// v2Handler.SetExpService(expSvc)
+		// XP: DI into V2Handler (set after expRepo is created below)
 
 		v2routes.Setup(router, v2Handler, jwtManager, permChecker, db)
 		v2routes.SetupAdminPosts(router, v2Handler, jwtManager)
@@ -402,6 +400,10 @@ func main() {
 		gnuPointRepo := v2repo.NewGnuboardPointRepository(db)
 		pointHandler := v2handler.NewPointHandler(gnuPointRepo)
 		expHandler := v2handler.NewExpHandler(v2ExpRepo)
+		expHandler.SetNotiRepository(gnurepo.NewNotiRepository(db))
+
+		// Inject expRepo into V2Handler for write/comment XP
+		v2Handler.SetExpRepository(v2ExpRepo)
 		myPageRepo := gnurepo.NewMyPageRepository(db, gnuBoardRepo)
 		myPageHandler := handler.NewMyPageHandler(myPageRepo)
 		v2routes.SetupMyPage(router, pointHandler, expHandler, myPageHandler, jwtManager)
