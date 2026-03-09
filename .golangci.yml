@@ -141,6 +141,7 @@ linters:
           - misspell
         path: internal/domain/gnuboard/.*\.go
       - linters:
+          - dupl
           - misspell
           - revive
         path: internal/migration/.*\.go
