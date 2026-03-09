@@ -113,6 +113,15 @@ func SetupAdminXP(router *gin.Engine, h *v2handler.ExpHandler, jwtManager *jwt.M
 	adminMembers.POST("/:mbId/grant", h.AdminGrantXP)
 }
 
+// SetupAdminPoint configures admin point configuration routes
+func SetupAdminPoint(router *gin.Engine, h *v2handler.ExpHandler, jwtManager *jwt.Manager) {
+	admin := router.Group("/api/v2/admin/point")
+	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+
+	admin.GET("/config", h.AdminGetPointConfig)
+	admin.PUT("/config", h.AdminUpdatePointConfig)
+}
+
 // SetupScrap configures v2 scrap routes
 func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)

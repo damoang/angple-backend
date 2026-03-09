@@ -5,14 +5,19 @@ import (
 	"net/http"
 	"os"
 
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
+	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
 // Handler handles internal cron job endpoints
 type Handler struct {
-	db     *gorm.DB
-	secret string
+	db                 *gorm.DB
+	secret             string
+	pointConfigRepo    v2repo.PointConfigRepository
+	gnuPointWriteRepo  v2repo.GnuboardPointWriteRepository
+	notiRepo           gnurepo.NotiRepository
 }
 
 // NewHandler creates a new cron Handler
@@ -22,6 +27,17 @@ func NewHandler(db *gorm.DB) *Handler {
 		secret = "angple_cron_2024"
 	}
 	return &Handler{db: db, secret: secret}
+}
+
+// SetPointExpiryDeps sets dependencies for point expiry cron jobs
+func (h *Handler) SetPointExpiryDeps(
+	pointConfigRepo v2repo.PointConfigRepository,
+	gnuPointWriteRepo v2repo.GnuboardPointWriteRepository,
+	notiRepo gnurepo.NotiRepository,
+) {
+	h.pointConfigRepo = pointConfigRepo
+	h.gnuPointWriteRepo = gnuPointWriteRepo
+	h.notiRepo = notiRepo
 }
 
 // verifySecret checks the secret query parameter

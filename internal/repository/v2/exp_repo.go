@@ -300,10 +300,25 @@ func (siteSettingsJSON) TableName() string {
 	return "site_settings"
 }
 
+// PointConfig represents configurable point expiry settings (stored in site_settings.settings_json)
+type PointConfig struct {
+	ExpiryEnabled bool `json:"expiry_enabled"` // Enable point expiry (default: false)
+	ExpiryDays    int  `json:"expiry_days"`    // Days until points expire (default: 180)
+}
+
+// DefaultPointConfig returns the default point configuration
+func DefaultPointConfig() *PointConfig {
+	return &PointConfig{
+		ExpiryEnabled: false,
+		ExpiryDays:    180,
+	}
+}
+
 // settingsJSONWrapper wraps the full settings_json content (preserves unknown fields)
 type settingsJSONWrapper struct {
-	XPConfig *XPConfig              `json:"xp_config,omitempty"`
-	Extra    map[string]interface{} `json:"-"`
+	XPConfig    *XPConfig    `json:"xp_config,omitempty"`
+	PointConfig *PointConfig `json:"point_config,omitempty"`
+	Extra       map[string]interface{} `json:"-"`
 }
 
 // GetXPConfig reads XP configuration from site_settings.settings_json (cached 30s)
