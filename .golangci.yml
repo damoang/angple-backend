@@ -1,260 +1,211 @@
 version: "2"
-
 run:
-  timeout: 5m
   tests: true
-
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
 linters:
   enable:
-    - errcheck        # 에러 체크 누락 검사
-    - gosimple        # 코드 간소화 제안
-    - govet           # go vet 실행
-    - ineffassign     # 비효율적인 할당 검사
-    - staticcheck     # 정적 분석
-    - unused          # 사용하지 않는 코드 검사
-    - gofmt           # 포맷팅 체크
-    - goimports       # import 정리
-    - misspell        # 철자 오류
-    - revive          # golint 후속작
-    - gosec           # 보안 이슈 검사
-    - unconvert       # 불필요한 타입 변환
-    - goconst         # 반복되는 상수 검사
-    - gocyclo         # 순환 복잡도 검사
-    - dupl            # 중복 코드 검사
-    - prealloc        # 슬라이스 사전 할당
-    - bodyclose       # HTTP response body close 체크
-    - noctx           # context 누락 검사
-    - rowserrcheck    # database/sql rows.Err 체크
-    - sqlclosecheck   # database/sql close 체크
-    - errorlint       # 에러 처리 best practice
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-
-  govet:
-    enable-all: true
-    disable:
-      - shadow
-      - fieldalignment
-
-  gocyclo:
-    min-complexity: 15
-
-  dupl:
-    threshold: 100
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-
-  misspell:
-    locale: US
-
-  revive:
+    - bodyclose
+    - dupl
+    - errorlint
+    - goconst
+    - gocyclo
+    - gosec
+    - misspell
+    - noctx
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+  settings:
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    gocyclo:
+      min-complexity: 15
+    gosec:
+      excludes:
+        - G204
+    govet:
+      disable:
+        - shadow
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      - name: exported
-      - name: if-return
-      - name: increment-decrement
-      - name: var-naming
-      - name: var-declaration
-      - name: package-comments
-      - name: range
-      - name: receiver-naming
-      - name: time-naming
-      - name: unexported-return
-      - name: indent-error-flow
-      - name: errorf
-      - name: empty-block
-      - name: superfluous-else
-      - name: unused-parameter
-      - name: unreachable-code
-      - name: redefines-builtin-id
-
-  gosec:
-    excludes:
-      - G204  # Subprocess launched with variable (개발 환경에서 필요)
-
+      - linters:
+          - dupl
+          - errcheck
+          - gocyclo
+          - gosec
+        path: _test\.go
+      - linters:
+          - dupl
+          - errcheck
+          - goconst
+          - gocyclo
+          - revive
+        path: cmd/.*main\.go
+      - linters:
+          - errorlint
+        path: cmd/migrate-.*\.go
+      - linters:
+          - revive
+        path: internal/domain/v2/.*\.go
+        text: stutters
+      - linters:
+          - goconst
+          - gocyclo
+          - gosec
+        path: internal/domain/v2/nariya_php\.go
+      - linters:
+          - dupl
+          - errcheck
+          - goconst
+          - gosec
+        path: internal/dantry/.*\.go
+      - linters:
+          - errcheck
+        path: internal/handler/.*\.go
+      - linters:
+          - errcheck
+          - revive
+        path: internal/handler/v2/.*\.go
+        text: stutters|Error return value
+      - linters:
+          - gocyclo
+        path: internal/handler/v2/.*\.go
+      - linters:
+          - gocyclo
+          - gosec
+        path: internal/middleware/.*\.go
+      - linters:
+          - revive
+        path: internal/common/.*\.go
+        text: unused-parameter
+      - linters:
+          - errcheck
+        path: internal/config/.*\.go
+      - linters:
+          - revive
+        path: internal/migration/.*\.go
+      - linters:
+          - revive
+        path: internal/domain/gnuboard/member\.go
+        text: var-naming
+      - linters:
+          - prealloc
+        path: internal/repository/gnuboard/mypage_repo\.go
+      - linters:
+          - dupl
+        path: internal/repository/.*\.go
+      - linters:
+          - dupl
+        path: internal/handler/.*\.go
+      - linters:
+          - dupl
+        path: internal/middleware/.*\.go
+      - linters:
+          - revive
+        path: internal/plugin/types\.go
+        text: stutters
+      - linters:
+          - gocyclo
+          - revive
+        path: internal/plugin/manager\.go
+        text: stutters|registerPluginMenus
+      - linters:
+          - dupl
+          - errcheck
+          - errorlint
+          - goconst
+          - gocyclo
+          - gosec
+          - misspell
+          - prealloc
+          - revive
+          - staticcheck
+        path: internal/plugins/commerce/.*\.go
+      - linters:
+          - dupl
+          - errcheck
+          - gocyclo
+        path: internal/plugins/marketplace/.*\.go
+      - linters:
+          - errcheck
+          - revive
+        path: internal/plugins/commerce/carrier/.*\.go
+      - linters:
+          - errcheck
+          - goconst
+          - revive
+        path: internal/plugins/commerce/gateway/.*\.go
+      - linters:
+          - dupl
+        path: internal/plugins/commerce/handler/.*\.go
+    paths:
+      - .*\.pb\.go$
+      - plugins
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-dirs:
-    - plugins
-  exclude-files:
-    - ".*\\.pb\\.go$"
-  exclude-rules:
-    # 테스트 파일은 일부 규칙 제외
-    - path: _test\.go
-      linters:
-        - dupl
-        - gosec
-        - gocyclo
-        - errcheck
-
-    # main.go 규칙 완화 (거대 DI/초기화 파일)
-    - path: cmd/.*main\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - goconst
-        - revive
-        - dupl
-
-    # migrate 도구 규칙 완화
-    - path: cmd/migrate-.*\.go
-      linters:
-        - errorlint
-
-    # v2 도메인 모델의 V2 prefix는 의도적 (gnuboard와 구분)
-    - path: internal/domain/v2/.*\.go
-      linters:
-        - revive
-      text: "stutters"
-
-    # nariya_php.go 규칙 완화 (PHP 호환 로직, 의도적으로 복잡)
-    - path: internal/domain/v2/nariya_php\.go
-      linters:
-        - gocyclo
-        - goconst
-        - gosec
-
-    # Dantry (에러 트래커) 규칙 완화 — 내부 모니터링 도구
-    - path: internal/dantry/.*\.go
-      linters:
-        - errcheck
-        - gosec
-        - goconst
-        - dupl
-
-    # Handler의 strconv 에러는 기본값 fallback이므로 무시
-    - path: internal/handler/.*\.go
-      linters:
-        - errcheck
-
-    # v2 Handler 규칙 완화 (CRUD 패턴 반복, strconv fallback)
-    - path: internal/handler/v2/.*\.go
-      linters:
-        - errcheck
-        - revive
-      text: "stutters|Error return value"
-
-    # v2 Handler 복잡도 허용 (CreateComment 등 CRUD 핸들러)
-    - path: internal/handler/v2/.*\.go
-      linters:
-        - gocyclo
-
-    # Middleware 규칙 완화
-    - path: internal/middleware/.*\.go
-      linters:
-        - gocyclo
-        - gosec
-
-    # common response 패턴 (err 파라미터는 인터페이스 호환용)
-    - path: internal/common/.*\.go
-      linters:
-        - revive
-      text: "unused-parameter"
-
-    # config dotenv 로드 에러는 환경에 따라 파일 없을 수 있음
-    - path: internal/config/.*\.go
-      linters:
-        - errcheck
-
-    # migration 유틸 규칙 완화
-    - path: internal/migration/.*\.go
-      linters:
-        - revive
-
-    # gnuboard member 레거시 필드명 (Url → URL 리네이밍 불가)
-    - path: internal/domain/gnuboard/member\.go
-      linters:
-        - revive
-      text: "var-naming"
-
-    # mypage repo의 prealloc (동적 UNION 빌드)
-    - path: internal/repository/gnuboard/mypage_repo\.go
-      linters:
-        - prealloc
-
-    # Repository 패턴의 유사 코드 허용
-    - path: internal/repository/.*\.go
-      linters:
-        - dupl
-
-    # Handler 패턴의 유사 코드 허용 (CRUD 핸들러는 구조가 비슷함)
-    - path: internal/handler/.*\.go
-      linters:
-        - dupl
-
-    # Middleware 패턴의 유사 코드 허용 (JWTAuth, OptionalJWTAuth 구조가 비슷함)
-    - path: internal/middleware/.*\.go
-      linters:
-        - dupl
-
-    # 플러그인의 타입 네이밍 (Plugin* prefix는 의도적)
-    - path: internal/plugin/types\.go
-      linters:
-        - revive
-      text: "stutters"
-
-    - path: internal/plugin/manager\.go
-      linters:
-        - revive
-        - gocyclo
-      text: "stutters|registerPluginMenus"
-
-    # Commerce 플러그인 규칙 완화 (API 호환성, 내부 에러 처리)
-    - path: internal/plugins/commerce/.*\.go
-      linters:
-        - misspell
-        - errcheck
-        - revive
-        - errorlint
-        - gosec
-        - dupl
-        - goconst
-        - gocyclo
-        - prealloc
-        - staticcheck
-
-    # Marketplace 플러그인 규칙 완화 (핸들러 패턴, 비핵심 에러)
-    - path: internal/plugins/marketplace/.*\.go
-      linters:
-        - errcheck
-        - dupl
-        - gocyclo
-
-    # Carrier 관련 규칙 제외
-    - path: internal/plugins/commerce/carrier/.*\.go
-      linters:
-        - errcheck
-        - revive
-
-    # Gateway 관련 규칙 제외 (인터페이스 구현으로 인해 unused parameter 발생)
-    - path: internal/plugins/commerce/gateway/.*\.go
-      linters:
-        - revive
-        - errcheck
-        - goconst
-
-    # Commerce handler 중복 코드 허용 (에러 핸들링 패턴)
-    - path: internal/plugins/commerce/handler/.*\.go
-      linters:
-        - dupl
-
   max-issues-per-linter: 0
   max-same-issues: 0
   uniq-by-line: true
-
-output:
-  formats:
-    colored-line-number: {}
-  print-issued-lines: true
-  print-linter-name: true
-  sort-results: true
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - .*\.pb\.go$
+      - plugins
+      - third_party$
+      - builtin$
+      - examples$
