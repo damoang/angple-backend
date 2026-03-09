@@ -18,18 +18,18 @@ import (
 
 // V2Handler handles all v2 API endpoints
 type V2Handler struct {
-	userRepo           v2repo.UserRepository
-	postRepo           v2repo.PostRepository
-	commentRepo        v2repo.CommentRepository
-	boardRepo          v2repo.BoardRepository
-	permChecker        middleware.BoardPermissionChecker
-	pointRepo          v2repo.PointRepository
-	revisionRepo       v2repo.RevisionRepository
-	notiRepo           gnurepo.NotiRepository
-	expRepo            v2repo.ExpRepository
-	gnuDB              *gorm.DB // gnuboard g5_member 조회용
-	gnuPointWriteRepo  v2repo.GnuboardPointWriteRepository
-	pointConfigRepo    v2repo.PointConfigRepository
+	userRepo          v2repo.UserRepository
+	postRepo          v2repo.PostRepository
+	commentRepo       v2repo.CommentRepository
+	boardRepo         v2repo.BoardRepository
+	permChecker       middleware.BoardPermissionChecker
+	pointRepo         v2repo.PointRepository
+	revisionRepo      v2repo.RevisionRepository
+	notiRepo          gnurepo.NotiRepository
+	expRepo           v2repo.ExpRepository
+	gnuDB             *gorm.DB // gnuboard g5_member 조회용
+	gnuPointWriteRepo v2repo.GnuboardPointWriteRepository
+	pointConfigRepo   v2repo.PointConfigRepository
 }
 
 // NewV2Handler creates a new V2Handler

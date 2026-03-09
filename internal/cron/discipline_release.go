@@ -9,11 +9,11 @@ import (
 
 // DisciplineReleaseResult contains the result of discipline release
 type DisciplineReleaseResult struct {
-	LevelRestoredCount    int      `json:"level_restored_count"`
-	LevelRestoredIDs      []string `json:"level_restored_ids"`
-	InterceptReleasedCount int     `json:"intercept_released_count"`
+	LevelRestoredCount     int      `json:"level_restored_count"`
+	LevelRestoredIDs       []string `json:"level_restored_ids"`
+	InterceptReleasedCount int      `json:"intercept_released_count"`
 	InterceptReleasedIDs   []string `json:"intercept_released_ids"`
-	ExecutedAt            string   `json:"executed_at"`
+	ExecutedAt             string   `json:"executed_at"`
 }
 
 // runDisciplineRelease restores level and clears intercept for expired discipline records

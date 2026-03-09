@@ -21,18 +21,18 @@ type ProcessReportsResult struct {
 
 // singoReportGroup represents a grouped report from na_singo
 type singoReportGroup struct {
-	TargetMbID           string  `gorm:"column:target_mb_id"`
-	AllReports           string  `gorm:"column:all_reports"`
+	TargetMbID             string  `gorm:"column:target_mb_id"`
+	AllReports             string  `gorm:"column:all_reports"`
 	AdminDisciplineReasons *string `gorm:"column:admin_discipline_reasons"`
-	AdminDisciplineDays  int     `gorm:"column:admin_discipline_days"`
-	AdminDisciplineType  string  `gorm:"column:admin_discipline_type"`
-	AdminDisciplineDetail *string `gorm:"column:admin_discipline_detail"`
-	TargetTitle          *string `gorm:"column:target_title"`
-	TargetContent        *string `gorm:"column:target_content"`
-	SgTable              string  `gorm:"column:sg_table"`
-	SgID                 int     `gorm:"column:sg_id"`
-	SgParent             int     `gorm:"column:sg_parent"`
-	ReportCount          int     `gorm:"column:report_count"`
+	AdminDisciplineDays    int     `gorm:"column:admin_discipline_days"`
+	AdminDisciplineType    string  `gorm:"column:admin_discipline_type"`
+	AdminDisciplineDetail  *string `gorm:"column:admin_discipline_detail"`
+	TargetTitle            *string `gorm:"column:target_title"`
+	TargetContent          *string `gorm:"column:target_content"`
+	SgTable                string  `gorm:"column:sg_table"`
+	SgID                   int     `gorm:"column:sg_id"`
+	SgParent               int     `gorm:"column:sg_parent"`
+	ReportCount            int     `gorm:"column:report_count"`
 }
 
 type reportedItem struct {
@@ -43,19 +43,19 @@ type reportedItem struct {
 
 // disciplineData is the JSON structure stored in wr_content of g5_write_disciplinelog
 type disciplineData struct {
-	PenaltyMbID    string         `json:"penalty_mb_id"`
-	PenaltyDateFrom string        `json:"penalty_date_from"`
-	PenaltyPeriod  int            `json:"penalty_period"`
-	PenaltyType    []string       `json:"penalty_type"`
-	SgTypes        []int          `json:"sg_types"`
-	Content        string         `json:"content,omitempty"`
-	ReportedItems  []reportedItem `json:"reported_items"`
-	IsBulk         bool           `json:"is_bulk"`
-	ReportedURL    string         `json:"reported_url,omitempty"`
-	ReportedTable  string         `json:"reported_table,omitempty"`
-	ReportedID     int            `json:"reported_id,omitempty"`
-	ReportedParent int            `json:"reported_parent,omitempty"`
-	ReportCount    int            `json:"report_count"`
+	PenaltyMbID     string         `json:"penalty_mb_id"`
+	PenaltyDateFrom string         `json:"penalty_date_from"`
+	PenaltyPeriod   int            `json:"penalty_period"`
+	PenaltyType     []string       `json:"penalty_type"`
+	SgTypes         []int          `json:"sg_types"`
+	Content         string         `json:"content,omitempty"`
+	ReportedItems   []reportedItem `json:"reported_items"`
+	IsBulk          bool           `json:"is_bulk"`
+	ReportedURL     string         `json:"reported_url,omitempty"`
+	ReportedTable   string         `json:"reported_table,omitempty"`
+	ReportedID      int            `json:"reported_id,omitempty"`
+	ReportedParent  int            `json:"reported_parent,omitempty"`
+	ReportCount     int            `json:"report_count"`
 }
 
 // runProcessApprovedReports processes admin-approved reports
@@ -318,19 +318,19 @@ func createDisciplineLogPost(
 
 	// JSON 데이터 구성
 	data := disciplineData{
-		PenaltyMbID:    targetMbID,
+		PenaltyMbID:     targetMbID,
 		PenaltyDateFrom: now.Format("2006-01-02 15:04:05"),
-		PenaltyPeriod:  penaltyPeriod,
-		PenaltyType:    penaltyType,
-		SgTypes:        sgTypes,
-		Content:        stripTags(disciplineDetail),
-		ReportedItems:  items,
-		IsBulk:         isBulk,
-		ReportedURL:    reportedPath,
-		ReportedTable:  sgTable,
-		ReportedID:     sgID,
-		ReportedParent: sgParent,
-		ReportCount:    actualReportCount,
+		PenaltyPeriod:   penaltyPeriod,
+		PenaltyType:     penaltyType,
+		SgTypes:         sgTypes,
+		Content:         stripTags(disciplineDetail),
+		ReportedItems:   items,
+		IsBulk:          isBulk,
+		ReportedURL:     reportedPath,
+		ReportedTable:   sgTable,
+		ReportedID:      sgID,
+		ReportedParent:  sgParent,
+		ReportCount:     actualReportCount,
 	}
 
 	contentJSON, err := json.Marshal(data)
@@ -698,22 +698,22 @@ var reportTypeLabels = map[int]string{
 
 // reasonKeyToInt maps string reason keys to integer codes
 var reasonKeyToInt = map[string]int{
-	"member_disparage":    1,
-	"no_manner":           2,
-	"inappropriate_expr":  3,
-	"discrimination":      4,
-	"provocation":         5,
+	"member_disparage":     1,
+	"no_manner":            2,
+	"inappropriate_expr":   3,
+	"discrimination":       4,
+	"provocation":          5,
 	"opinion_manipulation": 6,
-	"member_deception":    7,
-	"usage_obstruction":   8,
-	"purpose_violation":   9,
-	"trade_violation":     10,
-	"begging":             11,
-	"rights_infringement": 12,
-	"obscenity":           13,
-	"illegal_activity":    14,
-	"advertising":         15,
-	"policy_denial":       16,
-	"multi_account":       17,
-	"other":               18,
+	"member_deception":     7,
+	"usage_obstruction":    8,
+	"purpose_violation":    9,
+	"trade_violation":      10,
+	"begging":              11,
+	"rights_infringement":  12,
+	"obscenity":            13,
+	"illegal_activity":     14,
+	"advertising":          15,
+	"policy_denial":        16,
+	"multi_account":        17,
+	"other":                18,
 }

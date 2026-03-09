@@ -13,7 +13,7 @@ type MemberLockResult struct {
 	ExecutedAt    string   `json:"executed_at"`
 }
 
-// runMemberLockRelease releases locked members (mb_4 = 'lock' → '')
+// runMemberLockRelease releases locked members (mb_4 = 'lock' → ”)
 func runMemberLockRelease(db *gorm.DB) (*MemberLockResult, error) {
 	now := time.Now()
 

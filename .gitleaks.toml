@@ -19,3 +19,9 @@ paths = [
   '''process\.md$''',
   '''\.env\.readonly$''',
 ]
+
+[[rules]]
+id = "generic-api-key"
+description = "Cron handler fallback secret (non-sensitive default)"
+[rules.allowlist]
+paths = ['''internal/cron/handler\.go''']

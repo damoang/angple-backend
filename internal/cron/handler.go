@@ -13,11 +13,11 @@ import (
 
 // Handler handles internal cron job endpoints
 type Handler struct {
-	db                 *gorm.DB
-	secret             string
-	pointConfigRepo    v2repo.PointConfigRepository
-	gnuPointWriteRepo  v2repo.GnuboardPointWriteRepository
-	notiRepo           gnurepo.NotiRepository
+	db                *gorm.DB
+	secret            string
+	pointConfigRepo   v2repo.PointConfigRepository
+	gnuPointWriteRepo v2repo.GnuboardPointWriteRepository
+	notiRepo          gnurepo.NotiRepository
 }
 
 // NewHandler creates a new cron Handler

@@ -21,25 +21,25 @@ type ReportPatternResult struct {
 
 // reportStats holds all collected statistics
 type reportStats struct {
-	TotalReports     int                       `json:"total_reports"`
-	CompletedReports int                       `json:"completed_reports"`
-	ClaimReports     int                       `json:"claim_reports"`
-	ReportCount      int                       `json:"report_count"`
-	ReportMonth      int                       `json:"report_month"`
-	ReporterCount    int                       `json:"reporter_count"`
-	TotalCases       int                       `json:"total_cases"`
-	TotalMonthCases  int                       `json:"total_month_cases"`
-	ReportTypes      map[string]int            `json:"report_types"`
-	BoardStats       []boardStat               `json:"board_stats"`
-	DailyStats       map[string]dailyStat      `json:"daily_stats"`
-	WeeklyStats      map[string]weeklyStat     `json:"weekly_stats"`
-	TopReporters     []topReporter             `json:"top_reporters"`
-	PatternAnalysis  []patternItem             `json:"pattern_analysis"`
-	PatternSummary   map[string]interface{}    `json:"pattern_summary"`
-	DateFrom         string                    `json:"date_from"`
-	DateTo           string                    `json:"date_to"`
-	PeriodDays       int                       `json:"period_days"`
-	GeneratedAt      string                    `json:"generated_at"`
+	TotalReports     int                    `json:"total_reports"`
+	CompletedReports int                    `json:"completed_reports"`
+	ClaimReports     int                    `json:"claim_reports"`
+	ReportCount      int                    `json:"report_count"`
+	ReportMonth      int                    `json:"report_month"`
+	ReporterCount    int                    `json:"reporter_count"`
+	TotalCases       int                    `json:"total_cases"`
+	TotalMonthCases  int                    `json:"total_month_cases"`
+	ReportTypes      map[string]int         `json:"report_types"`
+	BoardStats       []boardStat            `json:"board_stats"`
+	DailyStats       map[string]dailyStat   `json:"daily_stats"`
+	WeeklyStats      map[string]weeklyStat  `json:"weekly_stats"`
+	TopReporters     []topReporter          `json:"top_reporters"`
+	PatternAnalysis  []patternItem          `json:"pattern_analysis"`
+	PatternSummary   map[string]interface{} `json:"pattern_summary"`
+	DateFrom         string                 `json:"date_from"`
+	DateTo           string                 `json:"date_to"`
+	PeriodDays       int                    `json:"period_days"`
+	GeneratedAt      string                 `json:"generated_at"`
 }
 
 type boardStat struct {
