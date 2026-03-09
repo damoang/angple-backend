@@ -29,25 +29,20 @@ func (r *gnuboardPointRepository) GetSummary(mbID string) (*PointSummary, error)
 		return nil, err
 	}
 
-	// Calculate total earned and used from g5_point
-	var totalEarned, totalUsed int
-
-	// Sum positive points (earned)
+	// Calculate total earned and used in a single query
+	var result struct {
+		TotalEarned int
+		TotalUsed   int
+	}
 	r.db.Model(&gnuboard.G5Point{}).
-		Select("COALESCE(SUM(po_point), 0)").
-		Where("po_mb_id = ? AND po_point > 0", mbID).
-		Scan(&totalEarned)
-
-	// Sum negative points (used) - make it positive for display
-	r.db.Model(&gnuboard.G5Point{}).
-		Select("COALESCE(ABS(SUM(po_point)), 0)").
-		Where("po_mb_id = ? AND po_point < 0", mbID).
-		Scan(&totalUsed)
+		Select("COALESCE(SUM(CASE WHEN po_point > 0 THEN po_point ELSE 0 END), 0) as total_earned, COALESCE(SUM(CASE WHEN po_point < 0 THEN ABS(po_point) ELSE 0 END), 0) as total_used").
+		Where("po_mb_id = ?", mbID).
+		Scan(&result)
 
 	return &PointSummary{
 		TotalPoint:  member.MbPoint,
-		TotalEarned: totalEarned,
-		TotalUsed:   totalUsed,
+		TotalEarned: result.TotalEarned,
+		TotalUsed:   result.TotalUsed,
 	}, nil
 }
 

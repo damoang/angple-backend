@@ -10,7 +10,7 @@ type Subscription struct {
 	CurrentPeriodEnd   time.Time  `gorm:"column:current_period_end" json:"current_period_end"`
 	CanceledAt         *time.Time `gorm:"column:canceled_at" json:"canceled_at,omitempty"`
 
-	SiteID          string `gorm:"column:site_id;uniqueIndex" json:"site_id"`
+	SiteID          string `gorm:"column:site_id;type:varchar(255);uniqueIndex" json:"site_id"`
 	Plan            string `gorm:"column:plan" json:"plan"`                                   // free, pro, business, enterprise
 	Status          string `gorm:"column:status;default:active" json:"status"`                // active, past_due, canceled, trialing
 	PaymentProvider string `gorm:"column:payment_provider" json:"payment_provider"`           // stripe, toss, manual
@@ -32,7 +32,7 @@ type Invoice struct {
 	PeriodStart time.Time  `gorm:"column:period_start" json:"period_start"`
 	PeriodEnd   time.Time  `gorm:"column:period_end" json:"period_end"`
 
-	SiteID          string `gorm:"column:site_id;index" json:"site_id"`
+	SiteID          string `gorm:"column:site_id;type:varchar(255);index" json:"site_id"`
 	Status          string `gorm:"column:status;default:pending" json:"status"` // pending, paid, failed, refunded
 	PaymentProvider string `gorm:"column:payment_provider" json:"payment_provider"`
 	ExternalInvID   string `gorm:"column:external_inv_id" json:"external_inv_id"`

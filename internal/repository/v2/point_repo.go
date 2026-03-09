@@ -100,25 +100,20 @@ func (r *pointRepository) GetSummary(userID uint64) (*PointSummary, error) {
 		return nil, err
 	}
 
-	// Calculate total earned and used from history
-	var totalEarned, totalUsed int
-
-	// Sum positive points (earned)
+	// Calculate total earned and used in a single query
+	var result struct {
+		TotalEarned int
+		TotalUsed   int
+	}
 	r.db.Model(&v2.V2Point{}).
-		Select("COALESCE(SUM(point), 0)").
-		Where("user_id = ? AND point > 0", userID).
-		Scan(&totalEarned)
-
-	// Sum negative points (used) - make it positive for display
-	r.db.Model(&v2.V2Point{}).
-		Select("COALESCE(ABS(SUM(point)), 0)").
-		Where("user_id = ? AND point < 0", userID).
-		Scan(&totalUsed)
+		Select("COALESCE(SUM(CASE WHEN point > 0 THEN point ELSE 0 END), 0) as total_earned, COALESCE(SUM(CASE WHEN point < 0 THEN ABS(point) ELSE 0 END), 0) as total_used").
+		Where("user_id = ?", userID).
+		Scan(&result)
 
 	return &PointSummary{
 		TotalPoint:  user.Point,
-		TotalEarned: totalEarned,
-		TotalUsed:   totalUsed,
+		TotalEarned: result.TotalEarned,
+		TotalUsed:   result.TotalUsed,
 	}, nil
 }
 

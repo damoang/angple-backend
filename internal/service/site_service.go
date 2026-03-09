@@ -210,14 +210,21 @@ func (s *SiteService) ListActive(ctx context.Context, limit, offset int) ([]doma
 		return nil, fmt.Errorf("failed to list sites: %w", err)
 	}
 
+	// Batch load settings for all sites in a single query
+	siteIDs := make([]string, len(sites))
+	for i, site := range sites {
+		siteIDs[i] = site.ID
+	}
+
+	settingsMap, err := s.repo.FindSettingsBySiteIDs(ctx, siteIDs)
+	if err != nil {
+		// Settings lookup failure is non-fatal, continue with empty map
+		settingsMap = make(map[string]*domain.SiteSettings)
+	}
+
 	responses := make([]domain.SiteResponse, 0, len(sites))
 	for _, site := range sites {
-		settings, err := s.repo.FindSettingsBySiteID(ctx, site.ID)
-		if err != nil {
-			// Settings not found is acceptable, continue with nil settings
-			settings = nil
-		}
-		resp := site.ToResponse(settings)
+		resp := site.ToResponse(settingsMap[site.ID])
 		responses = append(responses, *resp)
 	}
 

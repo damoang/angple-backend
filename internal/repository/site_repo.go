@@ -106,6 +106,27 @@ func (r *SiteRepository) FindSettingsBySiteID(ctx context.Context, siteID string
 	return &settings, nil
 }
 
+// FindSettingsBySiteIDs retrieves settings for multiple sites in a single query
+func (r *SiteRepository) FindSettingsBySiteIDs(ctx context.Context, siteIDs []string) (map[string]*domain.SiteSettings, error) {
+	if len(siteIDs) == 0 {
+		return make(map[string]*domain.SiteSettings), nil
+	}
+
+	var settingsList []domain.SiteSettings
+	err := r.db.WithContext(ctx).
+		Where("site_id IN ?", siteIDs).
+		Find(&settingsList).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]*domain.SiteSettings, len(settingsList))
+	for i := range settingsList {
+		result[settingsList[i].SiteID] = &settingsList[i]
+	}
+	return result, nil
+}
+
 // CreateSettings creates initial site settings
 func (r *SiteRepository) CreateSettings(ctx context.Context, settings *domain.SiteSettings) error {
 	return r.db.WithContext(ctx).Create(settings).Error
