@@ -126,7 +126,7 @@ func TransformToV1Posts(posts []*gnuboard.G5Write, noticeIDs map[int]bool) []map
 // TransformToV1Comment converts G5Write (comment) to v1 API response format
 func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 	depth := len(w.WrCommentReply)
-	return map[string]any{
+	result := map[string]any{
 		"id":         w.WrID,
 		"post_id":    w.WrParent,
 		"content":    w.WrContent,
@@ -140,6 +140,13 @@ func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 		"updated_at": parseWrLast(w.WrLast, w.WrDatetime),
 		"is_secret":  strings.Contains(w.WrOption, "secret"),
 	}
+	if w.WrDeletedAt != nil {
+		result["deleted_at"] = w.WrDeletedAt.Format(time.RFC3339)
+	}
+	if w.WrDeletedBy != nil {
+		result["deleted_by"] = *w.WrDeletedBy
+	}
+	return result
 }
 
 // TransformToV1Comments converts a slice of G5Write comments to v1 API response format
