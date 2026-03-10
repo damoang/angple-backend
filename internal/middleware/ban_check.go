@@ -12,6 +12,7 @@ import (
 
 const (
 	interceptDateFormat      = "2006-01-02 15:04:05"
+	interceptDateDashFormat  = "2006-01-02"
 	interceptDateShortFormat = "20060102"
 	claimBoardSlug           = "claim"
 	claimWindowDays          = 15
@@ -132,6 +133,10 @@ func ArchiveBoardCheck() gin.HandlerFunc {
 func parseInterceptDate(s string) (time.Time, error) {
 	if t, err := time.ParseInLocation(interceptDateFormat, s, time.Local); err == nil {
 		return t, nil
+	}
+	if t, err := time.ParseInLocation(interceptDateDashFormat, s, time.Local); err == nil {
+		// YYYY-MM-DD format (no time component) — treat as end of day
+		return t.Add(24*time.Hour - time.Second), nil
 	}
 	if t, err := time.ParseInLocation(interceptDateShortFormat, s, time.Local); err == nil {
 		// Short format has no time component — treat as end of day
