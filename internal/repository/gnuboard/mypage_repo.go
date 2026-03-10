@@ -186,7 +186,7 @@ func (r *myPageRepository) FindLikedPostsByMember(mbID string, page, limit int) 
 		table := fmt.Sprintf("g5_write_%s", boardID)
 		var posts []gnuboard.MyPost
 		if err := r.db.Raw(
-			fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id FROM `%s` WHERE wr_id IN ? AND wr_is_comment = 0", boardID, table),
+			fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id FROM `%s` WHERE wr_id IN ? AND wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", boardID, table),
 			wrIDs,
 		).Scan(&posts).Error; err != nil {
 			continue // skip boards with errors
