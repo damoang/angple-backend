@@ -343,7 +343,7 @@ func (s *SearchService) BulkIndexPosts(ctx context.Context, boardID string, limi
 	}
 
 	err := s.db.Table(tableName).
-		Where("wr_is_comment = 0").
+		Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").
 		Order("wr_id DESC").
 		Limit(limit).
 		Find(&rows).Error

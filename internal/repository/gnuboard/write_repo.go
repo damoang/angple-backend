@@ -140,7 +140,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		}
 	}
 	if total == 0 {
-		countQuery := r.db.Table(table).Where("wr_is_comment = 0")
+		countQuery := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')")
 		if err := countQuery.Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
@@ -174,14 +174,14 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	if orderClause == "wr_num, wr_reply" {
 		selectCols := strings.Join(coreColumns, ", ")
 		err := r.db.Raw(
-			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
 			limit, offset,
 		).Scan(&posts).Error
 		// Fallback if idx_list_page doesn't exist on this table
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
 				Select(coreColumns).
-				Where("wr_is_comment = 0").
+				Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").
 				Order(orderClause).
 				Offset(offset).
 				Limit(limit).
@@ -192,7 +192,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 
 	err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_is_comment = 0").
+		Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
@@ -221,7 +221,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 		}
 	}
 	if total == 0 {
-		if err := r.db.Table(table).Where("wr_is_comment = 0").Count(&total).Error; err != nil {
+		if err := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
 		postCountCache.Store(cacheKey, &cachedCount{total: total, expiresAt: time.Now().Add(countCacheTTL)})
@@ -233,13 +233,13 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	if orderClause == "wr_num, wr_reply" {
 		selectCols := strings.Join(coreColumns, ", ")
 		err := r.db.Raw(
-			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
 			excludeMbIDs, limit, offset,
 		).Scan(&posts).Error
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
 				Select(coreColumns).
-				Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
+				Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ?", excludeMbIDs).
 				Order(orderClause).
 				Offset(offset).
 				Limit(limit).
@@ -250,7 +250,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 
 	err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
+		Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ?", excludeMbIDs).
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
@@ -289,7 +289,7 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 	table := tableName(boardID)
 	if err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_id IN ? AND mb_id NOT IN ?", result.IDs, excludeMbIDs).
+		Where("wr_id IN ? AND mb_id NOT IN ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs, excludeMbIDs).
 		Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}
@@ -338,7 +338,7 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 	table := tableName(boardID)
 	if err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_id IN ?", result.IDs).
+		Where("wr_id IN ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs).
 		Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}

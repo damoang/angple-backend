@@ -153,7 +153,7 @@ func (s *BoardWriteRestrictionService) countTodayPosts(boardSlug, memberID strin
 
 	var count int64
 	err := s.db.Table(tableName).
-		Where("mb_id = ? AND DATE(wr_datetime) = ? AND wr_is_comment = 0", memberID, today).
+		Where("mb_id = ? AND DATE(wr_datetime) = ? AND wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", memberID, today).
 		Count(&count).Error
 	if err != nil {
 		return 0, err
