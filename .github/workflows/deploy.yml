@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: canary
-      url: https://canary.damoang.net/api/health
+      url: https://canary.damoang.net/api/v1/health
     permissions:
       id-token: write
       contents: read
@@ -119,7 +119,7 @@ jobs:
       - name: Smoke test
         run: |
           for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://canary.damoang.net/api/health || echo "000")
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://canary.damoang.net/api/v1/health || echo "000")
             if [ "$STATUS" = "200" ]; then
               echo "✅ Canary healthy"
               exit 0
