@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/damoang/angple-backend
+  DISCORD_WEBHOOK_TOKEN_BACKEND: ${{ secrets.DISCORD_WEBHOOK_TOKEN_BACKEND }}
 
 concurrency:
   group: deploy-main-backend
@@ -145,7 +146,7 @@ jobs:
           exit 1
 
       - name: Notify Discord (Canary)
-        if: always() && secrets.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
+        if: always() && env.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
         run: |
           STATUS="${{ job.status }}"
           COLOR=$([[ "$STATUS" == "success" ]] && echo "3066993" || echo "15158332")
@@ -233,7 +234,7 @@ jobs:
           exit 1
 
       - name: Notify Discord (Production)
-        if: always() && secrets.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
+        if: always() && env.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
         run: |
           STATUS="${{ job.status }}"
           COLOR=$([[ "$STATUS" == "success" ]] && echo "3066993" || echo "15158332")
