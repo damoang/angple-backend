@@ -222,8 +222,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	table := tableName(boardID)
 
 	// Reuse cached total count (same as FindPosts — avoids expensive COUNT on large tables)
-	var total int64
-	total = r.getCachedPostCount(boardID)
+	total := r.getCachedPostCount(boardID)
 	if total == 0 {
 		if err := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").Count(&total).Error; err != nil {
 			return nil, 0, err
