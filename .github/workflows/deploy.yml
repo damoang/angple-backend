@@ -37,16 +37,27 @@ jobs:
           tags: |
             type=sha,prefix=sha-
 
-      - name: Build and push
+      - name: Build and push API
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: deployments/docker/api.Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
+          platforms: linux/arm64
+          tags: ${{ env.IMAGE_NAME }}-api:${{ steps.meta.outputs.version }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build and push Gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployments/docker/gateway.Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.IMAGE_NAME }}-gateway:${{ steps.meta.outputs.version }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
 
   deploy-canary:
     needs: build
