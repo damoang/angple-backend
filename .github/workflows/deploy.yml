@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     outputs:
       sha_tag: ${{ steps.tags.outputs.sha_tag }}
+      image_repo: ${{ env.IMAGE_NAME }}-api
+      image_digest: ${{ steps.build_api.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -35,6 +37,7 @@ jobs:
         run: echo "sha_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push API
+        id: build_api
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -86,7 +89,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters "{
               \"commands\": [
-                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --canary-only\"
+                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' TELEGRAM_DEPLOY_CHAT_ID='${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}' DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/1449348482673672286/${{ secrets.DISCORD_WEBHOOK_TOKEN_BACKEND }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --canary-only\"
               ]
             }" \
             --timeout-seconds 600 \
@@ -155,10 +158,11 @@ jobs:
       - name: Notify Telegram (Approval)
         if: success()
         run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}" \
-            -d "text=✅ Backend Canary 완료%0A%0ATag: \`${{ needs.build.outputs.sha_tag }}\`%0AURL: https://canary.damoang.net/api/v1/health%0A%0A승인하시겠습니까?%0A%0A👉 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            -d "reply_markup={\"inline_keyboard\":[[{\"text\":\"✅ 승인\",\"url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"},{\"text\":\"❌ 거부\",\"callback_data\":\"reject:${{ github.run_id }}\"}]]}"
+            -d "text=✅ angple backend canary ready%0A%0ARepo: ${{ github.repository }}%0ACommit: ${{ github.sha }}%0ATag: \`${{ needs.build.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0ACanary: https://canary.damoang.net/api/v1/health%0AGate Approval: ${RUN_URL}%0A%0AEnvironment approval 후 production 배포가 진행됩니다." \
+            -d "reply_markup={\"inline_keyboard\":[[{\"text\":\"Canary 열기\",\"url\":\"https://canary.damoang.net/api/v1/health\"},{\"text\":\"Gate Approval\",\"url\":\"${RUN_URL}\"}]]}"
 
   deploy-production:
     needs: [build, deploy-canary]
@@ -186,7 +190,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters "{
               \"commands\": [
-                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --skip-canary\"
+                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' TELEGRAM_DEPLOY_CHAT_ID='${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}' DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/1449348482673672286/${{ secrets.DISCORD_WEBHOOK_TOKEN_BACKEND }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --skip-canary\"
               ]
             }" \
             --timeout-seconds 600 \
@@ -229,7 +233,7 @@ jobs:
         run: |
           STATUS="${{ job.status }}"
           COLOR=$([[ "$STATUS" == "success" ]] && echo "3066993" || echo "15158332")
-          curl -X POST "https://discord.com/api/webhooks/1435940653375815730/${{ secrets.DISCORD_WEBHOOK_TOKEN_WEB }}" -H "Content-Type: application/json" -d "{
+          curl -X POST "https://discord.com/api/webhooks/1449348482673672286/${{ secrets.DISCORD_WEBHOOK_TOKEN_BACKEND }}" -H "Content-Type: application/json" -d "{
             \"embeds\": [{
               \"title\": \"🎉 Backend Production $STATUS\",
               \"color\": $COLOR,
@@ -246,4 +250,4 @@ jobs:
           EMOJI=$([[ "$STATUS" == "success" ]] && echo "🎉" || echo "❌")
           curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}" \
-            -d "text=${EMOJI} Backend 운영 배포 ${STATUS}%0A%0ATag: \`${{ needs.build.outputs.sha_tag }}\`"
+            -d "text=${EMOJI} angple backend production ${STATUS}%0A%0ATag: \`${{ needs.build.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0AURL: https://damoang.net/api/health"
