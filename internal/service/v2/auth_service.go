@@ -49,9 +49,8 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		return nil, common.ErrInvalidCredentials
 	}
 
-	if user.Status == userStatusBanned {
-		return nil, errors.New("account is banned")
-	}
+	// 이용제한 사용자도 로그인 가능 (소명게시판 접근 허용)
+	// banned 상태 체크 제거
 	if user.Status == "inactive" {
 		return nil, errors.New("account is inactive")
 	}
