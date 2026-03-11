@@ -214,6 +214,16 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	sender, err := h.memberRepo.FindByID(mbID)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "보내는 회원 정보를 찾을 수 없습니다", err)
+		return
+	}
+	if sender.MbCertify == "" {
+		common.V2ErrorResponse(c, http.StatusForbidden, "실명인증이 필요합니다", nil)
+		return
+	}
+
 	memo, err := h.memoRepo.Send(mbID, req.ReceiverID, req.Content)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "쪽지 보내기 실패", err)
