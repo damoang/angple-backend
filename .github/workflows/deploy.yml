@@ -93,7 +93,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters "{
               \"commands\": [
-                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' TELEGRAM_DEPLOY_CHAT_ID='${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}' DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/1449348482673672286/${{ secrets.DISCORD_WEBHOOK_TOKEN_BACKEND }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --canary-only\"
+                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' TELEGRAM_DEPLOY_CHAT_ID='${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --canary-only\"
               ]
             }" \
             --timeout-seconds 600 \
@@ -145,7 +145,7 @@ jobs:
           exit 1
 
       - name: Notify Discord (Canary)
-        if: always()
+        if: always() && secrets.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
         run: |
           STATUS="${{ job.status }}"
           COLOR=$([[ "$STATUS" == "success" ]] && echo "3066993" || echo "15158332")
@@ -194,7 +194,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters "{
               \"commands\": [
-                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' TELEGRAM_DEPLOY_CHAT_ID='${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}' DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/1449348482673672286/${{ secrets.DISCORD_WEBHOOK_TOKEN_BACKEND }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --skip-canary\"
+                \"export GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' TELEGRAM_DEPLOY_CHAT_ID='${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}' && /home/angple/k8s/prod/deploy.sh backend $IMAGE_TAG --skip-canary\"
               ]
             }" \
             --timeout-seconds 600 \
@@ -233,7 +233,7 @@ jobs:
           exit 1
 
       - name: Notify Discord (Production)
-        if: always()
+        if: always() && secrets.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
         run: |
           STATUS="${{ job.status }}"
           COLOR=$([[ "$STATUS" == "success" ]] && echo "3066993" || echo "15158332")
