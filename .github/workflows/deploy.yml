@@ -85,8 +85,8 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters '{
               "commands": [
-                "export GHCR_TOKEN='"'$GHCR_TOKEN'"'",
-                "/home/angple/k8s/prod/deploy.sh backend '"$IMAGE_TAG"' --canary-only"
+                "export GHCR_TOKEN='$GHCR_TOKEN' && /home/angple/k8s/prod/deploy.sh backend '$IMAGE_TAG' --canary-only"
+                "export GHCR_TOKEN='$GHCR_TOKEN' && /home/angple/k8s/prod/deploy.sh backend '$IMAGE_TAG' --canary-only"
               ]
             }' \
             --timeout-seconds 300 \
@@ -178,8 +178,8 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters '{
               "commands": [
-                "export GHCR_TOKEN='"'$GHCR_TOKEN'"'",
-                "/home/angple/k8s/prod/deploy.sh backend '"$IMAGE_TAG"' --skip-canary"
+                "export GHCR_TOKEN='$GHCR_TOKEN' && /home/angple/k8s/prod/deploy.sh backend '$IMAGE_TAG' --skip-canary"
+                "export GHCR_TOKEN='$GHCR_TOKEN' && /home/angple/k8s/prod/deploy.sh backend '$IMAGE_TAG' --skip-canary"
               ]
             }' \
             --timeout-seconds 300 \
