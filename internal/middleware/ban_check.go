@@ -14,13 +14,12 @@ const (
 	interceptDateFormat      = "2006-01-02 15:04:05"
 	interceptDateDashFormat  = "2006-01-02"
 	interceptDateShortFormat = "20060102"
-	claimBoardSlug           = "claim"
-	claimWindowDays          = 15
+	promotionBoardSlug       = "promotion"
 )
 
 // BanCheck checks if the authenticated user is banned (mb_intercept_date).
 // Banned users cannot create or update posts/comments.
-// Exception: banned users can CREATE/COMMENT on the claim board within 15 days of discipline start (1+ days restriction only).
+// Exception: banned users can only write/comment on the promotion board.
 func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		mbID := GetUserID(c)
@@ -69,25 +68,11 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// User is currently banned — check claim board exception
+		// User is currently banned — only promotion board is allowed
 		slug := c.Param("slug")
-		if slug == claimBoardSlug {
-			// Claim board exception: allow POST/PATCH/PUT within 15 days of discipline start (1+ days restriction only)
-			var penaltyDateFrom string
-			var penaltyPeriod int
-			err := gnuDB.Raw(
-				"SELECT penalty_date_from, penalty_period FROM g5_da_member_discipline WHERE penalty_mb_id = ? ORDER BY id DESC LIMIT 1",
-				mbID,
-			).Row().Scan(&penaltyDateFrom, &penaltyPeriod)
-			if err == nil && penaltyDateFrom != "" && penaltyPeriod >= 1 {
-				if disciplineStart, e := time.ParseInLocation(interceptDateFormat, penaltyDateFrom, time.Local); e == nil {
-					daysSinceDiscipline := now.Sub(disciplineStart).Hours() / 24
-					if daysSinceDiscipline >= 1 && daysSinceDiscipline <= claimWindowDays {
-						c.Next()
-						return
-					}
-				}
-			}
+		if slug == promotionBoardSlug {
+			c.Next()
+			return
 		}
 
 		// Block the request
