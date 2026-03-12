@@ -53,6 +53,7 @@ var coreColumns = []string{
 type WriteRepository interface {
 	// Posts
 	FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	SearchPostsFiltered(boardID string, searchField, searchQuery string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
@@ -206,6 +207,49 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		Offset(offset).
 		Limit(limit).
 		Find(&posts).Error
+
+	return posts, total, err
+}
+
+// FindPostsAfter retrieves posts using cursor pagination for the default gnuboard sort.
+// Cursor is the last seen (wr_num, wr_reply) pair from the previous page.
+func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error) {
+	var posts []*gnuboard.G5Write
+	var total int64
+
+	table := tableName(boardID)
+
+	total = r.getCachedPostCount(boardID)
+	if total == 0 {
+		countQuery := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')")
+		if err := countQuery.Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		r.setCachedPostCount(boardID, total)
+	}
+
+	orderClause := r.getSortField(boardID)
+	if orderClause != "wr_num, wr_reply" {
+		return r.FindPosts(boardID, 1, limit)
+	}
+
+	selectCols := strings.Join(coreColumns, ", ")
+	err := r.db.Raw(
+		fmt.Sprintf(
+			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?)) ORDER BY wr_num, wr_reply LIMIT ?",
+			selectCols,
+			table,
+		),
+		cursorWrNum, cursorWrNum, cursorWrReply, limit,
+	).Scan(&posts).Error
+	if err != nil && strings.Contains(err.Error(), "idx_list_page") {
+		err = r.db.Table(table).
+			Select(coreColumns).
+			Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?))", cursorWrNum, cursorWrNum, cursorWrReply).
+			Order(orderClause).
+			Limit(limit).
+			Find(&posts).Error
+	}
 
 	return posts, total, err
 }
