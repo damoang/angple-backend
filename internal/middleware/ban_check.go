@@ -84,7 +84,7 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 		// Block the request
 		banEndStr := banEnd.Format("2006-01-02 15:04:05")
 		if banEnd.Year() >= 9999 {
-			banEndStr = "영구 제재"
+			banEndStr = "영구 이용제한"
 		}
 		common.ErrorResponse(c, http.StatusForbidden,
 			"이용제한 기간 중에는 해당 기능을 사용할 수 없습니다. (해제일: "+banEndStr+")", nil)
