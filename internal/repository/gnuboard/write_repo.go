@@ -157,26 +157,8 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		r.setCachedPostCount(boardID, total)
 	}
 
-	// 게시판별 커스텀 정렬 (bo_sort_field) — 캐시 사용
-	orderClause := "wr_num, wr_reply"
-	now := time.Now()
-	if cached, ok := sortFieldCache.Load(boardID); ok {
-		if entry, valid := cached.(*cachedSortField); valid && now.Before(entry.expiresAt) {
-			if entry.field != "" {
-				orderClause = entry.field
-			}
-		} else {
-			sortFieldCache.Delete(boardID)
-		}
-	}
-	if orderClause == "wr_num, wr_reply" {
-		var sortField string
-		r.db.Table("g5_board").Select("bo_sort_field").Where("bo_table = ?", boardID).Scan(&sortField)
-		sortFieldCache.Store(boardID, &cachedSortField{field: sortField, expiresAt: now.Add(sortFieldCacheTTL)})
-		if sortField != "" {
-			orderClause = sortField
-		}
-	}
+	// 게시판별 커스텀 정렬 (bo_sort_field) — 캐시된 단일 조회 사용
+	orderClause := r.getSortField(boardID)
 
 	// Select only core columns to avoid errors with missing columns
 	// Use FORCE INDEX for default sort order — MySQL optimizer incorrectly prefers idx_list_order
