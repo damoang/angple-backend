@@ -1294,6 +1294,9 @@ func main() {
 			if err3 != nil || limit < 1 || limit > 100 {
 				limit = 20
 			}
+			cursorWrNum, cursorNumErr := strconv.Atoi(c.Query("cursor_wr_num"))
+			cursorWrReply := c.Query("cursor_wr_reply")
+			useCursor := cursorNumErr == nil && cursorWrReply != ""
 
 			// Search parameters
 			sfl := c.Query("sfl") // search field: title, content, title_content, author
@@ -1308,8 +1311,11 @@ func main() {
 
 			// --- 2-layer cache: in-memory → Redis → DB ---
 			memKey := fmt.Sprintf("posts:%s:%d:%d", slug, page, limit)
+			if useCursor {
+				memKey = fmt.Sprintf("posts:%s:cursor:%d:%s:%d", slug, cursorWrNum, cursorWrReply, limit)
+			}
 
-			if !isSearching {
+			if !isSearching && !useCursor {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
@@ -1372,6 +1378,8 @@ func main() {
 			var total int64
 			if isSearching {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
+			} else if useCursor {
+				posts, total, err = gnuWriteRepo.FindPostsAfter(slug, limit, cursorWrNum, cursorWrReply)
 			} else {
 				posts, total, err = gnuWriteRepo.FindPosts(slug, page, limit)
 			}
@@ -1422,6 +1430,11 @@ func main() {
 			}
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit, "total": total}
+			if useCursor && len(posts) > 0 {
+				last := posts[len(posts)-1]
+				meta["next_cursor_wr_num"] = last.WrNum
+				meta["next_cursor_wr_reply"] = last.WrReply
+			}
 			response := gin.H{
 				"success": true,
 				"data":    items,
@@ -1429,7 +1442,7 @@ func main() {
 			}
 
 			// Store in both caches (only for non-search requests, unfiltered data)
-			if !isSearching {
+			if !isSearching && !useCursor {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
