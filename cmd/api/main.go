@@ -1301,6 +1301,7 @@ func main() {
 			// Search parameters
 			sfl := c.Query("sfl") // search field: title, content, title_content, author
 			stx := c.Query("stx") // search text
+			category := c.Query("category") // category filter (ca_name)
 			isSearching := sfl != "" && stx != ""
 
 			// Get blocked user IDs (skip for admins)
@@ -1311,11 +1312,14 @@ func main() {
 
 			// --- 2-layer cache: in-memory → Redis → DB ---
 			memKey := fmt.Sprintf("posts:%s:%d:%d", slug, page, limit)
+			if category != "" {
+				memKey = fmt.Sprintf("posts:%s:%d:%d:cat:%s", slug, page, limit, category)
+			}
 			if useCursor {
 				memKey = fmt.Sprintf("posts:%s:cursor:%d:%s:%d", slug, cursorWrNum, cursorWrReply, limit)
 			}
 
-			if !isSearching && !useCursor {
+			if !isSearching && !useCursor && category == "" {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
@@ -1380,6 +1384,8 @@ func main() {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
 			} else if useCursor {
 				posts, total, err = gnuWriteRepo.FindPostsAfter(slug, limit, cursorWrNum, cursorWrReply)
+			} else if category != "" {
+				posts, total, err = gnuWriteRepo.FindPostsByCategory(slug, category, page, limit)
 			} else {
 				posts, total, err = gnuWriteRepo.FindPosts(slug, page, limit)
 			}
@@ -1441,8 +1447,8 @@ func main() {
 				"meta":    meta,
 			}
 
-			// Store in both caches (only for non-search requests, unfiltered data)
-			if !isSearching && !useCursor {
+			// Store in both caches (only for non-search, non-category requests, unfiltered data)
+			if !isSearching && !useCursor && category == "" {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}

@@ -53,6 +53,7 @@ var coreColumns = []string{
 type WriteRepository interface {
 	// Posts
 	FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	FindPostsByCategory(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error)
@@ -185,6 +186,33 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	err := r.db.Table(table).
 		Select(coreColumns).
 		Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").
+		Order(orderClause).
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
+
+	return posts, total, err
+}
+
+// FindPostsByCategory retrieves posts filtered by ca_name (category) with pagination
+func (r *writeRepository) FindPostsByCategory(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	var posts []*gnuboard.G5Write
+	var total int64
+
+	offset := (page - 1) * limit
+	table := tableName(boardID)
+
+	baseWhere := "wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND ca_name = ?"
+
+	if err := r.db.Table(table).Where(baseWhere, category).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	orderClause := r.getSortField(boardID)
+
+	err := r.db.Table(table).
+		Select(coreColumns).
+		Where(baseWhere, category).
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
