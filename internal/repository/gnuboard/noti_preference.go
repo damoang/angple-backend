@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // NotiPreference represents a row in g5_noti_preference table
@@ -60,11 +59,16 @@ func (r *notiPreferenceRepository) Get(mbID string) (*NotiPreference, error) {
 
 // Upsert inserts or updates a user's notification preferences
 func (r *notiPreferenceRepository) Upsert(pref *NotiPreference) error {
-	return r.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "mb_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"noti_comment", "noti_reply", "noti_mention",
-			"noti_like", "noti_follow", "like_threshold",
-		}),
-	}).Create(pref).Error
+	result := r.db.Where("mb_id = ?", pref.MbID).First(&NotiPreference{})
+	if result.Error == gorm.ErrRecordNotFound {
+		return r.db.Create(pref).Error
+	}
+	return r.db.Model(&NotiPreference{}).Where("mb_id = ?", pref.MbID).Updates(map[string]interface{}{
+		"noti_comment":   pref.NotiComment,
+		"noti_reply":     pref.NotiReply,
+		"noti_mention":   pref.NotiMention,
+		"noti_like":      pref.NotiLike,
+		"noti_follow":    pref.NotiFollow,
+		"like_threshold": pref.LikeThreshold,
+	}).Error
 }
