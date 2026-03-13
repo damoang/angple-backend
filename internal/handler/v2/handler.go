@@ -3,6 +3,7 @@ package v2
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -978,6 +979,14 @@ func parsePagination(c *gin.Context) (int, int) {
 	return page, perPage
 }
 
+// safeUint64ToInt converts uint64 to int with overflow protection
+func safeUint64ToInt(v uint64) int {
+	if v > uint64(math.MaxInt) {
+		return math.MaxInt
+	}
+	return int(v)
+}
+
 // createCommentNotification creates a notification for the post author when a comment is posted
 func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, comment *v2domain.V2Comment, commenterMbID, commenterNick string) {
 	if h.gnuDB == nil || h.notiRepo == nil {
@@ -1019,7 +1028,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 						PhToCase:      "comment_reply",
 						PhFromCase:    "comment",
 						BoTable:       boardSlug,
-						WrID:          int(comment.ID),
+						WrID:          safeUint64ToInt(comment.ID),
 						MbID:          parentAuthorMbID,
 						RelMbID:       commenterMbID,
 						RelMbNick:     commenterNick,
@@ -1028,7 +1037,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 						PhReaded:      "N",
 						PhDatetime:    time.Now(),
 						ParentSubject: post.Title,
-						WrParent:      int(postID),
+						WrParent:      safeUint64ToInt(postID),
 					}
 					_ = h.notiRepo.Create(noti)
 				}
@@ -1048,7 +1057,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 		PhToCase:      "comment",
 		PhFromCase:    "comment",
 		BoTable:       boardSlug,
-		WrID:          int(comment.ID),
+		WrID:          safeUint64ToInt(comment.ID),
 		MbID:          postAuthorMbID,
 		RelMbID:       commenterMbID,
 		RelMbNick:     commenterNick,
@@ -1057,7 +1066,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 		PhReaded:      "N",
 		PhDatetime:    time.Now(),
 		ParentSubject: post.Title,
-		WrParent:      int(postID),
+		WrParent:      safeUint64ToInt(postID),
 	}
 	_ = h.notiRepo.Create(noti)
 }
