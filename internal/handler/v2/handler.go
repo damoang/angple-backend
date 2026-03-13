@@ -26,6 +26,7 @@ type V2Handler struct {
 	pointRepo         v2repo.PointRepository
 	revisionRepo      v2repo.RevisionRepository
 	notiRepo          gnurepo.NotiRepository
+	notiPrefRepo      gnurepo.NotiPreferenceRepository
 	expRepo           v2repo.ExpRepository
 	gnuDB             *gorm.DB // gnuboard g5_member 조회용
 	gnuPointWriteRepo v2repo.GnuboardPointWriteRepository
@@ -62,6 +63,11 @@ func (h *V2Handler) SetRevisionRepository(repo v2repo.RevisionRepository) {
 // SetNotiRepository sets the notification repository for creating notifications
 func (h *V2Handler) SetNotiRepository(repo gnurepo.NotiRepository) {
 	h.notiRepo = repo
+}
+
+// SetNotiPreferenceRepository sets the notification preference repository
+func (h *V2Handler) SetNotiPreferenceRepository(repo gnurepo.NotiPreferenceRepository) {
+	h.notiPrefRepo = repo
 }
 
 // SetGnuDB sets the gnuboard database connection for mb_id → mb_no lookup
@@ -1001,23 +1007,39 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 		if err == nil {
 			var parentAuthorMbID string
 			if err := h.gnuDB.Table("g5_member").Select("mb_id").Where("mb_no = ?", parentComment.UserID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != commenterMbID {
-				noti := &gnurepo.Notification{
-					PhToCase:      "comment_reply",
-					PhFromCase:    "comment",
-					BoTable:       boardSlug,
-					WrID:          int(comment.ID),
-					MbID:          parentAuthorMbID,
-					RelMbID:       commenterMbID,
-					RelMbNick:     commenterNick,
-					RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", commenterNick),
-					RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
-					PhReaded:      "N",
-					PhDatetime:    time.Now(),
-					ParentSubject: post.Title,
-					WrParent:      int(postID),
+				// 답글 알림 설정 확인
+				sendReply := true
+				if h.notiPrefRepo != nil {
+					if pref, err := h.notiPrefRepo.Get(parentAuthorMbID); err == nil && !pref.NotiReply {
+						sendReply = false
+					}
 				}
-				_ = h.notiRepo.Create(noti)
+				if sendReply {
+					noti := &gnurepo.Notification{
+						PhToCase:      "comment_reply",
+						PhFromCase:    "comment",
+						BoTable:       boardSlug,
+						WrID:          int(comment.ID),
+						MbID:          parentAuthorMbID,
+						RelMbID:       commenterMbID,
+						RelMbNick:     commenterNick,
+						RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", commenterNick),
+						RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
+						PhReaded:      "N",
+						PhDatetime:    time.Now(),
+						ParentSubject: post.Title,
+						WrParent:      int(postID),
+					}
+					_ = h.notiRepo.Create(noti)
+				}
 			}
+		}
+	}
+
+	// 댓글 알림 설정 확인
+	if h.notiPrefRepo != nil {
+		if pref, err := h.notiPrefRepo.Get(postAuthorMbID); err == nil && !pref.NotiComment {
+			return
 		}
 	}
 

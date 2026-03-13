@@ -61,6 +61,8 @@ func mapFromCase(fromCase string) string {
 		return "mention"
 	case "good", "nogood":
 		return "like"
+	case "memo":
+		return "memo"
 	case "write", "inquire", "answer":
 		return "system"
 	default:
@@ -83,6 +85,8 @@ func generateTitle(fromCase, relMbNick string) string {
 		return relMbNick + "님이 추천했습니다"
 	case "nogood":
 		return "게시글이 비추천을 받았습니다"
+	case "memo":
+		return relMbNick + "님이 쪽지를 보냈습니다"
 	case "inquire":
 		return "새 문의가 등록되었습니다"
 	case "answer":
