@@ -1299,8 +1299,8 @@ func main() {
 			useCursor := cursorNumErr == nil && cursorWrReply != ""
 
 			// Search parameters
-			sfl := c.Query("sfl") // search field: title, content, title_content, author
-			stx := c.Query("stx") // search text
+			sfl := c.Query("sfl")           // search field: title, content, title_content, author
+			stx := c.Query("stx")           // search text
 			category := c.Query("category") // category filter (ca_name)
 			isSearching := sfl != "" && stx != ""
 
