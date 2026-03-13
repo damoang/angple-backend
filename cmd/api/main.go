@@ -15,7 +15,6 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/cron"
-	"github.com/damoang/angple-backend/internal/dantry"
 	"github.com/damoang/angple-backend/internal/domain"
 	gnuboard "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
@@ -4133,35 +4132,6 @@ func main() {
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 		})
-
-		// Dantry (에러 리포트 - ClickHouse)
-		if chHost := os.Getenv("CLICKHOUSE_HOST"); chHost != "" {
-			chPort := 9000
-			if p, err := strconv.Atoi(os.Getenv("CLICKHOUSE_PORT")); err == nil {
-				chPort = p
-			}
-			chClient, chErr := dantry.NewClickHouseClient(dantry.ClientConfig{
-				Host:     chHost,
-				Port:     chPort,
-				Database: "error_logs",
-				User:     os.Getenv("CLICKHOUSE_USER"),
-				Password: os.Getenv("CLICKHOUSE_PASSWORD"),
-			})
-			if chErr != nil {
-				log.Printf("Dantry ClickHouse connection failed: %v (dantry disabled)", chErr)
-			} else {
-				dantryRepo := dantry.NewRepository(chClient)
-				dantryHandler := dantry.NewHandler(dantryRepo)
-				dantryGroup := router.Group("/api/v1/dantry", middleware.JWTAuth(jwtManager))
-				dantryGroup.GET("/errors", dantryHandler.ListErrors)
-				dantryGroup.GET("/errors/grouped", dantryHandler.ListGrouped)
-				dantryGroup.GET("/errors/members", dantryHandler.GetMembersByMessage)
-				dantryGroup.GET("/errors/:id", dantryHandler.GetByID)
-				dantryGroup.GET("/stats", dantryHandler.GetStats)
-				dantryGroup.GET("/timeseries", dantryHandler.GetTimeseries)
-				log.Println("Dantry error viewer initialized")
-			}
-		}
 
 		// Plugin System
 		installRepo := pluginstoreRepo.NewInstallationRepository(db)
