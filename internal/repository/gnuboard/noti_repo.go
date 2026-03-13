@@ -61,6 +61,7 @@ type NotiRepository interface {
 	Delete(mbID string, phID int) error
 	DeleteGroup(mbID, boTable string, wrID int, fromCase string) error
 	Create(noti *Notification) error
+	Exists(mbID, boTable string, wrID int, fromCase, relMbID string) (bool, error)
 }
 
 type notiRepository struct {
@@ -122,6 +123,15 @@ func (r *notiRepository) Delete(mbID string, phID int) error {
 // Create inserts a new notification
 func (r *notiRepository) Create(noti *Notification) error {
 	return r.db.Create(noti).Error
+}
+
+// Exists checks if a duplicate notification already exists
+func (r *notiRepository) Exists(mbID, boTable string, wrID int, fromCase, relMbID string) (bool, error) {
+	var count int64
+	err := r.db.Model(&Notification{}).
+		Where("mb_id = ? AND bo_table = ? AND wr_id = ? AND ph_from_case = ? AND rel_mb_id = ?", mbID, boTable, wrID, fromCase, relMbID).
+		Count(&count).Error
+	return count > 0, err
 }
 
 // GetGroupedNotifications returns notifications grouped by (bo_table, wr_id, ph_from_case)

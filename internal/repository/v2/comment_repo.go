@@ -11,6 +11,7 @@ import (
 type CommentRepository interface {
 	FindByID(id uint64) (*v2.V2Comment, error)
 	FindByPost(postID uint64, page, limit int) ([]*v2.V2Comment, int64, error)
+	FindByPostFiltered(postID uint64, page, limit int, excludeUserIDs []uint64) ([]*v2.V2Comment, int64, error)
 	Create(comment *v2.V2Comment) error
 	Update(comment *v2.V2Comment) error
 	Delete(id uint64) error
@@ -39,6 +40,24 @@ func (r *commentRepository) FindByPost(postID uint64, page, limit int) ([]*v2.V2
 	var total int64
 
 	query := r.db.Model(&v2.V2Comment{}).Where("post_id = ? AND status = 'active'", postID)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * limit
+	if err := query.Order("id ASC").Offset(offset).Limit(limit).Find(&comments).Error; err != nil {
+		return nil, 0, err
+	}
+	return comments, total, nil
+}
+
+// FindByPostFiltered retrieves comments excluding specified user IDs. Delegates to FindByPost if excludeUserIDs is empty.
+func (r *commentRepository) FindByPostFiltered(postID uint64, page, limit int, excludeUserIDs []uint64) ([]*v2.V2Comment, int64, error) {
+	if len(excludeUserIDs) == 0 {
+		return r.FindByPost(postID, page, limit)
+	}
+	var comments []*v2.V2Comment
+	var total int64
+	query := r.db.Model(&v2.V2Comment{}).Where("post_id = ? AND status = 'active' AND user_id NOT IN ?", postID, excludeUserIDs)
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

@@ -32,6 +32,7 @@ type V2Handler struct {
 	gnuDB             *gorm.DB // gnuboard g5_member 조회용
 	gnuPointWriteRepo v2repo.GnuboardPointWriteRepository
 	pointConfigRepo   v2repo.PointConfigRepository
+	blockRepo         v2repo.BlockRepository
 }
 
 // NewV2Handler creates a new V2Handler
@@ -89,6 +90,27 @@ func (h *V2Handler) SetGnuboardPointWriteRepository(repo v2repo.GnuboardPointWri
 // SetPointConfigRepository sets the point config repository for point expiry settings
 func (h *V2Handler) SetPointConfigRepository(repo v2repo.PointConfigRepository) {
 	h.pointConfigRepo = repo
+}
+
+// SetBlockRepository sets the block repository for filtering blocked users
+func (h *V2Handler) SetBlockRepository(repo v2repo.BlockRepository) {
+	h.blockRepo = repo
+}
+
+// getBlockedUserIDs returns blocked user IDs (as uint64) for the given mb_id
+func (h *V2Handler) getBlockedUserIDs(mbID string) []uint64 {
+	if h.blockRepo == nil || mbID == "" || h.gnuDB == nil {
+		return nil
+	}
+	blockedMbIDs, err := h.blockRepo.GetBlockedUserIDs(mbID)
+	if err != nil || len(blockedMbIDs) == 0 {
+		return nil
+	}
+	var userIDs []uint64
+	if err := h.gnuDB.Table("g5_member").Select("mb_no").Where("mb_id IN ?", blockedMbIDs).Pluck("mb_no", &userIDs).Error; err != nil || len(userIDs) == 0 {
+		return nil
+	}
+	return userIDs
 }
 
 // createLevelUpNoti inserts a level-up notification into g5_na_noti
@@ -287,13 +309,16 @@ func (h *V2Handler) ListPosts(c *gin.Context) {
 	searchField := c.Query("sfl")
 	searchQuery := c.Query("stx")
 
+	// 차단 사용자 필터링
+	blockedUserIDs := h.getBlockedUserIDs(middleware.GetUserID(c))
+
 	var posts []*v2domain.V2Post
 	var total int64
 
 	if searchField != "" && searchQuery != "" {
-		posts, total, err = h.postRepo.SearchByBoard(board.ID, searchField, searchQuery, page, perPage)
+		posts, total, err = h.postRepo.SearchByBoardFiltered(board.ID, searchField, searchQuery, page, perPage, blockedUserIDs)
 	} else {
-		posts, total, err = h.postRepo.FindByBoard(board.ID, page, perPage)
+		posts, total, err = h.postRepo.FindByBoardFiltered(board.ID, page, perPage, blockedUserIDs)
 	}
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 목록 조회 실패", err)
@@ -719,7 +744,8 @@ func (h *V2Handler) ListComments(c *gin.Context) {
 	}
 
 	page, perPage := parsePagination(c)
-	comments, total, err := h.commentRepo.FindByPost(postID, page, perPage)
+	blockedUserIDs := h.getBlockedUserIDs(middleware.GetUserID(c))
+	comments, total, err := h.commentRepo.FindByPostFiltered(postID, page, perPage, blockedUserIDs)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "댓글 목록 조회 실패", err)
 		return
@@ -1024,22 +1050,25 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 					}
 				}
 				if sendReply {
-					noti := &gnurepo.Notification{
-						PhToCase:      "comment_reply",
-						PhFromCase:    "comment",
-						BoTable:       boardSlug,
-						WrID:          safeUint64ToInt(comment.ID),
-						MbID:          parentAuthorMbID,
-						RelMbID:       commenterMbID,
-						RelMbNick:     commenterNick,
-						RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", commenterNick),
-						RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
-						PhReaded:      "N",
-						PhDatetime:    time.Now(),
-						ParentSubject: post.Title,
-						WrParent:      safeUint64ToInt(postID),
+					wrID := safeUint64ToInt(postID)
+					if exists, _ := h.notiRepo.Exists(parentAuthorMbID, boardSlug, wrID, "comment", commenterMbID); !exists {
+						noti := &gnurepo.Notification{
+							PhToCase:      "comment_reply",
+							PhFromCase:    "comment",
+							BoTable:       boardSlug,
+							WrID:          wrID,
+							MbID:          parentAuthorMbID,
+							RelMbID:       commenterMbID,
+							RelMbNick:     commenterNick,
+							RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", commenterNick),
+							RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
+							PhReaded:      "N",
+							PhDatetime:    time.Now(),
+							ParentSubject: post.Title,
+							WrParent:      wrID,
+						}
+						_ = h.notiRepo.Create(noti)
 					}
-					_ = h.notiRepo.Create(noti)
 				}
 			}
 		}
@@ -1053,20 +1082,23 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 	}
 
 	// 게시글 작성자에게 알림
-	noti := &gnurepo.Notification{
-		PhToCase:      "comment",
-		PhFromCase:    "comment",
-		BoTable:       boardSlug,
-		WrID:          safeUint64ToInt(comment.ID),
-		MbID:          postAuthorMbID,
-		RelMbID:       commenterMbID,
-		RelMbNick:     commenterNick,
-		RelMsg:        fmt.Sprintf("%s님이 회원님의 글에 댓글을 남겼습니다.", commenterNick),
-		RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
-		PhReaded:      "N",
-		PhDatetime:    time.Now(),
-		ParentSubject: post.Title,
-		WrParent:      safeUint64ToInt(postID),
+	wrID := safeUint64ToInt(postID)
+	if exists, _ := h.notiRepo.Exists(postAuthorMbID, boardSlug, wrID, "comment", commenterMbID); !exists {
+		noti := &gnurepo.Notification{
+			PhToCase:      "comment",
+			PhFromCase:    "comment",
+			BoTable:       boardSlug,
+			WrID:          wrID,
+			MbID:          postAuthorMbID,
+			RelMbID:       commenterMbID,
+			RelMbNick:     commenterNick,
+			RelMsg:        fmt.Sprintf("%s님이 회원님의 글에 댓글을 남겼습니다.", commenterNick),
+			RelURL:        fmt.Sprintf("/%s/%d#comment_%d", boardSlug, postID, comment.ID),
+			PhReaded:      "N",
+			PhDatetime:    time.Now(),
+			ParentSubject: post.Title,
+			WrParent:      wrID,
+		}
+		_ = h.notiRepo.Create(noti)
 	}
-	_ = h.notiRepo.Create(noti)
 }
