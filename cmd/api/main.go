@@ -3762,6 +3762,10 @@ func main() {
 		v2AdminHandler := v2handler.NewAdminHandler(v2AdminSvc)
 		v2routes.SetupAdmin(router, v2AdminHandler, jwtManager)
 
+		// Admin Settings (report-lock threshold etc.)
+		adminSettingsHandler := v2handler.NewAdminSettingsHandler(db)
+		v2routes.SetupAdminSettings(router, adminSettingsHandler, jwtManager)
+
 		// v2 Scrap, Memo, Block, Message
 		v2ScrapRepo := v2repo.NewScrapRepository(db)
 		v2MemoRepo := v2repo.NewMemoRepository(db)

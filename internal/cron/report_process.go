@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -194,6 +195,33 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 		// BULK_REPORTS에 포함된 추가 신고도 처리
 		if disciplineDetail != "" {
 			processBulkReports(tx, disciplineDetail, wrID)
+		}
+
+		// 2-5. 게시글/댓글별 자동 잠금 체크
+		reportLockThreshold := getReportLockThreshold(tx)
+		if reportLockThreshold > 0 {
+			processedKeys := make(map[string]bool)
+			for _, item := range items {
+				// 1) 게시글 잠금 (기존 로직 유지)
+				postID := item.ID
+				if item.Parent > 0 && item.Parent != item.ID {
+					postID = item.Parent
+				}
+				postKey := fmt.Sprintf("%s/%d/post", item.Table, postID)
+				if !processedKeys[postKey] {
+					processedKeys[postKey] = true
+					autoLockPost(tx, item.Table, postID, reportLockThreshold)
+				}
+
+				// 2) 댓글 개별 잠금
+				if item.Parent > 0 && item.Parent != item.ID {
+					commentKey := fmt.Sprintf("%s/%d/comment", item.Table, item.ID)
+					if !processedKeys[commentKey] {
+						processedKeys[commentKey] = true
+						autoLockComment(tx, item.Table, item.ID, item.Parent, reportLockThreshold)
+					}
+				}
+			}
 		}
 
 		return nil
@@ -694,6 +722,284 @@ var reportTypeLabels = map[int]string{
 	29: "용도위반", 30: "거래금지위반", 31: "구걸", 32: "권리침해",
 	33: "외설", 34: "위법행위", 35: "광고/홍보", 36: "운영정책부정",
 	37: "다중이", 38: "기타사유", 39: "뉴스펌글누락", 40: "뉴스전문전재",
+}
+
+// getReportLockThreshold reads the auto-lock threshold.
+// Priority: g5_kv_store → REPORT_LOCK_THRESHOLD env → 0 (disabled)
+func getReportLockThreshold(db *gorm.DB) int {
+	// 1. g5_kv_store에서 조회 (value_type='INT' → value_int, 'TEXT' → value_text)
+	var result struct {
+		ValueType string `gorm:"column:value_type"`
+		ValueText string `gorm:"column:value_text"`
+		ValueInt  int    `gorm:"column:value_int"`
+	}
+	err := db.Raw("SELECT value_type, value_text, value_int FROM g5_kv_store WHERE `key` = 'system:report_lock_threshold' LIMIT 1").Scan(&result).Error
+	if err == nil {
+		if result.ValueType == "INT" && result.ValueInt > 0 {
+			return result.ValueInt
+		}
+		if result.ValueText != "" {
+			var threshold int
+			if _, parseErr := fmt.Sscanf(result.ValueText, "%d", &threshold); parseErr == nil && threshold > 0 {
+				return threshold
+			}
+		}
+	}
+
+	// 2. 환경변수
+	if envVal := os.Getenv("REPORT_LOCK_THRESHOLD"); envVal != "" {
+		var threshold int
+		if _, parseErr := fmt.Sscanf(envVal, "%d", &threshold); parseErr == nil && threshold > 0 {
+			return threshold
+		}
+	}
+
+	// 3. 기본값: 0 (비활성)
+	return 0
+}
+
+// autoLockPost checks approved report count and locks post if threshold reached
+func autoLockPost(tx *gorm.DB, boTable string, postID, threshold int) {
+	tableName := fmt.Sprintf("g5_write_%s", boTable)
+
+	// 이미 잠금 상태인지 확인
+	var currentWr7 string
+	if err := tx.Raw(fmt.Sprintf("SELECT IFNULL(wr_7, '') FROM `%s` WHERE wr_id = ? AND wr_is_comment = 0", tableName), postID).Scan(&currentWr7).Error; err != nil {
+		return
+	}
+	if currentWr7 == "lock" {
+		return
+	}
+
+	// 승인된 신고 수 카운트 (해당 게시글 대상)
+	var approvedCount int64
+	tx.Raw(`
+		SELECT COUNT(*) FROM g5_na_singo
+		WHERE sg_table = ? AND (sg_id = ? OR sg_parent = ?) AND admin_approved = 1
+	`, boTable, postID, postID).Scan(&approvedCount)
+
+	if int(approvedCount) < threshold {
+		return
+	}
+
+	// 잠금 적용
+	tx.Exec(fmt.Sprintf("UPDATE `%s` SET wr_7 = 'lock' WHERE wr_id = ? AND wr_is_comment = 0", tableName), postID)
+	log.Printf("[Cron:auto-lock] locked post %s/%d (approved reports: %d >= threshold: %d)", boTable, postID, approvedCount, threshold)
+
+	// 진실의방에 참조 글 생성
+	createTruthroomPost(tx, boTable, postID)
+}
+
+// createTruthroomPost creates a reference post in g5_write_truthroom
+func createTruthroomPost(tx *gorm.DB, boTable string, postID int) {
+	// 중복 체크: wr_1 = boTable AND wr_2 = postID 기존 글 있으면 skip
+	var existingCount int64
+	tx.Raw(`
+		SELECT COUNT(*) FROM g5_write_truthroom
+		WHERE wr_1 = ? AND wr_2 = ? AND wr_is_comment = 0
+	`, boTable, fmt.Sprintf("%d", postID)).Scan(&existingCount)
+	if existingCount > 0 {
+		return
+	}
+
+	// 원본 글 제목/작성자 조회
+	tableName := fmt.Sprintf("g5_write_%s", boTable)
+	var original struct {
+		WrSubject string `gorm:"column:wr_subject"`
+		MbID      string `gorm:"column:mb_id"`
+		WrName    string `gorm:"column:wr_name"`
+	}
+	if err := tx.Table(tableName).Select("wr_subject, mb_id, wr_name").Where("wr_id = ? AND wr_is_comment = 0", postID).First(&original).Error; err != nil {
+		log.Printf("[Cron:auto-lock] failed to fetch original post %s/%d: %v", boTable, postID, err)
+		return
+	}
+
+	authorDisplay := original.MbID
+	if authorDisplay == "" {
+		authorDisplay = original.WrName
+	}
+
+	// 다음 wr_id 조회
+	var maxWrID int
+	tx.Raw("SELECT COALESCE(MAX(wr_id), 0) FROM g5_write_truthroom").Scan(&maxWrID)
+	wrID := maxWrID + 1
+
+	nowStr := time.Now().Format("2006-01-02 15:04:05")
+	subject := fmt.Sprintf("[신고잠금] %s", original.WrSubject)
+	postLink := fmt.Sprintf("https://damoang.net/%s/%d", boTable, postID)
+	content := fmt.Sprintf(`<p>신고 누적으로 자동 잠금된 게시글입니다.</p>
+<p>원본 게시글: <a href="%s" target="_blank">%s</a></p>
+<p>작성자: %s</p>
+<p>게시판: %s / 글번호: %d</p>`, postLink, original.WrSubject, authorDisplay, boTable, postID)
+
+	if err := tx.Exec(`
+		INSERT INTO g5_write_truthroom
+		SET wr_id = ?,
+			wr_num = (SELECT IFNULL(MIN(wr_num), 0) - 1 FROM g5_write_truthroom tmp),
+			wr_reply = '',
+			wr_parent = ?,
+			wr_is_comment = 0,
+			wr_comment = 0,
+			wr_comment_reply = '',
+			ca_name = '게시글',
+			wr_option = 'html1',
+			wr_subject = ?,
+			wr_content = ?,
+			wr_link1 = ?,
+			wr_link2 = '',
+			wr_link1_hit = 0,
+			wr_link2_hit = 0,
+			wr_hit = 0,
+			wr_good = 0,
+			wr_nogood = 0,
+			mb_id = 'police',
+			wr_password = '',
+			wr_name = 'police',
+			wr_email = '',
+			wr_homepage = '',
+			wr_datetime = ?,
+			wr_file = 0,
+			wr_last = ?,
+			wr_ip = '127.0.0.1',
+			wr_1 = ?,
+			wr_2 = ?,
+			wr_3 = '', wr_4 = '', wr_5 = '',
+			wr_6 = '', wr_7 = '', wr_8 = '', wr_9 = '', wr_10 = ''
+	`, wrID, wrID, subject, content, postLink,
+		nowStr, nowStr, boTable, fmt.Sprintf("%d", postID),
+	).Error; err != nil {
+		log.Printf("[Cron:auto-lock] failed to create truthroom post for %s/%d: %v", boTable, postID, err)
+		return
+	}
+
+	// 게시판 글 수 증가
+	tx.Exec("UPDATE g5_board SET bo_count_write = bo_count_write + 1 WHERE bo_table = 'truthroom'")
+	log.Printf("[Cron:auto-lock] created truthroom post #%d for %s/%d", wrID, boTable, postID)
+}
+
+// autoLockComment checks approved report count for a comment and locks it if threshold reached
+func autoLockComment(tx *gorm.DB, boTable string, commentID, parentID, threshold int) {
+	tableName := fmt.Sprintf("g5_write_%s", boTable)
+
+	// 이미 잠금 상태인지 확인
+	var currentWr7 string
+	if err := tx.Raw(fmt.Sprintf("SELECT IFNULL(wr_7, '') FROM `%s` WHERE wr_id = ? AND wr_is_comment = 1", tableName), commentID).Scan(&currentWr7).Error; err != nil {
+		return
+	}
+	if currentWr7 == "lock" {
+		return
+	}
+
+	// 승인된 신고 수 카운트 (해당 댓글 대상)
+	var approvedCount int64
+	tx.Raw(`
+		SELECT COUNT(*) FROM g5_na_singo
+		WHERE sg_table = ? AND sg_id = ? AND sg_parent = ? AND admin_approved = 1
+	`, boTable, commentID, parentID).Scan(&approvedCount)
+
+	if int(approvedCount) < threshold {
+		return
+	}
+
+	// 잠금 적용
+	tx.Exec(fmt.Sprintf("UPDATE `%s` SET wr_7 = 'lock' WHERE wr_id = ? AND wr_is_comment = 1", tableName), commentID)
+	log.Printf("[Cron:auto-lock] locked comment %s/%d (parent: %d, approved reports: %d >= threshold: %d)", boTable, commentID, parentID, approvedCount, threshold)
+
+	// 진실의방에 참조 글 생성
+	createTruthroomCommentPost(tx, boTable, commentID, parentID)
+}
+
+// createTruthroomCommentPost creates a reference post in g5_write_truthroom for a locked comment
+func createTruthroomCommentPost(tx *gorm.DB, boTable string, commentID, parentID int) {
+	// 중복 체크: wr_1 = boTable AND wr_2 = parentID AND wr_3 = commentID 기존 글 있으면 skip
+	var existingCount int64
+	tx.Raw(`
+		SELECT COUNT(*) FROM g5_write_truthroom
+		WHERE wr_1 = ? AND wr_2 = ? AND wr_3 = ? AND wr_is_comment = 0
+	`, boTable, fmt.Sprintf("%d", parentID), fmt.Sprintf("%d", commentID)).Scan(&existingCount)
+	if existingCount > 0 {
+		return
+	}
+
+	// 원본 댓글 내용/작성자 조회
+	tableName := fmt.Sprintf("g5_write_%s", boTable)
+	var original struct {
+		WrContent string `gorm:"column:wr_content"`
+		MbID      string `gorm:"column:mb_id"`
+		WrName    string `gorm:"column:wr_name"`
+	}
+	if err := tx.Table(tableName).Select("wr_content, mb_id, wr_name").Where("wr_id = ? AND wr_is_comment = 1", commentID).First(&original).Error; err != nil {
+		log.Printf("[Cron:auto-lock] failed to fetch original comment %s/%d: %v", boTable, commentID, err)
+		return
+	}
+
+	authorDisplay := original.MbID
+	if authorDisplay == "" {
+		authorDisplay = original.WrName
+	}
+
+	// 댓글 내용 미리보기 (80자)
+	preview := stripTags(original.WrContent)
+	if len([]rune(preview)) > 80 {
+		preview = string([]rune(preview)[:80]) + "…"
+	}
+
+	// 다음 wr_id 조회
+	var maxWrID int
+	tx.Raw("SELECT COALESCE(MAX(wr_id), 0) FROM g5_write_truthroom").Scan(&maxWrID)
+	wrID := maxWrID + 1
+
+	nowStr := time.Now().Format("2006-01-02 15:04:05")
+	subject := fmt.Sprintf("[신고잠금:댓글] %s", preview)
+	commentLink := fmt.Sprintf("https://damoang.net/%s/%d#c_%d", boTable, parentID, commentID)
+	content := fmt.Sprintf(`<p>신고 누적으로 자동 잠금된 댓글입니다.</p>
+<p>원본 댓글: <a href="%s" target="_blank">원본 댓글 보기</a></p>
+<p>작성자: %s</p>
+<p>게시판: %s / 원글번호: %d / 댓글번호: %d</p>`, commentLink, authorDisplay, boTable, parentID, commentID)
+
+	if err := tx.Exec(`
+		INSERT INTO g5_write_truthroom
+		SET wr_id = ?,
+			wr_num = (SELECT IFNULL(MIN(wr_num), 0) - 1 FROM g5_write_truthroom tmp),
+			wr_reply = '',
+			wr_parent = ?,
+			wr_is_comment = 0,
+			wr_comment = 0,
+			wr_comment_reply = '',
+			ca_name = '댓글',
+			wr_option = 'html1',
+			wr_subject = ?,
+			wr_content = ?,
+			wr_link1 = ?,
+			wr_link2 = '',
+			wr_link1_hit = 0,
+			wr_link2_hit = 0,
+			wr_hit = 0,
+			wr_good = 0,
+			wr_nogood = 0,
+			mb_id = 'police',
+			wr_password = '',
+			wr_name = 'police',
+			wr_email = '',
+			wr_homepage = '',
+			wr_datetime = ?,
+			wr_file = 0,
+			wr_last = ?,
+			wr_ip = '127.0.0.1',
+			wr_1 = ?,
+			wr_2 = ?,
+			wr_3 = ?, wr_4 = '', wr_5 = '',
+			wr_6 = '', wr_7 = '', wr_8 = '', wr_9 = '', wr_10 = ''
+	`, wrID, wrID, subject, content, commentLink,
+		nowStr, nowStr, boTable, fmt.Sprintf("%d", parentID), fmt.Sprintf("%d", commentID),
+	).Error; err != nil {
+		log.Printf("[Cron:auto-lock] failed to create truthroom comment post for %s/%d: %v", boTable, commentID, err)
+		return
+	}
+
+	// 게시판 글 수 증가
+	tx.Exec("UPDATE g5_board SET bo_count_write = bo_count_write + 1 WHERE bo_table = 'truthroom'")
+	log.Printf("[Cron:auto-lock] created truthroom comment post #%d for %s/%d (parent: %d)", wrID, boTable, commentID, parentID)
 }
 
 // reasonKeyToInt maps string reason keys to integer codes

@@ -122,6 +122,15 @@ func SetupAdminPoint(router *gin.Engine, h *v2handler.ExpHandler, jwtManager *jw
 	admin.PUT("/config", h.AdminUpdatePointConfig)
 }
 
+// SetupAdminSettings configures admin settings routes
+func SetupAdminSettings(router *gin.Engine, h *v2handler.AdminSettingsHandler, jwtManager *jwt.Manager) {
+	admin := router.Group("/api/v1/admin/settings")
+	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+
+	admin.GET("/report-lock", h.GetReportLockThreshold)
+	admin.PUT("/report-lock", h.UpdateReportLockThreshold)
+}
+
 // SetupScrap configures v2 scrap routes
 func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
