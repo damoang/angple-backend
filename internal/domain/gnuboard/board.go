@@ -44,7 +44,8 @@ type G5Board struct {
 	Bo8             string `gorm:"column:bo_8" json:"bo_8"`
 	Bo9             string `gorm:"column:bo_9" json:"bo_9"`
 	Bo10            string `gorm:"column:bo_10" json:"bo_10"`
-	BoUseCert       string `gorm:"column:bo_use_cert" json:"bo_use_cert"`
+	BoUseCert          string `gorm:"column:bo_use_cert" json:"bo_use_cert"`
+	BoInsertContent    string `gorm:"column:bo_insert_content" json:"bo_insert_content"`
 }
 
 // TableName returns the table name for GORM
@@ -76,8 +77,9 @@ type BoardResponse struct {
 	UseNogood     bool   `json:"use_nogood"`
 	UseSecret     bool   `json:"use_secret"`
 	UseSearch     bool   `json:"use_search"`
-	PostCount     int    `json:"post_count"`
-	CommentCount  int    `json:"comment_count"`
+	PostCount      int    `json:"post_count"`
+	CommentCount   int    `json:"comment_count"`
+	InsertContent  string `json:"insert_content,omitempty"`
 }
 
 // AdminBoardResponse is the full board response for admin settings page
@@ -179,7 +181,8 @@ func (b *G5Board) ToResponse() BoardResponse {
 		UseNogood:     b.BoUseNogood == 1,
 		UseSecret:     b.BoUseSecret == 1,
 		UseSearch:     b.BoUseSearch == 1,
-		PostCount:     b.BoCountWrite,
-		CommentCount:  b.BoCountComment,
+		PostCount:      b.BoCountWrite,
+		CommentCount:   b.BoCountComment,
+		InsertContent:  b.BoInsertContent,
 	}
 }
