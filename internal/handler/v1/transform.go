@@ -194,7 +194,7 @@ func TransformToV1Member(m *gnuboard.G5Member) map[string]any {
 	if avatarURL == "" {
 		avatarURL = m.MbIconPath
 	}
-	return map[string]any{
+	result := map[string]any{
 		"id":         m.MbID,
 		"username":   m.MbID,
 		"nickname":   m.MbNick,
@@ -205,6 +205,10 @@ func TransformToV1Member(m *gnuboard.G5Member) map[string]any {
 		"profile":    m.MbProfile,
 		"created_at": m.MbDatetime.Format(time.RFC3339),
 	}
+	if m.MbImageUpdatedAt != nil {
+		result["avatar_updated_at"] = m.MbImageUpdatedAt.Unix()
+	}
+	return result
 }
 
 // BuildNoticeIDMap creates a map of notice IDs for quick lookup
