@@ -1728,13 +1728,13 @@ func main() {
 
 			// LikerInfo struct for response
 			type LikerInfo struct {
-				MbID              string     `json:"mb_id"`
-				MbName            string     `json:"mb_name"`
-				MbNick            string     `json:"mb_nick"`
-				MbImageUrl        string     `json:"mb_image_url,omitempty"`
-				MbImageUpdatedAt  *time.Time `json:"mb_image_updated_at,omitempty"`
-				BgIP              string     `json:"bg_ip,omitempty"`
-				LikedAt           *time.Time `json:"liked_at"`
+				MbID             string     `json:"mb_id"`
+				MbName           string     `json:"mb_name"`
+				MbNick           string     `json:"mb_nick"`
+				MbImageUrl       string     `json:"mb_image_url,omitempty"`
+				MbImageUpdatedAt *time.Time `json:"mb_image_updated_at,omitempty"`
+				BgIP             string     `json:"bg_ip,omitempty"`
+				LikedAt          *time.Time `json:"liked_at"`
 			}
 
 			var likers []LikerInfo
