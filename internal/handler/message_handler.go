@@ -235,11 +235,14 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 		nickMap = make(map[string]string)
 	}
 
-	// 쪽지 알림 (비동기)
+	// 쪽지 알림 (비동기, 중복 체크)
 	go func() {
 		senderNick := nickMap[mbID]
 		if senderNick == "" {
 			senderNick = mbID
+		}
+		if exists, _ := h.notiRepo.Exists(req.ReceiverID, "", 0, "memo", mbID); exists {
+			return
 		}
 		_ = h.notiRepo.Create(&gnurepo.Notification{
 			PhToCase:   "memo",
