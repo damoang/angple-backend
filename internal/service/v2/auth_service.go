@@ -110,7 +110,9 @@ func (s *V2AuthService) grantLoginXP(username string) {
 		return
 	}
 
-	already, err := s.expRepo.HasTodayAction(username, "@login")
+	today := time.Now().Format("2006-01-02")
+
+	already, err := s.expRepo.HasTodayAction(username, today)
 	if err != nil {
 		log.Printf("[v2-auth] login XP check failed for user %s: %v", username, err)
 		return
@@ -118,8 +120,6 @@ func (s *V2AuthService) grantLoginXP(username string) {
 	if already {
 		return
 	}
-
-	today := time.Now().Format("2006-01-02")
 	if _, addErr := s.expRepo.AddExp(username, xpConfig.LoginXP, today+" 로그인", "@login", username, today); addErr != nil {
 		log.Printf("[v2-auth] login XP grant failed for user %s: %v", username, addErr)
 	}
