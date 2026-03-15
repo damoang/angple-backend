@@ -296,6 +296,8 @@ func generateGroupTitle(fromCase, latestSender string, senderCount int) string {
 		action = "비추천했습니다"
 	case "write":
 		action = "새 글을 작성했습니다"
+	case "memo":
+		action = "쪽지를 보냈습니다"
 	case "inquire":
 		return "새 문의가 등록되었습니다"
 	case "answer":
