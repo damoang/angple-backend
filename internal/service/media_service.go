@@ -45,6 +45,7 @@ type MediaUploadResult struct {
 	Key         string `json:"key"`
 	URL         string `json:"url"`
 	CDNURL      string `json:"cdn_url,omitempty"`
+	OriginURL   string `json:"origin_url,omitempty"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Size        int64  `json:"size"`
@@ -134,6 +135,7 @@ func (s *MediaService) UploadImage(ctx context.Context, file *multipart.FileHead
 		Key:         result.Key,
 		URL:         result.URL,
 		CDNURL:      result.CDNURL,
+		OriginURL:   result.OriginURL,
 		Filename:    file.Filename,
 		ContentType: contentType,
 		Size:        size,
@@ -194,6 +196,7 @@ func (s *MediaService) UploadAttachment(ctx context.Context, file *multipart.Fil
 		Key:         result.Key,
 		URL:         result.URL,
 		CDNURL:      result.CDNURL,
+		OriginURL:   result.OriginURL,
 		Filename:    file.Filename,
 		ContentType: contentType,
 		Size:        file.Size,
@@ -239,6 +242,7 @@ func (s *MediaService) UploadVideo(ctx context.Context, file *multipart.FileHead
 		Key:         result.Key,
 		URL:         result.URL,
 		CDNURL:      result.CDNURL,
+		OriginURL:   result.OriginURL,
 		Filename:    file.Filename,
 		ContentType: contentType,
 		Size:        file.Size,

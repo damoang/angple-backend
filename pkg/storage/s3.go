@@ -66,6 +66,7 @@ type UploadResult struct {
 	Key         string `json:"key"`
 	URL         string `json:"url"`
 	CDNURL      string `json:"cdn_url,omitempty"`
+	OriginURL   string `json:"origin_url,omitempty"`
 	ContentType string `json:"content_type"`
 	Size        int64  `json:"size"`
 }
@@ -85,15 +86,19 @@ func (c *S3Client) Upload(ctx context.Context, key string, body io.Reader, conte
 		return nil, fmt.Errorf("s3 upload failed: %w", err)
 	}
 
+	originURL := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", c.bucket, fullKey)
 	result := &UploadResult{
 		Key:         fullKey,
-		URL:         fmt.Sprintf("https://%s.s3.amazonaws.com/%s", c.bucket, fullKey),
+		URL:         originURL,
+		CDNURL:      "",
+		OriginURL:   originURL,
 		ContentType: contentType,
 		Size:        size,
 	}
 
 	if c.cdnURL != "" {
 		result.CDNURL = c.cdnURL + "/" + fullKey
+		result.URL = result.CDNURL
 	}
 
 	return result, nil
