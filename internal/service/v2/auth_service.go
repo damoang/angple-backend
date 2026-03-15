@@ -89,7 +89,7 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 	level := int(user.Level)
 	if promoted, newLevel := s.checkAndPromote(user.Username); promoted {
 		level = newLevel
-		user.Level = uint8(newLevel)
+		user.Level = uint8(min(newLevel, 255)) //nolint:gosec // level values are small (2-10)
 		// Update v2_users level (best-effort)
 		_ = s.userRepo.Update(user)
 	}
@@ -230,7 +230,7 @@ func (s *V2AuthService) checkAndPromote(mbID string) (bool, int) {
 			return false, member.MbLevel
 		}
 		log.Printf("[v2-auth] auto-promoted %s from level 2 to 3", mbID)
-		go s.sendPromotionNotification(mbID, 3)
+		go s.sendPromotionNotification(mbID)
 		return true, 3
 	}
 
@@ -238,7 +238,7 @@ func (s *V2AuthService) checkAndPromote(mbID string) (bool, int) {
 }
 
 // sendPromotionNotification sends a promotion notification (best-effort)
-func (s *V2AuthService) sendPromotionNotification(mbID string, newLevel int) {
+func (s *V2AuthService) sendPromotionNotification(mbID string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[v2-auth] promotion notification panic for %s: %v", mbID, r)
