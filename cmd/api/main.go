@@ -3136,9 +3136,19 @@ func main() {
 					"wr_id":    newPost.WrID,
 				})
 
-			// 4. 원본 게시글 + 댓글 삭제
-			tx.Table(fmt.Sprintf("g5_write_%s", srcBoard)).Where("wr_parent = ? AND wr_is_comment = 1", postID).Delete(&gnuboard.G5Write{})
-			tx.Table(fmt.Sprintf("g5_write_%s", srcBoard)).Where("wr_id = ?", postID).Delete(&gnuboard.G5Write{})
+			// 4. 원본 게시글 + 댓글 soft delete (이동 안내 메시지)
+			now := time.Now()
+			movedBy := middleware.GetUserID(c)
+			srcTable := fmt.Sprintf("g5_write_%s", srcBoard)
+			tx.Table(srcTable).Where("wr_parent = ? AND wr_is_comment = 1", postID).Updates(map[string]interface{}{
+				"wr_deleted_at": now,
+				"wr_deleted_by": movedBy,
+			})
+			tx.Table(srcTable).Where("wr_id = ?", postID).Updates(map[string]interface{}{
+				"wr_deleted_at": now,
+				"wr_deleted_by": movedBy,
+				"wr_content":    fmt.Sprintf("이 게시물은 <a href=\"/%s/%d\">%s 게시판</a>으로 이동되었습니다.", req.TargetBoardID, newPost.WrID, req.TargetBoardID),
+			})
 
 			if err := tx.Commit().Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "이동 트랜잭션 커밋 실패"})
