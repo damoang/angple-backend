@@ -45,6 +45,7 @@ var coreColumns = []string{
 	"wr_link1_hit", "wr_link2_hit", "wr_hit", "wr_good", "wr_nogood",
 	"mb_id", "wr_password", "wr_name", "wr_email", "wr_homepage",
 	"wr_datetime", "wr_file", "wr_last", "wr_ip",
+	"wr_9",                           // 리포트 통계 JSON 등
 	"wr_10",                          // 이미지 URL (갤러리/메시지 썸네일)
 	"wr_deleted_at", "wr_deleted_by", // Soft delete columns (마이그레이션된 테이블만)
 }

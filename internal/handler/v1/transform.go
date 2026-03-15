@@ -110,6 +110,9 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 func TransformToV1PostDetail(w *gnuboard.G5Write, isNotice bool) map[string]any {
 	result := TransformToV1Post(w, isNotice)
 	result["content"] = w.WrContent
+	if w.Wr9 != "" {
+		result["extra_9"] = w.Wr9
+	}
 	return result
 }
 

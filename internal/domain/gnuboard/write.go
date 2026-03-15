@@ -37,7 +37,8 @@ type G5Write struct {
 	WrFile         int       `gorm:"column:wr_file" json:"wr_file"`
 	WrLast         string    `gorm:"column:wr_last" json:"wr_last"`
 	WrIP           string    `gorm:"column:wr_ip" json:"wr_ip"`
-	// Extended columns for thumbnail/image support
+	// Extended columns
+	Wr9  string `gorm:"column:wr_9" json:"wr_9"`   // 리포트 통계 JSON 등
 	Wr10 string `gorm:"column:wr_10" json:"wr_10"` // 이미지 URL (갤러리/메시지 썸네일)
 	// Soft delete columns
 	WrDeletedAt *time.Time `gorm:"column:wr_deleted_at" json:"deleted_at,omitempty"`
