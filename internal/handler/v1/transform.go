@@ -69,6 +69,25 @@ func normalizeMediaURL(raw string) string {
 	return raw
 }
 
+func normalizeMediaContent(raw string) string {
+	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
+	if raw == "" || cdnURL == "" {
+		return raw
+	}
+
+	replacer := strings.NewReplacer(
+		`src="/data/`, `src="`+cdnURL+`/data/`,
+		`src='/data/`, `src='`+cdnURL+`/data/`,
+		`src="data/`, `src="`+cdnURL+`/data/`,
+		`src='data/`, `src='`+cdnURL+`/data/`,
+		`href="/data/`, `href="`+cdnURL+`/data/`,
+		`href='/data/`, `href='`+cdnURL+`/data/`,
+		`href="data/`, `href="`+cdnURL+`/data/`,
+		`href='data/`, `href='`+cdnURL+`/data/`,
+	)
+	return replacer.Replace(raw)
+}
+
 // MaskIP masks the 2nd octet of an IPv4 address with ♡ (e.g. "1.2.3.4" → "1.♡.3.4")
 func MaskIP(ip string) string {
 	if ip == "" {
@@ -136,7 +155,7 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 // TransformToV1PostDetail converts G5Write to detailed v1 API response format
 func TransformToV1PostDetail(w *gnuboard.G5Write, isNotice bool) map[string]any {
 	result := TransformToV1Post(w, isNotice)
-	result["content"] = w.WrContent
+	result["content"] = normalizeMediaContent(w.WrContent)
 	if w.Wr9 != "" {
 		result["extra_9"] = w.Wr9
 	}
