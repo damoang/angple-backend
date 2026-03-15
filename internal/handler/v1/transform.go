@@ -1,6 +1,7 @@
 package v1handler
 
 import (
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -37,9 +38,35 @@ func parseWrLast(wrLast string, createdAt time.Time) any {
 func extractFirstImageURL(html string) string {
 	m := imgSrcRegex.FindStringSubmatch(html)
 	if len(m) >= 2 {
-		return m[1]
+		return normalizeMediaURL(m[1])
 	}
 	return ""
+}
+
+func normalizeMediaURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return raw
+	}
+
+	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
+	if cdnURL == "" {
+		return raw
+	}
+
+	if strings.HasPrefix(raw, "./") {
+		raw = strings.TrimPrefix(raw, "./")
+	}
+	if strings.HasPrefix(raw, "data/") {
+		return cdnURL + "/" + raw
+	}
+	if strings.HasPrefix(raw, "/data/") {
+		return cdnURL + raw
+	}
+
+	return raw
 }
 
 // MaskIP masks the 2nd octet of an IPv4 address with ♡ (e.g. "1.2.3.4" → "1.♡.3.4")
@@ -97,8 +124,8 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 
 	// Add thumbnail: priority is wr_10 > first <img> in content
 	if w.Wr10 != "" {
-		result["thumbnail"] = w.Wr10
-		result["extra_10"] = w.Wr10
+		result["thumbnail"] = normalizeMediaURL(w.Wr10)
+		result["extra_10"] = normalizeMediaURL(w.Wr10)
 	} else if img := extractFirstImageURL(w.WrContent); img != "" {
 		result["thumbnail"] = img
 	}
