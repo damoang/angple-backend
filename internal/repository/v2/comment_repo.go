@@ -13,6 +13,7 @@ type CommentRepository interface {
 	FindByPost(postID uint64, page, limit int) ([]*v2.V2Comment, int64, error)
 	FindByPostFiltered(postID uint64, page, limit int, excludeUserIDs []uint64) ([]*v2.V2Comment, int64, error)
 	Create(comment *v2.V2Comment) error
+	HasRecentDuplicate(postID, userID uint64, content string, seconds int) (bool, error)
 	Update(comment *v2.V2Comment) error
 	Delete(id uint64) error
 	SoftDelete(id uint64, deletedBy uint64) error
@@ -70,6 +71,16 @@ func (r *commentRepository) FindByPostFiltered(postID uint64, page, limit int, e
 
 func (r *commentRepository) Create(comment *v2.V2Comment) error {
 	return r.db.Create(comment).Error
+}
+
+// HasRecentDuplicate checks if the same user posted the same content to the same post within N seconds
+func (r *commentRepository) HasRecentDuplicate(postID, userID uint64, content string, seconds int) (bool, error) {
+	var count int64
+	err := r.db.Model(&v2.V2Comment{}).
+		Where("post_id = ? AND user_id = ? AND content = ? AND created_at >= NOW() - INTERVAL ? SECOND AND status != 'deleted'",
+			postID, userID, content, seconds).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *commentRepository) Update(comment *v2.V2Comment) error {

@@ -418,6 +418,12 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		}
 	}
 
+	// 중복 글쓰기 방지: 같은 유저가 같은 게시판에 같은 제목으로 30초 내 재작성 차단
+	if dup, _ := h.postRepo.HasRecentDuplicate(board.ID, userID, req.Title, 30); dup {
+		common.V2ErrorResponse(c, http.StatusConflict, "같은 제목의 글이 이미 작성되었습니다. 잠시 후 다시 시도해주세요.", nil)
+		return
+	}
+
 	post := &v2domain.V2Post{
 		BoardID:  board.ID,
 		UserID:   userID,
@@ -829,6 +835,12 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 				return
 			}
 		}
+	}
+
+	// 중복 댓글 방지: 같은 유저가 같은 글에 같은 내용으로 10초 내 재작성 차단
+	if dup, _ := h.commentRepo.HasRecentDuplicate(postID, userID, req.Content, 10); dup {
+		common.V2ErrorResponse(c, http.StatusConflict, "같은 내용의 댓글이 이미 작성되었습니다.", nil)
+		return
 	}
 
 	comment := &v2domain.V2Comment{

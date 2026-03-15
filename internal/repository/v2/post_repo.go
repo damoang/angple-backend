@@ -17,6 +17,7 @@ type PostRepository interface {
 	SearchByBoardFiltered(boardID uint64, field, query string, page, limit int, excludeUserIDs []uint64) ([]*v2.V2Post, int64, error)
 	FindDeleted(page, limit int) ([]*v2.V2Post, int64, error)
 	Create(post *v2.V2Post) error
+	HasRecentDuplicate(boardID, userID uint64, title string, seconds int) (bool, error)
 	Update(post *v2.V2Post) error
 	Delete(id uint64) error
 	SoftDelete(id uint64, deletedBy uint64) error
@@ -180,6 +181,16 @@ func (r *postRepository) SearchByBoard(boardID uint64, field, keyword string, pa
 
 func (r *postRepository) Create(post *v2.V2Post) error {
 	return r.db.Create(post).Error
+}
+
+// HasRecentDuplicate checks if the same user posted the same title to the same board within N seconds
+func (r *postRepository) HasRecentDuplicate(boardID, userID uint64, title string, seconds int) (bool, error) {
+	var count int64
+	err := r.db.Model(&v2.V2Post{}).
+		Where("board_id = ? AND user_id = ? AND title = ? AND created_at >= NOW() - INTERVAL ? SECOND AND status != 'deleted'",
+			boardID, userID, title, seconds).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *postRepository) Update(post *v2.V2Post) error {
