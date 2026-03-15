@@ -73,6 +73,23 @@ func (c *MyCommentRow) ToCommentResponse() map[string]interface{} {
 	}
 }
 
+// ActivityPost represents a public post for member activity API
+type ActivityPost struct {
+	WrID       int       `gorm:"column:wr_id" json:"wr_id"`
+	WrSubject  string    `gorm:"column:wr_subject" json:"wr_subject"`
+	WrDatetime time.Time `gorm:"column:wr_datetime" json:"wr_datetime"`
+	BoardID    string    `gorm:"column:board_id" json:"board_id"`
+}
+
+// ActivityComment represents a public comment for member activity API
+type ActivityComment struct {
+	WrID       int       `gorm:"column:wr_id" json:"wr_id"`
+	WrContent  string    `gorm:"column:wr_content" json:"wr_content"`
+	WrParent   int       `gorm:"column:wr_parent" json:"wr_parent"`
+	WrDatetime time.Time `gorm:"column:wr_datetime" json:"wr_datetime"`
+	BoardID    string    `gorm:"column:board_id" json:"board_id"`
+}
+
 // BoardStat represents post/comment counts per board for a member
 type BoardStat struct {
 	BoardID      string `json:"board_id"`

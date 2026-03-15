@@ -14,6 +14,14 @@ type MyPageRepository interface {
 	FindCommentsByMember(mbID string, page, limit int) ([]gnuboard.MyCommentRow, int64, error)
 	FindLikedPostsByMember(mbID string, page, limit int) ([]gnuboard.MyPost, int64, error)
 	GetBoardStats(mbID string) ([]gnuboard.BoardStat, error)
+	FindPublicPostsByMember(mbID string, limit int) ([]gnuboard.ActivityPost, error)
+	FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error)
+	GetSearchableBoards() ([]searchableBoard, error)
+}
+
+type searchableBoard struct {
+	BoTable   string `gorm:"column:bo_table"`
+	BoSubject string `gorm:"column:bo_subject"`
 }
 
 type myPageRepository struct {
@@ -271,4 +279,95 @@ func (r *myPageRepository) GetBoardStats(mbID string) ([]gnuboard.BoardStat, err
 	}
 
 	return stats, nil
+}
+
+// GetSearchableBoards returns boards with bo_use_search=1 that have existing write tables
+func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
+	boards, err := r.boardRepo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(boards) == 0 {
+		return nil, nil
+	}
+
+	tableNames := make([]string, len(boards))
+	boardMap := make(map[string]*gnuboard.G5Board, len(boards))
+	for i, b := range boards {
+		tableName := fmt.Sprintf("g5_write_%s", b.BoTable)
+		tableNames[i] = tableName
+		boardMap[tableName] = b
+	}
+
+	var existingTables []string
+	r.db.Raw("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ?", tableNames).Scan(&existingTables)
+
+	var result []searchableBoard
+	for _, t := range existingTables {
+		b, ok := boardMap[t]
+		if !ok || b.BoUseSearch != 1 {
+			continue
+		}
+		result = append(result, searchableBoard{
+			BoTable:   b.BoTable,
+			BoSubject: b.BoSubject,
+		})
+	}
+	return result, nil
+}
+
+// FindPublicPostsByMember returns recent public posts by a member using UNION ALL
+func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gnuboard.ActivityPost, error) {
+	boards, err := r.GetSearchableBoards()
+	if err != nil || len(boards) == 0 {
+		return nil, err
+	}
+
+	var unions []string
+	var args []interface{}
+	for _, b := range boards {
+		table := fmt.Sprintf("g5_write_%s", b.BoTable)
+		unions = append(unions, fmt.Sprintf(
+			"(SELECT wr_id, wr_subject, wr_datetime, '%s' as board_id FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL) AND (wr_7 IS NULL OR wr_7 != 'lock') AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00'))",
+			b.BoTable, table))
+		args = append(args, mbID)
+	}
+
+	unionQuery := strings.Join(unions, " UNION ALL ")
+	dataSQL := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", unionQuery)
+	args = append(args, limit)
+
+	var posts []gnuboard.ActivityPost
+	if err := r.db.Raw(dataSQL, args...).Scan(&posts).Error; err != nil {
+		return nil, err
+	}
+	return posts, nil
+}
+
+// FindPublicCommentsByMember returns recent public comments by a member using UNION ALL
+func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error) {
+	boards, err := r.GetSearchableBoards()
+	if err != nil || len(boards) == 0 {
+		return nil, err
+	}
+
+	var unions []string
+	var args []interface{}
+	for _, b := range boards {
+		table := fmt.Sprintf("g5_write_%s", b.BoTable)
+		unions = append(unions, fmt.Sprintf(
+			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock') AND (p.wr_deleted_at IS NULL OR p.wr_deleted_at = '0000-00-00 00:00:00') WHERE c.mb_id = ? AND c.wr_is_comment = 1 AND (c.wr_deleted_at IS NULL OR c.wr_deleted_at = '0000-00-00 00:00:00'))",
+			b.BoTable, table, table))
+		args = append(args, mbID)
+	}
+
+	unionQuery := strings.Join(unions, " UNION ALL ")
+	dataSQL := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", unionQuery)
+	args = append(args, limit)
+
+	var comments []gnuboard.ActivityComment
+	if err := r.db.Raw(dataSQL, args...).Scan(&comments).Error; err != nil {
+		return nil, err
+	}
+	return comments, nil
 }

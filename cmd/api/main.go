@@ -420,6 +420,7 @@ func main() {
 		myPageRepo := gnurepo.NewMyPageRepository(db, gnuBoardRepo)
 		myPageHandler := handler.NewMyPageHandler(myPageRepo)
 		v2routes.SetupMyPage(router, pointHandler, expHandler, myPageHandler, jwtManager)
+		v2routes.SetupMemberActivity(router, myPageHandler)
 
 		// Admin XP + Point config management routes
 		v2routes.SetupAdminXP(router, expHandler, jwtManager)
