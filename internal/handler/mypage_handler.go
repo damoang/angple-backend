@@ -1,8 +1,12 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/middleware"
@@ -107,6 +111,122 @@ func (h *MyPageHandler) GetBoardStats(c *gin.Context) {
 	}
 
 	common.V2Success(c, stats)
+}
+
+var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
+var emoRe = regexp.MustCompile(`\{emo:[^}]+\}`)
+var whitespaceRe = regexp.MustCompile(`\s+`)
+
+// stripHTMLPreview removes HTML tags, emoji codes, HTML entities and truncates
+func stripHTMLPreview(content string, maxLen int) string {
+	s := htmlTagRe.ReplaceAllString(content, "")
+	s = emoRe.ReplaceAllString(s, "")
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	s = whitespaceRe.ReplaceAllString(s, " ")
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen])
+	}
+	return s
+}
+
+// GetMemberActivity handles GET /api/v1/members/:mb_id/activity
+func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
+	mbID := c.Param("id")
+	if mbID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"recentPosts": []interface{}{}, "recentComments": []interface{}{}})
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	// Get board subjects map
+	boards, err := h.myPageRepo.GetSearchableBoards()
+	if err != nil || len(boards) == 0 {
+		c.JSON(http.StatusOK, gin.H{"recentPosts": []interface{}{}, "recentComments": []interface{}{}})
+		return
+	}
+	boardSubjects := make(map[string]string, len(boards))
+	for _, b := range boards {
+		boardSubjects[b.BoTable] = b.BoSubject
+	}
+
+	// Parallel fetch posts and comments
+	var (
+		wg       sync.WaitGroup
+		posts    []map[string]interface{}
+		comments []map[string]interface{}
+		postsErr error
+		commsErr error
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		rawPosts, err := h.myPageRepo.FindPublicPostsByMember(mbID, limit)
+		if err != nil {
+			postsErr = err
+			return
+		}
+		posts = make([]map[string]interface{}, 0, len(rawPosts))
+		for _, p := range rawPosts {
+			posts = append(posts, map[string]interface{}{
+				"bo_table":    p.BoardID,
+				"bo_subject":  boardSubjects[p.BoardID],
+				"wr_id":       p.WrID,
+				"wr_subject":  p.WrSubject,
+				"wr_datetime": p.WrDatetime.Format("2006-01-02 15:04:05"),
+				"href":        fmt.Sprintf("/%s/%d", p.BoardID, p.WrID),
+			})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		rawComments, err := h.myPageRepo.FindPublicCommentsByMember(mbID, limit)
+		if err != nil {
+			commsErr = err
+			return
+		}
+		comments = make([]map[string]interface{}, 0, len(rawComments))
+		for _, cm := range rawComments {
+			comments = append(comments, map[string]interface{}{
+				"bo_table":     cm.BoardID,
+				"bo_subject":   boardSubjects[cm.BoardID],
+				"wr_id":        cm.WrID,
+				"parent_wr_id": cm.WrParent,
+				"preview":      stripHTMLPreview(cm.WrContent, 80),
+				"wr_datetime":  cm.WrDatetime.Format("2006-01-02 15:04:05"),
+				"href":         fmt.Sprintf("/%s/%d#c_%d", cm.BoardID, cm.WrParent, cm.WrID),
+			})
+		}
+	}()
+	wg.Wait()
+
+	if postsErr != nil || commsErr != nil {
+		c.JSON(http.StatusOK, gin.H{"recentPosts": []interface{}{}, "recentComments": []interface{}{}})
+		return
+	}
+	if posts == nil {
+		posts = make([]map[string]interface{}, 0)
+	}
+	if comments == nil {
+		comments = make([]map[string]interface{}, 0)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"recentPosts":    posts,
+		"recentComments": comments,
+	})
 }
 
 func parseMyPagePagination(c *gin.Context) (int, int) {

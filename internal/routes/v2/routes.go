@@ -215,6 +215,11 @@ func SetupMyPage(router *gin.Engine, pointHandler *v2handler.PointHandler, expHa
 	my.GET("/stats", myPageHandler.GetBoardStats)
 }
 
+// SetupMemberActivity configures public member activity route
+func SetupMemberActivity(router *gin.Engine, myPageHandler *handler.MyPageHandler) {
+	router.GET("/api/v1/members/:id/activity", myPageHandler.GetMemberActivity)
+}
+
 // SetupDisciplineLog configures discipline log routes (read-only, uses gnuboard g5_write_disciplinelog)
 func SetupDisciplineLog(router *gin.Engine, h *v2handler.DisciplineLogHandler, _ *jwt.Manager) {
 	// Public routes (read-only)
