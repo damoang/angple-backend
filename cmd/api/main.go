@@ -429,8 +429,9 @@ func main() {
 		disciplineLogHandler := v2handler.NewDisciplineLogHandler(gnuWriteRepo, db)
 		v2routes.SetupDisciplineLog(router, disciplineLogHandler, jwtManager)
 
-		// v2 Auth (with ExpRepo for daily login XP)
+		// v2 Auth (with ExpRepo for daily login XP + auto-promotion on login)
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager, v2ExpRepo)
+		v2AuthSvc.SetPromotionDeps(db, gnurepo.NewNotiRepository(db))
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
 		v2routes.SetupAuth(router, v2AuthHandler, jwtManager)
 
@@ -1424,11 +1425,16 @@ func main() {
 			}
 			if len(needFileIDs) > 0 {
 				if fileImages, err := gnuFileRepo.GetFirstImagesByPostIDs(slug, needFileIDs); err == nil && len(fileImages) > 0 {
+					cdnURL := strings.TrimRight(cfg.Storage.CDNURL, "/")
 					for i, item := range items {
 						if _, ok := item["thumbnail"]; !ok {
 							if id, ok := item["id"].(int); ok {
 								if fname, ok := fileImages[id]; ok {
-									items[i]["thumbnail"] = "data/file/" + slug + "/" + fname
+									if cdnURL != "" {
+										items[i]["thumbnail"] = cdnURL + "/data/file/" + slug + "/" + fname
+									} else {
+										items[i]["thumbnail"] = "data/file/" + slug + "/" + fname
+									}
 								}
 							}
 						}

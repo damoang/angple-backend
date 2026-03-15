@@ -67,11 +67,11 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 				BoTable:       "@system",
 				WrID:          0,
 				RelMbID:       "system",
-				RelMbNick:     "시스템",
-				RelMsg:        "활동 조건을 충족하여 등급이 3으로 승급되었습니다",
+				RelMbNick:     "다모앙",
+				RelMsg:        "💛 앙님(💛)으로 되었습니다. 앞으로도 다모앙에서 즐거운 시간 보내세요!",
 				RelURL:        "/my",
 				PhReaded:      "N",
-				ParentSubject: "등급 승급 안내",
+				ParentSubject: "축하합니다.",
 			}
 			if err := notiRepo.Create(noti); err != nil {
 				log.Printf("[Cron:auto-promote] notification failed for %s: %v", mbID, err)
