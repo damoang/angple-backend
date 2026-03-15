@@ -100,7 +100,8 @@ const maxLevel = 100000
 
 // levelExp returns the cumulative exp required for a given level (1-based).
 // Formula: level n requires n*(n-1)/2 * 1000 exp.
-//   Level 1: 0, Level 2: 1000, Level 3: 3000, Level 4: 6000, ...
+//
+//	Level 1: 0, Level 2: 1000, Level 3: 3000, Level 4: 6000, ...
 func levelExp(level int) int {
 	if level <= 1 {
 		return 0
