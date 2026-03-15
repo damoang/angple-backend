@@ -814,9 +814,20 @@ func createTruthroomPost(tx *gorm.DB, boTable string, postID int) {
 		return
 	}
 
-	authorDisplay := original.MbID
-	if authorDisplay == "" {
-		authorDisplay = original.WrName
+	authorID := original.MbID
+	authorName := original.WrName
+	if authorName == "" {
+		authorName = original.MbID
+	}
+
+	// 원본 내용 미리보기 (200자)
+	var originalContent struct {
+		WrContent string `gorm:"column:wr_content"`
+	}
+	tx.Table(tableName).Select("wr_content").Where("wr_id = ? AND wr_is_comment = 0", postID).First(&originalContent)
+	preview := stripTags(originalContent.WrContent)
+	if len([]rune(preview)) > 200 {
+		preview = string([]rune(preview)[:200]) + "…"
 	}
 
 	// 다음 wr_id 조회
@@ -827,10 +838,7 @@ func createTruthroomPost(tx *gorm.DB, boTable string, postID int) {
 	nowStr := time.Now().Format("2006-01-02 15:04:05")
 	subject := fmt.Sprintf("[신고잠금] %s", original.WrSubject)
 	postLink := fmt.Sprintf("https://damoang.net/%s/%d", boTable, postID)
-	content := fmt.Sprintf(`<p>신고 누적으로 자동 잠금된 게시글입니다.</p>
-<p>원본 게시글: <a href="%s" target="_blank">%s</a></p>
-<p>작성자: %s</p>
-<p>게시판: %s / 글번호: %d</p>`, postLink, original.WrSubject, authorDisplay, boTable, postID)
+	content := fmt.Sprintf(`<div class="truthroom-preview"><p class="preview-text">%s</p><p class="preview-source">출처: <a href="/%s/%d">%s #%d</a></p></div>`, preview, boTable, postID, boTable, postID)
 
 	if err := tx.Exec(`
 		INSERT INTO g5_write_truthroom
@@ -852,9 +860,9 @@ func createTruthroomPost(tx *gorm.DB, boTable string, postID int) {
 			wr_hit = 0,
 			wr_good = 0,
 			wr_nogood = 0,
-			mb_id = 'police',
+			mb_id = ?,
 			wr_password = '',
-			wr_name = 'police',
+			wr_name = ?,
 			wr_email = '',
 			wr_homepage = '',
 			wr_datetime = ?,
@@ -866,6 +874,7 @@ func createTruthroomPost(tx *gorm.DB, boTable string, postID int) {
 			wr_3 = '', wr_4 = '', wr_5 = '',
 			wr_6 = '', wr_7 = '', wr_8 = '', wr_9 = '', wr_10 = ''
 	`, wrID, wrID, subject, content, postLink,
+		authorID, authorName,
 		nowStr, nowStr, boTable, fmt.Sprintf("%d", postID),
 	).Error; err != nil {
 		log.Printf("[Cron:auto-lock] failed to create truthroom post for %s/%d: %v", boTable, postID, err)
@@ -933,15 +942,22 @@ func createTruthroomCommentPost(tx *gorm.DB, boTable string, commentID, parentID
 		return
 	}
 
-	authorDisplay := original.MbID
-	if authorDisplay == "" {
-		authorDisplay = original.WrName
+	authorID := original.MbID
+	authorName := original.WrName
+	if authorName == "" {
+		authorName = original.MbID
 	}
 
-	// 댓글 내용 미리보기 (80자)
+	// 댓글 내용 미리보기 (200자)
 	preview := stripTags(original.WrContent)
-	if len([]rune(preview)) > 80 {
-		preview = string([]rune(preview)[:80]) + "…"
+	if len([]rune(preview)) > 200 {
+		preview = string([]rune(preview)[:200]) + "…"
+	}
+
+	// 제목용 미리보기 (80자)
+	titlePreview := preview
+	if len([]rune(titlePreview)) > 80 {
+		titlePreview = string([]rune(titlePreview)[:80]) + "…"
 	}
 
 	// 다음 wr_id 조회
@@ -950,12 +966,9 @@ func createTruthroomCommentPost(tx *gorm.DB, boTable string, commentID, parentID
 	wrID := maxWrID + 1
 
 	nowStr := time.Now().Format("2006-01-02 15:04:05")
-	subject := fmt.Sprintf("[신고잠금:댓글] %s", preview)
+	subject := fmt.Sprintf("[신고잠금:댓글] %s", titlePreview)
 	commentLink := fmt.Sprintf("https://damoang.net/%s/%d#c_%d", boTable, parentID, commentID)
-	content := fmt.Sprintf(`<p>신고 누적으로 자동 잠금된 댓글입니다.</p>
-<p>원본 댓글: <a href="%s" target="_blank">원본 댓글 보기</a></p>
-<p>작성자: %s</p>
-<p>게시판: %s / 원글번호: %d / 댓글번호: %d</p>`, commentLink, authorDisplay, boTable, parentID, commentID)
+	content := fmt.Sprintf(`<div class="truthroom-preview"><p class="preview-text">%s</p><p class="preview-source">출처: <a href="/%s/%d#c_%d">%s #%d</a></p></div>`, preview, boTable, parentID, commentID, boTable, parentID)
 
 	if err := tx.Exec(`
 		INSERT INTO g5_write_truthroom
@@ -977,9 +990,9 @@ func createTruthroomCommentPost(tx *gorm.DB, boTable string, commentID, parentID
 			wr_hit = 0,
 			wr_good = 0,
 			wr_nogood = 0,
-			mb_id = 'police',
+			mb_id = ?,
 			wr_password = '',
-			wr_name = 'police',
+			wr_name = ?,
 			wr_email = '',
 			wr_homepage = '',
 			wr_datetime = ?,
@@ -991,6 +1004,7 @@ func createTruthroomCommentPost(tx *gorm.DB, boTable string, commentID, parentID
 			wr_3 = ?, wr_4 = '', wr_5 = '',
 			wr_6 = '', wr_7 = '', wr_8 = '', wr_9 = '', wr_10 = ''
 	`, wrID, wrID, subject, content, commentLink,
+		authorID, authorName,
 		nowStr, nowStr, boTable, fmt.Sprintf("%d", parentID), fmt.Sprintf("%d", commentID),
 	).Error; err != nil {
 		log.Printf("[Cron:auto-lock] failed to create truthroom comment post for %s/%d: %v", boTable, commentID, err)
