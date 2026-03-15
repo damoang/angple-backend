@@ -419,6 +419,9 @@ func main() {
 		v2Handler.SetExpRepository(v2ExpRepo)
 		myPageRepo := gnurepo.NewMyPageRepository(db, gnuBoardRepo)
 		myPageHandler := handler.NewMyPageHandler(myPageRepo)
+		if cacheService != nil {
+			myPageHandler.SetCache(cacheService)
+		}
 		v2routes.SetupMyPage(router, pointHandler, expHandler, myPageHandler, jwtManager)
 		v2routes.SetupMemberActivity(router, myPageHandler)
 
