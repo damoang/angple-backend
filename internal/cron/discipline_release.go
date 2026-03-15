@@ -23,42 +23,10 @@ func runDisciplineRelease(db *gorm.DB) (*DisciplineReleaseResult, error) {
 		ExecutedAt: now.Format("2006-01-02 15:04:05"),
 	}
 
-	// 1. Restore levels for expired level-type disciplines
-	// Conditions: penalty_type includes 'level' or 'all', period > 0 (not permanent), expired, member still at level 1
-	type expiredDiscipline struct {
-		PenaltyMbID string `gorm:"column:penalty_mb_id"`
-		PrevLevel   int    `gorm:"column:prev_level"`
-	}
+	// mb_level 복구는 더 이상 수행하지 않음 (제재 시 레벨 강등을 하지 않으므로)
+	// LevelRestoredCount, LevelRestoredIDs는 항상 0/empty (struct 호환성 유지)
 
-	var expired []expiredDiscipline
-	if err := db.Raw(`
-		SELECT d.penalty_mb_id, d.prev_level
-		FROM g5_da_member_discipline d
-		JOIN g5_member m ON m.mb_id = d.penalty_mb_id
-		WHERE d.penalty_type IN ('level', 'all')
-		  AND d.penalty_period > 0
-		  AND d.penalty_period != -1
-		  AND m.mb_level <= 1
-		  AND DATE_ADD(d.penalty_date_from, INTERVAL d.penalty_period DAY) < NOW()
-	`).Scan(&expired).Error; err != nil {
-		return nil, err
-	}
-
-	for _, e := range expired {
-		if e.PrevLevel <= 1 {
-			e.PrevLevel = 2 // minimum restore level
-		}
-		if err := db.Table("g5_member").
-			Where("mb_id = ? AND mb_level <= 1", e.PenaltyMbID).
-			Update("mb_level", e.PrevLevel).Error; err != nil {
-			log.Printf("[Cron:discipline-release] failed to restore level for %s: %v", e.PenaltyMbID, err)
-			continue
-		}
-		result.LevelRestoredIDs = append(result.LevelRestoredIDs, e.PenaltyMbID)
-		result.LevelRestoredCount++
-	}
-
-	// 2. Clear expired intercept dates
+	// Clear expired intercept dates
 	var interceptIDs []string
 	if err := db.Raw(`
 		SELECT mb_id FROM g5_member

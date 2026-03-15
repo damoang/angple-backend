@@ -441,31 +441,16 @@ func applyUserRestriction(tx *gorm.DB, targetMbID, disciplineType string, discip
 		restrictionEndDate = now.AddDate(0, 0, disciplineDays).Format("20060102")
 	}
 
-	// 제재 적용
+	// 제재 적용 (글쓰기 차단만, mb_level 강등 없음)
 	updates := map[string]interface{}{}
-	if disciplineType == "level_down" || disciplineType == "level" || disciplineType == "both" || disciplineType == "demotion_and_block" {
-		updates["mb_level"] = 1
-	}
-	// disciplineDays > 0이면 항상 글쓰기 차단 (type이 빈 문자열/warning이어도)
 	updates["mb_intercept_date"] = restrictionEndDate
 
 	if err := tx.Table("g5_member").Where("mb_id = ?", targetMbID).Updates(updates).Error; err != nil {
 		return err
 	}
 
-	// g5_da_member_discipline 테이블에 제재 정보 저장
-	penaltyTypeValue := ""
-	switch {
-	case disciplineType == "level_down" || disciplineType == "level":
-		penaltyTypeValue = "level"
-	case disciplineType == "access_block" || disciplineType == "access":
-		penaltyTypeValue = "intercept"
-	case disciplineType == "both" || disciplineType == "demotion_and_block":
-		penaltyTypeValue = "all"
-	default:
-		// 빈 문자열, warning 등 — 기간이 있으면 intercept로 처리
-		penaltyTypeValue = "intercept"
-	}
+	// g5_da_member_discipline 테이블에 제재 정보 저장 (모든 타입을 intercept로 통일)
+	penaltyTypeValue := "intercept"
 
 	penaltyPeriod := disciplineDays
 	if disciplineDays == 9999 {
