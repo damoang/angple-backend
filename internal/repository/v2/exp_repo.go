@@ -95,49 +95,43 @@ func NewExpRepository(db *gorm.DB) ExpRepository {
 	return &expRepository{db: db}
 }
 
-// Level thresholds (cumulative exp required for each level)
-var levelThresholds = []int{
-	0,      // Level 1
-	1000,   // Level 2
-	3000,   // Level 3
-	6000,   // Level 4
-	10000,  // Level 5
-	15000,  // Level 6
-	21000,  // Level 7
-	28000,  // Level 8
-	36000,  // Level 9
-	45000,  // Level 10
-	55000,  // Level 11
-	66000,  // Level 12
-	78000,  // Level 13
-	91000,  // Level 14
-	105000, // Level 15
+// maxLevel is the highest level a user can reach
+const maxLevel = 100000
+
+// levelExp returns the cumulative exp required for a given level (1-based).
+// Formula: level n requires n*(n-1)/2 * 1000 exp.
+//   Level 1: 0, Level 2: 1000, Level 3: 3000, Level 4: 6000, ...
+func levelExp(level int) int {
+	if level <= 1 {
+		return 0
+	}
+	return level * (level - 1) / 2 * 1000
 }
 
 func calculateLevelInfo(totalExp int) (currentLevel, nextLevel, nextLevelExp, expToNext, progress int) {
-	currentLevel = 1
-	for i, threshold := range levelThresholds {
-		if totalExp >= threshold {
-			currentLevel = i + 1
+	// Binary search for current level: find highest level where levelExp(level) <= totalExp
+	lo, hi := 1, maxLevel
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if levelExp(mid) <= totalExp {
+			lo = mid
 		} else {
-			break
+			hi = mid - 1
 		}
 	}
+	currentLevel = lo
 
 	// Calculate next level info
-	if currentLevel >= len(levelThresholds) {
+	if currentLevel >= maxLevel {
 		// Max level reached
 		nextLevel = currentLevel
-		nextLevelExp = levelThresholds[len(levelThresholds)-1]
+		nextLevelExp = levelExp(currentLevel)
 		expToNext = 0
 		progress = 100
 	} else {
 		nextLevel = currentLevel + 1
-		nextLevelExp = levelThresholds[currentLevel]
-		prevLevelExp := 0
-		if currentLevel > 1 {
-			prevLevelExp = levelThresholds[currentLevel-1]
-		}
+		nextLevelExp = levelExp(nextLevel)
+		prevLevelExp := levelExp(currentLevel)
 		expToNext = nextLevelExp - totalExp
 		levelRange := nextLevelExp - prevLevelExp
 		if levelRange > 0 {
@@ -196,7 +190,7 @@ func (r *expRepository) GetHistory(mbID string, page, limit int) ([]gnuboard.Exp
 }
 
 // maxXPLevel is the highest XP level; users at this level stop earning XP from actions
-var maxXPLevel = len(levelThresholds)
+var maxXPLevel = maxLevel
 
 func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID, action string) (*AddExpResult, error) {
 	result := &AddExpResult{}
@@ -212,6 +206,11 @@ func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID,
 		// 최대 레벨 도달 시 자동 적립(양수) 차단 — 관리자 수동 지급/차감은 허용
 		if member.AsLevel >= maxXPLevel && point > 0 && relTable != "@admin" {
 			return nil // 적립 없이 조용히 반환
+		}
+
+		// 레벨 80 이상: 로그인(출석)으로만 XP 적립 가능
+		if member.AsLevel >= 80 && point > 0 && relTable != "@login" && relTable != "@admin" {
+			return nil
 		}
 
 		// Update member exp
