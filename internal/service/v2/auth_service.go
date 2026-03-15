@@ -9,9 +9,11 @@ import (
 
 	"github.com/damoang/angple-backend/internal/common"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // V2AuthService handles v2 authentication with bcrypt + legacy password support
@@ -21,6 +23,8 @@ type V2AuthService struct {
 	userRepo   v2repo.UserRepository
 	jwtManager *jwt.Manager
 	expRepo    v2repo.ExpRepository
+	notiRepo   gnurepo.NotiRepository
+	db         *gorm.DB
 }
 
 // NewV2AuthService creates a new V2AuthService
@@ -30,6 +34,12 @@ func NewV2AuthService(userRepo v2repo.UserRepository, jwtManager *jwt.Manager, e
 		jwtManager: jwtManager,
 		expRepo:    expRepo,
 	}
+}
+
+// SetPromotionDeps sets dependencies needed for auto-promotion on login
+func (s *V2AuthService) SetPromotionDeps(db *gorm.DB, notiRepo gnurepo.NotiRepository) {
+	s.db = db
+	s.notiRepo = notiRepo
 }
 
 // V2LoginResponse represents v2 login response
@@ -70,20 +80,29 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		}
 	}
 
+	// Grant daily login XP synchronously (mb_login_days must be updated before promotion check)
+	if s.expRepo != nil {
+		s.grantLoginXP(username)
+	}
+
+	// Check auto-promotion (2→3) and update level if promoted
+	level := int(user.Level)
+	if promoted, newLevel := s.checkAndPromote(user.Username); promoted {
+		level = newLevel
+		user.Level = uint8(newLevel)
+		// Update v2_users level (best-effort)
+		_ = s.userRepo.Update(user)
+	}
+
 	// Generate JWT tokens
 	userIDStr := strconv.FormatUint(user.ID, 10)
-	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
+	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, level)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 	refreshToken, err := s.jwtManager.GenerateRefreshToken(userIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
-	}
-
-	// Grant daily login XP (best-effort, errors don't affect login)
-	if s.expRepo != nil {
-		go s.grantLoginXP(username)
 	}
 
 	return &V2LoginResponse{
@@ -180,4 +199,70 @@ func verifyPassword(plain, hashed string) bool {
 // isBcryptHash checks if the hash is bcrypt format ($2a$, $2b$, $2y$)
 func isBcryptHash(hash string) bool {
 	return len(hash) == 60 && (hash[:4] == "$2a$" || hash[:4] == "$2b$" || hash[:4] == "$2y$")
+}
+
+// checkAndPromote checks if the user meets auto-promotion criteria and promotes them.
+// Currently supports 2→3 (앙님) promotion.
+func (s *V2AuthService) checkAndPromote(mbID string) (bool, int) {
+	if s.db == nil {
+		return false, 0
+	}
+
+	var member struct {
+		MbLevel   int `gorm:"column:mb_level"`
+		LoginDays int `gorm:"column:mb_login_days"`
+		Exp       int `gorm:"column:as_exp"`
+	}
+	if err := s.db.Table("g5_member").
+		Select("mb_level, mb_login_days, as_exp").
+		Where("mb_id = ?", mbID).
+		First(&member).Error; err != nil {
+		log.Printf("[v2-auth] checkAndPromote: member query failed for %s: %v", mbID, err)
+		return false, 0
+	}
+
+	// 2→3 (앙님) 조건: 로그인 7일 이상 + 경험치 3000 이상
+	if member.MbLevel == 2 && member.LoginDays >= 7 && member.Exp >= 3000 {
+		if err := s.db.Table("g5_member").
+			Where("mb_id = ?", mbID).
+			Update("mb_level", 3).Error; err != nil {
+			log.Printf("[v2-auth] checkAndPromote: level update failed for %s: %v", mbID, err)
+			return false, member.MbLevel
+		}
+		log.Printf("[v2-auth] auto-promoted %s from level 2 to 3", mbID)
+		go s.sendPromotionNotification(mbID, 3)
+		return true, 3
+	}
+
+	return false, member.MbLevel
+}
+
+// sendPromotionNotification sends a promotion notification (best-effort)
+func (s *V2AuthService) sendPromotionNotification(mbID string, newLevel int) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[v2-auth] promotion notification panic for %s: %v", mbID, r)
+		}
+	}()
+
+	if s.notiRepo == nil {
+		return
+	}
+
+	noti := &gnurepo.Notification{
+		MbID:          mbID,
+		PhFromCase:    "promote",
+		PhToCase:      "me",
+		BoTable:       "@system",
+		WrID:          0,
+		RelMbID:       "system",
+		RelMbNick:     "다모앙",
+		RelMsg:        "💛 앙님(💛)으로 되었습니다. 앞으로도 다모앙에서 즐거운 시간 보내세요!",
+		RelURL:        "/my",
+		PhReaded:      "N",
+		ParentSubject: "축하합니다.",
+	}
+	if err := s.notiRepo.Create(noti); err != nil {
+		log.Printf("[v2-auth] promotion notification failed for %s: %v", mbID, err)
+	}
 }
