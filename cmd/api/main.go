@@ -419,6 +419,9 @@ func main() {
 		v2Handler.SetExpRepository(v2ExpRepo)
 		myPageRepo := gnurepo.NewMyPageRepository(db, gnuBoardRepo)
 		myPageHandler := handler.NewMyPageHandler(myPageRepo)
+		if redisClient != nil {
+			myPageHandler.SetRedisClient(redisClient)
+		}
 		v2routes.SetupMyPage(router, pointHandler, expHandler, myPageHandler, jwtManager)
 		v2routes.SetupMemberActivity(router, myPageHandler)
 

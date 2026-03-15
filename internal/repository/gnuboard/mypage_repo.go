@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,15 @@ type searchableBoard struct {
 	BoTable   string `gorm:"column:bo_table"`
 	BoSubject string `gorm:"column:bo_subject"`
 }
+
+// searchableBoardsCache caches the searchable boards list (5 min TTL)
+var searchableBoardsCache struct {
+	sync.RWMutex
+	boards    []searchableBoard
+	expiresAt time.Time
+}
+
+const boardsCacheTTL = 5 * time.Minute
 
 type myPageRepository struct {
 	db        *gorm.DB
@@ -390,8 +400,19 @@ func (r *myPageRepository) GetBoardStats(mbID string) ([]gnuboard.BoardStat, err
 	return stats, nil
 }
 
-// GetSearchableBoards returns boards with bo_use_search=1 that have existing write tables
+// GetSearchableBoards returns boards with bo_use_search=1 that have existing write tables.
+// Results are cached in memory for 5 minutes.
 func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
+	// Check memory cache first
+	searchableBoardsCache.RLock()
+	if time.Now().Before(searchableBoardsCache.expiresAt) && searchableBoardsCache.boards != nil {
+		cached := searchableBoardsCache.boards
+		searchableBoardsCache.RUnlock()
+		return cached, nil
+	}
+	searchableBoardsCache.RUnlock()
+
+	// Cache miss — query DB
 	boards, err := r.boardRepo.FindAll()
 	if err != nil {
 		return nil, err
@@ -422,17 +443,69 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 			BoSubject: b.BoSubject,
 		})
 	}
+
+	// Store in cache
+	searchableBoardsCache.Lock()
+	searchableBoardsCache.boards = result
+	searchableBoardsCache.expiresAt = time.Now().Add(boardsCacheTTL)
+	searchableBoardsCache.Unlock()
+
 	return result, nil
 }
 
 // FindPublicPostsByMember returns recent public posts by a member.
-// Temporarily disabled: returns empty to prevent slow queries under high concurrency.
+// Uses UNION ALL with per-subquery LIMIT for efficiency.
+// Each subquery leverages mb_id index + PK ordering.
 func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gnuboard.ActivityPost, error) {
-	return nil, nil
+	boards, err := r.GetSearchableBoards()
+	if err != nil || len(boards) == 0 {
+		return nil, err
+	}
+
+	var unions []string
+	var args []interface{}
+	for _, b := range boards {
+		table := fmt.Sprintf("g5_write_%s", b.BoTable)
+		unions = append(unions, fmt.Sprintf(
+			"(SELECT wr_id, wr_subject, wr_datetime, '%s' as board_id FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL) AND (wr_7 IS NULL OR wr_7 != 'lock') AND wr_deleted_at IS NULL ORDER BY wr_id DESC LIMIT %d)",
+			b.BoTable, table, limit))
+		args = append(args, mbID)
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
+	args = append(args, limit)
+
+	var posts []gnuboard.ActivityPost
+	if err := r.db.Raw(sql, args...).Scan(&posts).Error; err != nil {
+		return nil, err
+	}
+	return posts, nil
 }
 
 // FindPublicCommentsByMember returns recent public comments by a member.
-// Temporarily disabled: returns empty to prevent slow queries under high concurrency.
+// Uses UNION ALL + INNER JOIN to filter out comments on secret/locked/deleted parent posts.
 func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error) {
-	return nil, nil
+	boards, err := r.GetSearchableBoards()
+	if err != nil || len(boards) == 0 {
+		return nil, err
+	}
+
+	var unions []string
+	var args []interface{}
+	for _, b := range boards {
+		table := fmt.Sprintf("g5_write_%s", b.BoTable)
+		unions = append(unions, fmt.Sprintf(
+			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock') AND p.wr_deleted_at IS NULL WHERE c.mb_id = ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL ORDER BY c.wr_id DESC LIMIT %d)",
+			b.BoTable, table, table, limit))
+		args = append(args, mbID)
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
+	args = append(args, limit)
+
+	var comments []gnuboard.ActivityComment
+	if err := r.db.Raw(sql, args...).Scan(&comments).Error; err != nil {
+		return nil, err
+	}
+	return comments, nil
 }
