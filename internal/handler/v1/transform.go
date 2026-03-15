@@ -47,11 +47,15 @@ func normalizeMediaURL(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+
+	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
+	if cdnURL == "" {
 		return raw
 	}
 
-	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return rewriteLegacyCDNHost(raw, cdnURL)
+	}
 	if cdnURL == "" {
 		return raw
 	}
@@ -76,16 +80,39 @@ func normalizeMediaContent(raw string) string {
 	}
 
 	replacer := strings.NewReplacer(
+		`src="https://s3.damoang.net/data/`, `src="`+cdnURL+`/data/`,
+		`src='https://s3.damoang.net/data/`, `src='`+cdnURL+`/data/`,
+		`src="http://s3.damoang.net/data/`, `src="`+cdnURL+`/data/`,
+		`src='http://s3.damoang.net/data/`, `src='`+cdnURL+`/data/`,
 		`src="/data/`, `src="`+cdnURL+`/data/`,
 		`src='/data/`, `src='`+cdnURL+`/data/`,
 		`src="data/`, `src="`+cdnURL+`/data/`,
 		`src='data/`, `src='`+cdnURL+`/data/`,
+		`href="https://s3.damoang.net/data/`, `href="`+cdnURL+`/data/`,
+		`href='https://s3.damoang.net/data/`, `href='`+cdnURL+`/data/`,
+		`href="http://s3.damoang.net/data/`, `href="`+cdnURL+`/data/`,
+		`href='http://s3.damoang.net/data/`, `href='`+cdnURL+`/data/`,
 		`href="/data/`, `href="`+cdnURL+`/data/`,
 		`href='/data/`, `href='`+cdnURL+`/data/`,
 		`href="data/`, `href="`+cdnURL+`/data/`,
 		`href='data/`, `href='`+cdnURL+`/data/`,
 	)
 	return replacer.Replace(raw)
+}
+
+func rewriteLegacyCDNHost(raw, cdnURL string) string {
+	replacements := [][2]string{
+		{"https://s3.damoang.net/data/", cdnURL + "/data/"},
+		{"http://s3.damoang.net/data/", cdnURL + "/data/"},
+	}
+
+	for _, pair := range replacements {
+		if strings.HasPrefix(raw, pair[0]) {
+			return pair[1] + strings.TrimPrefix(raw, pair[0])
+		}
+	}
+
+	return raw
 }
 
 // MaskIP masks the 2nd octet of an IPv4 address with ♡ (e.g. "1.2.3.4" → "1.♡.3.4")
