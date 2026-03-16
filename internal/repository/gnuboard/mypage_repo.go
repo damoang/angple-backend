@@ -103,7 +103,8 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 			return nil
 		})
 	}
-	_ = g.Wait()
+	//nolint:errcheck // all goroutines return nil (errors skipped per board)
+	g.Wait()
 
 	if totalCount == 0 {
 		return nil, 0, nil
@@ -133,7 +134,8 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 			return nil
 		})
 	}
-	_ = g2.Wait()
+	//nolint:errcheck // all goroutines return nil
+	g2.Wait()
 
 	// Sort and paginate in Go
 	sort.Slice(posts, func(i, j int) bool {
@@ -188,7 +190,8 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 			return nil
 		})
 	}
-	_ = g.Wait()
+	//nolint:errcheck // all goroutines return nil
+	g.Wait()
 
 	if totalCount == 0 {
 		return nil, 0, nil
@@ -218,7 +221,8 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 			return nil
 		})
 	}
-	_ = g2.Wait()
+	//nolint:errcheck // all goroutines return nil
+	g2.Wait()
 
 	// Sort and paginate in Go
 	sort.Slice(comments, func(i, j int) bool {
@@ -304,7 +308,8 @@ func (r *myPageRepository) FindLikedPostsByMember(mbID string, page, limit int) 
 			return nil
 		})
 	}
-	_ = g.Wait()
+	//nolint:errcheck // all goroutines return nil
+	g.Wait()
 
 	// Build result in original order
 	var result []gnuboard.MyPost
@@ -369,7 +374,8 @@ func (r *myPageRepository) GetBoardStats(mbID string) ([]gnuboard.BoardStat, err
 			return nil
 		})
 	}
-	_ = g.Wait()
+	//nolint:errcheck // all goroutines return nil
+	g.Wait()
 
 	var stats []gnuboard.BoardStat
 	for _, c := range counts {
