@@ -35,21 +35,33 @@ func New(host string, port int) (*Client, error) {
 	return &Client{db: db}, nil
 }
 
+// addInfixWildcards wraps each whitespace-separated token with * for partial matching.
+// Requires min_infix_len to be set in the Sphinx index configuration.
+func addInfixWildcards(escaped string) string {
+	tokens := strings.Fields(escaped)
+	for i, t := range tokens {
+		tokens[i] = "*" + t + "*"
+	}
+	return strings.Join(tokens, " ")
+}
+
 // buildMatchExpr builds a Sphinx MATCH expression from search field and query.
 func buildMatchExpr(searchField, searchQuery string) string {
 	// Escape special Sphinx characters
 	escaped := escapeSphinx(searchQuery)
+	// Add infix wildcards for partial matching (author uses exact match)
+	wildcarded := addInfixWildcards(escaped)
 	switch searchField {
 	case "title":
-		return fmt.Sprintf("@wr_subject %s", escaped)
+		return fmt.Sprintf("@wr_subject %s", wildcarded)
 	case "content":
-		return fmt.Sprintf("@wr_content %s", escaped)
+		return fmt.Sprintf("@wr_content %s", wildcarded)
 	case "title_content":
-		return fmt.Sprintf("@(wr_subject,wr_content) %s", escaped)
+		return fmt.Sprintf("@(wr_subject,wr_content) %s", wildcarded)
 	case "author":
 		return fmt.Sprintf("@(wr_name,mb_id) %s", escaped)
 	default:
-		return fmt.Sprintf("@(wr_subject,wr_content) %s", escaped)
+		return fmt.Sprintf("@(wr_subject,wr_content) %s", wildcarded)
 	}
 }
 
