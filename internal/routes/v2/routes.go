@@ -270,9 +270,10 @@ func SetupLicense(router *gin.Engine, h *v2handler.LicenseHandler) {
 func SetupFavorite(router *gin.Engine, h *v2handler.FavoriteHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
 
-	me := router.Group("/api/v1/members/me", auth)
-	me.GET("/favorites", h.GetFavorites)
-	me.PUT("/favorites", h.UpdateFavorites)
+	// /api/v1/my/* 패턴 — 기존 my/point, my/posts 등과 일관성 유지
+	my := router.Group("/api/v1/my", auth)
+	my.GET("/favorites", h.GetFavorites)
+	my.PUT("/favorites", h.UpdateFavorites)
 }
 
 // SetupContent configures content page routes (admin + public)

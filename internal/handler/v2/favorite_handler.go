@@ -28,7 +28,7 @@ type FavoriteEntry struct {
 	Title   string `json:"title"`
 }
 
-// GetFavorites handles GET /api/v1/members/me/favorites
+// GetFavorites handles GET /api/v1/my/favorites
 func (h *FavoriteHandler) GetFavorites(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
@@ -57,7 +57,7 @@ func (h *FavoriteHandler) GetFavorites(c *gin.Context) {
 	common.V2Success(c, favorites)
 }
 
-// UpdateFavorites handles PUT /api/v1/members/me/favorites
+// UpdateFavorites handles PUT /api/v1/my/favorites
 func (h *FavoriteHandler) UpdateFavorites(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
