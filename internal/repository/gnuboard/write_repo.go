@@ -59,6 +59,7 @@ type WriteRepository interface {
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	SearchPostsByCategory(boardID string, searchField, searchQuery, category string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	SearchPostsFiltered(boardID string, searchField, searchQuery string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	FindPostByID(boardID string, wrID int) (*gnuboard.G5Write, error)
 	FindPostByIDIncludeDeleted(boardID string, wrID int) (*gnuboard.G5Write, error)
@@ -413,6 +414,46 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 		}
 	}
 	return ordered, result.TotalFound, nil
+}
+
+// SearchPostsByCategory retrieves posts matching search criteria filtered by ca_name (category).
+// Uses Sphinx for full-text search, then filters by category in MySQL.
+func (r *writeRepository) SearchPostsByCategory(boardID string, searchField, searchQuery, category string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	if r.sphinx == nil {
+		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
+	}
+
+	// Fetch extra results from Sphinx since category filter will reduce count
+	result, err := r.sphinx.Search(boardID, searchField, searchQuery, 1, limit*page*3)
+	if err != nil {
+		return nil, 0, fmt.Errorf("검색 서비스 오류: %w", err)
+	}
+	if result == nil || len(result.IDs) == 0 {
+		return nil, 0, nil
+	}
+
+	// Fetch from MySQL with category filter and count
+	var total int64
+	table := tableName(boardID)
+	if err := r.db.Table(table).
+		Where("wr_id IN ? AND ca_name = ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs, category).
+		Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var posts []*gnuboard.G5Write
+	offset := (page - 1) * limit
+	if err := r.db.Table(table).
+		Select(coreColumns).
+		Where("wr_id IN ? AND ca_name = ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs, category).
+		Order("wr_id DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return posts, total, nil
 }
 
 // FindPostByID retrieves a single post by ID (excludes soft deleted)

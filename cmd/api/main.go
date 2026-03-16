@@ -1386,7 +1386,9 @@ func main() {
 
 			var posts []*gnuboard.G5Write
 			var total int64
-			if isSearching {
+			if isSearching && category != "" {
+				posts, total, err = gnuWriteRepo.SearchPostsByCategory(slug, sfl, stx, category, page, limit)
+			} else if isSearching {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
 			} else if useCursor {
 				posts, total, err = gnuWriteRepo.FindPostsAfter(slug, limit, cursorWrNum, cursorWrReply)
