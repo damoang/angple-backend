@@ -76,8 +76,13 @@ func (r *myPageRepository) getActiveBoards() []string {
 	return ids
 }
 
+// largeBoardID is the board whose g5_write_* table is too large for per-board full scans.
+// For this board, member_activity_feed (covering index) is used instead.
+const largeBoardID = "free"
+
 // FindPostsByMember returns posts written by the member across all boards.
 // Uses parallel per-board queries instead of UNION ALL for better DB performance.
+// g5_write_free (600K+ rows) is handled via member_activity_feed to avoid 3.6s queries.
 func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gnuboard.MyPost, int64, error) {
 	boards := r.getActiveBoards()
 	if len(boards) == 0 {
@@ -101,9 +106,14 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 	g.SetLimit(maxDBConcurrency)
 	for _, boardID := range boards {
 		g.Go(func() error {
-			table := fmt.Sprintf("g5_write_%s", boardID)
 			var cnt int64
-			r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
+			if boardID == largeBoardID {
+				// Use member_activity_feed covering index instead of scanning 600K-row table
+				r.db.Raw("SELECT COUNT(*) FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 1 AND is_deleted = 0", mbID, largeBoardID).Scan(&cnt)
+			} else {
+				table := fmt.Sprintf("g5_write_%s", boardID)
+				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
+			}
 			if cnt > 0 {
 				muCounts.Lock()
 				counts = append(counts, boardCount{boardID: boardID, count: cnt})
@@ -130,12 +140,28 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 	g2.SetLimit(maxDBConcurrency)
 	for _, bc := range counts {
 		g2.Go(func() error {
-			table := fmt.Sprintf("g5_write_%s", bc.boardID)
 			var rows []gnuboard.MyPost
-			r.db.Raw(
-				fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL ORDER BY wr_datetime DESC LIMIT %d", bc.boardID, table, perTable),
-				mbID,
-			).Scan(&rows)
+			if bc.boardID == largeBoardID {
+				// Step 1: Get write_ids from activity_feed (covering index scan, ~1ms)
+				var writeIDs []int
+				r.db.Raw(
+					"SELECT write_id FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 1 AND is_deleted = 0 ORDER BY source_created_at DESC LIMIT ?",
+					mbID, largeBoardID, perTable,
+				).Scan(&writeIDs)
+				if len(writeIDs) > 0 {
+					// Step 2: Batch PK lookup for full post data
+					r.db.Raw(
+						fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id FROM `g5_write_%s` WHERE wr_id IN ? ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
+						writeIDs,
+					).Scan(&rows)
+				}
+			} else {
+				table := fmt.Sprintf("g5_write_%s", bc.boardID)
+				r.db.Raw(
+					fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL ORDER BY wr_datetime DESC LIMIT %d", bc.boardID, table, perTable),
+					mbID,
+				).Scan(&rows)
+			}
 			if len(rows) > 0 {
 				mu.Lock()
 				posts = append(posts, rows...)
@@ -165,6 +191,7 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 
 // FindCommentsByMember returns comments written by the member with parent post titles.
 // Uses parallel per-board queries instead of UNION ALL.
+// g5_write_free (600K+ rows) is handled via member_activity_feed to avoid 3.4s LEFT JOIN queries.
 func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([]gnuboard.MyCommentRow, int64, error) {
 	boards := r.getActiveBoards()
 	if len(boards) == 0 {
@@ -188,9 +215,14 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 	g.SetLimit(maxDBConcurrency)
 	for _, boardID := range boards {
 		g.Go(func() error {
-			table := fmt.Sprintf("g5_write_%s", boardID)
 			var cnt int64
-			r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
+			if boardID == largeBoardID {
+				// Use member_activity_feed covering index instead of scanning 600K-row table
+				r.db.Raw("SELECT COUNT(*) FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2 AND is_deleted = 0", mbID, largeBoardID).Scan(&cnt)
+			} else {
+				table := fmt.Sprintf("g5_write_%s", boardID)
+				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
+			}
 			if cnt > 0 {
 				muCounts.Lock()
 				counts = append(counts, boardCount{boardID: boardID, count: cnt})
@@ -217,12 +249,44 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 	g2.SetLimit(maxDBConcurrency)
 	for _, bc := range counts {
 		g2.Go(func() error {
-			table := fmt.Sprintf("g5_write_%s", bc.boardID)
 			var rows []gnuboard.MyCommentRow
-			r.db.Raw(
-				fmt.Sprintf("SELECT c.wr_id, c.wr_content, c.wr_datetime, c.mb_id, c.wr_name, c.wr_parent, c.wr_good, c.wr_nogood, c.wr_option, COALESCE(p.wr_subject, '') as post_title, '%s' as board_id FROM `%s` c LEFT JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 WHERE c.mb_id = ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL ORDER BY c.wr_datetime DESC LIMIT %d", bc.boardID, table, table, perTable),
-				mbID,
-			).Scan(&rows)
+			if bc.boardID == largeBoardID {
+				// Step 1: Get write_ids + parent_title from activity_feed (covering index, ~1ms)
+				type commentRef struct {
+					WriteID     int    `gorm:"column:write_id"`
+					ParentTitle string `gorm:"column:parent_title"`
+				}
+				var refs []commentRef
+				r.db.Raw(
+					"SELECT write_id, COALESCE(parent_title, '') as parent_title FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2 AND is_deleted = 0 ORDER BY source_created_at DESC LIMIT ?",
+					mbID, largeBoardID, perTable,
+				).Scan(&refs)
+				if len(refs) > 0 {
+					writeIDs := make([]int, len(refs))
+					titleMap := make(map[int]string, len(refs))
+					for i, ref := range refs {
+						writeIDs[i] = ref.WriteID
+						titleMap[ref.WriteID] = ref.ParentTitle
+					}
+					// Step 2: Batch PK lookup for comment data (no LEFT JOIN needed)
+					r.db.Raw(
+						fmt.Sprintf("SELECT wr_id, wr_content, wr_datetime, mb_id, wr_name, wr_parent, wr_good, wr_nogood, wr_option, '' as post_title, '%s' as board_id FROM `g5_write_%s` WHERE wr_id IN ? AND wr_is_comment = 1 ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
+						writeIDs,
+					).Scan(&rows)
+					// Fill parent titles from activity_feed (avoids expensive LEFT JOIN)
+					for i := range rows {
+						if t, ok := titleMap[rows[i].WrID]; ok {
+							rows[i].PostTitle = t
+						}
+					}
+				}
+			} else {
+				table := fmt.Sprintf("g5_write_%s", bc.boardID)
+				r.db.Raw(
+					fmt.Sprintf("SELECT c.wr_id, c.wr_content, c.wr_datetime, c.mb_id, c.wr_name, c.wr_parent, c.wr_good, c.wr_nogood, c.wr_option, COALESCE(p.wr_subject, '') as post_title, '%s' as board_id FROM `%s` c LEFT JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 WHERE c.mb_id = ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL ORDER BY c.wr_datetime DESC LIMIT %d", bc.boardID, table, table, perTable),
+					mbID,
+				).Scan(&rows)
+			}
 			if len(rows) > 0 {
 				mu.Lock()
 				comments = append(comments, rows...)

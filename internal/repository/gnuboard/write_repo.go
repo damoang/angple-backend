@@ -38,6 +38,15 @@ type cachedSortField struct {
 
 const sortFieldCacheTTL = 60 * time.Second
 
+// prefixColumns returns columns prefixed with a table alias (e.g., "t.wr_id, t.wr_num, ...")
+func prefixColumns(cols []string, alias string) string {
+	parts := make([]string, len(cols))
+	for i, c := range cols {
+		parts[i] = alias + "." + c
+	}
+	return strings.Join(parts, ", ")
+}
+
 // coreColumns are the columns that exist in all g5_write_* tables
 var coreColumns = []string{
 	"wr_id", "wr_num", "wr_reply", "wr_parent", "wr_is_comment",
@@ -143,12 +152,19 @@ func (r *writeRepository) getSortField(boardID string) string {
 	return orderClause
 }
 
+// maxPostOffset caps the OFFSET to prevent extreme tail-latency on deep pages.
+// Beyond this offset, the deferred JOIN subquery still scans too many index rows.
+const maxPostOffset = 30000
+
 // FindPosts retrieves posts (not comments, not deleted) from a board with pagination
 func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
 	var posts []*gnuboard.G5Write
 	var total int64
 
 	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
 	table := tableName(boardID)
 
 	// Posts count with Redis cache (shared across all pods)
@@ -164,13 +180,15 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	// 게시판별 커스텀 정렬 (bo_sort_field) — 캐시된 단일 조회 사용
 	orderClause := r.getSortField(boardID)
 
-	// Select only core columns to avoid errors with missing columns
-	// Use FORCE INDEX for default sort order — MySQL optimizer incorrectly prefers idx_list_order
-	// over idx_list_page, causing 1M+ row scans instead of 15K (verified with EXPLAIN)
+	// Deferred JOIN: subquery scans only wr_id via covering index, then JOIN fetches full rows.
+	// This avoids reading wide rows during the OFFSET skip phase (max 119s → ~200ms).
 	if orderClause == "wr_num, wr_reply" {
-		selectCols := strings.Join(coreColumns, ", ")
+		cols := prefixColumns(coreColumns, "t")
 		err := r.db.Raw(
-			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			fmt.Sprintf(
+				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
+				cols, table, table,
+			),
 			limit, offset,
 		).Scan(&posts).Error
 		// Fallback if idx_list_page doesn't exist on this table
@@ -276,6 +294,9 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 
 	var posts []*gnuboard.G5Write
 	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
 	table := tableName(boardID)
 
 	// Reuse cached total count (same as FindPosts — avoids expensive COUNT on large tables)
@@ -289,11 +310,14 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 
 	orderClause := r.getSortField(boardID)
 
-	// Use FORCE INDEX for default sort order (same as FindPosts)
+	// Deferred JOIN with exclusion filter applied in subquery
 	if orderClause == "wr_num, wr_reply" {
-		selectCols := strings.Join(coreColumns, ", ")
+		cols := prefixColumns(coreColumns, "t")
 		err := r.db.Raw(
-			fmt.Sprintf("SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?", selectCols, table),
+			fmt.Sprintf(
+				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
+				cols, table, table,
+			),
 			excludeMbIDs, limit, offset,
 		).Scan(&posts).Error
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
