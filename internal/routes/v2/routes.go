@@ -266,6 +266,15 @@ func SetupLicense(router *gin.Engine, h *v2handler.LicenseHandler) {
 	router.POST("/api/v2/licenses/verify", h.Verify)
 }
 
+// SetupFavorite configures board favorites routes
+func SetupFavorite(router *gin.Engine, h *v2handler.FavoriteHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	me := router.Group("/api/v1/members/me", auth)
+	me.GET("/favorites", h.GetFavorites)
+	me.PUT("/favorites", h.UpdateFavorites)
+}
+
 // SetupContent configures content page routes (admin + public)
 func SetupContent(router *gin.Engine, h *v2handler.ContentHandler, jwtManager *jwt.Manager) {
 	// Admin routes (requires authentication + admin)

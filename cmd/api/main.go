@@ -3822,6 +3822,7 @@ func main() {
 		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager)
 		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager, db)
+		v2routes.SetupFavorite(router, v2handler.NewFavoriteHandler(db), jwtManager)
 
 		// v1 message routes (uses g5_memo table directly)
 		gnuMemoRepo := gnurepo.NewMemoRepository(db)
