@@ -2,6 +2,7 @@ package gnuboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -567,8 +568,9 @@ func (r *writeRepository) SoftDeletePost(boardID string, wrID int, deletedBy str
 		WrSubject string `gorm:"column:wr_subject"`
 		WrContent string `gorm:"column:wr_content"`
 		WrName    string `gorm:"column:wr_name"`
+		MbID      string `gorm:"column:mb_id"`
 	}
-	if err := r.db.Table(table).Select("wr_subject, wr_content, wr_name").Where("wr_id = ?", wrID).Scan(&post).Error; err == nil {
+	if err := r.db.Table(table).Select("wr_subject, wr_content, wr_name, mb_id").Where("wr_id = ?", wrID).Scan(&post).Error; err == nil {
 		var nextVersion int
 		r.db.Raw("SELECT COALESCE(MAX(version), 0) + 1 FROM g5_write_revisions WHERE board_id = ? AND wr_id = ?", boardID, wrID).Scan(&nextVersion)
 		if err := r.db.Exec(`INSERT INTO g5_write_revisions
@@ -578,6 +580,18 @@ func (r *writeRepository) SoftDeletePost(boardID string, wrID int, deletedBy str
 		).Error; err != nil {
 			log.Printf("[SoftDeletePost] Failed to record revision for %s/%d: %v", boardID, wrID, err)
 		}
+
+		// g5_da_content_history에도 이중 기록
+		prevData, _ := json.Marshal(map[string]interface{}{
+			"wr_subject": post.WrSubject,
+			"wr_content": post.WrContent,
+			"wr_name":    post.WrName,
+			"mb_id":      post.MbID,
+		})
+		r.db.Exec(`INSERT INTO g5_da_content_history
+			(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+			VALUES (?, ?, 0, ?, ?, '삭제', ?, ?, ?)`,
+			boardID, wrID, post.MbID, post.WrName, deletedBy, now, string(prevData))
 	}
 
 	// Soft delete the post only (comments are preserved)
@@ -666,8 +680,29 @@ func (r *writeRepository) DeleteComment(boardID string, wrID int) error {
 
 // SoftDeleteComment marks a comment as deleted
 func (r *writeRepository) SoftDeleteComment(boardID string, wrID int, deletedBy string) error {
+	table := tableName(boardID)
 	now := time.Now()
-	return r.db.Table(tableName(boardID)).
+
+	// 삭제 전 댓글 데이터 읽기 + g5_da_content_history 기록
+	var comment struct {
+		WrContent string `gorm:"column:wr_content"`
+		WrName    string `gorm:"column:wr_name"`
+		MbID      string `gorm:"column:mb_id"`
+	}
+	if err := r.db.Table(table).Select("wr_content, wr_name, mb_id").
+		Where("wr_id = ? AND wr_is_comment = 1", wrID).Scan(&comment).Error; err == nil {
+		prevData, _ := json.Marshal(map[string]interface{}{
+			"wr_content": comment.WrContent,
+			"wr_name":    comment.WrName,
+			"mb_id":      comment.MbID,
+		})
+		r.db.Exec(`INSERT INTO g5_da_content_history
+			(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+			VALUES (?, ?, 1, ?, ?, '삭제', ?, ?, ?)`,
+			boardID, wrID, comment.MbID, comment.WrName, deletedBy, now, string(prevData))
+	}
+
+	return r.db.Table(table).
 		Where("wr_id = ? AND wr_is_comment = 1", wrID).
 		Updates(map[string]interface{}{
 			"wr_deleted_at": now,

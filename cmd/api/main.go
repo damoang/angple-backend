@@ -2414,6 +2414,20 @@ func main() {
 				VALUES (?, ?, ?, 'update', ?, ?, ?, ?, NOW())`,
 				slug, postID, nextVersion, post.WrSubject, post.WrContent, userID, post.WrName)
 
+			// g5_da_content_history에도 이중 기록
+			{
+				prevData, _ := json.Marshal(map[string]interface{}{
+					"wr_subject": post.WrSubject,
+					"wr_content": post.WrContent,
+					"wr_name":    post.WrName,
+					"mb_id":      post.MbID,
+				})
+				db.Exec(`INSERT INTO g5_da_content_history
+					(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+					VALUES (?, ?, 0, ?, ?, '수정', ?, NOW(), ?)`,
+					slug, postID, post.MbID, post.WrName, userID, string(prevData))
+			}
+
 			// 업데이트할 필드 구성
 			updates := map[string]interface{}{}
 			if req.Title != nil {
@@ -2515,6 +2529,19 @@ func main() {
 				(board_id, wr_id, version, change_type, title, content, edited_by, edited_by_name, edited_at)
 				VALUES (?, ?, ?, 'update', NULL, ?, ?, ?, NOW())`,
 				slug, commentID, nextVersion, comment.WrContent, userID, comment.WrName)
+
+			// g5_da_content_history에도 이중 기록
+			{
+				prevData, _ := json.Marshal(map[string]interface{}{
+					"wr_content": comment.WrContent,
+					"wr_name":    comment.WrName,
+					"mb_id":      comment.MbID,
+				})
+				db.Exec(`INSERT INTO g5_da_content_history
+					(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+					VALUES (?, ?, 1, ?, ?, '수정', ?, NOW(), ?)`,
+					slug, commentID, comment.MbID, comment.WrName, userID, string(prevData))
+			}
 
 			tableName := fmt.Sprintf("g5_write_%s", slug)
 			now := time.Now().Format("2006-01-02 15:04:05")
