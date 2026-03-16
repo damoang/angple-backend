@@ -521,6 +521,24 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 // Uses UNION ALL with per-subquery LIMIT for efficiency.
 // Each subquery leverages mb_id index + PK ordering.
 func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gnuboard.ActivityPost, error) {
+	var posts []gnuboard.ActivityPost
+	if err := r.db.Raw(
+		`SELECT write_id AS wr_id,
+		        COALESCE(title, '') AS wr_subject,
+		        source_created_at AS wr_datetime,
+		        board_id
+		   FROM member_activity_feed
+		  WHERE member_id = ?
+		    AND activity_type = 1
+		    AND is_public = 1
+		    AND is_deleted = 0
+		  ORDER BY source_created_at DESC, id DESC
+		  LIMIT ?`,
+		mbID, limit,
+	).Scan(&posts).Error; err == nil {
+		return posts, nil
+	}
+
 	boards, err := r.GetSearchableBoards()
 	if err != nil || len(boards) == 0 {
 		return nil, err
@@ -539,7 +557,6 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
 	args = append(args, limit)
 
-	var posts []gnuboard.ActivityPost
 	if err := r.db.Raw(sql, args...).Scan(&posts).Error; err != nil {
 		return nil, err
 	}
@@ -549,6 +566,25 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 // FindPublicCommentsByMember returns recent public comments by a member.
 // Uses UNION ALL + INNER JOIN to filter out comments on secret/locked/deleted parent posts.
 func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error) {
+	var comments []gnuboard.ActivityComment
+	if err := r.db.Raw(
+		`SELECT write_id AS wr_id,
+		        COALESCE(content_preview, '') AS wr_content,
+		        COALESCE(parent_write_id, 0) AS wr_parent,
+		        source_created_at AS wr_datetime,
+		        board_id
+		   FROM member_activity_feed
+		  WHERE member_id = ?
+		    AND activity_type = 2
+		    AND is_public = 1
+		    AND is_deleted = 0
+		  ORDER BY source_created_at DESC, id DESC
+		  LIMIT ?`,
+		mbID, limit,
+	).Scan(&comments).Error; err == nil {
+		return comments, nil
+	}
+
 	boards, err := r.GetSearchableBoards()
 	if err != nil || len(boards) == 0 {
 		return nil, err
@@ -567,7 +603,6 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
 	args = append(args, limit)
 
-	var comments []gnuboard.ActivityComment
 	if err := r.db.Raw(sql, args...).Scan(&comments).Error; err != nil {
 		return nil, err
 	}
