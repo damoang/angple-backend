@@ -16,6 +16,7 @@ import (
 // WritingSettings mirrors the frontend WritingSettings interface from v2_board_extended_settings JSON.
 type WritingSettings struct {
 	MaxPosts            int    `json:"maxPosts,omitempty"`
+	MaxPostsTotal       int    `json:"maxPostsTotal,omitempty"`
 	AllowedLevels       string `json:"allowedLevels,omitempty"`
 	RestrictedUsers     bool   `json:"restrictedUsers,omitempty"`
 	MemberOnly          bool   `json:"memberOnly,omitempty"`
@@ -35,6 +36,8 @@ type WriteRestrictionResult struct {
 	CanWrite   bool   `json:"can_write"`
 	Remaining  int    `json:"remaining"`   // -1 = unlimited
 	DailyLimit int    `json:"daily_limit"` // 0 = unlimited
+	TotalLimit int    `json:"total_limit"` // 0 = unlimited
+	TotalCount int    `json:"total_count"`
 	Reason     string `json:"reason,omitempty"`
 }
 
@@ -86,7 +89,33 @@ func (s *BoardWriteRestrictionService) Check(boardSlug, memberID string, memberL
 		}
 	}
 
-	// 2. restrictedUsers → only allowed members can write
+	// 2. maxPostsTotal — lifetime total limit (e.g. 가입인사 1회)
+	if writing.MaxPostsTotal > 0 {
+		totalCount, err := s.countTotalPosts(boardSlug, memberID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to count total posts: %w", err)
+		}
+
+		if totalCount >= writing.MaxPostsTotal {
+			return &WriteRestrictionResult{
+				CanWrite:   false,
+				Remaining:  0,
+				TotalLimit: writing.MaxPostsTotal,
+				TotalCount: totalCount,
+				Reason:     fmt.Sprintf("이 게시판에는 총 %d개까지 작성 가능합니다. (이미 %d개 작성)", writing.MaxPostsTotal, totalCount),
+			}, nil
+		}
+
+		remaining := writing.MaxPostsTotal - totalCount
+		return &WriteRestrictionResult{
+			CanWrite:   true,
+			Remaining:  remaining,
+			TotalLimit: writing.MaxPostsTotal,
+			TotalCount: totalCount,
+		}, nil
+	}
+
+	// 3. restrictedUsers → only allowed members can write
 	if writing.RestrictedUsers {
 		dailyLimit := findMemberDailyLimit(memberID, writing)
 		if dailyLimit == 0 {
@@ -117,7 +146,7 @@ func (s *BoardWriteRestrictionService) Check(boardSlug, memberID string, memberL
 		}, nil
 	}
 
-	// 3. maxPosts global daily limit (applies regardless of restrictedUsers)
+	// 4. maxPosts global daily limit (applies regardless of restrictedUsers)
 	if writing.MaxPosts > 0 {
 		todayCount, err := s.countTodayPosts(boardSlug, memberID)
 		if err != nil {
@@ -154,6 +183,20 @@ func (s *BoardWriteRestrictionService) countTodayPosts(boardSlug, memberID strin
 	var count int64
 	err := s.db.Table(tableName).
 		Where("mb_id = ? AND DATE(wr_datetime) = ? AND wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", memberID, today).
+		Count(&count).Error
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// countTotalPosts counts all non-comment posts ever written by the member in the board.
+func (s *BoardWriteRestrictionService) countTotalPosts(boardSlug, memberID string) (int, error) {
+	tableName := fmt.Sprintf("g5_write_%s", boardSlug)
+
+	var count int64
+	err := s.db.Table(tableName).
+		Where("mb_id = ? AND wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", memberID).
 		Count(&count).Error
 	if err != nil {
 		return 0, err

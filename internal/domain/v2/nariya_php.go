@@ -64,6 +64,7 @@ type NariyaNotification struct {
 // NariyaWriting holds writing restriction settings
 type NariyaWriting struct {
 	MaxPosts            int    `json:"maxPosts"`
+	MaxPostsTotal       int    `json:"maxPostsTotal"`
 	AllowedLevels       string `json:"allowedLevels"`
 	RestrictedUsers     bool   `json:"restrictedUsers"`
 	MemberOnly          bool   `json:"memberOnly"`

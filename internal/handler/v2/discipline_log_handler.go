@@ -131,6 +131,7 @@ type DisciplineLogDetail struct {
 	Memo            string          `json:"memo,omitempty"`
 	CreatedBy       string          `json:"created_by"`
 	CreatedAt       string          `json:"created_at"`
+	ClaimPostID     *int            `json:"claim_post_id,omitempty"`
 }
 
 // parseContentJSON parses the wr_content JSON or extracts from HTML
@@ -330,6 +331,19 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		Memo:            data.Content,
 		CreatedBy:       post.MbID,
 		CreatedAt:       post.WrDatetime.Format("2006-01-02 15:04:05"),
+	}
+
+	// 소명글 존재 여부 조회 (claim 게시판에서 wr_link1 = 'disciplinelog:{id}')
+	var claimPostID int
+	linkValue := "disciplinelog:" + strconv.Itoa(id)
+	err = h.db.Table("g5_write_claim").
+		Select("wr_id").
+		Where("wr_link1 = ? AND wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", linkValue).
+		Order("wr_id DESC").
+		Limit(1).
+		Scan(&claimPostID).Error
+	if err == nil && claimPostID > 0 {
+		detail.ClaimPostID = &claimPostID
 	}
 
 	common.V2Success(c, detail)
