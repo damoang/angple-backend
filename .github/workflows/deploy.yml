@@ -160,17 +160,57 @@ jobs:
             }]
           }"
 
+  verify-canary:
+    needs: [build, deploy-canary]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify canary endpoints
+        run: |
+          set -eu
+          for i in $(seq 1 6); do
+            echo "VERIFY ROUND $i"
+
+            HEALTH_STATUS=$(curl -sS -o /tmp/backend-health.out -w "%{http_code}" -A "GitHub-Actions-Verify" --max-time 10 https://canary.damoang.net/api/v1/health || echo "000")
+            echo "CHECK /api/v1/health -> $HEALTH_STATUS"
+            if [ "$HEALTH_STATUS" != "200" ]; then
+              cat /tmp/backend-health.out || true
+              exit 1
+            fi
+
+            ROOT_STATUS=$(curl -sS -o /tmp/backend-root.out -w "%{http_code}" -A "GitHub-Actions-Verify" --max-time 10 https://canary.damoang.net/ || echo "000")
+            echo "CHECK / -> $ROOT_STATUS"
+            if [ "$ROOT_STATUS" != "200" ] && [ "$ROOT_STATUS" != "302" ]; then
+              cat /tmp/backend-root.out || true
+              exit 1
+            fi
+
+            API_STATUS=$(curl -sS -o /tmp/backend-posts.out -w "%{http_code}" -A "GitHub-Actions-Verify" --max-time 10 "https://canary.damoang.net/api/v1/boards/free/posts?page=1&limit=5" || echo "000")
+            echo "CHECK /api/v1/boards/free/posts?page=1&limit=5 -> $API_STATUS"
+            if [ "$API_STATUS" != "200" ]; then
+              cat /tmp/backend-posts.out || true
+              exit 1
+            fi
+
+            grep -q '"data"' /tmp/backend-posts.out || {
+              cat /tmp/backend-posts.out || true
+              exit 1
+            }
+            echo 'MATCH /api/v1/boards/free/posts?page=1&limit=5 -> "data"'
+
+            sleep 5
+          done
+
       - name: Notify Telegram (Approval)
         if: success()
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}" \
-            -d "text=✅ angple backend canary ready%0A%0ARepo: ${{ github.repository }}%0ACommit: ${{ github.sha }}%0ATag: \`${{ needs.build.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0ACanary: https://canary.damoang.net/api/v1/health%0AGate Approval: ${RUN_URL}%0A%0AEnvironment approval 후 production 배포가 진행됩니다." \
+            -d "text=✅ angple backend canary verified%0A%0ARepo: ${{ github.repository }}%0ACommit: ${{ github.sha }}%0ATag: \`${{ needs.build.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0ACanary: https://canary.damoang.net/api/v1/health%0AGate Approval: ${RUN_URL}%0A%0ACanary 검증 통과 후 Environment approval 을 하면 production 배포가 진행됩니다." \
             -d "reply_markup={\"inline_keyboard\":[[{\"text\":\"Canary 열기\",\"url\":\"https://canary.damoang.net/api/v1/health\"},{\"text\":\"Gate Approval\",\"url\":\"${RUN_URL}\"}]]}"
 
   deploy-production:
-    needs: [build, deploy-canary]
+    needs: [build, deploy-canary, verify-canary]
     runs-on: ubuntu-latest
     environment:
       name: production
