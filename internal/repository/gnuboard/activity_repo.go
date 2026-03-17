@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 
-	domain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"gorm.io/gorm"
 )
@@ -37,9 +36,9 @@ type MemberActivityRepository interface {
 	ListPostsByMember(mbID string, offset, limit int) ([]gnudomain.MyPost, error)
 	ListCommentsByMember(mbID string, offset, limit int) ([]gnudomain.MyCommentRow, error)
 	ListCommentRefsByMemberBoardType(mbID, boardID string, limit int) ([]activityCommentRef, error)
-	ListBoardStatsByMember(mbID string) ([]domain.MemberActivityStatsRow, error)
-	ListPublicPostsByMember(mbID string, limit int) ([]domain.ActivityPost, error)
-	ListPublicCommentsByMember(mbID string, limit int) ([]domain.ActivityComment, error)
+	ListBoardStatsByMember(mbID string) ([]gnudomain.MemberActivityStatsRow, error)
+	ListPublicPostsByMember(mbID string, limit int) ([]gnudomain.ActivityPost, error)
+	ListPublicCommentsByMember(mbID string, limit int) ([]gnudomain.ActivityComment, error)
 }
 
 type memberActivityRepository struct {
@@ -69,7 +68,7 @@ func (r *memberActivityRepository) CountByMemberBoardType(mbID, boardID string, 
 	}
 
 	var count int64
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Where("member_id = ? AND board_id = ? AND activity_type = ? AND is_deleted = 0", mbID, boardID, activityType).
 		Count(&count).Error
 	return count, err
@@ -81,7 +80,7 @@ func (r *memberActivityRepository) CountByMemberType(mbID string, activityType i
 	}
 
 	var count int64
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Where("member_id = ? AND activity_type = ? AND is_deleted = 0", mbID, activityType).
 		Count(&count).Error
 	return count, err
@@ -95,7 +94,7 @@ func (r *memberActivityRepository) ListWriteIDsByMemberBoardType(mbID, boardID s
 	var rows []struct {
 		WriteID int `gorm:"column:write_id"`
 	}
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select("write_id").
 		Where("member_id = ? AND board_id = ? AND activity_type = ? AND is_deleted = 0", mbID, boardID, activityType).
 		Order("source_created_at DESC, id DESC").
@@ -118,7 +117,7 @@ func (r *memberActivityRepository) ListCommentRefsByMemberBoardType(mbID, boardI
 	}
 
 	var refs []activityCommentRef
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select("write_id, COALESCE(parent_title, '') AS parent_title").
 		Where("member_id = ? AND board_id = ? AND activity_type = ? AND is_deleted = 0", mbID, boardID, activityTypeComment).
 		Order("source_created_at DESC, id DESC").
@@ -133,7 +132,7 @@ func (r *memberActivityRepository) ListPostRefsByMember(mbID string, offset, lim
 	}
 
 	var refs []activityPostRef
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select("board_id, write_id").
 		Where("member_id = ? AND activity_type = ? AND is_deleted = 0", mbID, activityTypePost).
 		Order("source_created_at DESC, id DESC").
@@ -149,7 +148,7 @@ func (r *memberActivityRepository) ListCommentRefsByMember(mbID string, offset, 
 	}
 
 	var refs []activityCommentRef
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select("board_id, write_id, COALESCE(parent_write_id, 0) AS parent_write_id, COALESCE(parent_title, '') AS parent_title").
 		Where("member_id = ? AND activity_type = ? AND is_deleted = 0", mbID, activityTypeComment).
 		Order("source_created_at DESC, id DESC").
@@ -165,7 +164,7 @@ func (r *memberActivityRepository) ListPostsByMember(mbID string, offset, limit 
 	}
 
 	var posts []gnudomain.MyPost
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select(`
 			write_id AS wr_id,
 			COALESCE(title, '') AS wr_subject,
@@ -194,7 +193,7 @@ func (r *memberActivityRepository) ListCommentsByMember(mbID string, offset, lim
 	}
 
 	var comments []gnudomain.MyCommentRow
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select(`
 			write_id AS wr_id,
 			COALESCE(content_preview, '') AS wr_content,
@@ -215,26 +214,26 @@ func (r *memberActivityRepository) ListCommentsByMember(mbID string, offset, lim
 	return comments, err
 }
 
-func (r *memberActivityRepository) ListBoardStatsByMember(mbID string) ([]domain.MemberActivityStatsRow, error) {
+func (r *memberActivityRepository) ListBoardStatsByMember(mbID string) ([]gnudomain.MemberActivityStatsRow, error) {
 	if !r.hasFeedTable() {
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	var stats []domain.MemberActivityStatsRow
-	err := r.db.Model(&domain.MemberActivityStatsRow{}).
+	var stats []gnudomain.MemberActivityStatsRow
+	err := r.db.Model(&gnudomain.MemberActivityStatsRow{}).
 		Where("member_id = ? AND board_id != '' AND (post_count > 0 OR comment_count > 0)", mbID).
 		Order("post_count + comment_count DESC, board_id ASC").
 		Find(&stats).Error
 	return stats, err
 }
 
-func (r *memberActivityRepository) ListPublicPostsByMember(mbID string, limit int) ([]domain.ActivityPost, error) {
+func (r *memberActivityRepository) ListPublicPostsByMember(mbID string, limit int) ([]gnudomain.ActivityPost, error) {
 	if !r.hasFeedTable() {
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	var posts []domain.ActivityPost
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	var posts []gnudomain.ActivityPost
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select("write_id AS wr_id, COALESCE(title, '') AS wr_subject, source_created_at AS wr_datetime, board_id").
 		Where("member_id = ? AND activity_type = ? AND is_public = 1 AND is_deleted = 0", mbID, activityTypePost).
 		Order("source_created_at DESC, id DESC").
@@ -243,13 +242,13 @@ func (r *memberActivityRepository) ListPublicPostsByMember(mbID string, limit in
 	return posts, err
 }
 
-func (r *memberActivityRepository) ListPublicCommentsByMember(mbID string, limit int) ([]domain.ActivityComment, error) {
+func (r *memberActivityRepository) ListPublicCommentsByMember(mbID string, limit int) ([]gnudomain.ActivityComment, error) {
 	if !r.hasFeedTable() {
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	var comments []domain.ActivityComment
-	err := r.db.Model(&domain.MemberActivityFeed{}).
+	var comments []gnudomain.ActivityComment
+	err := r.db.Model(&gnudomain.MemberActivityFeed{}).
 		Select("write_id AS wr_id, COALESCE(content_preview, '') AS wr_content, COALESCE(parent_write_id, 0) AS wr_parent, source_created_at AS wr_datetime, board_id").
 		Where("member_id = ? AND activity_type = ? AND is_public = 1 AND is_deleted = 0", mbID, activityTypeComment).
 		Order("source_created_at DESC, id DESC").
