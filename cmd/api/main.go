@@ -2537,11 +2537,14 @@ func main() {
 					}
 				} else {
 					// 루트 댓글: FOR UPDATE로 게시글 행 잠금 후 MAX(wr_comment) + 1
+					var lockedPost struct {
+						WrID int `gorm:"column:wr_id"`
+					}
 					tx.Table(tableName).
 						Clauses(clause.Locking{Strength: "UPDATE"}).
 						Select("wr_id").
 						Where("wr_id = ? AND wr_is_comment = 0", postID).
-						Scan(&struct{}{})
+						Scan(&lockedPost)
 
 					var maxComment int
 					tx.Table(tableName).

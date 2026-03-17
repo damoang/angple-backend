@@ -233,7 +233,8 @@ func (s *MemberActivitySyncService) syncLegacyPost(boardSlug string, wrID int, r
 		HasFile      bool      `gorm:"column:has_file"`
 		IsDeleted    bool      `gorm:"column:is_deleted"`
 		CreatedAt    time.Time `gorm:"column:created_at"`
-		UpdatedAt    time.Time `gorm:"column:updated_at"`
+		UpdatedAt    time.Time `gorm:"-"`
+		UpdatedAtRaw string    `gorm:"column:updated_at"`
 	}
 
 	var row postRow
@@ -253,7 +254,7 @@ func (s *MemberActivitySyncService) syncLegacyPost(boardSlug string, wrID int, r
 		       p.wr_datetime AS created_at,
 		       CASE
 		           WHEN p.wr_last IS NULL OR p.wr_last = '' OR p.wr_last = '0000-00-00 00:00:00' THEN p.wr_datetime
-		           ELSE p.wr_last
+		           ELSE DATE_FORMAT(p.wr_last, '%%Y-%%m-%%d %%H:%%i:%%s')
 		       END AS updated_at
 		  FROM %s p
 		 WHERE p.wr_id = ?
@@ -265,6 +266,7 @@ func (s *MemberActivitySyncService) syncLegacyPost(boardSlug string, wrID int, r
 	if row.ID == 0 || row.MemberID == "" {
 		return nil
 	}
+	row.UpdatedAt = parseLegacyFeedTime(row.UpdatedAtRaw, row.CreatedAt)
 
 	isPublic := !row.IsDeleted &&
 		!strings.Contains(strings.ToLower(row.WrOption), "secret") &&
@@ -337,7 +339,8 @@ func (s *MemberActivitySyncService) syncLegacyComment(boardSlug string, wrID int
 		IsDeleted    bool      `gorm:"column:is_deleted"`
 		ParentGone   bool      `gorm:"column:parent_deleted"`
 		CreatedAt    time.Time `gorm:"column:created_at"`
-		UpdatedAt    time.Time `gorm:"column:updated_at"`
+		UpdatedAt    time.Time `gorm:"-"`
+		UpdatedAtRaw string    `gorm:"column:updated_at"`
 	}
 
 	var row commentRow
@@ -356,7 +359,7 @@ func (s *MemberActivitySyncService) syncLegacyComment(boardSlug string, wrID int
 		       c.wr_datetime AS created_at,
 		       CASE
 		           WHEN c.wr_last IS NULL OR c.wr_last = '' OR c.wr_last = '0000-00-00 00:00:00' THEN c.wr_datetime
-		           ELSE c.wr_last
+		           ELSE DATE_FORMAT(c.wr_last, '%%Y-%%m-%%d %%H:%%i:%%s')
 		       END AS updated_at
 		  FROM %s c
 		  JOIN %s p ON p.wr_id = c.wr_parent AND p.wr_is_comment = 0
@@ -369,6 +372,7 @@ func (s *MemberActivitySyncService) syncLegacyComment(boardSlug string, wrID int
 	if row.ID == 0 || row.MemberID == "" {
 		return nil
 	}
+	row.UpdatedAt = parseLegacyFeedTime(row.UpdatedAtRaw, row.CreatedAt)
 
 	isPublic := !row.IsDeleted &&
 		!row.ParentGone &&
@@ -817,6 +821,18 @@ func legacyWriteTableName(boardSlug string) (string, error) {
 		return "", fmt.Errorf("invalid board slug: %q", boardSlug)
 	}
 	return "g5_write_" + boardSlug, nil
+}
+
+func parseLegacyFeedTime(raw string, fallback time.Time) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "0000-00-00 00:00:00" {
+		return fallback
+	}
+	parsed, err := time.ParseInLocation("2006-01-02 15:04:05", raw, time.Local)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func (s *MemberActivitySyncService) memberIDsForParent(writeTable string, parentWriteID int) ([]string, error) {
