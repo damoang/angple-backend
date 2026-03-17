@@ -52,6 +52,8 @@ import (
 	"github.com/gin-gonic/gin"
 	mysqldriver "github.com/go-sql-driver/mysql"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	swaggerFiles "github.com/swaggo/files"
@@ -100,6 +102,14 @@ type idempotencyCachedResponse struct {
 
 var postMemCache sync.Map // key: "posts:{boardID}:{page}:{limit}"
 
+var writeDuplicateDetectedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "write_duplicate_detected_total",
+		Help: "Total number of duplicate or replayed write requests detected",
+	},
+	[]string{"operation", "reason"},
+)
+
 func makePostDedupKey(boardID, memberID, title string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(title))))
 	return fmt.Sprintf("write:dedupe:%s:%s:%s", boardID, memberID, hex.EncodeToString(sum[:]))
@@ -125,6 +135,56 @@ func releasePostDedup(ctx context.Context, redisClient *redis.Client, key string
 		return
 	}
 	redisClient.Del(ctx, key) //nolint:errcheck
+}
+
+func createWriteAfterEvent(tx *gorm.DB, repo gnurepo.WriteAfterEventRepository, eventType, boardSlug string, writeID int, opts ...func(*gnuboard.WriteAfterEvent)) error {
+	if tx == nil || repo == nil {
+		return nil
+	}
+	event := &gnuboard.WriteAfterEvent{
+		EventType:  eventType,
+		BoardSlug:  boardSlug,
+		WriteID:    writeID,
+		Status:     gnuboard.WriteAfterEventStatusPending,
+		OccurredAt: time.Now(),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(event)
+		}
+	}
+	return repo.Create(tx, event)
+}
+
+func withWriteAfterPostID(postID int) func(*gnuboard.WriteAfterEvent) {
+	return func(event *gnuboard.WriteAfterEvent) {
+		event.PostID = &postID
+	}
+}
+
+func withWriteAfterParentID(parentID *int) func(*gnuboard.WriteAfterEvent) {
+	return func(event *gnuboard.WriteAfterEvent) {
+		event.ParentID = parentID
+	}
+}
+
+func withWriteAfterMember(memberID, author string) func(*gnuboard.WriteAfterEvent) {
+	return func(event *gnuboard.WriteAfterEvent) {
+		event.MemberID = memberID
+		event.Author = author
+	}
+}
+
+func withWriteAfterSubject(subject string) func(*gnuboard.WriteAfterEvent) {
+	return func(event *gnuboard.WriteAfterEvent) {
+		event.Subject = subject
+	}
+}
+
+func withWriteAfterOccurredAt(occurredAt time.Time) func(*gnuboard.WriteAfterEvent) {
+	return func(event *gnuboard.WriteAfterEvent) {
+		event.OccurredAt = occurredAt
+	}
 }
 
 func makeCommentDedupKey(boardID, memberID string, postID int, parentID *int, content string) string {
@@ -1378,12 +1438,14 @@ func main() {
 			}
 			return ids
 		}
+		writeAfterEventRepo := gnurepo.NewWriteAfterEventRepository(db)
 		writeAfterWorker := worker.NewWriteAfterWorker(
 			db,
 			cacheService,
 			notiRepo,
 			notiPrefRepo,
 			memberActivitySync,
+			writeAfterEventRepo,
 			getBlockedIDs,
 			worker.ClearPostMemCache(&postMemCache),
 		)
@@ -2233,14 +2295,17 @@ func main() {
 			idempotencyBaseKey := getIdempotencyBaseKey(c, mbID)
 			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
 			case "cached":
+				writeDuplicateDetectedTotal.WithLabelValues("create_post", "idempotency_cached").Inc()
 				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
 				return
 			case "processing":
+				writeDuplicateDetectedTotal.WithLabelValues("create_post", "idempotency_processing").Inc()
 				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
 				return
 			}
 			dedupKey, reserved := reservePostDedup(c.Request.Context(), redisClient, slug, mbID, req.Title)
 			if !reserved {
+				writeDuplicateDetectedTotal.WithLabelValues("create_post", "dedupe").Inc()
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 제목의 글이 방금 작성되었습니다."})
 				return
@@ -2260,15 +2325,33 @@ func main() {
 			phaseDurations["wr_num"] = time.Since(phaseStart)
 			phaseStart = time.Now()
 
-			if err := db.Table(tableName).Create(&post).Error; err != nil {
+			txErr := db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Table(tableName).Create(&post).Error; err != nil {
+					return err
+				}
+				if err := tx.Table(tableName).Where("wr_id = ?", post.WrID).Update("wr_parent", post.WrID).Error; err != nil {
+					return err
+				}
+				if err := createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypePostCreated,
+					slug,
+					post.WrID,
+					withWriteAfterMember(mbID, post.WrName),
+					withWriteAfterSubject(post.WrSubject),
+					withWriteAfterOccurredAt(now),
+				); err != nil {
+					return err
+				}
+				return nil
+			})
+			if txErr != nil {
 				releasePostDedup(c.Request.Context(), redisClient, dedupKey)
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 작성 실패"})
 				return
 			}
-
-			// wr_parent를 자기 자신의 wr_id로 UPDATE (gnuboard 규칙)
-			db.Table(tableName).Where("wr_id = ?", post.WrID).Update("wr_parent", post.WrID)
 			phaseDurations["insert"] = time.Since(phaseStart)
 			phaseStart = time.Now()
 
@@ -2304,15 +2387,6 @@ func main() {
 				}
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoWritePoint, "글쓰기", tableName, fmt.Sprintf("%d", post.WrID), "@write", pc) //nolint:errcheck
 			}
-
-			writeAfterWorker.Enqueue(worker.PostCreatedJob{
-				BoardSlug: slug,
-				WriteID:   post.WrID,
-				MemberID:  mbID,
-				Author:    post.WrName,
-				Subject:   post.WrSubject,
-				CreatedAt: now,
-			})
 
 			payload := gin.H{
 				"success": true,
@@ -2398,14 +2472,17 @@ func main() {
 			idempotencyBaseKey := getIdempotencyBaseKey(c, mbID)
 			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
 			case "cached":
+				writeDuplicateDetectedTotal.WithLabelValues("create_comment", "idempotency_cached").Inc()
 				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
 				return
 			case "processing":
+				writeDuplicateDetectedTotal.WithLabelValues("create_comment", "idempotency_processing").Inc()
 				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
 				return
 			}
 			dedupKey, reserved := reserveCommentDedup(c.Request.Context(), redisClient, slug, mbID, postID, req.ParentID, req.Content)
 			if !reserved {
+				writeDuplicateDetectedTotal.WithLabelValues("create_comment", "dedupe").Inc()
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 내용의 댓글이 방금 작성되었습니다."})
 				return
@@ -2496,6 +2573,20 @@ func main() {
 					return err
 				}
 
+				if err := createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeCommentCreated,
+					slug,
+					createdComment.WrID,
+					withWriteAfterPostID(postID),
+					withWriteAfterParentID(req.ParentID),
+					withWriteAfterMember(mbID, authorName),
+					withWriteAfterOccurredAt(now),
+				); err != nil {
+					return err
+				}
+
 				return nil
 			})
 			phaseDurations["transaction"] = time.Since(phaseStart)
@@ -2530,16 +2621,6 @@ func main() {
 			if middleware.GetUserLevel(c) >= 10 {
 				commentIP = comment.WrIP
 			}
-
-			writeAfterWorker.Enqueue(worker.CommentCreatedJob{
-				BoardSlug: slug,
-				WriteID:   comment.WrID,
-				PostID:    postID,
-				ParentID:  req.ParentID,
-				MemberID:  mbID,
-				Author:    authorName,
-				CreatedAt: now,
-			})
 
 			payload := gin.H{
 				"success": true,
@@ -2673,15 +2754,31 @@ func main() {
 			idempotencyBaseKey := getIdempotencyBaseKey(c, userID)
 			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
 			case "cached":
+				writeDuplicateDetectedTotal.WithLabelValues("update_post", "idempotency_cached").Inc()
 				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
 				return
 			case "processing":
+				writeDuplicateDetectedTotal.WithLabelValues("update_post", "idempotency_processing").Inc()
 				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
 				return
 			}
 
 			tableName := fmt.Sprintf("g5_write_%s", slug)
-			if err := db.Table(tableName).Where("wr_id = ?", postID).Updates(updates).Error; err != nil {
+			txErr := db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Table(tableName).Where("wr_id = ?", postID).Updates(updates).Error; err != nil {
+					return err
+				}
+				return createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypePostUpdated,
+					slug,
+					postID,
+					withWriteAfterMember(post.MbID, post.WrName),
+					withWriteAfterSubject(post.WrSubject),
+				)
+			})
+			if txErr != nil {
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 수정 실패"})
 				return
@@ -2693,18 +2790,6 @@ func main() {
 					fmt.Printf("[WARN] tag update failed for %s/%d: %v\n", slug, postID, err)
 				}
 			}
-
-			// 캐시 무효화: 게시글 상세 + 목록
-			if cacheService != nil {
-				_ = cacheService.InvalidatePost(c.Request.Context(), slug, postID)
-				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
-			}
-			postMemCache.Range(func(key, value interface{}) bool {
-				if strings.HasPrefix(key.(string), "posts:"+slug+":") {
-					postMemCache.Delete(key)
-				}
-				return true
-			})
 
 			payload := gin.H{"success": true, "message": "수정 완료"}
 			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusOK, payload)
@@ -2747,9 +2832,11 @@ func main() {
 			idempotencyBaseKey := getIdempotencyBaseKey(c, userID)
 			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
 			case "cached":
+				writeDuplicateDetectedTotal.WithLabelValues("update_comment", "idempotency_cached").Inc()
 				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
 				return
 			case "processing":
+				writeDuplicateDetectedTotal.WithLabelValues("update_comment", "idempotency_processing").Inc()
 				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
 				return
 			}
@@ -2778,19 +2865,28 @@ func main() {
 
 			tableName := fmt.Sprintf("g5_write_%s", slug)
 			now := time.Now().Format("2006-01-02 15:04:05")
-			if err := db.Table(tableName).Where("wr_id = ?", commentID).Updates(map[string]interface{}{
-				"wr_content": req.Content,
-				"wr_last":    now,
-			}).Error; err != nil {
+			postID, _ := strconv.Atoi(c.Param("id"))
+			txErr := db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Table(tableName).Where("wr_id = ?", commentID).Updates(map[string]interface{}{
+					"wr_content": req.Content,
+					"wr_last":    now,
+				}).Error; err != nil {
+					return err
+				}
+				return createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeCommentUpdated,
+					slug,
+					commentID,
+					withWriteAfterPostID(postID),
+					withWriteAfterMember(comment.MbID, comment.WrName),
+				)
+			})
+			if txErr != nil {
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 수정 실패"})
 				return
-			}
-
-			// 캐시 무효화: 댓글 목록
-			if cacheService != nil {
-				postID, _ := strconv.Atoi(c.Param("id"))
-				_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
 			}
 
 			payload := gin.H{"success": true, "message": "수정 완료"}
@@ -2890,21 +2986,29 @@ func main() {
 
 			// 관리자(level >= 10)는 즉시 삭제
 			if userLevel >= 10 {
-				if err := gnuWriteRepo.SoftDeletePost(slug, postID, userID); err != nil {
+				txErr := db.Transaction(func(tx *gorm.DB) error {
+					now := time.Now()
+					if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ?", postID).Updates(map[string]interface{}{
+						"wr_deleted_at": now,
+						"wr_deleted_by": userID,
+					}).Error; err != nil {
+						return err
+					}
+					return createWriteAfterEvent(
+						tx,
+						writeAfterEventRepo,
+						gnuboard.WriteAfterEventTypePostDeleted,
+						slug,
+						postID,
+						withWriteAfterMember(post.MbID, post.WrName),
+						withWriteAfterSubject(post.WrSubject),
+						withWriteAfterOccurredAt(now),
+					)
+				})
+				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
 				}
-				// 캐시 무효화: 게시글 상세 + 목록
-				if cacheService != nil {
-					_ = cacheService.InvalidatePost(c.Request.Context(), slug, postID)
-					_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
-				}
-				postMemCache.Range(func(key, value interface{}) bool {
-					if strings.HasPrefix(key.(string), "posts:"+slug+":") {
-						postMemCache.Delete(key)
-					}
-					return true
-				})
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
 			}
@@ -2984,7 +3088,24 @@ func main() {
 			}
 
 			// 게시글 복구
-			if err := gnuWriteRepo.RestorePost(slug, postID); err != nil {
+			txErr := db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ?", postID).Updates(map[string]interface{}{
+					"wr_deleted_at": nil,
+					"wr_deleted_by": nil,
+				}).Error; err != nil {
+					return err
+				}
+				return createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypePostRestored,
+					slug,
+					postID,
+					withWriteAfterMember(post.MbID, post.WrName),
+					withWriteAfterSubject(post.WrSubject),
+				)
+			})
+			if txErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 복구 실패"})
 				return
 			}
@@ -3051,17 +3172,31 @@ func main() {
 			// 관리자(level >= 10)는 즉시 삭제
 			postID, _ := strconv.Atoi(c.Param("id"))
 			if userLevel >= 10 {
-				if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
+				txErr := db.Transaction(func(tx *gorm.DB) error {
+					now := time.Now()
+					if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ? AND wr_is_comment = 1", commentID).Updates(map[string]interface{}{
+						"wr_deleted_at": now,
+						"wr_deleted_by": userID,
+					}).Error; err != nil {
+						return err
+					}
+					if err := adjustPostCommentCount(tx, slug, postID, -1); err != nil {
+						return err
+					}
+					return createWriteAfterEvent(
+						tx,
+						writeAfterEventRepo,
+						gnuboard.WriteAfterEventTypeCommentDeleted,
+						slug,
+						commentID,
+						withWriteAfterPostID(postID),
+						withWriteAfterMember(comment.MbID, comment.WrName),
+						withWriteAfterOccurredAt(now),
+					)
+				})
+				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
-				}
-				if err := adjustPostCommentCount(db, slug, postID, -1); err != nil {
-					pkglogger.Info("comment_count_adjust_failed board=%s post_id=%d delta=-1 comment_id=%d err=%v", slug, postID, commentID, err)
-				}
-				// 캐시 무효화: 댓글 + 게시글 목록 (댓글 수 변경)
-				if cacheService != nil {
-					_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
-					_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
@@ -3078,17 +3213,31 @@ func main() {
 
 			if delayMinutes == 0 {
 				// 답글 없으면 즉시 삭제
-				if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
+				txErr := db.Transaction(func(tx *gorm.DB) error {
+					now := time.Now()
+					if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ? AND wr_is_comment = 1", commentID).Updates(map[string]interface{}{
+						"wr_deleted_at": now,
+						"wr_deleted_by": userID,
+					}).Error; err != nil {
+						return err
+					}
+					if err := adjustPostCommentCount(tx, slug, postID, -1); err != nil {
+						return err
+					}
+					return createWriteAfterEvent(
+						tx,
+						writeAfterEventRepo,
+						gnuboard.WriteAfterEventTypeCommentDeleted,
+						slug,
+						commentID,
+						withWriteAfterPostID(postID),
+						withWriteAfterMember(comment.MbID, comment.WrName),
+						withWriteAfterOccurredAt(now),
+					)
+				})
+				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
-				}
-				if err := adjustPostCommentCount(db, slug, postID, -1); err != nil {
-					pkglogger.Info("comment_count_adjust_failed board=%s post_id=%d delta=-1 comment_id=%d err=%v", slug, postID, commentID, err)
-				}
-				// 캐시 무효화: 댓글 + 게시글 목록 (댓글 수 변경)
-				if cacheService != nil {
-					_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
-					_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
@@ -3152,19 +3301,29 @@ func main() {
 			}
 
 			// 댓글 복구
-			if err := gnuWriteRepo.RestoreComment(slug, commentID); err != nil {
+			postID, _ := strconv.Atoi(c.Param("id"))
+			txErr := db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ? AND wr_is_comment = 1", commentID).Updates(map[string]interface{}{
+					"wr_deleted_at": nil,
+					"wr_deleted_by": nil,
+				}).Error; err != nil {
+					return err
+				}
+				if err := adjustPostCommentCount(tx, slug, postID, 1); err != nil {
+					return err
+				}
+				return createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeCommentRestored,
+					slug,
+					commentID,
+					withWriteAfterPostID(postID),
+				)
+			})
+			if txErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 복구 실패"})
 				return
-			}
-
-			// 캐시 무효화
-			postID, _ := strconv.Atoi(c.Param("id"))
-			if err := adjustPostCommentCount(db, slug, postID, 1); err != nil {
-				pkglogger.Info("comment_count_adjust_failed board=%s post_id=%d delta=1 comment_id=%d err=%v", slug, postID, commentID, err)
-			}
-			if cacheService != nil {
-				_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
-				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 			}
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "댓글 복구 완료"})
@@ -4555,7 +4714,7 @@ func main() {
 		cronGroup.POST("/auto-promote", cronHandler.AutoPromote)
 
 		// Start delete worker for delayed deletion processing
-		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo)
+		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo, writeAfterEventRepo)
 		deleteWorker.Start()
 		defer deleteWorker.Stop()
 	} else {

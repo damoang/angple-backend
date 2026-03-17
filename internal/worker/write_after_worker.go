@@ -9,15 +9,49 @@ import (
 	"sync"
 	"time"
 
+	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	"github.com/damoang/angple-backend/internal/service"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"gorm.io/gorm"
 )
 
 type BlockedIDsProvider func(ctx context.Context, userID string) []string
 type ClearPostMemCacheFunc func(boardSlug string)
+
+var (
+	writeAfterEventsProcessedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "write_after_events_processed_total",
+			Help: "Total number of processed write-after events",
+		},
+		[]string{"event_type", "result"},
+	)
+	writeAfterEventsRetryTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "write_after_events_retry_total",
+			Help: "Total number of write-after event retries",
+		},
+		[]string{"event_type"},
+	)
+	writeAfterQueueDepth = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "write_after_events_queue_depth",
+			Help: "Number of pending write-after events ready to process",
+		},
+	)
+	writeAfterEventLagSeconds = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "write_after_event_lag_seconds",
+			Help:    "Lag between event occurrence and processing attempt",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120},
+		},
+		[]string{"event_type"},
+	)
+)
 
 type WriteAfterWorker struct {
 	db             *gorm.DB
@@ -28,9 +62,11 @@ type WriteAfterWorker struct {
 	getBlockedIDs  BlockedIDsProvider
 	clearPostCache ClearPostMemCacheFunc
 
-	jobs chan any
-	stop chan struct{}
-	wg   sync.WaitGroup
+	repo         gnurepo.WriteAfterEventRepository
+	pollInterval time.Duration
+	batchSize    int
+	stop         chan struct{}
+	wg           sync.WaitGroup
 }
 
 type PostCreatedJob struct {
@@ -58,6 +94,7 @@ func NewWriteAfterWorker(
 	notiRepo gnurepo.NotiRepository,
 	notiPrefRepo gnurepo.NotiPreferenceRepository,
 	activitySync *service.MemberActivitySyncService,
+	repo gnurepo.WriteAfterEventRepository,
 	getBlockedIDs BlockedIDsProvider,
 	clearPostCache ClearPostMemCacheFunc,
 ) *WriteAfterWorker {
@@ -67,9 +104,11 @@ func NewWriteAfterWorker(
 		notiRepo:       notiRepo,
 		notiPrefRepo:   notiPrefRepo,
 		activitySync:   activitySync,
+		repo:           repo,
 		getBlockedIDs:  getBlockedIDs,
 		clearPostCache: clearPostCache,
-		jobs:           make(chan any, 2048),
+		pollInterval:   2 * time.Second,
+		batchSize:      100,
 		stop:           make(chan struct{}),
 	}
 }
@@ -82,12 +121,14 @@ func (w *WriteAfterWorker) Start(concurrency int) {
 		w.wg.Add(1)
 		go func() {
 			defer w.wg.Done()
+			ticker := time.NewTicker(w.pollInterval)
+			defer ticker.Stop()
 			for {
 				select {
 				case <-w.stop:
 					return
-				case job := <-w.jobs:
-					w.handle(job)
+				case <-ticker.C:
+					w.processBatch()
 				}
 			}
 		}()
@@ -101,23 +142,71 @@ func (w *WriteAfterWorker) Stop() {
 	log.Printf("[WriteAfterWorker] Stopped")
 }
 
-func (w *WriteAfterWorker) Enqueue(job any) {
-	select {
-	case w.jobs <- job:
-	default:
-		log.Printf("[WriteAfterWorker] queue full, fallback async processing for %T", job)
-		go w.handle(job)
+func (w *WriteAfterWorker) processBatch() {
+	if w.repo == nil {
+		return
+	}
+	now := time.Now()
+	if pendingCount, err := w.repo.CountPending(now); err == nil {
+		writeAfterQueueDepth.Set(float64(pendingCount))
+	}
+
+	events, err := w.repo.ClaimPending(now, w.batchSize)
+	if err != nil {
+		log.Printf("[WriteAfterWorker] claim pending failed: %v", err)
+		return
+	}
+	for _, event := range events {
+		writeAfterEventLagSeconds.WithLabelValues(event.EventType).Observe(time.Since(event.OccurredAt).Seconds())
+		if err := w.handleEvent(event); err != nil {
+			writeAfterEventsProcessedTotal.WithLabelValues(event.EventType, "error").Inc()
+			writeAfterEventsRetryTotal.WithLabelValues(event.EventType).Inc()
+			if markErr := w.repo.MarkFailed(event.ID, gnurepo.TrimWriteAfterEventError(err)); markErr != nil {
+				log.Printf("[WriteAfterWorker] mark failed %d: %v", event.ID, markErr)
+			}
+			continue
+		}
+		writeAfterEventsProcessedTotal.WithLabelValues(event.EventType, "success").Inc()
+		if err := w.repo.MarkProcessed(event.ID); err != nil {
+			log.Printf("[WriteAfterWorker] mark processed %d: %v", event.ID, err)
+		}
 	}
 }
 
-func (w *WriteAfterWorker) handle(job any) {
-	switch j := job.(type) {
-	case PostCreatedJob:
-		w.handlePostCreated(j)
-	case CommentCreatedJob:
-		w.handleCommentCreated(j)
+func (w *WriteAfterWorker) handleEvent(event gnudomain.WriteAfterEvent) error {
+	switch event.EventType {
+	case gnudomain.WriteAfterEventTypePostCreated:
+		w.handlePostCreated(PostCreatedJob{
+			BoardSlug: event.BoardSlug,
+			WriteID:   event.WriteID,
+			MemberID:  event.MemberID,
+			Author:    event.Author,
+			Subject:   event.Subject,
+			CreatedAt: event.OccurredAt,
+		})
+		return nil
+	case gnudomain.WriteAfterEventTypeCommentCreated:
+		postID := 0
+		if event.PostID != nil {
+			postID = *event.PostID
+		}
+		w.handleCommentCreated(CommentCreatedJob{
+			BoardSlug: event.BoardSlug,
+			WriteID:   event.WriteID,
+			PostID:    postID,
+			ParentID:  event.ParentID,
+			MemberID:  event.MemberID,
+			Author:    event.Author,
+			CreatedAt: event.OccurredAt,
+		})
+		return nil
+	case gnudomain.WriteAfterEventTypePostUpdated, gnudomain.WriteAfterEventTypePostDeleted, gnudomain.WriteAfterEventTypePostRestored:
+		w.handlePostChanged(event)
+		return nil
+	case gnudomain.WriteAfterEventTypeCommentUpdated, gnudomain.WriteAfterEventTypeCommentDeleted, gnudomain.WriteAfterEventTypeCommentRestored:
+		return w.handleCommentChanged(event)
 	default:
-		log.Printf("[WriteAfterWorker] unknown job type %T", job)
+		return gnurepo.FormatUnknownWriteAfterEvent(event.EventType)
 	}
 }
 
@@ -261,6 +350,44 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 			WrParent:      job.PostID,
 		})
 	}
+}
+
+func (w *WriteAfterWorker) handlePostChanged(event gnudomain.WriteAfterEvent) {
+	if w.cacheService != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = w.cacheService.InvalidatePost(ctx, event.BoardSlug, event.WriteID)
+		_ = w.cacheService.InvalidatePosts(ctx, event.BoardSlug)
+		cancel()
+	}
+	if w.clearPostCache != nil {
+		w.clearPostCache(event.BoardSlug)
+	}
+	if w.activitySync != nil {
+		if err := w.activitySync.SyncLegacyPost(event.BoardSlug, event.WriteID); err != nil {
+			log.Printf("[WriteAfterWorker] activity sync failed for post %s/%d: %v", event.BoardSlug, event.WriteID, err)
+		}
+	}
+}
+
+func (w *WriteAfterWorker) handleCommentChanged(event gnudomain.WriteAfterEvent) error {
+	if event.PostID == nil {
+		return fmt.Errorf("missing post_id for comment event %s/%d", event.BoardSlug, event.WriteID)
+	}
+	if w.cacheService != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = w.cacheService.InvalidateComments(ctx, event.BoardSlug, *event.PostID)
+		_ = w.cacheService.InvalidatePosts(ctx, event.BoardSlug)
+		cancel()
+	}
+	if w.clearPostCache != nil {
+		w.clearPostCache(event.BoardSlug)
+	}
+	if w.activitySync != nil {
+		if err := w.activitySync.SyncLegacyComment(event.BoardSlug, event.WriteID); err != nil {
+			log.Printf("[WriteAfterWorker] activity sync failed for comment %s/%d: %v", event.BoardSlug, event.WriteID, err)
+		}
+	}
+	return nil
 }
 
 func (w *WriteAfterWorker) isBlocked(targetUserID, actorUserID string) bool {

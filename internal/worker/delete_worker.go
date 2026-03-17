@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	"gorm.io/gorm"
 )
@@ -13,16 +14,18 @@ import (
 type DeleteWorker struct {
 	writeRepo gnurepo.WriteRepository
 	sdRepo    gnurepo.ScheduledDeleteRepository
+	eventRepo gnurepo.WriteAfterEventRepository
 	db        *gorm.DB
 	stop      chan struct{}
 	wg        sync.WaitGroup
 }
 
 // NewDeleteWorker creates a new DeleteWorker
-func NewDeleteWorker(db *gorm.DB, writeRepo gnurepo.WriteRepository, sdRepo gnurepo.ScheduledDeleteRepository) *DeleteWorker {
+func NewDeleteWorker(db *gorm.DB, writeRepo gnurepo.WriteRepository, sdRepo gnurepo.ScheduledDeleteRepository, eventRepo gnurepo.WriteAfterEventRepository) *DeleteWorker {
 	return &DeleteWorker{
 		writeRepo: writeRepo,
 		sdRepo:    sdRepo,
+		eventRepo: eventRepo,
 		db:        db,
 		stop:      make(chan struct{}),
 	}
@@ -78,23 +81,74 @@ func (w *DeleteWorker) processPending() {
 				log.Printf("[DeleteWorker] Error finding comment %s/%d before delete: %v", sd.BoTable, sd.WrID, findErr)
 				continue
 			}
-			// Soft delete comment
-			if err := w.writeRepo.SoftDeleteComment(sd.BoTable, sd.WrID, sd.RequestedBy); err != nil {
-				log.Printf("[DeleteWorker] Error soft deleting comment %s/%d: %v", sd.BoTable, sd.WrID, err)
-				continue
-			}
-			if w.db != nil {
-				tableName := "g5_write_" + sd.BoTable
-				if err := w.db.Table(tableName).
+			if err := w.db.Transaction(func(tx *gorm.DB) error {
+				now := time.Now()
+				if err := tx.Table("g5_write_"+sd.BoTable).
+					Where("wr_id = ? AND wr_is_comment = 1", sd.WrID).
+					Updates(map[string]interface{}{
+						"wr_deleted_at": now,
+						"wr_deleted_by": sd.RequestedBy,
+					}).Error; err != nil {
+					return err
+				}
+				if err := tx.Table("g5_write_"+sd.BoTable).
 					Where("wr_id = ?", comment.WrParent).
 					Update("wr_comment", gorm.Expr("GREATEST(COALESCE(wr_comment, 0) - 1, 0)")).
 					Error; err != nil {
-					log.Printf("[DeleteWorker] Error decrementing comment count for %s/%d: %v", sd.BoTable, comment.WrParent, err)
+					return err
 				}
+				if w.eventRepo != nil {
+					postID := comment.WrParent
+					if err := w.eventRepo.Create(tx, &gnudomain.WriteAfterEvent{
+						EventType:  gnudomain.WriteAfterEventTypeCommentDeleted,
+						BoardSlug:  sd.BoTable,
+						WriteID:    sd.WrID,
+						PostID:     &postID,
+						MemberID:   comment.MbID,
+						Author:     comment.WrName,
+						OccurredAt: now,
+						Status:     gnudomain.WriteAfterEventStatusPending,
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				log.Printf("[DeleteWorker] Error soft deleting comment %s/%d: %v", sd.BoTable, sd.WrID, err)
+				continue
 			}
 		} else {
-			// Soft delete post (including its comments)
-			if err := w.writeRepo.SoftDeletePost(sd.BoTable, sd.WrID, sd.RequestedBy); err != nil {
+			post, findErr := w.writeRepo.FindPostByIDIncludeDeleted(sd.BoTable, sd.WrID)
+			if findErr != nil {
+				log.Printf("[DeleteWorker] Error finding post %s/%d before delete: %v", sd.BoTable, sd.WrID, findErr)
+				continue
+			}
+			if err := w.db.Transaction(func(tx *gorm.DB) error {
+				now := time.Now()
+				if err := tx.Table("g5_write_"+sd.BoTable).
+					Where("wr_id = ?", sd.WrID).
+					Updates(map[string]interface{}{
+						"wr_deleted_at": now,
+						"wr_deleted_by": sd.RequestedBy,
+					}).Error; err != nil {
+					return err
+				}
+				if w.eventRepo != nil {
+					if err := w.eventRepo.Create(tx, &gnudomain.WriteAfterEvent{
+						EventType:  gnudomain.WriteAfterEventTypePostDeleted,
+						BoardSlug:  sd.BoTable,
+						WriteID:    sd.WrID,
+						MemberID:   post.MbID,
+						Author:     post.WrName,
+						Subject:    post.WrSubject,
+						OccurredAt: now,
+						Status:     gnudomain.WriteAfterEventStatusPending,
+					}); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
 				log.Printf("[DeleteWorker] Error soft deleting post %s/%d: %v", sd.BoTable, sd.WrID, err)
 				continue
 			}
