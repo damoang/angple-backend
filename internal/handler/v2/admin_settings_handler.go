@@ -42,7 +42,7 @@ func (h *AdminSettingsHandler) UpdateReportLockThreshold(c *gin.Context) {
 		return
 	}
 
-	now := int(time.Now().Unix())
+	now := common.SafeInt64ToInt(time.Now().Unix())
 
 	// UPSERT into g5_kv_store
 	result := h.db.Exec(`

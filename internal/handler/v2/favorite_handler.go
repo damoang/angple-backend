@@ -78,7 +78,7 @@ func (h *FavoriteHandler) UpdateFavorites(c *gin.Context) {
 	}
 
 	key := fmt.Sprintf("favorites:%s", userID)
-	now := int(time.Now().Unix())
+	now := common.SafeInt64ToInt(time.Now().Unix())
 
 	result := h.db.Exec(`
 		INSERT INTO g5_kv_store (`+"`key`"+`, value_type, value_text, updated_at)
