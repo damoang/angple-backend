@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 
@@ -187,7 +188,7 @@ func (s *BoardWriteRestrictionService) countTodayPosts(boardSlug, memberID strin
 	if err != nil {
 		return 0, err
 	}
-	return int(count), nil
+	return common.SafeInt64ToInt(count), nil
 }
 
 // countTotalPosts counts all non-comment posts ever written by the member in the board.
@@ -201,7 +202,7 @@ func (s *BoardWriteRestrictionService) countTotalPosts(boardSlug, memberID strin
 	if err != nil {
 		return 0, err
 	}
-	return int(count), nil
+	return common.SafeInt64ToInt(count), nil
 }
 
 // parseWritingSettings extracts WritingSettings from the extended settings JSON.

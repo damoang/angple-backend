@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
 	"gorm.io/gorm"
 )
 
@@ -86,13 +87,13 @@ func runUpdateMemberLevels(db *gorm.DB) (*MemberLevelsResult, error) {
 		if isExpired {
 			affected := updatePostVisibility(db, promo.MemberID, true)
 			if affected > 0 {
-				result.VisibilityCount += int(affected)
+				result.VisibilityCount += common.SafeInt64ToInt(affected)
 				result.Messages = append(result.Messages, fmt.Sprintf("%s(%s): %d개 게시글 비공개 처리", promo.AdvertiserName, promo.MemberID, affected))
 			}
 		} else if isActive {
 			affected := updatePostVisibility(db, promo.MemberID, false)
 			if affected > 0 {
-				result.VisibilityCount += int(affected)
+				result.VisibilityCount += common.SafeInt64ToInt(affected)
 				result.Messages = append(result.Messages, fmt.Sprintf("%s(%s): %d개 게시글 공개 전환", promo.AdvertiserName, promo.MemberID, affected))
 			}
 		}

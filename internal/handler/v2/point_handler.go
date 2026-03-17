@@ -66,7 +66,7 @@ func (h *PointHandler) GetPointHistory(c *gin.Context) {
 	// Get summary as well
 	summary, _ := h.gnuPointRepo.GetSummary(mbID)
 
-	totalPages := (int(total) + limit - 1) / limit
+	totalPages := (common.SafeInt64ToInt(total) + limit - 1) / limit
 
 	common.V2Success(c, gin.H{
 		"summary": summary,

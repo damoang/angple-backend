@@ -3,7 +3,6 @@ package v2
 import (
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -1008,10 +1007,7 @@ func parsePagination(c *gin.Context) (int, int) {
 
 // safeUint64ToInt converts uint64 to int with overflow protection
 func safeUint64ToInt(v uint64) int {
-	if v > uint64(math.MaxInt) {
-		return math.MaxInt
-	}
-	return int(v)
+	return common.SafeUint64ToInt(v)
 }
 
 // createCommentNotification creates a notification for the post author when a comment is posted

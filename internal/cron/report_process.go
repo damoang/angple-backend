@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
 	"gorm.io/gorm"
 )
 
@@ -763,7 +764,7 @@ func autoLockPost(tx *gorm.DB, boTable string, postID, threshold int) {
 		WHERE sg_table = ? AND (sg_id = ? OR sg_parent = ?) AND admin_approved = 1
 	`, boTable, postID, postID).Scan(&approvedCount)
 
-	if int(approvedCount) < threshold {
+	if common.SafeInt64ToInt(approvedCount) < threshold {
 		return
 	}
 
@@ -891,7 +892,7 @@ func autoLockComment(tx *gorm.DB, boTable string, commentID, parentID, threshold
 		WHERE sg_table = ? AND sg_id = ? AND sg_parent = ? AND admin_approved = 1
 	`, boTable, commentID, parentID).Scan(&approvedCount)
 
-	if int(approvedCount) < threshold {
+	if common.SafeInt64ToInt(approvedCount) < threshold {
 		return
 	}
 

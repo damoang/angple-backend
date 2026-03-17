@@ -104,7 +104,7 @@ func (h *ExpHandler) GetExpHistory(c *gin.Context) {
 	// Get summary as well
 	summary, _ := h.expRepo.GetSummary(mbID)
 
-	totalPages := (int(total) + limit - 1) / limit
+	totalPages := (common.SafeInt64ToInt(total) + limit - 1) / limit
 
 	common.V2Success(c, gin.H{
 		"summary": summary,
@@ -141,7 +141,7 @@ func (h *ExpHandler) AdminListMemberXP(c *gin.Context) {
 		return
 	}
 
-	totalPages := (int(total) + limit - 1) / limit
+	totalPages := (common.SafeInt64ToInt(total) + limit - 1) / limit
 
 	common.V2Success(c, gin.H{
 		"members": members,
@@ -180,7 +180,7 @@ func (h *ExpHandler) AdminGetMemberXPHistory(c *gin.Context) {
 
 	summary, _ := h.expRepo.GetSummary(mbID)
 
-	totalPages := (int(total) + limit - 1) / limit
+	totalPages := (common.SafeInt64ToInt(total) + limit - 1) / limit
 
 	common.V2Success(c, gin.H{
 		"summary": summary,

@@ -2846,7 +2846,7 @@ func main() {
 				replyCount = 0
 			}
 
-			delayMinutes := gnuboard.CalculateDelay(int(replyCount))
+			delayMinutes := gnuboard.CalculateDelay(common.SafeInt64ToInt(replyCount))
 
 			if delayMinutes == 0 {
 				// 답글 없으면 즉시 삭제
@@ -2880,7 +2880,7 @@ func main() {
 				BoTable:      slug,
 				WrID:         commentID,
 				WrIsComment:  1,
-				ReplyCount:   int(replyCount),
+				ReplyCount:   common.SafeInt64ToInt(replyCount),
 				DelayMinutes: delayMinutes,
 				ScheduledAt:  now.Add(time.Duration(delayMinutes) * time.Minute),
 				RequestedBy:  userID,

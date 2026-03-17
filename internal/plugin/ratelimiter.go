@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -138,7 +139,7 @@ func (rl *RateLimiter) check(key string, cfg *RateLimitConfig) (bool, int, error
 		return false, 0, err
 	}
 
-	count := int(countCmd.Val())
+	count := common.SafeInt64ToInt(countCmd.Val())
 	remaining := cfg.Requests - count
 	if remaining < 0 {
 		remaining = 0
