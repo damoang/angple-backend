@@ -113,6 +113,7 @@ type DisciplineLogListItem struct {
 	MemberNickname  string   `json:"member_nickname"`
 	PenaltyPeriod   int      `json:"penalty_period"`
 	PenaltyDateFrom string   `json:"penalty_date_from"`
+	PenaltyDateTo   *string  `json:"penalty_date_to,omitempty"`
 	ViolationTypes  []int    `json:"violation_types"`
 	ViolationTitles []string `json:"violation_titles"`
 	Memo            string   `json:"memo,omitempty"`
@@ -255,12 +256,24 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 			dateFrom = dateFrom[:10]
 		}
 
+		// Calculate penalty_date_to for time-limited penalties
+		var penaltyDateTo *string
+		if data.PenaltyPeriod > 0 {
+			df, err := time.Parse("2006-01-02 15:04:05", data.PenaltyDateFrom)
+			if err != nil {
+				df, _ = time.Parse("2006-01-02", data.PenaltyDateFrom)
+			}
+			dt := df.AddDate(0, 0, data.PenaltyPeriod).Format("2006-01-02 15:04:05")
+			penaltyDateTo = &dt
+		}
+
 		items = append(items, DisciplineLogListItem{
 			ID:              post.WrID,
 			MemberID:        data.PenaltyMbID,
 			MemberNickname:  getMemberNickFromTitle(post.WrSubject),
 			PenaltyPeriod:   data.PenaltyPeriod,
 			PenaltyDateFrom: dateFrom,
+			PenaltyDateTo:   penaltyDateTo,
 			ViolationTypes:  data.SgTypes,
 			ViolationTitles: titles,
 			Memo:            data.Content,
