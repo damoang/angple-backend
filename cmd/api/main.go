@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -101,7 +101,7 @@ type idempotencyCachedResponse struct {
 var postMemCache sync.Map // key: "posts:{boardID}:{page}:{limit}"
 
 func makePostDedupKey(boardID, memberID, title string) string {
-	sum := sha1.Sum([]byte(strings.TrimSpace(strings.ToLower(title))))
+	sum := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(title))))
 	return fmt.Sprintf("write:dedupe:%s:%s:%s", boardID, memberID, hex.EncodeToString(sum[:]))
 }
 
@@ -110,11 +110,14 @@ func reservePostDedup(ctx context.Context, redisClient *redis.Client, boardID, m
 		return "", true
 	}
 	key := makePostDedupKey(boardID, memberID, title)
-	ok, err := redisClient.SetNX(ctx, key, "1", 30*time.Second).Result()
+	_, err := redisClient.SetArgs(ctx, key, "1", redis.SetArgs{Mode: "NX", TTL: 30 * time.Second}).Result()
+	if err == redis.Nil {
+		return key, false
+	}
 	if err != nil {
 		return "", true
 	}
-	return key, ok
+	return key, true
 }
 
 func releasePostDedup(ctx context.Context, redisClient *redis.Client, key string) {
@@ -129,7 +132,7 @@ func makeCommentDedupKey(boardID, memberID string, postID int, parentID *int, co
 	if parentID != nil && *parentID > 0 {
 		parentPart = strconv.Itoa(*parentID)
 	}
-	sum := sha1.Sum([]byte(strings.TrimSpace(strings.ToLower(content))))
+	sum := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(content))))
 	return fmt.Sprintf("comment:dedupe:%s:%s:%d:%s:%s", boardID, memberID, postID, parentPart, hex.EncodeToString(sum[:]))
 }
 
@@ -138,11 +141,14 @@ func reserveCommentDedup(ctx context.Context, redisClient *redis.Client, boardID
 		return "", true
 	}
 	key := makeCommentDedupKey(boardID, memberID, postID, parentID, content)
-	ok, err := redisClient.SetNX(ctx, key, "1", 10*time.Second).Result()
+	_, err := redisClient.SetArgs(ctx, key, "1", redis.SetArgs{Mode: "NX", TTL: 10 * time.Second}).Result()
+	if err == redis.Nil {
+		return key, false
+	}
 	if err != nil {
 		return "", true
 	}
-	return key, ok
+	return key, true
 }
 
 func releaseCommentDedup(ctx context.Context, redisClient *redis.Client, key string) {
@@ -193,7 +199,7 @@ func getNextWrNumFast(ctx context.Context, db *gorm.DB, redisClient *redis.Clien
 		if scanErr := db.Table(tableName).Select("COALESCE(MIN(wr_num), 0)").Scan(&minNum).Error; scanErr != nil {
 			return 0, scanErr
 		}
-		redisClient.SetNX(ctx, key, minNum, 0) //nolint:errcheck
+		redisClient.SetArgs(ctx, key, minNum, redis.SetArgs{Mode: "NX"}) //nolint:errcheck
 	}
 
 	next, err := redisClient.Decr(ctx, key).Result()
@@ -248,17 +254,17 @@ func beginIdempotentWrite(ctx context.Context, redisClient *redis.Client, baseKe
 	if cached, err := loadIdempotencyCachedResponse(ctx, redisClient, baseKey); err == nil && cached != nil {
 		return "cached", cached
 	}
-	locked, err := redisClient.SetNX(ctx, getIdempotencyLockKey(baseKey), "1", 60*time.Second).Result()
+	_, err := redisClient.SetArgs(ctx, getIdempotencyLockKey(baseKey), "1", redis.SetArgs{Mode: "NX", TTL: 60 * time.Second}).Result()
+	if err == redis.Nil {
+		if cached, cacheErr := loadIdempotencyCachedResponse(ctx, redisClient, baseKey); cacheErr == nil && cached != nil {
+			return "cached", cached
+		}
+		return "processing", nil
+	}
 	if err != nil {
 		return "proceed", nil
 	}
-	if locked {
-		return "proceed", nil
-	}
-	if cached, err := loadIdempotencyCachedResponse(ctx, redisClient, baseKey); err == nil && cached != nil {
-		return "cached", cached
-	}
-	return "processing", nil
+	return "proceed", nil
 }
 
 func storeIdempotentWriteResponse(ctx context.Context, redisClient *redis.Client, baseKey string, status int, payload interface{}) {
