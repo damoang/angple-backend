@@ -92,6 +92,11 @@ type memCachedPosts struct {
 	expiresAt time.Time
 }
 
+type idempotencyCachedResponse struct {
+	Status int             `json:"status"`
+	Body   json.RawMessage `json:"body"`
+}
+
 var postMemCache sync.Map // key: "posts:{boardID}:{page}:{limit}"
 
 func makePostDedupKey(boardID, memberID, title string) string {
@@ -147,6 +152,88 @@ func getNextWrNumFast(ctx context.Context, db *gorm.DB, redisClient *redis.Clien
 		return minNum - 1, nil
 	}
 	return int(next), nil
+}
+
+func getIdempotencyBaseKey(c *gin.Context, memberID string) string {
+	idempotencyKey := strings.TrimSpace(c.GetHeader("X-Idempotency-Key"))
+	if idempotencyKey == "" {
+		return ""
+	}
+	return fmt.Sprintf("idempotency:%s:%s:%s:%s", memberID, c.Request.Method, c.FullPath(), idempotencyKey)
+}
+
+func getIdempotencyRespKey(baseKey string) string {
+	return baseKey + ":resp"
+}
+
+func getIdempotencyLockKey(baseKey string) string {
+	return baseKey + ":lock"
+}
+
+func loadIdempotencyCachedResponse(ctx context.Context, redisClient *redis.Client, baseKey string) (*idempotencyCachedResponse, error) {
+	if redisClient == nil || baseKey == "" {
+		return nil, nil
+	}
+	raw, err := redisClient.Get(ctx, getIdempotencyRespKey(baseKey)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var cached idempotencyCachedResponse
+	if err := json.Unmarshal(raw, &cached); err != nil {
+		return nil, err
+	}
+	return &cached, nil
+}
+
+func beginIdempotentWrite(ctx context.Context, redisClient *redis.Client, baseKey string) (string, *idempotencyCachedResponse) {
+	if redisClient == nil || baseKey == "" {
+		return "proceed", nil
+	}
+	if cached, err := loadIdempotencyCachedResponse(ctx, redisClient, baseKey); err == nil && cached != nil {
+		return "cached", cached
+	}
+	locked, err := redisClient.SetNX(ctx, getIdempotencyLockKey(baseKey), "1", 60*time.Second).Result()
+	if err != nil {
+		return "proceed", nil
+	}
+	if locked {
+		return "proceed", nil
+	}
+	if cached, err := loadIdempotencyCachedResponse(ctx, redisClient, baseKey); err == nil && cached != nil {
+		return "cached", cached
+	}
+	return "processing", nil
+}
+
+func storeIdempotentWriteResponse(ctx context.Context, redisClient *redis.Client, baseKey string, status int, payload interface{}) {
+	if redisClient == nil || baseKey == "" {
+		return
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		redisClient.Del(ctx, getIdempotencyLockKey(baseKey)) //nolint:errcheck
+		return
+	}
+	cachedBody, err := json.Marshal(idempotencyCachedResponse{
+		Status: status,
+		Body:   body,
+	})
+	if err != nil {
+		redisClient.Del(ctx, getIdempotencyLockKey(baseKey)) //nolint:errcheck
+		return
+	}
+	redisClient.Set(ctx, getIdempotencyRespKey(baseKey), cachedBody, 5*time.Minute) //nolint:errcheck
+	redisClient.Del(ctx, getIdempotencyLockKey(baseKey))                            //nolint:errcheck
+}
+
+func releaseIdempotentWrite(ctx context.Context, redisClient *redis.Client, baseKey string) {
+	if redisClient == nil || baseKey == "" {
+		return
+	}
+	redisClient.Del(ctx, getIdempotencyLockKey(baseKey)) //nolint:errcheck
 }
 
 // filterItems filters blocked users' posts from parsed items slice, preserving notice posts.
@@ -2033,8 +2120,18 @@ func main() {
 			}
 
 			tableName := fmt.Sprintf("g5_write_%s", slug)
+			idempotencyBaseKey := getIdempotencyBaseKey(c, mbID)
+			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
+			case "cached":
+				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
+				return
+			case "processing":
+				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
+				return
+			}
 			dedupKey, reserved := reservePostDedup(c.Request.Context(), redisClient, slug, mbID, req.Title)
 			if !reserved {
+				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 제목의 글이 방금 작성되었습니다."})
 				return
 			}
@@ -2043,6 +2140,7 @@ func main() {
 			nextWrNum, wrNumErr := getNextWrNumFast(c.Request.Context(), db, redisClient, slug)
 			if wrNumErr != nil {
 				releasePostDedup(c.Request.Context(), redisClient, dedupKey)
+				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "wr_num 생성 실패"})
 				return
 			}
@@ -2050,6 +2148,7 @@ func main() {
 
 			if err := db.Table(tableName).Create(&post).Error; err != nil {
 				releasePostDedup(c.Request.Context(), redisClient, dedupKey)
+				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 작성 실패"})
 				return
 			}
@@ -2154,10 +2253,12 @@ func main() {
 				}
 			}()
 
-			c.JSON(http.StatusCreated, gin.H{
+			payload := gin.H{
 				"success": true,
 				"data":    v1handler.TransformToV1PostDetail(&post, false),
-			})
+			}
+			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusCreated, payload)
+			c.JSON(http.StatusCreated, payload)
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/comments - Create comment in g5_write_{slug}
@@ -2224,12 +2325,22 @@ func main() {
 			now := time.Now()
 			nowStr := now.Format("2006-01-02 15:04:05")
 			tableName := fmt.Sprintf("g5_write_%s", slug)
+			idempotencyBaseKey := getIdempotencyBaseKey(c, mbID)
+			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
+			case "cached":
+				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
+				return
+			case "processing":
+				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
+				return
+			}
 
 			// 중복 댓글 방지: 10초 이내 같은 내용의 댓글이 있으면 거부
 			var dupCommentCount int64
 			db.Table(tableName).Where("mb_id = ? AND wr_content = ? AND wr_is_comment = 1 AND wr_parent = ? AND wr_datetime > ?",
 				mbID, req.Content, postID, time.Now().Add(-10*time.Second)).Count(&dupCommentCount)
 			if dupCommentCount > 0 {
+				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 내용의 댓글이 방금 작성되었습니다."})
 				return
 			}
@@ -2322,6 +2433,7 @@ func main() {
 			})
 
 			if txErr != nil {
+				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				switch txErr.Error() {
 				case "PARENT_NOT_FOUND":
 					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "부모 댓글을 찾을 수 없습니다"})
@@ -2423,7 +2535,7 @@ func main() {
 				}
 			}()
 
-			c.JSON(http.StatusCreated, gin.H{
+			payload := gin.H{
 				"success": true,
 				"data": gin.H{
 					"id":         comment.WrID,
@@ -2438,7 +2550,9 @@ func main() {
 					"created_at": now.Format(time.RFC3339),
 					"is_secret":  false,
 				},
-			})
+			}
+			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusCreated, payload)
+			c.JSON(http.StatusCreated, payload)
 		})
 
 		// PUT /api/v1/boards/:slug/posts/:id - Update post
@@ -2548,8 +2662,19 @@ func main() {
 				return
 			}
 
+			idempotencyBaseKey := getIdempotencyBaseKey(c, userID)
+			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
+			case "cached":
+				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
+				return
+			case "processing":
+				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
+				return
+			}
+
 			tableName := fmt.Sprintf("g5_write_%s", slug)
 			if err := db.Table(tableName).Where("wr_id = ?", postID).Updates(updates).Error; err != nil {
+				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 수정 실패"})
 				return
 			}
@@ -2573,7 +2698,9 @@ func main() {
 				return true
 			})
 
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "수정 완료"})
+			payload := gin.H{"success": true, "message": "수정 완료"}
+			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusOK, payload)
+			c.JSON(http.StatusOK, payload)
 		})
 
 		// PUT /api/v1/boards/:slug/posts/:id/comments/:comment_id - Update comment
@@ -2609,6 +2736,16 @@ func main() {
 				return
 			}
 
+			idempotencyBaseKey := getIdempotencyBaseKey(c, userID)
+			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
+			case "cached":
+				c.Data(cached.Status, "application/json; charset=utf-8", cached.Body)
+				return
+			case "processing":
+				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
+				return
+			}
+
 			// 수정 전 내용을 리비전에 저장
 			var nextVersion int
 			db.Raw("SELECT COALESCE(MAX(version), 0) + 1 FROM g5_write_revisions WHERE board_id = ? AND wr_id = ?",
@@ -2637,6 +2774,7 @@ func main() {
 				"wr_content": req.Content,
 				"wr_last":    now,
 			}).Error; err != nil {
+				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 수정 실패"})
 				return
 			}
@@ -2647,7 +2785,9 @@ func main() {
 				_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
 			}
 
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "수정 완료"})
+			payload := gin.H{"success": true, "message": "수정 완료"}
+			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusOK, payload)
+			c.JSON(http.StatusOK, payload)
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/comments/:comment_id/revisions - Get comment revision history
