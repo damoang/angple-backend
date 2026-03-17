@@ -1975,6 +1975,22 @@ func main() {
 				return
 			}
 
+			cacheVersion := "0"
+			if redisClient != nil {
+				ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Millisecond)
+				defer cancel()
+				versionKey := fmt.Sprintf("rv:post-likers:%s:%d", slug, postID)
+				if rawVersion, getErr := redisClient.Get(ctx, versionKey).Result(); getErr == nil && rawVersion != "" {
+					cacheVersion = rawVersion
+				}
+
+				cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:v%s", slug, postID, page, limit, cacheVersion)
+				if cached, getErr := redisClient.Get(ctx, cacheKey).Bytes(); getErr == nil {
+					c.Data(http.StatusOK, "application/json; charset=utf-8", cached)
+					return
+				}
+			}
+
 			// Count total likers
 			db.Table("g5_board_good").
 				Where("bo_table = ? AND wr_id = ? AND bg_flag = ?", slug, postID, "good").
@@ -2001,6 +2017,22 @@ func main() {
 					"total":  total,
 				},
 			})
+
+			if redisClient != nil {
+				payload := gin.H{
+					"success": true,
+					"data": gin.H{
+						"likers": likers,
+						"total":  total,
+					},
+				}
+				if raw, marshalErr := json.Marshal(payload); marshalErr == nil {
+					ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Millisecond)
+					defer cancel()
+					cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:v%s", slug, postID, page, limit, cacheVersion)
+					redisClient.Set(ctx, cacheKey, raw, 15*time.Second) //nolint:errcheck
+				}
+			}
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/revisions - Get post revision history
@@ -2262,19 +2294,20 @@ func main() {
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoWritePoint, "글쓰기", tableName, fmt.Sprintf("%d", post.WrID), "@write", pc) //nolint:errcheck
 			}
 
-			// 게시글 목록 캐시 무효화 (새 글이 목록에 즉시 반영되도록)
-			if cacheService != nil {
-				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
-			}
-			postMemCache.Range(func(key, value interface{}) bool {
-				if strings.HasPrefix(key.(string), "posts:"+slug+":") {
-					postMemCache.Delete(key)
-				}
-				return true
-			})
-
-			// 팔로워/구독자 알림 (비동기)
+			// 응답 이후 처리: 캐시 무효화 + 알림
 			go func() {
+				if cacheService != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					_ = cacheService.InvalidatePosts(ctx, slug)
+				}
+				postMemCache.Range(func(key, value interface{}) bool {
+					if strings.HasPrefix(key.(string), "posts:"+slug+":") {
+						postMemCache.Delete(key)
+					}
+					return true
+				})
+
 				authorName := post.WrName
 				if authorName == "" {
 					authorName = mbID
@@ -2539,26 +2572,27 @@ func main() {
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), fmt.Sprintf("%d", comment.WrID), "@comment", pc) //nolint:errcheck
 			}
 
-			// 캐시 무효화: 댓글 목록 + 게시글 목록 (댓글 수 변경 반영)
-			if cacheService != nil {
-				_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
-				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
-			}
-			postMemCache.Range(func(key, value interface{}) bool {
-				if strings.HasPrefix(key.(string), "posts:"+slug+":") {
-					postMemCache.Delete(key)
-				}
-				return true
-			})
-
 			// Admin sees full IP, others see masked
 			commentIP := v1handler.MaskIP(comment.WrIP)
 			if middleware.GetUserLevel(c) >= 10 {
 				commentIP = comment.WrIP
 			}
 
-			// 알림 생성 (비동기)
+			// 응답 이후 처리: 캐시 무효화 + 알림
 			go func() {
+				if cacheService != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					_ = cacheService.InvalidateComments(ctx, slug, postID)
+					_ = cacheService.InvalidatePosts(ctx, slug)
+				}
+				postMemCache.Range(func(key, value interface{}) bool {
+					if strings.HasPrefix(key.(string), "posts:"+slug+":") {
+						postMemCache.Delete(key)
+					}
+					return true
+				})
+
 				// 게시글 작성자 조회
 				var postAuthor struct {
 					MbID      string `gorm:"column:mb_id"`
