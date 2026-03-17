@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -35,12 +36,28 @@ func New(host string, port int) (*Client, error) {
 	return &Client{db: db}, nil
 }
 
+// containsCJK checks if a string contains any CJK or Korean characters.
+func containsCJK(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Hangul, r) || unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // addInfixWildcards wraps each whitespace-separated token with * for partial matching.
-// Requires min_infix_len to be set in the Sphinx index configuration.
+// For CJK tokens (ngram_len=1), uses phrase search ("*token*") to ensure
+// adjacent ngram matching instead of scattered individual character matches.
 func addInfixWildcards(escaped string) string {
 	tokens := strings.Fields(escaped)
 	for i, t := range tokens {
-		tokens[i] = "*" + t + "*"
+		if containsCJK(t) && len([]rune(t)) >= 2 {
+			// CJK phrase: "단파" → "*단파*" (adjacent ngram matching)
+			tokens[i] = `"*` + t + `*"`
+		} else {
+			tokens[i] = "*" + t + "*"
+		}
 	}
 	return strings.Join(tokens, " ")
 }
