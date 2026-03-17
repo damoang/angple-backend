@@ -2298,7 +2298,10 @@ func main() {
 				if req.ParentID != nil && *req.ParentID > 0 {
 					var parentAuthorMbID string
 					if err := db.Table(tableName).Select("mb_id").Where("wr_id = ?", *req.ParentID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != mbID {
-						if pref, _ := notiPrefRepo.Get(parentAuthorMbID); pref.NotiReply {
+						// 수신자가 발신자를 차단한 경우 알림 생략
+						if blocked, _ := blockRepo.Exists(parentAuthorMbID, mbID); blocked {
+							// skip
+						} else if pref, _ := notiPrefRepo.Get(parentAuthorMbID); pref.NotiReply {
 							_ = notiRepo.Create(&gnurepo.Notification{
 								PhToCase:      "comment_reply",
 								PhFromCase:    "comment",
@@ -2318,9 +2321,11 @@ func main() {
 					}
 				}
 
-				// 게시글 작성자에게 알림 (자기 댓글은 제외)
+				// 게시글 작성자에게 알림 (자기 댓글은 제외, 차단한 사용자 제외)
 				if postAuthor.MbID != mbID {
-					if pref, _ := notiPrefRepo.Get(postAuthor.MbID); pref.NotiComment {
+					if blocked, _ := blockRepo.Exists(postAuthor.MbID, mbID); blocked {
+						// 게시글 작성자가 댓글 작성자를 차단한 경우 알림 생략
+					} else if pref, _ := notiPrefRepo.Get(postAuthor.MbID); pref.NotiComment {
 						_ = notiRepo.Create(&gnurepo.Notification{
 							PhToCase:      "comment",
 							PhFromCase:    "comment",
