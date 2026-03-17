@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2298,8 +2299,8 @@ func main() {
 				if req.ParentID != nil && *req.ParentID > 0 {
 					var parentAuthorMbID string
 					if err := db.Table(tableName).Select("mb_id").Where("wr_id = ?", *req.ParentID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != mbID {
-						// 수신자가 발신자를 차단한 경우 알림 생략
-						if blocked, _ := blockRepo.Exists(parentAuthorMbID, mbID); blocked {
+						// 수신자가 발신자를 차단한 경우 알림 생략 (Redis 캐시 활용)
+						if slices.Contains(getBlockedIDs(context.Background(), parentAuthorMbID), mbID) {
 							// skip
 						} else if pref, _ := notiPrefRepo.Get(parentAuthorMbID); pref.NotiReply {
 							_ = notiRepo.Create(&gnurepo.Notification{
@@ -2323,7 +2324,7 @@ func main() {
 
 				// 게시글 작성자에게 알림 (자기 댓글은 제외, 차단한 사용자 제외)
 				if postAuthor.MbID != mbID {
-					if blocked, _ := blockRepo.Exists(postAuthor.MbID, mbID); blocked {
+					if slices.Contains(getBlockedIDs(context.Background(), postAuthor.MbID), mbID) {
 						// 게시글 작성자가 댓글 작성자를 차단한 경우 알림 생략
 					} else if pref, _ := notiPrefRepo.Get(postAuthor.MbID); pref.NotiComment {
 						_ = notiRepo.Create(&gnurepo.Notification{

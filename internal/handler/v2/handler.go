@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -1045,7 +1046,9 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 				// 수신자가 발신자를 차단했는지 확인
 				isBlockedByParent := false
 				if h.blockRepo != nil {
-					isBlockedByParent, _ = h.blockRepo.Exists(parentAuthorMbID, commenterMbID)
+					if blockedIDs, err := h.blockRepo.GetBlockedUserIDs(parentAuthorMbID); err == nil {
+						isBlockedByParent = slices.Contains(blockedIDs, commenterMbID)
+					}
 				}
 				// 답글 알림 설정 확인
 				sendReply := true
@@ -1083,7 +1086,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 
 	// 게시글 작성자가 댓글 작성자를 차단한 경우 알림 생략
 	if h.blockRepo != nil {
-		if blocked, _ := h.blockRepo.Exists(postAuthorMbID, commenterMbID); blocked {
+		if blockedIDs, err := h.blockRepo.GetBlockedUserIDs(postAuthorMbID); err == nil && slices.Contains(blockedIDs, commenterMbID) {
 			return
 		}
 	}
