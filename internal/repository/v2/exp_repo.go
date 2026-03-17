@@ -36,6 +36,9 @@ type XPConfig struct {
 	LoginEnabled   bool `json:"login_enabled"`   // Enable login XP (default: true)
 	WriteEnabled   bool `json:"write_enabled"`   // Enable write XP (default: false)
 	CommentEnabled bool `json:"comment_enabled"` // Enable comment XP (default: false)
+	XPBasePoint    int  `json:"xp_base_point"`   // Base XP per level step (default: 1000, nariya xp_point)
+	XPRate         int  `json:"xp_rate"`         // Level growth rate (default: 2, nariya xp_rate)
+	MaxLevel       int  `json:"max_level"`       // Maximum level cap (default: 5000, nariya xp_max)
 }
 
 // DefaultXPConfig returns the default XP configuration
@@ -47,6 +50,9 @@ func DefaultXPConfig() *XPConfig {
 		LoginEnabled:   true,
 		WriteEnabled:   false,
 		CommentEnabled: false,
+		XPBasePoint:    1000,
+		XPRate:         2,
+		MaxLevel:       5000,
 	}
 }
 
@@ -95,18 +101,19 @@ func NewExpRepository(db *gorm.DB) ExpRepository {
 	return &expRepository{db: db}
 }
 
-// maxLevel is the highest level a user can reach
-const maxLevel = 100000
+// maxLevel is the highest level a user can reach (nariya xp_max)
+const maxLevel = 5000
 
 // levelExp returns the cumulative exp required for a given level (1-based).
-// Formula: level n requires n*(n-1)/2 * 1000 exp.
+// Nariya-compatible formula: xp_base * (n-1)² where xp_base=1000, xp_rate=2
 //
-//	Level 1: 0, Level 2: 1000, Level 3: 3000, Level 4: 6000, ...
+//	Level 1: 0, Level 2: 1000, Level 3: 4000, Level 10: 81000, Level 40: 1521000
 func levelExp(level int) int {
 	if level <= 1 {
 		return 0
 	}
-	return level * (level - 1) / 2 * 1000
+	n := level - 1
+	return 1000 * n * n
 }
 
 func calculateLevelInfo(totalExp int) (currentLevel, nextLevel, nextLevelExp, expToNext, progress int) {
@@ -387,6 +394,15 @@ func (r *expRepository) getXPConfigFromDB() (*XPConfig, error) {
 	}
 	if wrapper.XPConfig.CommentXP == 0 {
 		wrapper.XPConfig.CommentXP = 50
+	}
+	if wrapper.XPConfig.XPBasePoint == 0 {
+		wrapper.XPConfig.XPBasePoint = 1000
+	}
+	if wrapper.XPConfig.XPRate == 0 {
+		wrapper.XPConfig.XPRate = 2
+	}
+	if wrapper.XPConfig.MaxLevel == 0 {
+		wrapper.XPConfig.MaxLevel = 5000
 	}
 
 	return wrapper.XPConfig, nil
