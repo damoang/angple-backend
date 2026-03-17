@@ -434,24 +434,29 @@ func applyUserRestriction(tx *gorm.DB, targetMbID, disciplineType string, discip
 		return fmt.Errorf("회원 조회 실패: %w", err)
 	}
 
-	// 제재 종료일 계산 (mb_intercept_date는 varchar(8)이므로 YYYYMMDD 형식)
-	var restrictionEndDate string
-	if disciplineDays == 9999 {
-		restrictionEndDate = "99991231"
-	} else {
-		restrictionEndDate = now.AddDate(0, 0, disciplineDays).Format("20060102")
+	// disciplineType에 따라 적절한 필드만 업데이트
+	penaltyTypes := convertDisciplineType(disciplineType)
+
+	// "access" 유형에서만 mb_intercept_date 설정
+	// "level" 유형은 g5_member 변경 없음 (mb_level 강등도 하지 않음)
+	for _, pt := range penaltyTypes {
+		if pt == "access" {
+			var restrictionEndDate string
+			if disciplineDays == 9999 {
+				restrictionEndDate = "99991231"
+			} else {
+				restrictionEndDate = now.AddDate(0, 0, disciplineDays).Format("20060102")
+			}
+			if err := tx.Table("g5_member").Where("mb_id = ?", targetMbID).
+				Update("mb_intercept_date", restrictionEndDate).Error; err != nil {
+				return err
+			}
+			break
+		}
 	}
 
-	// 제재 적용 (글쓰기 차단만, mb_level 강등 없음)
-	updates := map[string]interface{}{}
-	updates["mb_intercept_date"] = restrictionEndDate
-
-	if err := tx.Table("g5_member").Where("mb_id = ?", targetMbID).Updates(updates).Error; err != nil {
-		return err
-	}
-
-	// g5_da_member_discipline 테이블에 제재 정보 저장 (모든 타입을 intercept로 통일)
-	penaltyTypeValue := "intercept"
+	// g5_da_member_discipline 테이블에 제재 정보 저장 (올바른 penalty_type 사용)
+	penaltyTypeValue := derivePenaltyTypeValue(penaltyTypes)
 
 	penaltyPeriod := disciplineDays
 	if disciplineDays == 9999 {
@@ -654,6 +659,30 @@ func convertDisciplineType(disciplineType string) []string {
 	default:
 		return []string{}
 	}
+}
+
+// derivePenaltyTypeValue converts penalty type slice to DB value string
+func derivePenaltyTypeValue(penaltyTypes []string) string {
+	hasLevel := false
+	hasAccess := false
+	for _, pt := range penaltyTypes {
+		if pt == "level" {
+			hasLevel = true
+		}
+		if pt == "access" {
+			hasAccess = true
+		}
+	}
+	if hasLevel && hasAccess {
+		return "both"
+	}
+	if hasLevel {
+		return "level"
+	}
+	if hasAccess {
+		return "intercept"
+	}
+	return ""
 }
 
 // stripTags removes HTML tags from a string (simple implementation)
