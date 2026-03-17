@@ -259,8 +259,8 @@ func (r *expRepository) HasTodayAction(mbID, action string) (bool, error) {
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 	var count int64
 	err := r.db.Model(&gnuboard.G5NaXP{}).
-		Where("mb_id = ? AND xp_rel_action = ? AND xp_datetime >= ? AND xp_datetime < ?",
-			mbID, action, todayStart, tomorrowStart).
+		Where("mb_id = ? AND xp_rel_table = ? AND xp_rel_action = ? AND xp_datetime >= ? AND xp_datetime < ?",
+			mbID, "@login", action, todayStart, tomorrowStart).
 		Count(&count).Error
 	if err != nil {
 		return false, err
