@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -111,7 +112,7 @@ func reservePostDedup(ctx context.Context, redisClient *redis.Client, boardID, m
 	}
 	key := makePostDedupKey(boardID, memberID, title)
 	_, err := redisClient.SetArgs(ctx, key, "1", redis.SetArgs{Mode: "NX", TTL: 30 * time.Second}).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return key, false
 	}
 	if err != nil {
@@ -142,7 +143,7 @@ func reserveCommentDedup(ctx context.Context, redisClient *redis.Client, boardID
 	}
 	key := makeCommentDedupKey(boardID, memberID, postID, parentID, content)
 	_, err := redisClient.SetArgs(ctx, key, "1", redis.SetArgs{Mode: "NX", TTL: 10 * time.Second}).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return key, false
 	}
 	if err != nil {
@@ -255,7 +256,7 @@ func beginIdempotentWrite(ctx context.Context, redisClient *redis.Client, baseKe
 		return "cached", cached
 	}
 	_, err := redisClient.SetArgs(ctx, getIdempotencyLockKey(baseKey), "1", redis.SetArgs{Mode: "NX", TTL: 60 * time.Second}).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		if cached, cacheErr := loadIdempotencyCachedResponse(ctx, redisClient, baseKey); cacheErr == nil && cached != nil {
 			return "cached", cached
 		}
