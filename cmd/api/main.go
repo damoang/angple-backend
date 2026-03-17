@@ -1976,6 +1976,15 @@ func main() {
 
 			tableName := fmt.Sprintf("g5_write_%s", slug)
 
+			// 중복 작성 방지: 30초 이내 같은 제목의 글이 있으면 거부
+			var dupPostCount int64
+			db.Table(tableName).Where("mb_id = ? AND wr_subject = ? AND wr_is_comment = 0 AND wr_datetime > ?",
+				mbID, req.Title, time.Now().Add(-30*time.Second)).Count(&dupPostCount)
+			if dupPostCount > 0 {
+				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 제목의 글이 방금 작성되었습니다."})
+				return
+			}
+
 			// wr_num 값 계산 (가장 작은 음수값 - 1, gnuboard 정렬 규칙)
 			var minNum int
 			db.Table(tableName).Select("COALESCE(MIN(wr_num), 0)").Scan(&minNum)
@@ -2156,6 +2165,15 @@ func main() {
 			now := time.Now()
 			nowStr := now.Format("2006-01-02 15:04:05")
 			tableName := fmt.Sprintf("g5_write_%s", slug)
+
+			// 중복 댓글 방지: 10초 이내 같은 내용의 댓글이 있으면 거부
+			var dupCommentCount int64
+			db.Table(tableName).Where("mb_id = ? AND wr_content = ? AND wr_is_comment = 1 AND wr_parent = ? AND wr_datetime > ?",
+				mbID, req.Content, postID, time.Now().Add(-10*time.Second)).Count(&dupCommentCount)
+			if dupCommentCount > 0 {
+				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 내용의 댓글이 방금 작성되었습니다."})
+				return
+			}
 
 			// 대댓글 처리 (그누보드 호환)
 			// wr_comment: 순서 번호 (루트 댓글은 MAX+1, 대댓글은 부모 루트의 순서 번호)
