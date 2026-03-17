@@ -6,21 +6,24 @@ import (
 	"time"
 
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
+	"gorm.io/gorm"
 )
 
 // DeleteWorker processes pending scheduled deletes in the background
 type DeleteWorker struct {
 	writeRepo gnurepo.WriteRepository
 	sdRepo    gnurepo.ScheduledDeleteRepository
+	db        *gorm.DB
 	stop      chan struct{}
 	wg        sync.WaitGroup
 }
 
 // NewDeleteWorker creates a new DeleteWorker
-func NewDeleteWorker(writeRepo gnurepo.WriteRepository, sdRepo gnurepo.ScheduledDeleteRepository) *DeleteWorker {
+func NewDeleteWorker(db *gorm.DB, writeRepo gnurepo.WriteRepository, sdRepo gnurepo.ScheduledDeleteRepository) *DeleteWorker {
 	return &DeleteWorker{
 		writeRepo: writeRepo,
 		sdRepo:    sdRepo,
+		db:        db,
 		stop:      make(chan struct{}),
 	}
 }
@@ -70,10 +73,24 @@ func (w *DeleteWorker) processPending() {
 
 	for _, sd := range records {
 		if sd.WrIsComment == 1 {
+			comment, findErr := w.writeRepo.FindCommentByID(sd.BoTable, sd.WrID)
+			if findErr != nil {
+				log.Printf("[DeleteWorker] Error finding comment %s/%d before delete: %v", sd.BoTable, sd.WrID, findErr)
+				continue
+			}
 			// Soft delete comment
 			if err := w.writeRepo.SoftDeleteComment(sd.BoTable, sd.WrID, sd.RequestedBy); err != nil {
 				log.Printf("[DeleteWorker] Error soft deleting comment %s/%d: %v", sd.BoTable, sd.WrID, err)
 				continue
+			}
+			if w.db != nil {
+				tableName := "g5_write_" + sd.BoTable
+				if err := w.db.Table(tableName).
+					Where("wr_id = ?", comment.WrParent).
+					Update("wr_comment", gorm.Expr("GREATEST(COALESCE(wr_comment, 0) - 1, 0)")).
+					Error; err != nil {
+					log.Printf("[DeleteWorker] Error decrementing comment count for %s/%d: %v", sd.BoTable, comment.WrParent, err)
+				}
 			}
 		} else {
 			// Soft delete post (including its comments)

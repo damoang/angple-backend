@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,6 +122,58 @@ func releasePostDedup(ctx context.Context, redisClient *redis.Client, key string
 		return
 	}
 	redisClient.Del(ctx, key) //nolint:errcheck
+}
+
+func makeCommentDedupKey(boardID, memberID string, postID int, parentID *int, content string) string {
+	parentPart := "root"
+	if parentID != nil && *parentID > 0 {
+		parentPart = strconv.Itoa(*parentID)
+	}
+	sum := sha1.Sum([]byte(strings.TrimSpace(strings.ToLower(content))))
+	return fmt.Sprintf("comment:dedupe:%s:%s:%d:%s:%s", boardID, memberID, postID, parentPart, hex.EncodeToString(sum[:]))
+}
+
+func reserveCommentDedup(ctx context.Context, redisClient *redis.Client, boardID, memberID string, postID int, parentID *int, content string) (string, bool) {
+	if redisClient == nil {
+		return "", true
+	}
+	key := makeCommentDedupKey(boardID, memberID, postID, parentID, content)
+	ok, err := redisClient.SetNX(ctx, key, "1", 10*time.Second).Result()
+	if err != nil {
+		return "", true
+	}
+	return key, ok
+}
+
+func releaseCommentDedup(ctx context.Context, redisClient *redis.Client, key string) {
+	if redisClient == nil || key == "" {
+		return
+	}
+	redisClient.Del(ctx, key) //nolint:errcheck
+}
+
+func adjustPostCommentCount(tx *gorm.DB, boardID string, postID int, delta int) error {
+	tableName := fmt.Sprintf("g5_write_%s", boardID)
+	return tx.Table(tableName).
+		Where("wr_id = ?", postID).
+		Update("wr_comment", gorm.Expr("GREATEST(COALESCE(wr_comment, 0) + ?, 0)", delta)).
+		Error
+}
+
+func logWritePhase(c *gin.Context, op, boardID string, targetID int, started time.Time, fields map[string]time.Duration) {
+	parts := make([]string, 0, len(fields))
+	for key, value := range fields {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, value.Round(time.Millisecond)))
+	}
+	sort.Strings(parts)
+	pkglogger.Info("write_trace op=%s board=%s target_id=%d request_id=%s total=%s %s",
+		op,
+		boardID,
+		targetID,
+		c.GetString("request_id"),
+		time.Since(started).Round(time.Millisecond),
+		strings.Join(parts, " "),
+	)
 }
 
 func getNextWrNumFast(ctx context.Context, db *gorm.DB, redisClient *redis.Client, boardID string) (int, error) {
@@ -2011,6 +2064,9 @@ func main() {
 
 		// POST /api/v1/boards/:slug/posts - Create post in g5_write_{slug}
 		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
+			startedAt := time.Now()
+			phaseStart := startedAt
+			phaseDurations := map[string]time.Duration{}
 			slug := c.Param("slug")
 
 			// 게시판 설정 조회
@@ -2019,6 +2075,8 @@ func main() {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시판을 찾을 수 없습니다"})
 				return
 			}
+			phaseDurations["board_lookup"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			// 요청 바디 파싱
 			var req struct {
@@ -2118,6 +2176,8 @@ func main() {
 			if req.Link2 != nil {
 				post.WrLink2 = *req.Link2
 			}
+			phaseDurations["validate"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			tableName := fmt.Sprintf("g5_write_%s", slug)
 			idempotencyBaseKey := getIdempotencyBaseKey(c, mbID)
@@ -2135,6 +2195,8 @@ func main() {
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 제목의 글이 방금 작성되었습니다."})
 				return
 			}
+			phaseDurations["dedupe"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			// wr_num 값 계산 (가장 작은 음수값 - 1, gnuboard 정렬 규칙)
 			nextWrNum, wrNumErr := getNextWrNumFast(c.Request.Context(), db, redisClient, slug)
@@ -2145,6 +2207,8 @@ func main() {
 				return
 			}
 			post.WrNum = nextWrNum
+			phaseDurations["wr_num"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			if err := db.Table(tableName).Create(&post).Error; err != nil {
 				releasePostDedup(c.Request.Context(), redisClient, dedupKey)
@@ -2155,6 +2219,8 @@ func main() {
 
 			// wr_parent를 자기 자신의 wr_id로 UPDATE (gnuboard 규칙)
 			db.Table(tableName).Where("wr_id = ?", post.WrID).Update("wr_parent", post.WrID)
+			phaseDurations["insert"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			// 태그 저장 (g5_na_tag / g5_na_tag_log)
 			if len(req.Tags) > 0 {
@@ -2177,6 +2243,8 @@ func main() {
 			if len(extras) > 0 {
 				db.Table(tableName).Where("wr_id = ?", post.WrID).Updates(extras)
 			}
+			phaseDurations["post_write"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			// 포인트 처리 (g5_point 기반 FIFO 소비)
 			if board.BoWritePoint != 0 {
@@ -2258,11 +2326,16 @@ func main() {
 				"data":    v1handler.TransformToV1PostDetail(&post, false),
 			}
 			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusCreated, payload)
+			phaseDurations["after_write"] = time.Since(phaseStart)
+			logWritePhase(c, "create_post", slug, post.WrID, startedAt, phaseDurations)
 			c.JSON(http.StatusCreated, payload)
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/comments - Create comment in g5_write_{slug}
 		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
+			startedAt := time.Now()
+			phaseStart := startedAt
+			phaseDurations := map[string]time.Duration{}
 			slug := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -2276,6 +2349,8 @@ func main() {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시판을 찾을 수 없습니다"})
 				return
 			}
+			phaseDurations["board_lookup"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			// 요청 바디 파싱
 			var req struct {
@@ -2320,6 +2395,8 @@ func main() {
 			if authorName == "" {
 				db.Table("g5_member").Select("mb_nick").Where("mb_id = ?", mbID).Scan(&authorName)
 			}
+			phaseDurations["validate"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			// g5_write_{slug} 테이블에 댓글 INSERT
 			now := time.Now()
@@ -2334,16 +2411,14 @@ func main() {
 				c.JSON(http.StatusAccepted, gin.H{"success": false, "error": "동일 요청을 처리 중입니다. 잠시만 기다려주세요."})
 				return
 			}
-
-			// 중복 댓글 방지: 10초 이내 같은 내용의 댓글이 있으면 거부
-			var dupCommentCount int64
-			db.Table(tableName).Where("mb_id = ? AND wr_content = ? AND wr_is_comment = 1 AND wr_parent = ? AND wr_datetime > ?",
-				mbID, req.Content, postID, time.Now().Add(-10*time.Second)).Count(&dupCommentCount)
-			if dupCommentCount > 0 {
+			dedupKey, reserved := reserveCommentDedup(c.Request.Context(), redisClient, slug, mbID, postID, req.ParentID, req.Content)
+			if !reserved {
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 내용의 댓글이 방금 작성되었습니다."})
 				return
 			}
+			phaseDurations["dedupe"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			// 대댓글 처리 (그누보드 호환)
 			// wr_comment: 순서 번호 (루트 댓글은 MAX+1, 대댓글은 부모 루트의 순서 번호)
@@ -2424,15 +2499,17 @@ func main() {
 					return err
 				}
 
-				// 부모 게시글의 wr_comment 카운트 갱신
-				var commentCount int64
-				tx.Table(tableName).Where("wr_parent = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", postID).Count(&commentCount)
-				tx.Table(tableName).Where("wr_id = ?", postID).Update("wr_comment", commentCount)
+				if err := adjustPostCommentCount(tx, slug, postID, 1); err != nil {
+					return err
+				}
 
 				return nil
 			})
+			phaseDurations["transaction"] = time.Since(phaseStart)
+			phaseStart = time.Now()
 
 			if txErr != nil {
+				releaseCommentDedup(c.Request.Context(), redisClient, dedupKey)
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				switch txErr.Error() {
 				case "PARENT_NOT_FOUND":
@@ -2552,6 +2629,8 @@ func main() {
 				},
 			}
 			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusCreated, payload)
+			phaseDurations["after_write"] = time.Since(phaseStart)
+			logWritePhase(c, "create_comment", slug, comment.WrID, startedAt, phaseDurations)
 			c.JSON(http.StatusCreated, payload)
 		})
 
@@ -3047,6 +3126,9 @@ func main() {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
 				}
+				if err := adjustPostCommentCount(db, slug, postID, -1); err != nil {
+					pkglogger.Info("comment_count_adjust_failed board=%s post_id=%d delta=-1 comment_id=%d err=%v", slug, postID, commentID, err)
+				}
 				// 캐시 무효화: 댓글 + 게시글 목록 (댓글 수 변경)
 				if cacheService != nil {
 					_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
@@ -3070,6 +3152,9 @@ func main() {
 				if err := gnuWriteRepo.SoftDeleteComment(slug, commentID, userID); err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
+				}
+				if err := adjustPostCommentCount(db, slug, postID, -1); err != nil {
+					pkglogger.Info("comment_count_adjust_failed board=%s post_id=%d delta=-1 comment_id=%d err=%v", slug, postID, commentID, err)
 				}
 				// 캐시 무효화: 댓글 + 게시글 목록 (댓글 수 변경)
 				if cacheService != nil {
@@ -3145,6 +3230,9 @@ func main() {
 
 			// 캐시 무효화
 			postID, _ := strconv.Atoi(c.Param("id"))
+			if err := adjustPostCommentCount(db, slug, postID, 1); err != nil {
+				pkglogger.Info("comment_count_adjust_failed board=%s post_id=%d delta=1 comment_id=%d err=%v", slug, postID, commentID, err)
+			}
 			if cacheService != nil {
 				_ = cacheService.InvalidateComments(c.Request.Context(), slug, postID)
 				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
@@ -4538,7 +4626,7 @@ func main() {
 		cronGroup.POST("/auto-promote", cronHandler.AutoPromote)
 
 		// Start delete worker for delayed deletion processing
-		deleteWorker := worker.NewDeleteWorker(gnuWriteRepo, scheduledDeleteRepo)
+		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo)
 		deleteWorker.Start()
 		defer deleteWorker.Stop()
 	} else {
