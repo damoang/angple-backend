@@ -36,6 +36,9 @@ func Run(db *gorm.DB) error {
 	if err := AddListDeletedIndexes(db); err != nil {
 		return err
 	}
+	if err := AddDisciplineLogPenaltyMbIDColumn(db); err != nil {
+		return err
+	}
 	return nil
 }
 

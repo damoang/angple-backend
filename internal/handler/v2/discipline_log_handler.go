@@ -96,14 +96,18 @@ var ViolationTypes = []ViolationType{
 	{40, "뉴스전문전재", "뉴스 전문을 허가 없이 전재하는 행위"},
 }
 
+// violationTypeMap is a pre-built lookup map for O(1) access by code
+var violationTypeMap = func() map[int]*ViolationType {
+	m := make(map[int]*ViolationType, len(ViolationTypes))
+	for i := range ViolationTypes {
+		m[ViolationTypes[i].Code] = &ViolationTypes[i]
+	}
+	return m
+}()
+
 // getViolationType returns the violation type by code
 func getViolationType(code int) *ViolationType {
-	for _, v := range ViolationTypes {
-		if v.Code == code {
-			return &v
-		}
-	}
-	return nil
+	return violationTypeMap[code]
 }
 
 // DisciplineLogListItem represents a discipline log item in list
@@ -219,9 +223,9 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 	var total int64
 
 	if memberID != "" {
-		// Filter by member_id using JSON_EXTRACT on wr_content
+		// Filter by member_id using generated column (indexed)
 		table := "g5_write_disciplinelog"
-		filter := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND JSON_VALID(wr_content) AND JSON_UNQUOTE(JSON_EXTRACT(wr_content, '$.penalty_mb_id')) = ?"
+		filter := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND penalty_mb_id = ?"
 
 		h.db.Table(table).Where(filter, memberID).Count(&total)
 		h.db.Table(table).Select(disciplineLogColumns).Where(filter, memberID).
