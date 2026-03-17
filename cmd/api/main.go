@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -50,6 +52,7 @@ import (
 	mysqldriver "github.com/go-sql-driver/mysql"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/driver/mysql"
@@ -90,6 +93,61 @@ type memCachedPosts struct {
 }
 
 var postMemCache sync.Map // key: "posts:{boardID}:{page}:{limit}"
+
+func makePostDedupKey(boardID, memberID, title string) string {
+	sum := sha1.Sum([]byte(strings.TrimSpace(strings.ToLower(title))))
+	return fmt.Sprintf("write:dedupe:%s:%s:%s", boardID, memberID, hex.EncodeToString(sum[:]))
+}
+
+func reservePostDedup(ctx context.Context, redisClient *redis.Client, boardID, memberID, title string) (string, bool) {
+	if redisClient == nil {
+		return "", true
+	}
+	key := makePostDedupKey(boardID, memberID, title)
+	ok, err := redisClient.SetNX(ctx, key, "1", 30*time.Second).Result()
+	if err != nil {
+		return "", true
+	}
+	return key, ok
+}
+
+func releasePostDedup(ctx context.Context, redisClient *redis.Client, key string) {
+	if redisClient == nil || key == "" {
+		return
+	}
+	redisClient.Del(ctx, key) //nolint:errcheck
+}
+
+func getNextWrNumFast(ctx context.Context, db *gorm.DB, redisClient *redis.Client, boardID string) (int, error) {
+	tableName := fmt.Sprintf("g5_write_%s", boardID)
+	if redisClient == nil {
+		var minNum int
+		if err := db.Table(tableName).Select("COALESCE(MIN(wr_num), 0)").Scan(&minNum).Error; err != nil {
+			return 0, err
+		}
+		return minNum - 1, nil
+	}
+
+	key := fmt.Sprintf("board:wr_num:%s", boardID)
+	exists, err := redisClient.Exists(ctx, key).Result()
+	if err == nil && exists == 0 {
+		var minNum int64
+		if scanErr := db.Table(tableName).Select("COALESCE(MIN(wr_num), 0)").Scan(&minNum).Error; scanErr != nil {
+			return 0, scanErr
+		}
+		redisClient.SetNX(ctx, key, minNum, 0) //nolint:errcheck
+	}
+
+	next, err := redisClient.Decr(ctx, key).Result()
+	if err != nil {
+		var minNum int
+		if scanErr := db.Table(tableName).Select("COALESCE(MIN(wr_num), 0)").Scan(&minNum).Error; scanErr != nil {
+			return 0, scanErr
+		}
+		return minNum - 1, nil
+	}
+	return int(next), nil
+}
 
 // filterItems filters blocked users' posts from parsed items slice, preserving notice posts.
 func filterItems(items []map[string]any, blockedIDs []string) []map[string]any {
@@ -1975,22 +2033,23 @@ func main() {
 			}
 
 			tableName := fmt.Sprintf("g5_write_%s", slug)
-
-			// 중복 작성 방지: 30초 이내 같은 제목의 글이 있으면 거부
-			var dupPostCount int64
-			db.Table(tableName).Where("mb_id = ? AND wr_subject = ? AND wr_is_comment = 0 AND wr_datetime > ?",
-				mbID, req.Title, time.Now().Add(-30*time.Second)).Count(&dupPostCount)
-			if dupPostCount > 0 {
+			dedupKey, reserved := reservePostDedup(c.Request.Context(), redisClient, slug, mbID, req.Title)
+			if !reserved {
 				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "같은 제목의 글이 방금 작성되었습니다."})
 				return
 			}
 
 			// wr_num 값 계산 (가장 작은 음수값 - 1, gnuboard 정렬 규칙)
-			var minNum int
-			db.Table(tableName).Select("COALESCE(MIN(wr_num), 0)").Scan(&minNum)
-			post.WrNum = minNum - 1
+			nextWrNum, wrNumErr := getNextWrNumFast(c.Request.Context(), db, redisClient, slug)
+			if wrNumErr != nil {
+				releasePostDedup(c.Request.Context(), redisClient, dedupKey)
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "wr_num 생성 실패"})
+				return
+			}
+			post.WrNum = nextWrNum
 
 			if err := db.Table(tableName).Create(&post).Error; err != nil {
+				releasePostDedup(c.Request.Context(), redisClient, dedupKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 작성 실패"})
 				return
 			}
