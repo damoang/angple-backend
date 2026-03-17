@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -975,6 +974,7 @@ func main() {
 		// v1 notifications (g5_na_noti)
 		notiRepo := gnurepo.NewNotiRepository(db)
 		notiPrefRepo := gnurepo.NewNotiPreferenceRepository(db)
+		memberActivitySync := service.NewMemberActivitySyncService(db)
 		notiHandler := handler.NewNotiHandler(notiRepo, notiPrefRepo)
 		notiGroup := router.Group("/api/v1/notifications", middleware.JWTAuth(jwtManager))
 		notiGroup.GET("/unread-count", notiHandler.GetUnreadCount)
@@ -1378,6 +1378,17 @@ func main() {
 			}
 			return ids
 		}
+		writeAfterWorker := worker.NewWriteAfterWorker(
+			db,
+			cacheService,
+			notiRepo,
+			notiPrefRepo,
+			memberActivitySync,
+			getBlockedIDs,
+			worker.ClearPostMemCache(&postMemCache),
+		)
+		writeAfterWorker.Start(4)
+		defer writeAfterWorker.Stop()
 
 		// v1 block routes
 		v1Members := router.Group("/api/v1/members")
@@ -2294,72 +2305,14 @@ func main() {
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoWritePoint, "글쓰기", tableName, fmt.Sprintf("%d", post.WrID), "@write", pc) //nolint:errcheck
 			}
 
-			// 응답 이후 처리: 캐시 무효화 + 알림
-			go func() {
-				if cacheService != nil {
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-					defer cancel()
-					_ = cacheService.InvalidatePosts(ctx, slug)
-				}
-				postMemCache.Range(func(key, value interface{}) bool {
-					if strings.HasPrefix(key.(string), "posts:"+slug+":") {
-						postMemCache.Delete(key)
-					}
-					return true
-				})
-
-				authorName := post.WrName
-				if authorName == "" {
-					authorName = mbID
-				}
-				subject := post.WrSubject
-				now := time.Now()
-
-				// 1. 팔로워 알림: 이 작성자를 팔로우한 사람들
-				var followerIDs []string
-				db.Table("g5_member_follow").Select("mb_id").Where("target_id = ?", mbID).Pluck("mb_id", &followerIDs)
-				for _, fid := range followerIDs {
-					if pref, _ := notiPrefRepo.Get(fid); !pref.NotiFollow {
-						continue
-					}
-					_ = notiRepo.Create(&gnurepo.Notification{
-						PhToCase: "follow", PhFromCase: "write", BoTable: slug,
-						WrID: post.WrID, MbID: fid, RelMbID: mbID,
-						RelMbNick:  authorName,
-						RelMsg:     fmt.Sprintf("%s님이 새 글을 작성했습니다: %s", authorName, subject),
-						RelURL:     fmt.Sprintf("/%s/%d", slug, post.WrID),
-						PhReaded:   "N",
-						PhDatetime: now,
-						WrParent:   post.WrID,
-					})
-				}
-
-				// 2. 게시판 구독자 알림: 이 게시판을 구독한 사람들 (작성자 제외, 팔로워 중복 제외)
-				var subscriberIDs []string
-				db.Table("g5_board_subscribe").Select("mb_id").Where("bo_table = ? AND mb_id != ?", slug, mbID).Pluck("mb_id", &subscriberIDs)
-				followerSet := make(map[string]bool, len(followerIDs))
-				for _, fid := range followerIDs {
-					followerSet[fid] = true
-				}
-				for _, sid := range subscriberIDs {
-					if followerSet[sid] {
-						continue // 이미 팔로워 알림 받음
-					}
-					if pref, _ := notiPrefRepo.Get(sid); !pref.NotiFollow {
-						continue
-					}
-					_ = notiRepo.Create(&gnurepo.Notification{
-						PhToCase: "subscribe", PhFromCase: "write", BoTable: slug,
-						WrID: post.WrID, MbID: sid, RelMbID: mbID,
-						RelMbNick:  authorName,
-						RelMsg:     fmt.Sprintf("%s 게시판에 새 글: %s", slug, subject),
-						RelURL:     fmt.Sprintf("/%s/%d", slug, post.WrID),
-						PhReaded:   "N",
-						PhDatetime: now,
-						WrParent:   post.WrID,
-					})
-				}
-			}()
+			writeAfterWorker.Enqueue(worker.PostCreatedJob{
+				BoardSlug: slug,
+				WriteID:   post.WrID,
+				MemberID:  mbID,
+				Author:    post.WrName,
+				Subject:   post.WrSubject,
+				CreatedAt: now,
+			})
 
 			payload := gin.H{
 				"success": true,
@@ -2578,80 +2531,15 @@ func main() {
 				commentIP = comment.WrIP
 			}
 
-			// 응답 이후 처리: 캐시 무효화 + 알림
-			go func() {
-				if cacheService != nil {
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-					defer cancel()
-					_ = cacheService.InvalidateComments(ctx, slug, postID)
-					_ = cacheService.InvalidatePosts(ctx, slug)
-				}
-				postMemCache.Range(func(key, value interface{}) bool {
-					if strings.HasPrefix(key.(string), "posts:"+slug+":") {
-						postMemCache.Delete(key)
-					}
-					return true
-				})
-
-				// 게시글 작성자 조회
-				var postAuthor struct {
-					MbID      string `gorm:"column:mb_id"`
-					WrSubject string `gorm:"column:wr_subject"`
-				}
-				if err := db.Table(tableName).Select("mb_id, wr_subject").Where("wr_id = ? AND wr_is_comment = 0", postID).Scan(&postAuthor).Error; err != nil || postAuthor.MbID == "" {
-					return
-				}
-
-				// 대댓글인 경우: 부모 댓글 작성자에게 알림
-				if req.ParentID != nil && *req.ParentID > 0 {
-					var parentAuthorMbID string
-					if err := db.Table(tableName).Select("mb_id").Where("wr_id = ?", *req.ParentID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != mbID {
-						// 수신자가 발신자를 차단한 경우 알림 생략 (Redis 캐시 활용)
-						if slices.Contains(getBlockedIDs(context.Background(), parentAuthorMbID), mbID) {
-							// skip
-						} else if pref, _ := notiPrefRepo.Get(parentAuthorMbID); pref.NotiReply {
-							_ = notiRepo.Create(&gnurepo.Notification{
-								PhToCase:      "comment_reply",
-								PhFromCase:    "comment",
-								BoTable:       slug,
-								WrID:          comment.WrID,
-								MbID:          parentAuthorMbID,
-								RelMbID:       mbID,
-								RelMbNick:     authorName,
-								RelMsg:        fmt.Sprintf("%s님이 회원님의 댓글에 답글을 남겼습니다.", authorName),
-								RelURL:        fmt.Sprintf("/%s/%d#comment_%d", slug, postID, comment.WrID),
-								PhReaded:      "N",
-								PhDatetime:    now,
-								ParentSubject: postAuthor.WrSubject,
-								WrParent:      postID,
-							})
-						}
-					}
-				}
-
-				// 게시글 작성자에게 알림 (자기 댓글은 제외, 차단한 사용자 제외)
-				if postAuthor.MbID != mbID {
-					if slices.Contains(getBlockedIDs(context.Background(), postAuthor.MbID), mbID) {
-						// 게시글 작성자가 댓글 작성자를 차단한 경우 알림 생략
-					} else if pref, _ := notiPrefRepo.Get(postAuthor.MbID); pref.NotiComment {
-						_ = notiRepo.Create(&gnurepo.Notification{
-							PhToCase:      "comment",
-							PhFromCase:    "comment",
-							BoTable:       slug,
-							WrID:          comment.WrID,
-							MbID:          postAuthor.MbID,
-							RelMbID:       mbID,
-							RelMbNick:     authorName,
-							RelMsg:        fmt.Sprintf("%s님이 회원님의 글에 댓글을 남겼습니다.", authorName),
-							RelURL:        fmt.Sprintf("/%s/%d#comment_%d", slug, postID, comment.WrID),
-							PhReaded:      "N",
-							PhDatetime:    now,
-							ParentSubject: postAuthor.WrSubject,
-							WrParent:      postID,
-						})
-					}
-				}
-			}()
+			writeAfterWorker.Enqueue(worker.CommentCreatedJob{
+				BoardSlug: slug,
+				WriteID:   comment.WrID,
+				PostID:    postID,
+				ParentID:  req.ParentID,
+				MemberID:  mbID,
+				Author:    authorName,
+				CreatedAt: now,
+			})
 
 			payload := gin.H{
 				"success": true,
