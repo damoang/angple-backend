@@ -51,6 +51,13 @@ var (
 		},
 		[]string{"event_type"},
 	)
+	writeAfterActivitySyncFailuresTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "write_after_activity_sync_failures_total",
+			Help: "Total number of member activity sync failures inside write-after processing",
+		},
+		[]string{"event_type"},
+	)
 )
 
 type WriteAfterWorker struct {
@@ -221,6 +228,7 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	}
 	if w.activitySync != nil {
 		if err := w.activitySync.SyncLegacyPost(job.BoardSlug, job.WriteID); err != nil {
+			writeAfterActivitySyncFailuresTotal.WithLabelValues(gnudomain.WriteAfterEventTypePostCreated).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for post %s/%d: %v", job.BoardSlug, job.WriteID, err)
 		}
 	}
@@ -289,6 +297,7 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 	}
 	if w.activitySync != nil {
 		if err := w.activitySync.SyncLegacyComment(job.BoardSlug, job.WriteID); err != nil {
+			writeAfterActivitySyncFailuresTotal.WithLabelValues(gnudomain.WriteAfterEventTypeCommentCreated).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for comment %s/%d: %v", job.BoardSlug, job.WriteID, err)
 		}
 	}
@@ -364,6 +373,7 @@ func (w *WriteAfterWorker) handlePostChanged(event gnudomain.WriteAfterEvent) {
 	}
 	if w.activitySync != nil {
 		if err := w.activitySync.SyncLegacyPost(event.BoardSlug, event.WriteID); err != nil {
+			writeAfterActivitySyncFailuresTotal.WithLabelValues(event.EventType).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for post %s/%d: %v", event.BoardSlug, event.WriteID, err)
 		}
 	}
@@ -384,6 +394,7 @@ func (w *WriteAfterWorker) handleCommentChanged(event gnudomain.WriteAfterEvent)
 	}
 	if w.activitySync != nil {
 		if err := w.activitySync.SyncLegacyComment(event.BoardSlug, event.WriteID); err != nil {
+			writeAfterActivitySyncFailuresTotal.WithLabelValues(event.EventType).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for comment %s/%d: %v", event.BoardSlug, event.WriteID, err)
 		}
 	}
