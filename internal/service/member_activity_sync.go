@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
 	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -95,7 +96,7 @@ func (s *MemberActivitySyncService) syncPost(postID uint64, rebuildStats bool) e
 		MemberID:        row.MemberID,
 		BoardID:         row.BoardSlug,
 		WriteTable:      "v2_posts",
-		WriteID:         int(row.ID),
+		WriteID:         common.SafeUint64ToInt(row.ID),
 		ActivityType:    1,
 		IsPublic:        isPublic,
 		IsDeleted:       row.Status == "deleted",
@@ -124,7 +125,7 @@ func (s *MemberActivitySyncService) syncPost(postID uint64, rebuildStats bool) e
 		}).Error; err != nil {
 		return err
 	}
-	if members, err := s.memberIDsForParent("v2_comments", int(postID)); err == nil {
+	if members, err := s.memberIDsForParent("v2_comments", common.SafeUint64ToInt(postID)); err == nil {
 		affectedMembers = append(affectedMembers, members...)
 	}
 
@@ -180,12 +181,12 @@ func (s *MemberActivitySyncService) syncComment(commentID uint64, rebuildStats b
 		!row.PostSecret &&
 		s.isBoardSearchable(row.BoardSlug)
 	updatedAt := row.UpdatedAt
-	parentID := int(row.PostID)
+	parentID := common.SafeUint64ToInt(row.PostID)
 	feed := &gnudomain.MemberActivityFeed{
 		MemberID:        row.MemberID,
 		BoardID:         row.BoardSlug,
 		WriteTable:      "v2_comments",
-		WriteID:         int(row.ID),
+		WriteID:         common.SafeUint64ToInt(row.ID),
 		ParentWriteID:   &parentID,
 		ActivityType:    2,
 		IsPublic:        isPublic,
