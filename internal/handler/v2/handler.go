@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -476,6 +477,7 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 
 // UpdatePost handles PUT /api/v1/boards/:slug/posts/:id
 func (h *V2Handler) UpdatePost(c *gin.Context) {
+	slug := c.Param("slug")
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
@@ -486,6 +488,16 @@ func (h *V2Handler) UpdatePost(c *gin.Context) {
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
 		return
+	}
+
+	// 소명글 수정 차단: claim 게시판에서 disciplinelog 연동 글은 수정 불가
+	if slug == "claim" && h.gnuDB != nil && middleware.GetUserLevel(c) < 10 {
+		var link1 string
+		h.gnuDB.Table("g5_write_claim").Select("wr_link1").Where("wr_id = ?", id).Scan(&link1)
+		if strings.HasPrefix(link1, "disciplinelog") {
+			common.V2ErrorResponse(c, http.StatusForbidden, "소명글은 수정할 수 없습니다.", nil)
+			return
+		}
 	}
 
 	// 권한 체크: 작성자 또는 관리자만 수정 가능
@@ -535,6 +547,7 @@ func (h *V2Handler) UpdatePost(c *gin.Context) {
 
 // DeletePost handles DELETE /api/v1/boards/:slug/posts/:id (soft delete)
 func (h *V2Handler) DeletePost(c *gin.Context) {
+	slug := c.Param("slug")
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
@@ -545,6 +558,16 @@ func (h *V2Handler) DeletePost(c *gin.Context) {
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
 		return
+	}
+
+	// 소명글 삭제 차단: claim 게시판에서 disciplinelog 연동 글은 삭제 불가
+	if slug == "claim" && h.gnuDB != nil && middleware.GetUserLevel(c) < 10 {
+		var link1 string
+		h.gnuDB.Table("g5_write_claim").Select("wr_link1").Where("wr_id = ?", id).Scan(&link1)
+		if strings.HasPrefix(link1, "disciplinelog") {
+			common.V2ErrorResponse(c, http.StatusForbidden, "소명글은 삭제할 수 없습니다.", nil)
+			return
+		}
 	}
 
 	// 권한 체크: 작성자 또는 관리자만 삭제 가능

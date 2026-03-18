@@ -35,8 +35,18 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 			Select("mb_intercept_date").
 			Where("mb_id = ?", mbID).
 			Row().Scan(&interceptDate)
-		if err != nil || interceptDate == "" {
-			// mb_intercept_date가 비어있어도 g5_da_member_discipline에 활성 제재가 있으면 차단
+		// mb_intercept_date가 비어있거나, 파싱 실패하거나, 만료된 경우 → fallback으로 discipline 테이블 재확인
+		needsFallback := (err != nil || interceptDate == "")
+		if !needsFallback {
+			banEnd, parseErr := parseInterceptDate(interceptDate)
+			if parseErr != nil {
+				needsFallback = true
+			} else if time.Now().After(banEnd) {
+				needsFallback = true
+			}
+		}
+
+		if needsFallback {
 			var penaltyEndDate string
 			fallbackErr := gnuDB.Raw(
 				`SELECT CASE
@@ -69,9 +79,8 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		now := time.Now()
-		if now.After(banEnd) {
-			// Ban expired
+		if time.Now().After(banEnd) {
+			// Ban expired (and no active discipline found in fallback)
 			c.Next()
 			return
 		}
