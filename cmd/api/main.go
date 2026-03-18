@@ -4222,8 +4222,8 @@ func main() {
 		v2MemoRepo := v2repo.NewMemoRepository(db)
 		v2BlockRepo := v2repo.NewBlockRepository(db)
 		v2MessageRepo := v2repo.NewMessageRepository(db)
-		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager)
-		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager)
+		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager, db)
+		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager, db)
 		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager, db)
 		v2routes.SetupFavorite(router, v2handler.NewFavoriteHandler(db), jwtManager)
@@ -4430,7 +4430,7 @@ func main() {
 		})
 
 		// POST /api/v1/polls/:id/vote — 투표 참여
-		pollGroup.POST("/:id/vote", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		pollGroup.POST("/:id/vote", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			pollID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid poll ID"})
