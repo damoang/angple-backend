@@ -437,21 +437,17 @@ func applyUserRestriction(tx *gorm.DB, targetMbID, disciplineType string, discip
 	// disciplineType에 따라 적절한 필드만 업데이트
 	penaltyTypes := convertDisciplineType(disciplineType)
 
-	// "access" 유형에서만 mb_intercept_date 설정
-	// "level" 유형은 g5_member 변경 없음 (mb_level 강등도 하지 않음)
-	for _, pt := range penaltyTypes {
-		if pt == "access" {
-			var restrictionEndDate string
-			if disciplineDays == 9999 {
-				restrictionEndDate = "99991231"
-			} else {
-				restrictionEndDate = now.AddDate(0, 0, disciplineDays).Format("20060102")
-			}
-			if err := tx.Table("g5_member").Where("mb_id = ?", targetMbID).
-				Update("mb_intercept_date", restrictionEndDate).Error; err != nil {
-				return err
-			}
-			break
+	// penalty_type 무관하게 disciplineDays > 0이면 항상 mb_intercept_date 설정
+	if disciplineDays > 0 || disciplineDays == 9999 {
+		var restrictionEndDate string
+		if disciplineDays == 9999 {
+			restrictionEndDate = "99991231"
+		} else {
+			restrictionEndDate = now.AddDate(0, 0, disciplineDays).Format("20060102")
+		}
+		if err := tx.Table("g5_member").Where("mb_id = ?", targetMbID).
+			Update("mb_intercept_date", restrictionEndDate).Error; err != nil {
+			return err
 		}
 	}
 

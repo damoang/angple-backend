@@ -132,11 +132,12 @@ func SetupAdminSettings(router *gin.Engine, h *v2handler.AdminSettingsHandler, j
 }
 
 // SetupScrap configures v2 scrap routes
-func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.Manager) {
+func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.Manager, gnuDB *gorm.DB) {
 	auth := middleware.JWTAuth(jwtManager)
+	banCheck := middleware.BanCheck(gnuDB)
 
 	posts := router.Group("/api/v2/posts")
-	posts.POST("/:id/scrap", auth, h.AddScrap)
+	posts.POST("/:id/scrap", auth, banCheck, h.AddScrap)
 	posts.DELETE("/:id/scrap", auth, h.RemoveScrap)
 
 	me := router.Group("/api/v2/me", auth)
@@ -144,12 +145,13 @@ func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.M
 }
 
 // SetupMemo configures v2 memo routes
-func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Manager) {
+func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Manager, gnuDB *gorm.DB) {
 	auth := middleware.JWTAuth(jwtManager)
+	banCheck := middleware.BanCheck(gnuDB)
 
 	memo := router.Group("/api/v2/members/:id/memo", auth)
 	memo.GET("", h.GetMemo)
-	memo.POST("", h.CreateMemo)
+	memo.POST("", banCheck, h.CreateMemo)
 	memo.PUT("", h.UpdateMemo)
 	memo.DELETE("", h.DeleteMemo)
 	memo.GET("/all", middleware.RequireAdmin(), h.GetAllMemos)
