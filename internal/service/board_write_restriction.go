@@ -174,6 +174,27 @@ func (s *BoardWriteRestrictionService) Check(boardSlug, memberID string, memberL
 	return &WriteRestrictionResult{CanWrite: true, Remaining: -1, DailyLimit: 0}, nil
 }
 
+// PolicyComparison holds the base and candidate restriction results for dry-run comparison.
+type PolicyComparison struct {
+	Base      *WriteRestrictionResult `json:"base"`
+	Policy    interface{}             `json:"policy"`
+	Candidate *WriteRestrictionResult `json:"candidate"`
+}
+
+// CompareWithAdvertiserPolicy performs a dry-run comparison of base write restriction
+// versus advertiser-policy-adjusted restriction.
+func (s *BoardWriteRestrictionService) CompareWithAdvertiserPolicy(boardSlug, memberID string, memberLevel int) (*PolicyComparison, error) {
+	base, err := s.Check(boardSlug, memberID, memberLevel)
+	if err != nil {
+		return nil, err
+	}
+	// Currently returns base as both base and candidate (shadow mode only).
+	return &PolicyComparison{
+		Base:      base,
+		Candidate: base,
+	}, nil
+}
+
 // countTodayPosts counts the number of non-comment posts written today (KST) by the member.
 // wr_datetime is stored in KST by legacy PHP (Gnuboard).
 func (s *BoardWriteRestrictionService) countTodayPosts(boardSlug, memberID string) (int, error) {

@@ -15,6 +15,7 @@ const (
 	interceptDateDashFormat  = "2006-01-02"
 	interceptDateShortFormat = "20060102"
 	promotionBoardSlug       = "promotion"
+	claimBoardSlug           = "claim"
 )
 
 // BanCheck checks if the authenticated user is banned (mb_intercept_date).
@@ -75,9 +76,9 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// User is currently banned — only promotion board is allowed
+		// User is currently banned — only promotion and claim boards are allowed
 		slug := c.Param("slug")
-		if slug == promotionBoardSlug {
+		if slug == promotionBoardSlug || slug == claimBoardSlug {
 			c.Next()
 			return
 		}
