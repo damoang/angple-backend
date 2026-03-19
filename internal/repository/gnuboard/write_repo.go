@@ -130,6 +130,26 @@ func tableName(boardID string) string {
 	return fmt.Sprintf("g5_write_%s", boardID)
 }
 
+// allowedSortColumns is the whitelist for bo_sort_field values
+var allowedSortColumns = map[string]bool{
+	"wr_num, wr_reply":          true,
+	"wr_datetime DESC":          true,
+	"wr_hit DESC":               true,
+	"wr_good DESC":              true,
+	"wr_good DESC, wr_num":      true,
+	"wr_id DESC":                true,
+	"wr_num":                    true,
+	"wr_reply":                  true,
+	"wr_last DESC":              true,
+	"wr_last DESC, wr_num":      true,
+	"wr_comment DESC":           true,
+	"wr_comment DESC, wr_num":   true,
+	"wr_datetime":               true,
+	"wr_num DESC, wr_reply":     true,
+	"wr_num ASC, wr_reply":      true,
+	"wr_num DESC, wr_reply ASC": true,
+}
+
 // getSortField returns the sort clause for a board (with caching)
 func (r *writeRepository) getSortField(boardID string) string {
 	orderClause := "wr_num, wr_reply"
@@ -146,7 +166,7 @@ func (r *writeRepository) getSortField(boardID string) string {
 	var sortField string
 	r.db.Table("g5_board").Select("bo_sort_field").Where("bo_table = ?", boardID).Scan(&sortField)
 	sortFieldCache.Store(boardID, &cachedSortField{field: sortField, expiresAt: now.Add(sortFieldCacheTTL)})
-	if sortField != "" {
+	if sortField != "" && allowedSortColumns[sortField] {
 		return sortField
 	}
 	return orderClause

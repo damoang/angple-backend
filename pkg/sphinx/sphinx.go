@@ -100,6 +100,7 @@ func escapeSphinx(s string) string {
 		`$`, `\$`,
 		`=`, `\=`,
 		`<`, `\<`,
+		`@`, `\@`,
 	)
 	return replacer.Replace(s)
 }

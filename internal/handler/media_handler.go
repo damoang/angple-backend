@@ -90,7 +90,7 @@ func (h *MediaHandler) DeleteFile(c *gin.Context) {
 	}
 
 	if err := h.mediaService.DeleteFile(c.Request.Context(), req.Key); err != nil {
-		common.ErrorResponse(c, http.StatusInternalServerError, "Delete failed: "+err.Error(), nil)
+		common.ErrorResponse(c, http.StatusBadRequest, "파일 삭제 실패", nil)
 		return
 	}
 

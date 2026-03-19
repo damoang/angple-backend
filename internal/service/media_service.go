@@ -31,7 +31,7 @@ func NewMediaService(s3Client *storage.S3Client) *MediaService {
 		s3:      s3Client,
 		maxSize: 50 * 1024 * 1024, // 50MB
 		allowExts: []string{
-			".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
+			".jpg", ".jpeg", ".png", ".gif", ".webp",
 			".mp4", ".webm", ".mov",
 			".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
 			".zip", ".rar", ".7z", ".tar", ".gz",
@@ -82,7 +82,7 @@ func (s *MediaService) UploadImage(ctx context.Context, file *multipart.FileHead
 	var width, height int
 
 	// Try to decode and resize if it's a raster image (not SVG/GIF)
-	if ext != ".svg" && ext != ".gif" {
+	if ext != ".gif" {
 		img, format, decErr := image.Decode(bytes.NewReader(data))
 		if decErr == nil {
 			bounds := img.Bounds()
@@ -249,8 +249,21 @@ func (s *MediaService) UploadVideo(ctx context.Context, file *multipart.FileHead
 	}, nil
 }
 
-// DeleteFile removes a file from storage
+// allowedKeyPrefixes restricts which S3 paths can be deleted via API
+var allowedKeyPrefixes = []string{"images/", "attachments/", "videos/", "editor/"}
+
+// DeleteFile removes a file from storage after validating the key prefix
 func (s *MediaService) DeleteFile(ctx context.Context, key string) error {
+	allowed := false
+	for _, prefix := range allowedKeyPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("삭제할 수 없는 파일입니다")
+	}
 	return s.s3.Delete(ctx, key)
 }
 
@@ -270,7 +283,7 @@ func (s *MediaService) isAllowedExt(ext string) bool {
 
 func isImageExt(ext string) bool {
 	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg":
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 		return true
 	}
 	return false
@@ -290,6 +303,11 @@ func isDangerousContentType(ct string) bool {
 		"application/x-sharedlib",
 		"application/x-mach-binary",
 		"application/x-dosexec",
+		"text/html",
+		"application/javascript",
+		"application/xhtml+xml",
+		"application/x-httpd-php",
+		"image/svg+xml",
 	}
 	for _, d := range dangerous {
 		if strings.HasPrefix(ct, d) {
