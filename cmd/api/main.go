@@ -385,6 +385,19 @@ func safeIntToUint64(v int) uint64 {
 	return uint64(v) // #nosec G115 -- IDs are always non-negative
 }
 
+// extractDisciplinelogID extracts the numeric ID from link1 values like "disciplinelog/1234" or "disciplinelog:1234"
+func extractDisciplinelogID(link1 string) string {
+	for _, prefix := range []string{"disciplinelog/", "disciplinelog:"} {
+		if strings.HasPrefix(link1, prefix) {
+			id := link1[len(prefix):]
+			if _, err := strconv.Atoi(id); err == nil {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
 func main() {
 	dotenvFiles := config.LoadDotEnv()
 
@@ -2297,6 +2310,14 @@ func main() {
 			if req.Link2 != nil {
 				post.WrLink2 = *req.Link2
 			}
+
+			// 소명 게시판: 제목 자동 생성 (disciplinelog 번호 기반)
+			if slug == "claim" && req.Link1 != nil {
+				if id := extractDisciplinelogID(*req.Link1); id != "" {
+					post.WrSubject = "[소명 #" + id + "]"
+				}
+			}
+
 			phaseDurations["validate"] = time.Since(phaseStart)
 			phaseStart = time.Now()
 
