@@ -983,7 +983,7 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
 		})
 
-		router.GET("/api/v1/boards/:slug/notices", func(c *gin.Context) {
+		router.GET("/api/v1/boards/:slug/notices", middleware.ValidateBoardSlug(), func(c *gin.Context) {
 			slug := c.Param("slug")
 			ctx := c.Request.Context()
 
@@ -1532,6 +1532,7 @@ func main() {
 
 		// v1 boards routes → use Gnuboard g5_* tables
 		v1Boards := router.Group("/api/v1/boards")
+		v1Boards.Use(middleware.ValidateBoardSlug())
 		v1Boards.Use(middleware.OptionalJWTAuth(jwtManager))
 		v1Boards.Use(middleware.ArchiveBoardCheck())
 		v1Boards.Use(middleware.APICacheControl(10)) // 브라우저 캐시 10초
