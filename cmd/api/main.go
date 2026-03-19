@@ -377,6 +377,14 @@ func filterItems(items []map[string]any, blockedIDs []string) []map[string]any {
 	return filtered
 }
 
+// safeIntToUint64 converts int to uint64, clamping negative values to 0.
+func safeIntToUint64(v int) uint64 {
+	if v < 0 {
+		return 0
+	}
+	return uint64(v) // #nosec G115 -- IDs are always non-negative
+}
+
 func main() {
 	dotenvFiles := config.LoadDotEnv()
 
@@ -2363,7 +2371,7 @@ func main() {
 			if v2RevisionRepo != nil {
 				userIDUint, _ := strconv.ParseUint(mbID, 10, 64)
 				_ = v2RevisionRepo.Create(&v2domain.V2ContentRevision{
-					PostID:       uint64(post.WrID),
+					PostID:       safeIntToUint64(post.WrID),
 					Version:      1,
 					ChangeType:   "create",
 					Title:        post.WrSubject,
@@ -2636,7 +2644,7 @@ func main() {
 			if v2RevisionRepo != nil {
 				userIDUint, _ := strconv.ParseUint(mbID, 10, 64)
 				_ = v2RevisionRepo.Create(&v2domain.V2ContentRevision{
-					PostID:       uint64(createdComment.WrID),
+					PostID:       safeIntToUint64(createdComment.WrID),
 					Version:      1,
 					ChangeType:   "create",
 					Content:      createdComment.WrContent,
@@ -2745,9 +2753,9 @@ func main() {
 			if v2RevisionRepo != nil {
 				userIDUint, _ := strconv.ParseUint(userID, 10, 64)
 				nickname := middleware.GetNickname(c)
-				v2NextVer, _ := v2RevisionRepo.GetNextVersion(uint64(postID))
+				v2NextVer, _ := v2RevisionRepo.GetNextVersion(safeIntToUint64(postID))
 				_ = v2RevisionRepo.Create(&v2domain.V2ContentRevision{
-					PostID:       uint64(postID),
+					PostID:       safeIntToUint64(postID),
 					Version:      v2NextVer,
 					ChangeType:   "update",
 					Title:        post.WrSubject,
@@ -2904,9 +2912,9 @@ func main() {
 			if v2RevisionRepo != nil {
 				userIDUint, _ := strconv.ParseUint(userID, 10, 64)
 				nickname := middleware.GetNickname(c)
-				v2NextVer, _ := v2RevisionRepo.GetNextVersion(uint64(commentID))
+				v2NextVer, _ := v2RevisionRepo.GetNextVersion(safeIntToUint64(commentID))
 				_ = v2RevisionRepo.Create(&v2domain.V2ContentRevision{
-					PostID:       uint64(commentID),
+					PostID:       safeIntToUint64(commentID),
 					Version:      v2NextVer,
 					ChangeType:   "update",
 					Content:      comment.WrContent,
