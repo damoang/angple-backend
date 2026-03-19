@@ -3,6 +3,7 @@ package middleware
 import (
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/damoang/angple-backend/pkg/jwt"
 	"github.com/gin-gonic/gin"
 )
+
+// internalSecret is loaded from INTERNAL_SECRET env var at startup
+var internalSecret = os.Getenv("INTERNAL_SECRET")
 
 // getRemoteIP extracts the actual connection IP from RemoteAddr (ignores X-Forwarded-For)
 // RemoteAddr format: "IP:port" or "[IPv6]:port"
@@ -48,7 +52,7 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		// 1. 127.0.0.1에서 오는 요청 (nginx → SvelteKit → Backend)
 		// 2. 공유 시크릿 일치 (CloudFront가 직접 Backend로 라우팅하는 경우)
 		isLocalhost := remoteIP == "127.0.0.1" || remoteIP == "::1"
-		hasValidSecret := internalSecret == "angple-internal-dev-2026"
+		hasValidSecret := internalSecret != "" && internalSecret == c.GetHeader("X-Internal-Secret")
 		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
 			userID := c.GetHeader("X-Internal-User-ID")
 			levelStr := c.GetHeader("X-Internal-User-Level")
@@ -123,7 +127,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		internalAuth := c.GetHeader("X-Internal-Auth")
 		internalSecret := c.GetHeader("X-Internal-Secret")
 		isLocalhost := remoteIP == "127.0.0.1" || remoteIP == "::1"
-		hasValidSecret := internalSecret == "angple-internal-dev-2026"
+		hasValidSecret := internalSecret != "" && internalSecret == c.GetHeader("X-Internal-Secret")
 		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
 			userID := c.GetHeader("X-Internal-User-ID")
 			levelStr := c.GetHeader("X-Internal-User-Level")

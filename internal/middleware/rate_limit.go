@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -61,9 +60,9 @@ func RateLimit(redisClient *redis.Client, cfg RateLimitConfig) gin.HandlerFunc {
 			return
 		}
 
-		// SSR 요청은 rate limit 우회 (SvelteKit 서버 사이드 렌더링)
-		userAgent := c.GetHeader("User-Agent")
-		if strings.HasPrefix(userAgent, "Angple-Web-SSR") {
+		// SSR 요청은 rate limit 우회 (localhost에서 오는 SvelteKit 요청만)
+		remoteIP := getRemoteIP(c)
+		if remoteIP == "127.0.0.1" || remoteIP == "::1" {
 			c.Next()
 			return
 		}

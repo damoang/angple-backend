@@ -580,8 +580,8 @@ func main() {
 		// router.Use(middleware.WriteRateLimit(redisClient, middleware.WriteRateLimitConfig(), "/api/v2/media"))
 	}
 
-	// Prometheus metrics
-	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	// Prometheus metrics (localhost only)
+	router.GET("/metrics", middleware.RequireLocalhost(), gin.WrapH(promhttp.Handler()))
 
 	// Health Check (DB ping 포함 — 커넥션 죽으면 K8s가 파드 재시작)
 	router.GET("/health", func(c *gin.Context) {
@@ -625,8 +625,8 @@ func main() {
 		})
 	})
 
-	// Swagger UI
-	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger UI (localhost only — 프로덕션 API 스키마 노출 방지)
+	router.GET("/swagger/*any", middleware.RequireLocalhost(), ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// v2 API routes (only if DB is connected)
 	if db != nil {
@@ -723,11 +723,18 @@ func main() {
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager, v2ExpRepo)
 		v2AuthSvc.SetPromotionDeps(db, gnurepo.NewNotiRepository(db))
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
-		v2routes.SetupAuth(router, v2AuthHandler, jwtManager)
+
+		// 로그인 rate limit (10회/분)
+		loginRateLimit := middleware.RateLimit(redisClient, middleware.RateLimitConfig{
+			RequestsPerMinute: 10,
+			KeyPrefix:         "api:ratelimit:login:",
+			Message:           "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.",
+		})
+		v2routes.SetupAuth(router, v2AuthHandler, jwtManager, loginRateLimit)
 
 		// v1 compatibility routes (frontend calls /api/v1/*)
 		v1Auth := router.Group("/api/v1/auth")
-		v1Auth.POST("/login", v2AuthHandler.Login)
+		v1Auth.POST("/login", loginRateLimit, v2AuthHandler.Login)
 		v1Auth.POST("/refresh", v2AuthHandler.RefreshToken)
 		v1Auth.POST("/logout", v2AuthHandler.Logout)
 		v1Auth.GET("/me", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
@@ -3624,6 +3631,10 @@ func main() {
 				return
 			}
 
+			if !middleware.BoardSlugRegex.MatchString(req.TargetBoardID) {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid target board ID"})
+				return
+			}
 			if srcBoard == req.TargetBoardID {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "같은 게시판으로는 이동할 수 없습니다"})
 				return
@@ -4806,12 +4817,14 @@ func main() {
 		mp.POST("/:name/download", marketplaceHandler.TrackDownload)
 
 		mpDev := router.Group("/api/v2/marketplace/developers")
+		mpDev.Use(middleware.JWTAuth(jwtManager))
 		mpDev.POST("/register", marketplaceHandler.RegisterDeveloper)
 		mpDev.GET("/me", marketplaceHandler.GetMyProfile)
 		mpDev.POST("/submissions", marketplaceHandler.SubmitPlugin)
 		mpDev.GET("/submissions", marketplaceHandler.ListMySubmissions)
 
 		mpAdmin := router.Group("/api/v2/admin/marketplace")
+		mpAdmin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		mpAdmin.GET("/submissions/pending", marketplaceHandler.ListPendingSubmissions)
 		mpAdmin.POST("/submissions/:id/review", marketplaceHandler.ReviewSubmission)
 
@@ -4825,10 +4838,11 @@ func main() {
 			givingGroup.GET("/list", givingHandler.List)
 		}
 
-		// Internal cron endpoints (curl-based cron jobs)
+		// Internal cron endpoints (curl-based cron jobs, localhost only)
 		cronHandler := cron.NewHandler(db)
 		cronHandler.SetPointExpiryDeps(pointConfigRepo, gnuPointWriteRepo, gnurepo.NewNotiRepository(db))
 		cronGroup := router.Group("/api/internal/cron")
+		cronGroup.Use(middleware.RequireLocalhost())
 		cronGroup.POST("/member-lock-release", cronHandler.MemberLockRelease)
 		cronGroup.POST("/update-member-levels", cronHandler.UpdateMemberLevels)
 		cronGroup.POST("/process-approved-reports", cronHandler.ProcessApprovedReports)

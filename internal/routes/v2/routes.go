@@ -10,9 +10,10 @@ import (
 )
 
 // SetupAuth configures v2 authentication routes
-func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.Manager) {
+func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.Manager, loginRateLimit ...gin.HandlerFunc) {
 	authGroup := router.Group("/api/v2/auth")
-	authGroup.POST("/login", h.Login)
+	loginHandlers := append(loginRateLimit, h.Login)
+	authGroup.POST("/login", loginHandlers...)
 	authGroup.POST("/refresh", h.RefreshToken)
 	authGroup.POST("/logout", h.Logout)
 	authGroup.GET("/me", middleware.JWTAuth(jwtManager), h.GetMe)
