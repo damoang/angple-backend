@@ -3624,6 +3624,10 @@ func main() {
 				return
 			}
 
+			if !middleware.BoardSlugRegex.MatchString(req.TargetBoardID) {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid target board ID"})
+				return
+			}
 			if srcBoard == req.TargetBoardID {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "같은 게시판으로는 이동할 수 없습니다"})
 				return
@@ -4806,12 +4810,14 @@ func main() {
 		mp.POST("/:name/download", marketplaceHandler.TrackDownload)
 
 		mpDev := router.Group("/api/v2/marketplace/developers")
+		mpDev.Use(middleware.JWTAuth(jwtManager))
 		mpDev.POST("/register", marketplaceHandler.RegisterDeveloper)
 		mpDev.GET("/me", marketplaceHandler.GetMyProfile)
 		mpDev.POST("/submissions", marketplaceHandler.SubmitPlugin)
 		mpDev.GET("/submissions", marketplaceHandler.ListMySubmissions)
 
 		mpAdmin := router.Group("/api/v2/admin/marketplace")
+		mpAdmin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		mpAdmin.GET("/submissions/pending", marketplaceHandler.ListPendingSubmissions)
 		mpAdmin.POST("/submissions/:id/review", marketplaceHandler.ReviewSubmission)
 
@@ -4825,10 +4831,11 @@ func main() {
 			givingGroup.GET("/list", givingHandler.List)
 		}
 
-		// Internal cron endpoints (curl-based cron jobs)
+		// Internal cron endpoints (curl-based cron jobs, localhost only)
 		cronHandler := cron.NewHandler(db)
 		cronHandler.SetPointExpiryDeps(pointConfigRepo, gnuPointWriteRepo, gnurepo.NewNotiRepository(db))
 		cronGroup := router.Group("/api/internal/cron")
+		cronGroup.Use(middleware.RequireLocalhost())
 		cronGroup.POST("/member-lock-release", cronHandler.MemberLockRelease)
 		cronGroup.POST("/update-member-levels", cronHandler.UpdateMemberLevels)
 		cronGroup.POST("/process-approved-reports", cronHandler.ProcessApprovedReports)

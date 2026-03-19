@@ -7,6 +7,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// RequireLocalhost blocks requests not originating from 127.0.0.1 or ::1
+func RequireLocalhost() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := getRemoteIP(c)
+		if ip != "127.0.0.1" && ip != "::1" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		c.Next()
+	}
+}
+
 // RequireAdmin checks that the authenticated user has admin level (>= 10)
 func RequireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
