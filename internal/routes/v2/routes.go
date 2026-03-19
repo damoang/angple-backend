@@ -39,6 +39,7 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 
 	// Boards (OptionalJWTAuth로 인증된 사용자에게 permissions 제공)
 	boards := api.Group("/boards")
+	boards.Use(middleware.ValidateBoardSlug())
 	boards.Use(middleware.OptionalJWTAuth(jwtManager))
 	boards.Use(middleware.ArchiveBoardCheck())
 	boards.GET("", h.ListBoards)
@@ -187,13 +188,16 @@ func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *j
 	messages.DELETE("/:id", h.DeleteMessage)
 }
 
-// SetupInstall configures v2 installation routes (no authentication required)
+// SetupInstall configures v2 installation routes
 func SetupInstall(router *gin.Engine, h *v2handler.InstallHandler) {
 	install := router.Group("/api/v2/install")
 
 	install.GET("/status", h.CheckInstallStatus)
-	install.POST("/test-db", h.TestDB)
-	install.POST("/create-admin", h.CreateAdmin)
+
+	// 설치 미완료일 때만 접근 가능
+	installOnly := install.Group("", h.RequireNotInstalled())
+	installOnly.POST("/test-db", h.TestDB)
+	installOnly.POST("/create-admin", h.CreateAdmin)
 }
 
 // SetupMyPage configures user's own data routes (points, exp, posts, comments, stats)

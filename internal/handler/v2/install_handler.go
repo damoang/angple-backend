@@ -54,6 +54,20 @@ type CreateAdminResponse struct {
 	Message string `json:"message"`
 }
 
+// RequireNotInstalled returns middleware that blocks access if installation is already complete
+func (h *InstallHandler) RequireNotInstalled() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var count int64
+		h.db.Table("v2_users").Where("level >= 10").Count(&count)
+		if count > 0 {
+			common.V2ErrorResponse(c, http.StatusForbidden, "이미 설치가 완료되었습니다", nil)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // TestDB handles POST /api/v2/install/test-db
 // @Summary Test database connection
 // @Description Tests if the provided database credentials are valid
@@ -221,12 +235,11 @@ func (h *InstallHandler) CheckInstallStatus(c *gin.Context) {
 	err := h.db.Table("v2_users").Where("level >= 10").Count(&adminCount).Error
 
 	if err != nil {
-		// Table doesn't exist or DB error
+		// Table doesn't exist or DB error — 내부 정보 노출 방지
 		common.V2Success(c, gin.H{
-			"installed":    false,
-			"hasDatabase":  false,
-			"hasAdmin":     false,
-			"errorMessage": err.Error(),
+			"installed":   false,
+			"hasDatabase": false,
+			"hasAdmin":    false,
 		})
 		return
 	}

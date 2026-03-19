@@ -1,0 +1,30 @@
+package middleware
+
+import (
+	"net/http"
+	"regexp"
+
+	"github.com/damoang/angple-backend/internal/common"
+	"github.com/gin-gonic/gin"
+)
+
+// boardSlugRegex allows lowercase letters, digits, and underscores, max 20 chars.
+// Matches Gnuboard's board ID rules.
+var boardSlugRegex = regexp.MustCompile(`^[a-z0-9_]{1,20}$`)
+
+// ValidateBoardSlug rejects requests whose :slug parameter contains invalid characters.
+func ValidateBoardSlug() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		slug := c.Param("slug")
+		if slug == "" {
+			c.Next()
+			return
+		}
+		if !boardSlugRegex.MatchString(slug) {
+			common.ErrorResponse(c, http.StatusBadRequest, "Invalid board ID", nil)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
