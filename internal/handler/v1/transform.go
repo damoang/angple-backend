@@ -41,10 +41,16 @@ func toThumbnailURL(rawURL string, size string) string {
 	if thumbnailRegex == nil {
 		return rawURL
 	}
-	// 이미 썸네일 URL이면 이중 변환 방지
-	if thumbnailSuffixRegex.MatchString(rawURL) {
+	// 이미 요청한 크기와 동일한 썸네일이면 스킵
+	if strings.HasSuffix(rawURL, "-"+size+".webp") {
 		return rawURL
 	}
+	// 다른 크기의 썸네일이면 크기 suffix 제거 후 재생성
+	if loc := thumbnailSuffixRegex.FindStringIndex(rawURL); loc != nil {
+		base := rawURL[:loc[0]]
+		return base + "-" + size + ".webp"
+	}
+	// 썸네일이 아닌 일반 URL → 기존 로직
 	m := thumbnailRegex.FindStringSubmatch(rawURL)
 	if m == nil {
 		return rawURL
