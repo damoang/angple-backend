@@ -580,8 +580,8 @@ func main() {
 		// router.Use(middleware.WriteRateLimit(redisClient, middleware.WriteRateLimitConfig(), "/api/v2/media"))
 	}
 
-	// Prometheus metrics
-	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	// Prometheus metrics (localhost only)
+	router.GET("/metrics", middleware.RequireLocalhost(), gin.WrapH(promhttp.Handler()))
 
 	// Health Check (DB ping 포함 — 커넥션 죽으면 K8s가 파드 재시작)
 	router.GET("/health", func(c *gin.Context) {
@@ -625,8 +625,8 @@ func main() {
 		})
 	})
 
-	// Swagger UI
-	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger UI (localhost only — 프로덕션 API 스키마 노출 방지)
+	router.GET("/swagger/*any", middleware.RequireLocalhost(), ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// v2 API routes (only if DB is connected)
 	if db != nil {
@@ -723,11 +723,18 @@ func main() {
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager, v2ExpRepo)
 		v2AuthSvc.SetPromotionDeps(db, gnurepo.NewNotiRepository(db))
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
-		v2routes.SetupAuth(router, v2AuthHandler, jwtManager)
+
+		// 로그인 rate limit (10회/분)
+		loginRateLimit := middleware.RateLimit(redisClient, middleware.RateLimitConfig{
+			RequestsPerMinute: 10,
+			KeyPrefix:         "api:ratelimit:login:",
+			Message:           "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.",
+		})
+		v2routes.SetupAuth(router, v2AuthHandler, jwtManager, loginRateLimit)
 
 		// v1 compatibility routes (frontend calls /api/v1/*)
 		v1Auth := router.Group("/api/v1/auth")
-		v1Auth.POST("/login", v2AuthHandler.Login)
+		v1Auth.POST("/login", loginRateLimit, v2AuthHandler.Login)
 		v1Auth.POST("/refresh", v2AuthHandler.RefreshToken)
 		v1Auth.POST("/logout", v2AuthHandler.Logout)
 		v1Auth.GET("/me", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)

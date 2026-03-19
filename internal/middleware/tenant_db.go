@@ -2,10 +2,14 @@ package middleware
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 
 	"gorm.io/gorm"
 )
+
+// schemaNameRegex validates schema names (alphanumeric + underscore, max 64 chars)
+var schemaNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]{1,64}$`)
 
 // TenantDBResolver resolves the correct database connection for a tenant
 // based on the site's DB strategy (shared, schema, dedicated)
@@ -36,7 +40,7 @@ func (r *TenantDBResolver) ResolveDB(_, dbStrategy, schemaName string) *gorm.DB 
 
 // resolveSchema returns a session scoped to the given schema
 func (r *TenantDBResolver) resolveSchema(schemaName string) *gorm.DB {
-	if schemaName == "" {
+	if schemaName == "" || !schemaNameRegex.MatchString(schemaName) {
 		return r.defaultDB
 	}
 
@@ -58,12 +62,18 @@ func (r *TenantDBResolver) resolveSchema(schemaName string) *gorm.DB {
 
 // CreateSchema creates a new database schema for a tenant
 func (r *TenantDBResolver) CreateSchema(schemaName string) error {
+	if !schemaNameRegex.MatchString(schemaName) {
+		return fmt.Errorf("invalid schema name: %s", schemaName)
+	}
 	sql := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", schemaName)
 	return r.defaultDB.Exec(sql).Error
 }
 
 // DropSchema drops a tenant's database schema
 func (r *TenantDBResolver) DropSchema(schemaName string) error {
+	if !schemaNameRegex.MatchString(schemaName) {
+		return fmt.Errorf("invalid schema name: %s", schemaName)
+	}
 	sql := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", schemaName)
 	r.schemaDbs.Delete(schemaName)
 	return r.defaultDB.Exec(sql).Error
