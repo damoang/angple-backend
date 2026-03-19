@@ -1,6 +1,7 @@
 package v1handler
 
 import (
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -11,6 +12,64 @@ import (
 
 // imgSrcRegex matches src attribute in <img> tags
 var imgSrcRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
+
+// thumbnailRegex matches S3 image URLs for thumbnail conversion
+var thumbnailRegex *regexp.Regexp
+
+// imgTagSrcRegex matches <img> tags with src attributes containing S3 image URLs
+var imgTagSrcRegex *regexp.Regexp
+
+func init() {
+	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
+	if cdnURL != "" {
+		if parsed, err := url.Parse(cdnURL); err == nil {
+			host := regexp.QuoteMeta(parsed.Host)
+			// GIF 제외: 애니메이션 손실 방지
+			thumbnailRegex = regexp.MustCompile(`(?i)^(https?://` + host + `/data/(?:file|editor)/.+)\.(jpg|jpeg|png|webp)$`)
+			imgTagSrcRegex = regexp.MustCompile(`(<img\s[^>]*?src=)(["'])(https?://` + host + `/data/(?:file|editor)/.+?\.(?:jpg|jpeg|png|webp))(["'])`)
+		}
+	}
+}
+
+// thumbnailSuffixRegex detects URLs that are already thumbnail versions
+var thumbnailSuffixRegex = regexp.MustCompile(`-\d+x\d+\.webp$`)
+
+// toThumbnailURL converts an S3 image URL to a Lambda-generated thumbnail URL
+func toThumbnailURL(rawURL string, size string) string {
+	if thumbnailRegex == nil {
+		return rawURL
+	}
+	// 이미 썸네일 URL이면 이중 변환 방지
+	if thumbnailSuffixRegex.MatchString(rawURL) {
+		return rawURL
+	}
+	m := thumbnailRegex.FindStringSubmatch(rawURL)
+	if m == nil {
+		return rawURL
+	}
+	return m[1] + "-" + size + ".webp"
+}
+
+// optimizeContentImages replaces img src URLs with thumbnail versions and adds data-original
+func optimizeContentImages(html string) string {
+	if imgTagSrcRegex == nil {
+		return html
+	}
+	return imgTagSrcRegex.ReplaceAllStringFunc(html, func(match string) string {
+		parts := imgTagSrcRegex.FindStringSubmatch(match)
+		if len(parts) < 5 {
+			return match
+		}
+		imgPrefix := parts[1] // <img ... src=
+		quote := parts[2]     // " or '
+		originalURL := parts[3]
+		thumbURL := toThumbnailURL(originalURL, "835x626")
+		if thumbURL == originalURL {
+			return match
+		}
+		return imgPrefix + quote + thumbURL + quote + " data-original=" + quote + originalURL + quote
+	})
+}
 
 // kst is the Asia/Seoul timezone for parsing gnuboard datetime values
 var kst = time.FixedZone("KST", 9*60*60)
@@ -75,8 +134,12 @@ func normalizeMediaURL(raw string) string {
 
 func normalizeMediaContent(raw string) string {
 	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
-	if raw == "" || cdnURL == "" {
+	if raw == "" {
 		return raw
+	}
+
+	if cdnURL == "" {
+		return optimizeContentImages(raw)
 	}
 
 	replacer := strings.NewReplacer(
@@ -97,7 +160,8 @@ func normalizeMediaContent(raw string) string {
 		`href="data/`, `href="`+cdnURL+`/data/`,
 		`href='data/`, `href='`+cdnURL+`/data/`,
 	)
-	return replacer.Replace(raw)
+	result := replacer.Replace(raw)
+	return optimizeContentImages(result)
 }
 
 func rewriteLegacyCDNHost(raw, cdnURL string) string {
@@ -170,10 +234,13 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 
 	// Add thumbnail: priority is wr_10 > first <img> in content
 	if w.Wr10 != "" {
-		result["thumbnail"] = normalizeMediaURL(w.Wr10)
-		result["extra_10"] = normalizeMediaURL(w.Wr10)
+		normalized := normalizeMediaURL(w.Wr10)
+		result["thumbnail"] = toThumbnailURL(normalized, "400x225")
+		result["thumbnail_raw"] = normalized
+		result["extra_10"] = normalized
 	} else if img := extractFirstImageURL(w.WrContent); img != "" {
-		result["thumbnail"] = img
+		result["thumbnail"] = toThumbnailURL(img, "400x225")
+		result["thumbnail_raw"] = img
 	}
 
 	return result
@@ -205,7 +272,7 @@ func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 	result := map[string]any{
 		"id":         w.WrID,
 		"post_id":    w.WrParent,
-		"content":    w.WrContent,
+		"content":    normalizeMediaContent(w.WrContent),
 		"author":     w.WrName,
 		"author_id":  w.MbID,
 		"likes":      w.WrGood,
