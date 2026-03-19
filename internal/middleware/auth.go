@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -37,16 +36,6 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		remoteIP := getRemoteIP(c)
 		internalAuth := c.GetHeader("X-Internal-Auth")
 		internalSecret := c.GetHeader("X-Internal-Secret")
-		internalUserID := c.GetHeader("X-Internal-User-ID")
-
-		// 디버그: admin 요청 로깅
-		if strings.Contains(c.Request.URL.Path, "admin") {
-			log.Printf("[JWTAuth DEBUG] %s %s | remoteIP=%s clientIP=%s | internalAuth=%s hasSecret=%v userID=%s | hasAuthHeader=%v",
-				c.Request.Method, c.Request.URL.Path,
-				remoteIP, c.ClientIP(),
-				internalAuth, internalSecret != "", internalUserID,
-				c.GetHeader("Authorization") != "")
-		}
 
 		// 내부 신뢰 요청 확인 (두 가지 방식)
 		// 1. 127.0.0.1에서 오는 요청 (nginx → SvelteKit → Backend)
