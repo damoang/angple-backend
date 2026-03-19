@@ -350,14 +350,16 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		CreatedAt:       post.WrDatetime.Format("2006-01-02 15:04:05"),
 	}
 
-	// 소명글 존재 여부 조회 (claim 게시판에서 wr_link1 매칭: 상대경로/풀URL 모두)
+	// 소명글 존재 여부 조회 (claim 게시판에서 wr_link1 또는 wr_content 매칭)
 	var claimPostID int
 	linkColon := "disciplinelog:" + strconv.Itoa(id)
 	linkSlash := "disciplinelog/" + strconv.Itoa(id)
 	linkLike := "%disciplinelog/" + strconv.Itoa(id)
+	contentLikeRel := `%href="/disciplinelog/` + strconv.Itoa(id) + `"%`
+	contentLikeFull := `%href="https://damoang.net/disciplinelog/` + strconv.Itoa(id) + `"%`
 	err = h.db.Table("g5_write_claim").
 		Select("wr_id").
-		Where("(wr_link1 = ? OR wr_link1 = ? OR wr_link1 LIKE ?) AND wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", linkColon, linkSlash, linkLike).
+		Where("(wr_link1 = ? OR wr_link1 = ? OR wr_link1 LIKE ? OR wr_content LIKE ? OR wr_content LIKE ?) AND wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", linkColon, linkSlash, linkLike, contentLikeRel, contentLikeFull).
 		Order("wr_id DESC").
 		Limit(1).
 		Scan(&claimPostID).Error
