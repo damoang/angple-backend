@@ -4371,6 +4371,10 @@ func main() {
 		v1Messages.POST("", banCheck, v1MsgHandler.SendMessage)
 		v1Messages.DELETE("/:id", v1MsgHandler.DeleteMessage)
 
+		// Site Logo
+		siteLogoRepo := v2repo.NewSiteLogoRepository(db)
+		v2routes.SetupSiteLogo(router, v2handler.NewSiteLogoHandler(siteLogoRepo), jwtManager)
+
 		// Banner, Promotion, License (v1 + v2 dual routes)
 		bannerRepo := v2repo.NewBannerRepository(db)
 		v2routes.SetupBanner(router, v2handler.NewBannerHandler(bannerRepo))
