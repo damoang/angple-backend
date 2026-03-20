@@ -56,9 +56,16 @@ setup:
 
 # 로컬 개발 환경 (Docker All-in-One)
 dev-docker:
+	@echo "Ensuring Docker network exists: angple-dev-network"
+	@if ! docker network inspect angple-dev-network >/dev/null 2>&1; then \
+		echo "Creating network: angple-dev-network"; \
+		docker network create angple-dev-network >/dev/null; \
+	else \
+		echo "Network already exists: angple-dev-network"; \
+	fi
 	@echo "Starting development environment with Docker (MySQL + Redis + API)..."
 	@echo "Containers: angple-dev-mysql, angple-dev-redis, angple-dev-api"
-	docker compose -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.dev.yml up
 	@echo ""
 	@echo "✅ Development environment started!"
 	@echo "   API: http://localhost:8081"
