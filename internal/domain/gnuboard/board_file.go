@@ -1,6 +1,9 @@
 package gnuboard
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // G5BoardFile represents the g5_board_file table (file attachments)
 type G5BoardFile struct {
@@ -11,12 +14,11 @@ type G5BoardFile struct {
 	BfFile     string    `gorm:"column:bf_file" json:"bf_file"`         // 저장된 파일명 (레거시: 해시파일명)
 	BfContent  string    `gorm:"column:bf_content" json:"bf_content"`   // 파일 설명
 	BfDownload int       `gorm:"column:bf_download" json:"bf_download"` // 다운로드 횟수
-	BfFileURL  string    `gorm:"column:bf_fileurl" json:"bf_fileurl"`   // S3 전체 URL
-	BfStorage  string    `gorm:"column:bf_storage" json:"bf_storage"`   // 저장소 타입 (s3)
 	BfFilesize int64     `gorm:"column:bf_filesize" json:"bf_filesize"` // 파일 크기
 	BfWidth    int       `gorm:"column:bf_width" json:"bf_width"`       // 이미지 가로
 	BfHeight   int       `gorm:"column:bf_height" json:"bf_height"`     // 이미지 세로
 	BfType     int       `gorm:"column:bf_type" json:"bf_type"`         // 파일 타입 (0: 일반, 1: 이미지 등)
+	BfFileURL  string    `gorm:"column:bf_fileurl" json:"bf_fileurl"`   // CDN URL (있으면 우선 사용)
 	BfDateTime time.Time `gorm:"column:bf_datetime" json:"bf_datetime"`
 }
 
@@ -45,8 +47,20 @@ func (f *G5BoardFile) ToFileResponse(baseURL string) FileResponse {
 	// 이미지 여부 판단 (bf_type이 1이거나 이미지 확장자인 경우)
 	isImage := f.BfType == 1 || f.BfWidth > 0 || f.BfHeight > 0
 
-	// 파일 URL 생성
-	fileURL := baseURL + "/data/file/" + f.BoTable + "/" + f.BfFile
+	// 파일 URL 생성: bf_fileurl이 있으면 우선 사용 (레거시 CDN 호스트 치환)
+	var fileURL string
+	if f.BfFileURL != "" {
+		fileURL = f.BfFileURL
+		// 레거시 CDN 호스트를 현재 baseURL로 치환
+		for _, legacy := range []string{"https://cdn.damoang.net", "http://cdn.damoang.net", "https://s3.damoang.net", "http://s3.damoang.net"} {
+			if strings.HasPrefix(fileURL, legacy) {
+				fileURL = baseURL + strings.TrimPrefix(fileURL, legacy)
+				break
+			}
+		}
+	} else {
+		fileURL = baseURL + "/data/file/" + f.BoTable + "/" + f.BfFile
+	}
 	thumbnailURL := ""
 	if isImage {
 		thumbnailURL = fileURL // 이미지인 경우 썸네일로 사용
