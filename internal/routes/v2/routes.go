@@ -273,6 +273,19 @@ func SetupLicense(router *gin.Engine, h *v2handler.LicenseHandler) {
 	router.POST("/api/v2/licenses/verify", h.Verify)
 }
 
+// SetupSiteLogo configures site logo routes (admin CRUD + public active logo)
+func SetupSiteLogo(router *gin.Engine, h *v2handler.SiteLogoHandler, jwtManager *jwt.Manager) {
+	admin := router.Group("/api/v1/admin/logos")
+	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+	admin.GET("", h.ListLogos)
+	admin.POST("", h.CreateLogo)
+	admin.PUT("/:id", h.UpdateLogo)
+	admin.DELETE("/:id", h.DeleteLogo)
+
+	// public: 오늘의 로고 (SSR용)
+	router.GET("/api/v1/logos/active", h.GetActiveLogo)
+}
+
 // SetupFavorite configures board favorites routes
 func SetupFavorite(router *gin.Engine, h *v2handler.FavoriteHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
