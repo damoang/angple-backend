@@ -36,6 +36,40 @@ func (r *FileRepository) GetFile(boardID string, postID int, fileNo int) (*gnubo
 	return &file, nil
 }
 
+// CreateFile inserts a new file record into g5_board_file
+func (r *FileRepository) CreateFile(file *gnuboard.G5BoardFile) error {
+	return r.db.Create(file).Error
+}
+
+// CreateFiles inserts multiple file records into g5_board_file
+func (r *FileRepository) CreateFiles(files []gnuboard.G5BoardFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	return r.db.Create(&files).Error
+}
+
+// DeleteFilesByPost removes all file records for a specific post
+func (r *FileRepository) DeleteFilesByPost(boardID string, postID int) error {
+	return r.db.Where("bo_table = ? AND wr_id = ?", boardID, postID).Delete(&gnuboard.G5BoardFile{}).Error
+}
+
+// GetMaxBfNo returns the current max bf_no for a post (for determining next file number)
+func (r *FileRepository) GetMaxBfNo(boardID string, postID int) (int, error) {
+	var maxNo *int
+	err := r.db.Model(&gnuboard.G5BoardFile{}).
+		Where("bo_table = ? AND wr_id = ?", boardID, postID).
+		Select("MAX(bf_no)").
+		Scan(&maxNo).Error
+	if err != nil {
+		return -1, err
+	}
+	if maxNo == nil {
+		return -1, nil
+	}
+	return *maxNo, nil
+}
+
 // IncrementDownloadCount increases the download count for a file
 func (r *FileRepository) IncrementDownloadCount(boardID string, postID int, fileNo int) error {
 	return r.db.Model(&gnuboard.G5BoardFile{}).

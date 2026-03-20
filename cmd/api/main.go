@@ -2231,6 +2231,14 @@ func main() {
 				Extra2   *string  `json:"extra_2"`
 				Extra3   *string  `json:"extra_3"`
 				Tags     []string `json:"tags"`
+				Files    []struct {
+					Key      string `json:"key"`
+					URL      string `json:"url"`
+					Filename string `json:"filename"`
+					Size     int64  `json:"size"`
+					Width    int    `json:"width"`
+					Height   int    `json:"height"`
+				} `json:"files"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "제목과 내용을 입력해주세요"})
@@ -2441,6 +2449,29 @@ func main() {
 					pc, _ = pointConfigRepo.GetPointConfig()
 				}
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoWritePoint, "글쓰기", tableName, fmt.Sprintf("%d", post.WrID), "@write", pc) //nolint:errcheck
+			}
+
+			// 첨부파일 레코드 생성 (g5_board_file)
+			if len(req.Files) > 0 {
+				var boardFiles []gnuboard.G5BoardFile
+				for i, f := range req.Files {
+					boardFiles = append(boardFiles, gnuboard.G5BoardFile{
+						BoTable:    slug,
+						WrID:       post.WrID,
+						BfNo:       i,
+						BfSource:   f.Filename,
+						BfFile:     f.Key[strings.LastIndex(f.Key, "/")+1:],
+						BfFileURL:  f.URL,
+						BfStorage:  "s3",
+						BfFilesize: f.Size,
+						BfWidth:    f.Width,
+						BfHeight:   f.Height,
+						BfDateTime: now,
+					})
+				}
+				if err := gnuFileRepo.CreateFiles(boardFiles); err != nil {
+					fmt.Printf("[WARN] file attachment save failed for %s/%d: %v\n", slug, post.WrID, err)
+				}
 			}
 
 			payload := gin.H{
@@ -2766,6 +2797,14 @@ func main() {
 				Extra2   *string  `json:"extra_2"`
 				Extra3   *string  `json:"extra_3"`
 				Tags     []string `json:"tags"`
+				Files    *[]struct {
+					Key      string `json:"key"`
+					URL      string `json:"url"`
+					Filename string `json:"filename"`
+					Size     int64  `json:"size"`
+					Width    int    `json:"width"`
+					Height   int    `json:"height"`
+				} `json:"files"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "잘못된 요청입니다"})
@@ -2877,6 +2916,36 @@ func main() {
 			if req.Tags != nil {
 				if err := gnuTagRepo.SetPostTags(slug, postID, req.Tags, userID); err != nil {
 					fmt.Printf("[WARN] tag update failed for %s/%d: %v\n", slug, postID, err)
+				}
+			}
+
+			// 첨부파일 업데이트 (files 필드가 전송된 경우)
+			if req.Files != nil {
+				// 기존 파일 삭제 후 새 파일 목록으로 교체
+				if err := gnuFileRepo.DeleteFilesByPost(slug, postID); err != nil {
+					fmt.Printf("[WARN] file delete failed for %s/%d: %v\n", slug, postID, err)
+				}
+				if len(*req.Files) > 0 {
+					now := time.Now()
+					var boardFiles []gnuboard.G5BoardFile
+					for i, f := range *req.Files {
+						boardFiles = append(boardFiles, gnuboard.G5BoardFile{
+							BoTable:    slug,
+							WrID:       postID,
+							BfNo:       i,
+							BfSource:   f.Filename,
+							BfFile:     f.Key[strings.LastIndex(f.Key, "/")+1:],
+							BfFileURL:  f.URL,
+							BfStorage:  "s3",
+							BfFilesize: f.Size,
+							BfWidth:    f.Width,
+							BfHeight:   f.Height,
+							BfDateTime: now,
+						})
+					}
+					if err := gnuFileRepo.CreateFiles(boardFiles); err != nil {
+						fmt.Printf("[WARN] file attachment save failed for %s/%d: %v\n", slug, postID, err)
+					}
 				}
 			}
 
@@ -3560,9 +3629,6 @@ func main() {
 
 		// PUT /api/v1/boards/:slug/extended-settings (admin only)
 		nariyaDataPath := os.Getenv("NARIYA_DATA_PATH")
-		if nariyaDataPath == "" {
-			nariyaDataPath = "/home/damoang/www/data/nariya/board"
-		}
 		v1Boards.PUT("/:slug/extended-settings", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
 			slug := c.Param("slug")
 			var req struct {
