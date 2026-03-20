@@ -16,8 +16,6 @@ var imgSrcRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
 // thumbnailRegex matches S3 image URLs for thumbnail conversion
 var thumbnailRegex *regexp.Regexp
 
-// imgTagSrcRegex matches <img> tags with src attributes containing S3 image URLs
-var imgTagSrcRegex *regexp.Regexp
 
 func init() {
 	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
@@ -28,7 +26,6 @@ func init() {
 			hostPattern := "(?:" + host + "|cdn\\.damoang\\.net)"
 			// GIF 제외: 애니메이션 손실 방지
 			thumbnailRegex = regexp.MustCompile(`(?i)^(https?://` + hostPattern + `/data/(?:file|editor)/.+)\.(jpg|jpeg|png|webp)$`)
-			imgTagSrcRegex = regexp.MustCompile(`(<img\s[^>]*?src=)(["'])(https?://` + hostPattern + `/data/(?:file|editor)/.+?\.(?:jpg|jpeg|png|webp))(["'])`)
 		}
 	}
 }
@@ -58,26 +55,6 @@ func toThumbnailURL(rawURL string, size string) string {
 	return m[1] + "-" + size + ".webp"
 }
 
-// optimizeContentImages replaces img src URLs with thumbnail versions and adds data-original
-func optimizeContentImages(html string) string {
-	if imgTagSrcRegex == nil {
-		return html
-	}
-	return imgTagSrcRegex.ReplaceAllStringFunc(html, func(match string) string {
-		parts := imgTagSrcRegex.FindStringSubmatch(match)
-		if len(parts) < 5 {
-			return match
-		}
-		imgPrefix := parts[1] // <img ... src=
-		quote := parts[2]     // " or '
-		originalURL := parts[3]
-		thumbURL := toThumbnailURL(originalURL, "1200x900")
-		if thumbURL == originalURL {
-			return match
-		}
-		return imgPrefix + quote + thumbURL + quote + " data-original=" + quote + originalURL + quote
-	})
-}
 
 // kst is the Asia/Seoul timezone for parsing gnuboard datetime values
 var kst = time.FixedZone("KST", 9*60*60)
@@ -140,19 +117,14 @@ func normalizeMediaURL(raw string) string {
 	return raw
 }
 
-func normalizeMediaContent(raw string, boardID ...string) string {
+func normalizeMediaContent(raw string, _ ...string) string {
 	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
 	if raw == "" {
 		return raw
 	}
 
-	skipThumbnail := len(boardID) > 0 && boardID[0] == "promotion"
-
 	if cdnURL == "" {
-		if skipThumbnail {
-			return raw
-		}
-		return optimizeContentImages(raw)
+		return raw
 	}
 
 	replacer := strings.NewReplacer(
@@ -173,11 +145,7 @@ func normalizeMediaContent(raw string, boardID ...string) string {
 		`href="data/`, `href="`+cdnURL+`/data/`,
 		`href='data/`, `href='`+cdnURL+`/data/`,
 	)
-	result := replacer.Replace(raw)
-	if skipThumbnail {
-		return result
-	}
-	return optimizeContentImages(result)
+	return replacer.Replace(raw)
 }
 
 func rewriteLegacyCDNHost(raw, cdnURL string) string {
