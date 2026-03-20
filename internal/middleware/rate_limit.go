@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,33 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
+
+// k8sInternalNets defines K8s internal CIDR ranges to bypass rate limiting
+var k8sInternalNets []*net.IPNet
+
+func init() {
+	for _, cidr := range []string{"10.42.0.0/16", "10.43.0.0/16"} {
+		_, ipNet, _ := net.ParseCIDR(cidr)
+		k8sInternalNets = append(k8sInternalNets, ipNet)
+	}
+}
+
+// isInternalIP checks if the IP is localhost or K8s internal
+func isInternalIP(ip string) bool {
+	if ip == "127.0.0.1" || ip == "::1" {
+		return true
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, ipNet := range k8sInternalNets {
+		if ipNet.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
 
 // RateLimitConfig configures the rate limiter
 type RateLimitConfig struct {
@@ -60,9 +88,9 @@ func RateLimit(redisClient *redis.Client, cfg RateLimitConfig) gin.HandlerFunc {
 			return
 		}
 
-		// SSR 요청은 rate limit 우회 (localhost에서 오는 SvelteKit 요청만)
+		// SSR 요청은 rate limit 우회 (K8s 내부 Pod에서 오는 SvelteKit 요청 포함)
 		remoteIP := getRemoteIP(c)
-		if remoteIP == "127.0.0.1" || remoteIP == "::1" {
+		if isInternalIP(remoteIP) {
 			c.Next()
 			return
 		}
