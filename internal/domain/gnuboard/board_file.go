@@ -7,16 +7,16 @@ type G5BoardFile struct {
 	BoTable    string    `gorm:"column:bo_table;primaryKey" json:"bo_table"`
 	WrID       int       `gorm:"column:wr_id;primaryKey" json:"wr_id"`
 	BfNo       int       `gorm:"column:bf_no;primaryKey" json:"bf_no"`
-	BfSource   string    `gorm:"column:bf_source" json:"bf_source"`       // 원본 파일명
-	BfFile     string    `gorm:"column:bf_file" json:"bf_file"`           // 저장된 파일명 (레거시: 해시파일명)
-	BfContent  string    `gorm:"column:bf_content" json:"bf_content"`     // 파일 설명
-	BfDownload int       `gorm:"column:bf_download" json:"bf_download"`   // 다운로드 횟수
-	BfFileURL  string    `gorm:"column:bf_fileurl" json:"bf_fileurl"`     // S3 전체 URL
-	BfStorage  string    `gorm:"column:bf_storage" json:"bf_storage"`     // 저장소 타입 (s3)
-	BfFilesize int64     `gorm:"column:bf_filesize" json:"bf_filesize"`   // 파일 크기
-	BfWidth    int       `gorm:"column:bf_width" json:"bf_width"`         // 이미지 가로
-	BfHeight   int       `gorm:"column:bf_height" json:"bf_height"`       // 이미지 세로
-	BfType     int       `gorm:"column:bf_type" json:"bf_type"`           // 파일 타입 (0: 일반, 1: 이미지 등)
+	BfSource   string    `gorm:"column:bf_source" json:"bf_source"`     // 원본 파일명
+	BfFile     string    `gorm:"column:bf_file" json:"bf_file"`         // 저장된 파일명 (레거시: 해시파일명)
+	BfContent  string    `gorm:"column:bf_content" json:"bf_content"`   // 파일 설명
+	BfDownload int       `gorm:"column:bf_download" json:"bf_download"` // 다운로드 횟수
+	BfFileURL  string    `gorm:"column:bf_fileurl" json:"bf_fileurl"`   // S3 전체 URL
+	BfStorage  string    `gorm:"column:bf_storage" json:"bf_storage"`   // 저장소 타입 (s3)
+	BfFilesize int64     `gorm:"column:bf_filesize" json:"bf_filesize"` // 파일 크기
+	BfWidth    int       `gorm:"column:bf_width" json:"bf_width"`       // 이미지 가로
+	BfHeight   int       `gorm:"column:bf_height" json:"bf_height"`     // 이미지 세로
+	BfType     int       `gorm:"column:bf_type" json:"bf_type"`         // 파일 타입 (0: 일반, 1: 이미지 등)
 	BfDateTime time.Time `gorm:"column:bf_datetime" json:"bf_datetime"`
 }
 

@@ -16,7 +16,6 @@ var imgSrcRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
 // thumbnailRegex matches S3 image URLs for thumbnail conversion
 var thumbnailRegex *regexp.Regexp
 
-
 func init() {
 	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
 	if cdnURL != "" {
@@ -54,7 +53,6 @@ func toThumbnailURL(rawURL string, size string) string {
 	}
 	return m[1] + "-" + size + ".webp"
 }
-
 
 // kst is the Asia/Seoul timezone for parsing gnuboard datetime values
 var kst = time.FixedZone("KST", 9*60*60)

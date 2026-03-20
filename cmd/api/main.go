@@ -2231,7 +2231,7 @@ func main() {
 				Extra2   *string  `json:"extra_2"`
 				Extra3   *string  `json:"extra_3"`
 				Tags     []string `json:"tags"`
-				Files []struct {
+				Files    []struct {
 					Key      string `json:"key"`
 					URL      string `json:"url"`
 					Filename string `json:"filename"`
@@ -2797,7 +2797,7 @@ func main() {
 				Extra2   *string  `json:"extra_2"`
 				Extra3   *string  `json:"extra_3"`
 				Tags     []string `json:"tags"`
-				Files *[]struct {
+				Files    *[]struct {
 					Key      string `json:"key"`
 					URL      string `json:"url"`
 					Filename string `json:"filename"`
