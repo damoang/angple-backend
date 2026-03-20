@@ -2456,12 +2456,12 @@ func main() {
 				var boardFiles []gnuboard.G5BoardFile
 				for i, f := range req.Files {
 					boardFiles = append(boardFiles, gnuboard.G5BoardFile{
-						BoTable:    slug,
-						WrID:       post.WrID,
-						BfNo:       i,
-						BfSource:   f.Filename,
-						BfFile:     f.Key[strings.LastIndex(f.Key, "/")+1:],
-						BfFileURL:  f.URL,
+						BoTable:   slug,
+						WrID:      post.WrID,
+						BfNo:      i,
+						BfSource:  f.Filename,
+						BfFile:    f.Key[strings.LastIndex(f.Key, "/")+1:],
+						BfFileURL: f.URL,
 
 						BfFilesize: f.Size,
 						BfWidth:    f.Width,
@@ -2930,13 +2930,13 @@ func main() {
 					var boardFiles []gnuboard.G5BoardFile
 					for i, f := range *req.Files {
 						boardFiles = append(boardFiles, gnuboard.G5BoardFile{
-							BoTable:    slug,
-							WrID:       postID,
-							BfNo:       i,
-							BfSource:   f.Filename,
-							BfFile:     f.Key[strings.LastIndex(f.Key, "/")+1:],
-							BfFileURL:  f.URL,
-	
+							BoTable:   slug,
+							WrID:      postID,
+							BfNo:      i,
+							BfSource:  f.Filename,
+							BfFile:    f.Key[strings.LastIndex(f.Key, "/")+1:],
+							BfFileURL: f.URL,
+
 							BfFilesize: f.Size,
 							BfWidth:    f.Width,
 							BfHeight:   f.Height,
