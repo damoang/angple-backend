@@ -1,6 +1,9 @@
 package gnuboard
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // G5BoardFile represents the g5_board_file table (file attachments)
 type G5BoardFile struct {
@@ -17,6 +20,7 @@ type G5BoardFile struct {
 	BfWidth    int       `gorm:"column:bf_width" json:"bf_width"`       // 이미지 가로
 	BfHeight   int       `gorm:"column:bf_height" json:"bf_height"`     // 이미지 세로
 	BfType     int       `gorm:"column:bf_type" json:"bf_type"`         // 파일 타입 (0: 일반, 1: 이미지 등)
+	BfFileURL  string    `gorm:"column:bf_fileurl" json:"bf_fileurl"`   // CDN URL (있으면 우선 사용)
 	BfDateTime time.Time `gorm:"column:bf_datetime" json:"bf_datetime"`
 }
 
@@ -45,8 +49,20 @@ func (f *G5BoardFile) ToFileResponse(baseURL string) FileResponse {
 	// 이미지 여부 판단 (bf_type이 1이거나 이미지 확장자인 경우)
 	isImage := f.BfType == 1 || f.BfWidth > 0 || f.BfHeight > 0
 
-	// 파일 URL 생성
-	fileURL := baseURL + "/data/file/" + f.BoTable + "/" + f.BfFile
+	// 파일 URL 생성: bf_fileurl이 있으면 우선 사용 (레거시 CDN 호스트 치환)
+	var fileURL string
+	if f.BfFileURL != "" {
+		fileURL = f.BfFileURL
+		// 레거시 CDN 호스트를 현재 baseURL로 치환
+		for _, legacy := range []string{"https://cdn.damoang.net", "http://cdn.damoang.net", "https://s3.damoang.net", "http://s3.damoang.net"} {
+			if strings.HasPrefix(fileURL, legacy) {
+				fileURL = baseURL + strings.TrimPrefix(fileURL, legacy)
+				break
+			}
+		}
+	} else {
+		fileURL = baseURL + "/data/file/" + f.BoTable + "/" + f.BfFile
+	}
 	thumbnailURL := ""
 	if isImage {
 		thumbnailURL = fileURL // 이미지인 경우 썸네일로 사용
