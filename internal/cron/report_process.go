@@ -473,14 +473,14 @@ func applyUserRestriction(tx *gorm.DB, targetMbID, disciplineType string, discip
 
 	if existingID > 0 {
 		tx.Exec(`UPDATE g5_da_member_discipline SET
-			penalty_date_from = ?, penalty_period = ?, penalty_type = ?, prev_level = ?
+			penalty_date_from = ?, penalty_period = ?, penalty_type = ?, prev_level = ?, restriction_scope = ?
 			WHERE penalty_mb_id = ?`,
-			now.Format("2006-01-02 15:04:05"), penaltyPeriod, penaltyTypeValue, member.MbLevel, targetMbID)
+			now.Format("2006-01-02 15:04:05"), penaltyPeriod, penaltyTypeValue, member.MbLevel, "all", targetMbID)
 	} else {
 		tx.Exec(`INSERT INTO g5_da_member_discipline
-			(penalty_mb_id, penalty_date_from, penalty_period, penalty_type, sg_types, prev_level)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-			targetMbID, now.Format("2006-01-02 15:04:05"), penaltyPeriod, penaltyTypeValue, sgTypesStr, member.MbLevel)
+			(penalty_mb_id, penalty_date_from, penalty_period, penalty_type, sg_types, prev_level, restriction_scope)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			targetMbID, now.Format("2006-01-02 15:04:05"), penaltyPeriod, penaltyTypeValue, sgTypesStr, member.MbLevel, "all")
 	}
 
 	return nil

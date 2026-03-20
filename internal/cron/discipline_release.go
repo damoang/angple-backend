@@ -84,5 +84,18 @@ func runDisciplineRelease(db *gorm.DB) (*DisciplineReleaseResult, error) {
 		}
 	}
 
+	// Clean up expired discipline records from g5_da_member_discipline
+	// (prevents fallback in ban_check from re-applying expired restrictions)
+	expiredResult := db.Exec(`
+		DELETE FROM g5_da_member_discipline
+		WHERE penalty_period > 0
+		  AND DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY) < NOW()
+	`)
+	if expiredResult.Error != nil {
+		log.Printf("[Cron:discipline-release] failed to clean expired discipline records: %v", expiredResult.Error)
+	} else if expiredResult.RowsAffected > 0 {
+		log.Printf("[Cron:discipline-release] cleaned %d expired discipline records", expiredResult.RowsAffected)
+	}
+
 	return result, nil
 }
