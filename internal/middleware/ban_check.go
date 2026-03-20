@@ -21,7 +21,14 @@ const (
 // BanCheck checks if the authenticated user is banned (mb_intercept_date).
 // Banned users cannot create or update posts/comments.
 // Exception: banned users can only write/comment on the promotion board.
+// This checks all restriction scopes (equivalent to BanCheckScoped("all")).
 func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
+	return BanCheckScoped(gnuDB, "all")
+}
+
+// BanCheckScoped checks if the authenticated user is banned for a specific scope.
+// scope: "all" (any restriction), "write", "comment", "reaction"
+func BanCheckScoped(gnuDB *gorm.DB, scope string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		mbID := GetUserID(c)
 		if mbID == "" {
@@ -47,6 +54,10 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 		}
 
 		if needsFallback {
+			// scope별 매칭: "all" scope는 모든 restriction_scope에 매칭,
+			// 특정 scope는 "all" 또는 해당 scope에 매칭
+			scopeCondition := "AND restriction_scope IN ('all', ?)"
+
 			var penaltyEndDate string
 			fallbackErr := gnuDB.Raw(
 				`SELECT CASE
@@ -60,7 +71,8 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 						penalty_period = -1
 						OR (penalty_period > 0 AND DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY) > NOW())
 				   )
-				 ORDER BY id DESC LIMIT 1`, mbID,
+				   `+scopeCondition+`
+				 ORDER BY id DESC LIMIT 1`, mbID, scope,
 			).Row().Scan(&penaltyEndDate)
 			if fallbackErr != nil || penaltyEndDate == "" {
 				c.Next()
@@ -85,6 +97,24 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// scope가 "all"이 아닌 경우, discipline 테이블에서 해당 scope 제한이 실제 있는지 확인
+		if scope != "all" {
+			var scopeCount int64
+			gnuDB.Raw(`
+				SELECT COUNT(*) FROM g5_da_member_discipline
+				WHERE penalty_mb_id = ?
+				  AND restriction_scope IN ('all', ?)
+				  AND (
+					penalty_period = -1
+					OR (penalty_period > 0 AND DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY) > NOW())
+				  )`, mbID, scope,
+			).Scan(&scopeCount)
+			if scopeCount == 0 {
+				c.Next()
+				return
+			}
+		}
+
 		// User is currently banned — only promotion and claim boards are allowed
 		slug := c.Param("slug")
 		if slug == promotionBoardSlug || slug == claimBoardSlug {
@@ -97,8 +127,19 @@ func BanCheck(gnuDB *gorm.DB) gin.HandlerFunc {
 		if banEnd.Year() >= 9999 {
 			banEndStr = "영구 이용제한"
 		}
+
+		scopeLabel := ""
+		switch scope {
+		case "comment":
+			scopeLabel = "댓글 "
+		case "reaction":
+			scopeLabel = "공감/추천 "
+		case "write":
+			scopeLabel = "글쓰기 "
+		}
+
 		common.ErrorResponse(c, http.StatusForbidden,
-			"이용제한 기간 중에는 해당 기능을 사용할 수 없습니다. (해제일: "+banEndStr+")", nil)
+			scopeLabel+"이용제한 기간 중에는 해당 기능을 사용할 수 없습니다. (해제일: "+banEndStr+")", nil)
 		c.Abort()
 	}
 }

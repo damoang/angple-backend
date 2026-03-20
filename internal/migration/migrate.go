@@ -42,6 +42,9 @@ func Run(db *gorm.DB) error {
 	if err := AddDisciplineLogPenaltyMbIDColumn(db); err != nil {
 		return err
 	}
+	if err := AddRestrictionScopeColumn(db); err != nil {
+		return err
+	}
 	return nil
 }
 
