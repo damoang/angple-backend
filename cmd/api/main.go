@@ -2462,7 +2462,7 @@ func main() {
 						BfSource:   f.Filename,
 						BfFile:     f.Key[strings.LastIndex(f.Key, "/")+1:],
 						BfFileURL:  f.URL,
-						BfStorage:  "s3",
+
 						BfFilesize: f.Size,
 						BfWidth:    f.Width,
 						BfHeight:   f.Height,
@@ -2936,7 +2936,7 @@ func main() {
 							BfSource:   f.Filename,
 							BfFile:     f.Key[strings.LastIndex(f.Key, "/")+1:],
 							BfFileURL:  f.URL,
-							BfStorage:  "s3",
+	
 							BfFilesize: f.Size,
 							BfWidth:    f.Width,
 							BfHeight:   f.Height,
