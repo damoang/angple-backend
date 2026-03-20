@@ -147,7 +147,8 @@ var allowedSortColumns = map[string]bool{
 	"wr_datetime":               true,
 	"wr_num DESC, wr_reply":     true,
 	"wr_num ASC, wr_reply":      true,
-	"wr_num DESC, wr_reply ASC": true,
+	"wr_num DESC, wr_reply ASC":      true,
+	"wr_subject DESC, wr_id DESC":    true,
 }
 
 // getSortField returns the sort clause for a board (with caching)
