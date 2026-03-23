@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
+	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
+	"github.com/damoang/angple-backend/internal/memberlevel"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -52,25 +54,21 @@ type V2LoginResponse struct {
 }
 
 // Login authenticates a user against v2_users table.
-// Supports both bcrypt (new) and legacy gnuboard password hashing (migrated users).
+// Supports both bcrypt (new accounts), then legacy gnuboard hashing (migrated users).
 func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, error) {
 	user, err := s.userRepo.FindByUsername(username)
 	if err != nil {
 		return nil, common.ErrInvalidCredentials
 	}
 
-	// 이용제한 사용자도 로그인 가능 (소명게시판 접근 허용)
-	// banned 상태 체크 제거
 	if user.Status == "inactive" {
 		return nil, errors.New("account is inactive")
 	}
 
-	// Try bcrypt first (new accounts), then legacy gnuboard hashing (migrated)
 	if !verifyPassword(password, user.Password) {
 		return nil, common.ErrInvalidCredentials
 	}
 
-	// If the password is legacy format, upgrade to bcrypt (best-effort, non-blocking)
 	if !isBcryptHash(user.Password) {
 		if upgraded, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost); hashErr == nil {
 			user.Password = string(upgraded)
@@ -80,21 +78,17 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		}
 	}
 
-	// Grant daily login XP synchronously (mb_login_days must be updated before promotion check)
 	if s.expRepo != nil {
 		s.grantLoginXP(username)
 	}
 
-	// Check auto-promotion (2→3) and update level if promoted
 	level := int(user.Level)
 	if promoted, newLevel := s.checkAndPromote(user.Username); promoted {
 		level = newLevel
-		user.Level = uint8(min(newLevel, 255)) //nolint:gosec // level values are small (2-10)
-		// Update v2_users level (best-effort)
+		user.Level = uint8(min(newLevel, 255)) //nolint:gosec
 		_ = s.userRepo.Update(user)
 	}
 
-	// Generate JWT tokens
 	userIDStr := strconv.FormatUint(user.ID, 10)
 	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, level)
 	if err != nil {
@@ -112,7 +106,6 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 	}, nil
 }
 
-// grantLoginXP grants daily login XP to a user (best-effort, panics are recovered)
 func (s *V2AuthService) grantLoginXP(username string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -130,7 +123,6 @@ func (s *V2AuthService) grantLoginXP(username string) {
 	}
 
 	today := time.Now().Format("2006-01-02")
-
 	already, err := s.expRepo.HasTodayAction(username, today)
 	if err != nil {
 		log.Printf("[v2-auth] login XP check failed for user %s: %v", username, err)
@@ -142,8 +134,6 @@ func (s *V2AuthService) grantLoginXP(username string) {
 	if _, addErr := s.expRepo.AddExp(username, xpConfig.LoginXP, today+" 로그인", "@login", username, today); addErr != nil {
 		log.Printf("[v2-auth] login XP grant failed for user %s: %v", username, addErr)
 	}
-
-	// 서로 다른 날 로그인 횟수 증가 (자동등업 조건)
 	if err := s.expRepo.IncrementLoginDays(username); err != nil {
 		log.Printf("[v2-auth] login days increment failed for user %s: %v", username, err)
 	}
@@ -183,12 +173,10 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 	}, nil
 }
 
-// GetCurrentUser returns the user for the given ID
 func (s *V2AuthService) GetCurrentUser(userID uint64) (*v2domain.V2User, error) {
 	return s.userRepo.FindByID(userID)
 }
 
-// verifyPassword checks password against bcrypt hash
 func verifyPassword(plain, hashed string) bool {
 	if isBcryptHash(hashed) {
 		return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plain)) == nil
@@ -196,7 +184,6 @@ func verifyPassword(plain, hashed string) bool {
 	return false
 }
 
-// isBcryptHash checks if the hash is bcrypt format ($2a$, $2b$, $2y$)
 func isBcryptHash(hash string) bool {
 	return len(hash) == 60 && (hash[:4] == "$2a$" || hash[:4] == "$2b$" || hash[:4] == "$2y$")
 }
@@ -205,44 +192,66 @@ func isEligibleForAutoPromotion(level, loginDays, exp int, certify string) bool 
 	return level == 2 && loginDays >= 7 && exp >= 3000 && certify != ""
 }
 
-// checkAndPromote checks if the user meets auto-promotion criteria and promotes them.
-// Currently supports 2→3 (앙님) promotion.
 func (s *V2AuthService) checkAndPromote(mbID string) (bool, int) {
 	if s.db == nil {
 		return false, 0
 	}
 
-	var member struct {
-		MbLevel   int `gorm:"column:mb_level"`
-		LoginDays int `gorm:"column:mb_login_days"`
-		Exp       int `gorm:"column:as_exp"`
-		Certify   string `gorm:"column:mb_certify"`
-	}
-	if err := s.db.Table("g5_member").
-		Select("mb_level, mb_login_days, as_exp, mb_certify").
-		Where("mb_id = ?", mbID).
-		First(&member).Error; err != nil {
-		log.Printf("[v2-auth] checkAndPromote: member query failed for %s: %v", mbID, err)
-		return false, 0
-	}
+	var (
+		previousLevel int
+		promoted      bool
+		newLevel      int
+	)
 
-	// 2→3 (앙님) 조건: 실명인증 + 로그인 7일 이상 + 경험치 3000 이상
-	if isEligibleForAutoPromotion(member.MbLevel, member.LoginDays, member.Exp, member.Certify) {
-		if err := s.db.Table("g5_member").
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var member gnudomain.G5Member
+		if err := tx.Table("g5_member").
+			Select("mb_id, mb_level, mb_login_days, as_exp, as_level, mb_certify, mb_datetime").
 			Where("mb_id = ?", mbID).
-			Update("mb_level", 3).Error; err != nil {
-			log.Printf("[v2-auth] checkAndPromote: level update failed for %s: %v", mbID, err)
-			return false, member.MbLevel
+			Take(&member).Error; err != nil {
+			return err
 		}
-		log.Printf("[v2-auth] auto-promoted %s from level 2 to 3", mbID)
+
+		previousLevel = member.MbLevel
+		newLevel = member.MbLevel
+		if !isEligibleForAutoPromotion(member.MbLevel, member.MbLoginDays, member.AsExp, member.MbCertify) {
+			return nil
+		}
+
+		result := tx.Table("g5_member").
+			Where("mb_id = ? AND mb_level = ?", mbID, member.MbLevel).
+			Update("mb_level", 3)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+
+		if err := memberlevel.RecordPromotion(tx, &member, 3, memberlevel.ReasonAutoPromoteLoginAPI); err != nil {
+			if memberlevel.IsMissingHistoryTableError(err) {
+				log.Printf("[v2-auth] member level history table missing; promotion logged skipped for %s: %v", mbID, err)
+			} else {
+				return err
+			}
+		}
+
+		promoted = true
+		newLevel = 3
+		return nil
+	})
+	if err != nil {
+		log.Printf("[v2-auth] checkAndPromote failed for %s: %v", mbID, err)
+		return false, previousLevel
+	}
+	if promoted {
+		log.Printf("[v2-auth] auto-promoted %s from level %d to %d", mbID, previousLevel, newLevel)
 		go s.sendPromotionNotification(mbID)
-		return true, 3
 	}
 
-	return false, member.MbLevel
+	return promoted, newLevel
 }
 
-// sendPromotionNotification sends a promotion notification (best-effort)
 func (s *V2AuthService) sendPromotionNotification(mbID string) {
 	defer func() {
 		if r := recover(); r != nil {

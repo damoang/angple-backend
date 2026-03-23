@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
+	"github.com/damoang/angple-backend/internal/memberlevel"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	"gorm.io/gorm"
 )
@@ -17,17 +19,23 @@ type AutoPromoteResult struct {
 }
 
 // runAutoPromote promotes members from mb_level 2 to 3
-// Conditions: mb_certify <> '' AND mb_login_days >= 7 AND as_exp >= 3000
+// Conditions: mb_certify <> ” AND mb_login_days >= 7 AND as_exp >= 3000
 func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteResult, error) {
 	now := time.Now()
 
-	// 조건 충족 회원 조회: mb_level=2, 실명인증, 로그인 7일 이상, 경험치 3000 이상
 	type candidate struct {
-		MbID string `gorm:"column:mb_id"`
+		MbID        string    `gorm:"column:mb_id"`
+		MbLevel     int       `gorm:"column:mb_level"`
+		MbLoginDays int       `gorm:"column:mb_login_days"`
+		AsExp       int       `gorm:"column:as_exp"`
+		AsLevel     int       `gorm:"column:as_level"`
+		MbCertify   string    `gorm:"column:mb_certify"`
+		MbDatetime  time.Time `gorm:"column:mb_datetime"`
 	}
+
 	var candidates []candidate
 	if err := db.Table("g5_member").
-		Select("mb_id").
+		Select("mb_id, mb_level, mb_login_days, as_exp, COALESCE(as_level, 0) as as_level, mb_certify, mb_datetime").
 		Where("mb_level = 2 AND mb_login_days >= 7 AND as_exp >= 3000").
 		Where("COALESCE(mb_certify, '') <> ''").
 		Where("mb_leave_date = '' AND mb_intercept_date = ''").
@@ -38,29 +46,51 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 	result := &AutoPromoteResult{
 		ExecutedAt: now.Format("2006-01-02 15:04:05"),
 	}
-
 	if len(candidates) == 0 {
 		return result, nil
 	}
 
-	// 일괄 업데이트
-	mbIDs := make([]string, len(candidates))
-	for i, c := range candidates {
-		mbIDs[i] = c.MbID
+	for _, candidate := range candidates {
+		member := gnudomain.G5Member{
+			MbID:        candidate.MbID,
+			MbLevel:     candidate.MbLevel,
+			MbLoginDays: candidate.MbLoginDays,
+			AsExp:       candidate.AsExp,
+			AsLevel:     candidate.AsLevel,
+			MbCertify:   candidate.MbCertify,
+			MbDatetime:  candidate.MbDatetime,
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			update := tx.Table("g5_member").
+				Where("mb_id = ? AND mb_level = ?", candidate.MbID, candidate.MbLevel).
+				Update("mb_level", 3)
+			if update.Error != nil {
+				return update.Error
+			}
+			if update.RowsAffected != 1 {
+				return nil
+			}
+
+			if err := memberlevel.RecordPromotion(tx, &member, 3, memberlevel.ReasonAutoPromoteCron); err != nil {
+				if memberlevel.IsMissingHistoryTableError(err) {
+					log.Printf("[Cron:auto-promote] member level history table missing; promotion log skipped for %s: %v", candidate.MbID, err)
+					return nil
+				}
+				return err
+			}
+
+			result.PromotedCount++
+			result.PromotedIDs = append(result.PromotedIDs, candidate.MbID)
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("등급 업데이트 실패(%s): %w", candidate.MbID, err)
+		}
 	}
 
-	if err := db.Table("g5_member").
-		Where("mb_id IN ?", mbIDs).
-		Update("mb_level", 3).Error; err != nil {
-		return nil, fmt.Errorf("등급 업데이트 실패: %w", err)
-	}
-
-	result.PromotedCount = len(mbIDs)
-	result.PromotedIDs = mbIDs
-
-	// 알림 발송 (best-effort)
 	if notiRepo != nil {
-		for _, mbID := range mbIDs {
+		for _, mbID := range result.PromotedIDs {
 			noti := &gnurepo.Notification{
 				MbID:          mbID,
 				PhFromCase:    "promote",

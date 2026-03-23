@@ -2,6 +2,7 @@ package migration
 
 import (
 	"github.com/damoang/angple-backend/internal/domain"
+	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
 	pluginstoreDomain "github.com/damoang/angple-backend/internal/pluginstore/domain"
 	"gorm.io/gorm"
@@ -9,7 +10,7 @@ import (
 
 // Run executes AutoMigrate for core tables and seeds default data if empty.
 func Run(db *gorm.DB) error {
-	if err := db.AutoMigrate(&domain.Menu{}, &domain.MemberBlock{}, &v2domain.SiteLogo{}, &pluginstoreDomain.PluginInstallation{}, &pluginstoreDomain.PluginSetting{}, &pluginstoreDomain.PluginEvent{}, &pluginstoreDomain.PluginPermission{}, &pluginstoreDomain.PluginMigration{}); err != nil {
+	if err := db.AutoMigrate(&domain.Menu{}, &domain.MemberBlock{}, &v2domain.SiteLogo{}, &pluginstoreDomain.PluginInstallation{}, &pluginstoreDomain.PluginSetting{}, &pluginstoreDomain.PluginEvent{}, &pluginstoreDomain.PluginPermission{}, &pluginstoreDomain.PluginMigration{}, &gnudomain.MemberLevelHistory{}); err != nil {
 		return err
 	}
 
