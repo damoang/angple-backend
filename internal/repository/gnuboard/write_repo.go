@@ -177,7 +177,8 @@ func (r *writeRepository) getSortField(boardID string) string {
 // Beyond this offset, the deferred JOIN subquery still scans too many index rows.
 const maxPostOffset = 30000
 
-// FindPosts retrieves posts (not comments, not deleted) from a board with pagination
+// FindPosts retrieves posts (not comments) from a board with pagination.
+// Soft-deleted posts stay in the list so users can still trace their own activity.
 func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
 	var posts []*gnuboard.G5Write
 	var total int64
@@ -191,7 +192,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	// Posts count with Redis cache (shared across all pods)
 	total = r.getCachedPostCount(boardID)
 	if total == 0 {
-		countQuery := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')")
+		countQuery := r.db.Table(table).Where("wr_is_comment = 0")
 		if err := countQuery.Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
@@ -207,7 +208,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		cols := prefixColumns(coreColumns, "t")
 		err := r.db.Raw(
 			fmt.Sprintf(
-				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
+				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
 				cols, table, table,
 			),
 			limit, offset,
@@ -216,7 +217,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
 				Select(coreColumns).
-				Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").
+				Where("wr_is_comment = 0").
 				Order(orderClause).
 				Offset(offset).
 				Limit(limit).
@@ -227,7 +228,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 
 	err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").
+		Where("wr_is_comment = 0").
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).
@@ -244,7 +245,7 @@ func (r *writeRepository) FindPostsByCategory(boardID string, category string, p
 	offset := (page - 1) * limit
 	table := tableName(boardID)
 
-	baseWhere := "wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND ca_name = ?"
+	baseWhere := "wr_is_comment = 0 AND ca_name = ?"
 
 	if err := r.db.Table(table).Where(baseWhere, category).Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -273,7 +274,7 @@ func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum 
 
 	total = r.getCachedPostCount(boardID)
 	if total == 0 {
-		countQuery := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')")
+		countQuery := r.db.Table(table).Where("wr_is_comment = 0")
 		if err := countQuery.Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
@@ -288,7 +289,7 @@ func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum 
 	selectCols := strings.Join(coreColumns, ", ")
 	err := r.db.Raw(
 		fmt.Sprintf(
-			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?)) ORDER BY wr_num, wr_reply LIMIT ?",
+			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?)) ORDER BY wr_num, wr_reply LIMIT ?",
 			selectCols,
 			table,
 		),
@@ -297,7 +298,7 @@ func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum 
 	if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 		err = r.db.Table(table).
 			Select(coreColumns).
-			Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?))", cursorWrNum, cursorWrNum, cursorWrReply).
+			Where("wr_is_comment = 0 AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?))", cursorWrNum, cursorWrNum, cursorWrReply).
 			Order(orderClause).
 			Limit(limit).
 			Find(&posts).Error
@@ -323,7 +324,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	// Reuse cached total count (same as FindPosts — avoids expensive COUNT on large tables)
 	total := r.getCachedPostCount(boardID)
 	if total == 0 {
-		if err := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").Count(&total).Error; err != nil {
+		if err := r.db.Table(table).Where("wr_is_comment = 0").Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
 		r.setCachedPostCount(boardID, total)
@@ -336,7 +337,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 		cols := prefixColumns(coreColumns, "t")
 		err := r.db.Raw(
 			fmt.Sprintf(
-				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
+				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
 				cols, table, table,
 			),
 			excludeMbIDs, limit, offset,
@@ -344,7 +345,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
 				Select(coreColumns).
-				Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ?", excludeMbIDs).
+				Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
 				Order(orderClause).
 				Offset(offset).
 				Limit(limit).
@@ -355,7 +356,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 
 	err := r.db.Table(table).
 		Select(coreColumns).
-		Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00') AND mb_id NOT IN ?", excludeMbIDs).
+		Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
 		Order(orderClause).
 		Offset(offset).
 		Limit(limit).

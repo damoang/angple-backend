@@ -152,6 +152,13 @@ type activityResponse struct {
 	RecentComments []map[string]interface{} `json:"recentComments"`
 }
 
+func formatNullableTime(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return t.Format(time.RFC3339)
+}
+
 // GetMemberActivity handles GET /api/v1/members/:id/activity
 func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 	mbID := c.Param("id")
@@ -215,6 +222,7 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 				"wr_id":       p.WrID,
 				"wr_subject":  p.WrSubject,
 				"wr_datetime": p.WrDatetime.Format("2006-01-02 15:04:05"),
+				"deleted_at":  formatNullableTime(p.DeletedAt),
 				"href":        fmt.Sprintf("/%s/%d", p.BoardID, p.WrID),
 			})
 		}
@@ -229,13 +237,15 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 		comments = make([]map[string]interface{}, 0, len(rawComments))
 		for _, cm := range rawComments {
 			comments = append(comments, map[string]interface{}{
-				"bo_table":     cm.BoardID,
-				"bo_subject":   boardSubjects[cm.BoardID],
-				"wr_id":        cm.WrID,
-				"parent_wr_id": cm.WrParent,
-				"preview":      stripHTMLPreview(cm.WrContent, 80),
-				"wr_datetime":  cm.WrDatetime.Format("2006-01-02 15:04:05"),
-				"href":         fmt.Sprintf("/%s/%d#c_%d", cm.BoardID, cm.WrParent, cm.WrID),
+				"bo_table":        cm.BoardID,
+				"bo_subject":      boardSubjects[cm.BoardID],
+				"wr_id":           cm.WrID,
+				"parent_wr_id":    cm.WrParent,
+				"preview":         stripHTMLPreview(cm.WrContent, 80),
+				"wr_datetime":     cm.WrDatetime.Format("2006-01-02 15:04:05"),
+				"deleted_at":      formatNullableTime(cm.DeletedAt),
+				"post_deleted_at": formatNullableTime(cm.ParentDeletedAt),
+				"href":            fmt.Sprintf("/%s/%d#c_%d", cm.BoardID, cm.WrParent, cm.WrID),
 			})
 		}
 	}()

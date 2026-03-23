@@ -109,10 +109,10 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 			var cnt int64
 			if boardID == largeBoardID {
 				// Use member_activity_feed covering index instead of scanning 600K-row table
-				r.db.Raw("SELECT COUNT(*) FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 1 AND is_deleted = 0", mbID, largeBoardID).Scan(&cnt)
+				r.db.Raw("SELECT COUNT(*) FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 1", mbID, largeBoardID).Scan(&cnt)
 			} else {
 				table := fmt.Sprintf("g5_write_%s", boardID)
-				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
+				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0", table), mbID).Scan(&cnt)
 			}
 			if cnt > 0 {
 				muCounts.Lock()
@@ -145,20 +145,20 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 				// Step 1: Get write_ids from activity_feed (covering index scan, ~1ms)
 				var writeIDs []int
 				r.db.Raw(
-					"SELECT write_id FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 1 AND is_deleted = 0 ORDER BY source_created_at DESC LIMIT ?",
+					"SELECT write_id FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 1 ORDER BY source_created_at DESC LIMIT ?",
 					mbID, largeBoardID, perTable,
 				).Scan(&writeIDs)
 				if len(writeIDs) > 0 {
 					// Step 2: Batch PK lookup for full post data
 					r.db.Raw(
-						fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id FROM `g5_write_%s` WHERE wr_id IN ? ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
+						fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id, wr_deleted_at AS deleted_at FROM `g5_write_%s` WHERE wr_id IN ? ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
 						writeIDs,
 					).Scan(&rows)
 				}
 			} else {
 				table := fmt.Sprintf("g5_write_%s", bc.boardID)
 				r.db.Raw(
-					fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL ORDER BY wr_datetime DESC LIMIT %d", bc.boardID, table, perTable),
+					fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id, wr_deleted_at AS deleted_at FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 ORDER BY wr_datetime DESC LIMIT %d", bc.boardID, table, perTable),
 					mbID,
 				).Scan(&rows)
 			}
@@ -218,10 +218,10 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 			var cnt int64
 			if boardID == largeBoardID {
 				// Use member_activity_feed covering index instead of scanning 600K-row table
-				r.db.Raw("SELECT COUNT(*) FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2 AND is_deleted = 0", mbID, largeBoardID).Scan(&cnt)
+				r.db.Raw("SELECT COUNT(*) FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2", mbID, largeBoardID).Scan(&cnt)
 			} else {
 				table := fmt.Sprintf("g5_write_%s", boardID)
-				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
+				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 1", table), mbID).Scan(&cnt)
 			}
 			if cnt > 0 {
 				muCounts.Lock()
@@ -258,7 +258,7 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 				}
 				var refs []commentRef
 				r.db.Raw(
-					"SELECT write_id, COALESCE(parent_title, '') as parent_title FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2 AND is_deleted = 0 ORDER BY source_created_at DESC LIMIT ?",
+					"SELECT write_id, COALESCE(parent_title, '') as parent_title FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2 ORDER BY source_created_at DESC LIMIT ?",
 					mbID, largeBoardID, perTable,
 				).Scan(&refs)
 				if len(refs) > 0 {
@@ -270,7 +270,7 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 					}
 					// Step 2: Batch PK lookup for comment data (no LEFT JOIN needed)
 					r.db.Raw(
-						fmt.Sprintf("SELECT wr_id, wr_content, wr_datetime, mb_id, wr_name, wr_parent, wr_good, wr_nogood, wr_option, '' as post_title, '%s' as board_id FROM `g5_write_%s` WHERE wr_id IN ? AND wr_is_comment = 1 ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
+						fmt.Sprintf("SELECT c.wr_id, c.wr_content, c.wr_datetime, c.mb_id, c.wr_name, c.wr_parent, c.wr_good, c.wr_nogood, c.wr_option, '' as post_title, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `g5_write_%s` c LEFT JOIN `g5_write_%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 WHERE c.wr_id IN ? AND c.wr_is_comment = 1 ORDER BY c.wr_datetime DESC", largeBoardID, largeBoardID, largeBoardID),
 						writeIDs,
 					).Scan(&rows)
 					// Fill parent titles from activity_feed (avoids expensive LEFT JOIN)
@@ -283,7 +283,7 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 			} else {
 				table := fmt.Sprintf("g5_write_%s", bc.boardID)
 				r.db.Raw(
-					fmt.Sprintf("SELECT c.wr_id, c.wr_content, c.wr_datetime, c.mb_id, c.wr_name, c.wr_parent, c.wr_good, c.wr_nogood, c.wr_option, COALESCE(p.wr_subject, '') as post_title, '%s' as board_id FROM `%s` c LEFT JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 WHERE c.mb_id = ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL ORDER BY c.wr_datetime DESC LIMIT %d", bc.boardID, table, table, perTable),
+					fmt.Sprintf("SELECT c.wr_id, c.wr_content, c.wr_datetime, c.mb_id, c.wr_name, c.wr_parent, c.wr_good, c.wr_nogood, c.wr_option, CASE WHEN p.wr_deleted_at IS NOT NULL THEN '[삭제된 글]' ELSE COALESCE(p.wr_subject, '') END as post_title, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c LEFT JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_datetime DESC LIMIT %d", bc.boardID, table, table, perTable),
 					mbID,
 				).Scan(&rows)
 			}
@@ -526,12 +526,12 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		`SELECT write_id AS wr_id,
 		        COALESCE(title, '') AS wr_subject,
 		        source_created_at AS wr_datetime,
-		        board_id
+		        board_id,
+		        CASE WHEN is_deleted = 1 THEN source_updated_at ELSE NULL END AS deleted_at
 		   FROM member_activity_feed
 		  WHERE member_id = ?
 		    AND activity_type = 1
-		    AND is_public = 1
-		    AND is_deleted = 0
+		    AND (is_public = 1 OR is_deleted = 1)
 		  ORDER BY source_created_at DESC, id DESC
 		  LIMIT ?`,
 		mbID, limit,
@@ -549,7 +549,7 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 	for _, b := range boards {
 		table := fmt.Sprintf("g5_write_%s", b.BoTable)
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT wr_id, wr_subject, wr_datetime, '%s' as board_id FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL) AND (wr_7 IS NULL OR wr_7 != 'lock') AND wr_deleted_at IS NULL ORDER BY wr_id DESC LIMIT %d)",
+			"(SELECT wr_id, wr_subject, wr_datetime, '%s' as board_id, wr_deleted_at AS deleted_at FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL) AND (wr_7 IS NULL OR wr_7 != 'lock') ORDER BY wr_id DESC LIMIT %d)",
 			b.BoTable, table, limit))
 		args = append(args, mbID)
 	}
@@ -572,12 +572,13 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		        COALESCE(content_preview, '') AS wr_content,
 		        COALESCE(parent_write_id, 0) AS wr_parent,
 		        source_created_at AS wr_datetime,
-		        board_id
+		        board_id,
+		        CASE WHEN is_deleted = 1 THEN source_updated_at ELSE NULL END AS deleted_at,
+		        NULL AS parent_deleted_at
 		   FROM member_activity_feed
 		  WHERE member_id = ?
 		    AND activity_type = 2
-		    AND is_public = 1
-		    AND is_deleted = 0
+		    AND (is_public = 1 OR is_deleted = 1)
 		  ORDER BY source_created_at DESC, id DESC
 		  LIMIT ?`,
 		mbID, limit,
@@ -595,7 +596,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 	for _, b := range boards {
 		table := fmt.Sprintf("g5_write_%s", b.BoTable)
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock') AND p.wr_deleted_at IS NULL WHERE c.mb_id = ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL ORDER BY c.wr_id DESC LIMIT %d)",
+			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock') WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
 			b.BoTable, table, table, limit))
 		args = append(args, mbID)
 	}
