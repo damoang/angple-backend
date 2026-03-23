@@ -1,9 +1,13 @@
 package worker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -69,11 +73,14 @@ type WriteAfterWorker struct {
 	getBlockedIDs  BlockedIDsProvider
 	clearPostCache ClearPostMemCacheFunc
 
-	repo         gnurepo.WriteAfterEventRepository
-	pollInterval time.Duration
-	batchSize    int
-	stop         chan struct{}
-	wg           sync.WaitGroup
+	repo           gnurepo.WriteAfterEventRepository
+	pollInterval   time.Duration
+	batchSize      int
+	stop           chan struct{}
+	wg             sync.WaitGroup
+	httpClient     *http.Client
+	webBaseURL     string
+	internalSecret string
 }
 
 type PostCreatedJob struct {
@@ -117,6 +124,11 @@ func NewWriteAfterWorker(
 		pollInterval:   2 * time.Second,
 		batchSize:      100,
 		stop:           make(chan struct{}),
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
+		webBaseURL:     strings.TrimRight(getAffiliateSyncBaseURL(), "/"),
+		internalSecret: os.Getenv("INTERNAL_SECRET"),
 	}
 }
 
@@ -168,7 +180,7 @@ func (w *WriteAfterWorker) processBatch() {
 		if err := w.handleEvent(event); err != nil {
 			writeAfterEventsProcessedTotal.WithLabelValues(event.EventType, "error").Inc()
 			writeAfterEventsRetryTotal.WithLabelValues(event.EventType).Inc()
-			if markErr := w.repo.MarkFailed(event.ID, gnurepo.TrimWriteAfterEventError(err)); markErr != nil {
+			if markErr := w.markFailed(event, err); markErr != nil {
 				log.Printf("[WriteAfterWorker] mark failed %d: %v", event.ID, markErr)
 			}
 			continue
@@ -212,9 +224,121 @@ func (w *WriteAfterWorker) handleEvent(event gnudomain.WriteAfterEvent) error {
 		return nil
 	case gnudomain.WriteAfterEventTypeCommentUpdated, gnudomain.WriteAfterEventTypeCommentDeleted, gnudomain.WriteAfterEventTypeCommentRestored:
 		return w.handleCommentChanged(event)
+	case gnudomain.WriteAfterEventTypeAffiliatePostSync,
+		gnudomain.WriteAfterEventTypeAffiliateCommentSync,
+		gnudomain.WriteAfterEventTypeAffiliatePostDelete,
+		gnudomain.WriteAfterEventTypeAffiliateCommentDelete:
+		return w.handleAffiliateEvent(event)
 	default:
 		return gnurepo.FormatUnknownWriteAfterEvent(event.EventType)
 	}
+}
+
+func getAffiliateSyncBaseURL() string {
+	if url := strings.TrimSpace(os.Getenv("WEB_INTERNAL_URL")); url != "" {
+		return url
+	}
+	if url := strings.TrimSpace(os.Getenv("WEB_BASE_URL")); url != "" {
+		return url
+	}
+	return "https://damoang.net"
+}
+
+func (w *WriteAfterWorker) markFailed(event gnudomain.WriteAfterEvent, err error) error {
+	if w.repo == nil {
+		return nil
+	}
+	if isAffiliateEventType(event.EventType) {
+		delay := affiliateRetryDelay(event.RetryCount)
+		return w.repo.MarkFailedWithDelay(event.ID, gnurepo.TrimWriteAfterEventError(err), delay)
+	}
+	return w.repo.MarkFailed(event.ID, gnurepo.TrimWriteAfterEventError(err))
+}
+
+func isAffiliateEventType(eventType string) bool {
+	switch eventType {
+	case gnudomain.WriteAfterEventTypeAffiliatePostSync,
+		gnudomain.WriteAfterEventTypeAffiliateCommentSync,
+		gnudomain.WriteAfterEventTypeAffiliatePostDelete,
+		gnudomain.WriteAfterEventTypeAffiliateCommentDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func affiliateRetryDelay(retryCount int) time.Duration {
+	switch retryCount {
+	case 0:
+		return time.Minute
+	case 1:
+		return 10 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent) error {
+	if w.httpClient == nil || w.webBaseURL == "" {
+		return fmt.Errorf("affiliate sync client not configured")
+	}
+	payload := map[string]interface{}{
+		"boardId": event.BoardSlug,
+	}
+
+	switch event.EventType {
+	case gnudomain.WriteAfterEventTypeAffiliatePostSync:
+		payload["entity"] = "post"
+		payload["action"] = "sync"
+		payload["postId"] = event.WriteID
+	case gnudomain.WriteAfterEventTypeAffiliateCommentSync:
+		if event.PostID == nil {
+			return fmt.Errorf("missing post_id for affiliate comment sync %s/%d", event.BoardSlug, event.WriteID)
+		}
+		payload["entity"] = "comment"
+		payload["action"] = "sync"
+		payload["postId"] = *event.PostID
+		payload["commentId"] = event.WriteID
+	case gnudomain.WriteAfterEventTypeAffiliatePostDelete:
+		payload["entity"] = "post"
+		payload["action"] = "delete"
+		payload["postId"] = event.WriteID
+	case gnudomain.WriteAfterEventTypeAffiliateCommentDelete:
+		if event.PostID == nil {
+			return fmt.Errorf("missing post_id for affiliate comment delete %s/%d", event.BoardSlug, event.WriteID)
+		}
+		payload["entity"] = "comment"
+		payload["action"] = "delete"
+		payload["postId"] = *event.PostID
+		payload["commentId"] = event.WriteID
+	default:
+		return gnurepo.FormatUnknownWriteAfterEvent(event.EventType)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, w.webBaseURL+"/api/internal/affiliate/sync", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Secret", w.internalSecret)
+	req.Header.Set("User-Agent", "angple-backend-affiliate-worker/1.0")
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("affiliate sync returned %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {

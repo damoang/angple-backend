@@ -2389,6 +2389,16 @@ func main() {
 				); err != nil {
 					return err
 				}
+				if err := createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeAffiliatePostSync,
+					slug,
+					post.WrID,
+					withWriteAfterOccurredAt(now),
+				); err != nil {
+					return err
+				}
 				return nil
 			})
 			if txErr != nil {
@@ -2675,6 +2685,17 @@ func main() {
 				); err != nil {
 					return err
 				}
+				if err := createWriteAfterEvent(
+					tx,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeAffiliateCommentSync,
+					slug,
+					createdComment.WrID,
+					withWriteAfterPostID(postID),
+					withWriteAfterOccurredAt(now),
+				); err != nil {
+					return err
+				}
 
 				return nil
 			})
@@ -2906,6 +2927,15 @@ func main() {
 					withWriteAfterSubject(post.WrSubject),
 				)
 			})
+			if txErr == nil {
+				_ = createWriteAfterEvent(
+					db,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeAffiliatePostSync,
+					slug,
+					postID,
+				)
+			}
 			if txErr != nil {
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 수정 실패"})
@@ -3054,6 +3084,16 @@ func main() {
 					withWriteAfterMember(comment.MbID, comment.WrName),
 				)
 			})
+			if txErr == nil {
+				_ = createWriteAfterEvent(
+					db,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeAffiliateCommentSync,
+					slug,
+					commentID,
+					withWriteAfterPostID(postID),
+				)
+			}
 			if txErr != nil {
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 수정 실패"})
@@ -3176,6 +3216,15 @@ func main() {
 						withWriteAfterOccurredAt(now),
 					)
 				})
+				if txErr == nil {
+					_ = createWriteAfterEvent(
+						db,
+						writeAfterEventRepo,
+						gnuboard.WriteAfterEventTypeAffiliatePostDelete,
+						slug,
+						postID,
+					)
+				}
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
@@ -3206,6 +3255,15 @@ func main() {
 						withWriteAfterOccurredAt(now),
 					)
 				})
+				if txErr == nil {
+					_ = createWriteAfterEvent(
+						db,
+						writeAfterEventRepo,
+						gnuboard.WriteAfterEventTypeAffiliatePostDelete,
+						slug,
+						postID,
+					)
+				}
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
@@ -3306,6 +3364,15 @@ func main() {
 					withWriteAfterSubject(post.WrSubject),
 				)
 			})
+			if txErr == nil {
+				_ = createWriteAfterEvent(
+					db,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeAffiliatePostSync,
+					slug,
+					postID,
+				)
+			}
 			if txErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 복구 실패"})
 				return
@@ -3395,6 +3462,16 @@ func main() {
 						withWriteAfterOccurredAt(now),
 					)
 				})
+				if txErr == nil {
+					_ = createWriteAfterEvent(
+						db,
+						writeAfterEventRepo,
+						gnuboard.WriteAfterEventTypeAffiliateCommentDelete,
+						slug,
+						commentID,
+						withWriteAfterPostID(postID),
+					)
+				}
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
@@ -3436,6 +3513,16 @@ func main() {
 						withWriteAfterOccurredAt(now),
 					)
 				})
+				if txErr == nil {
+					_ = createWriteAfterEvent(
+						db,
+						writeAfterEventRepo,
+						gnuboard.WriteAfterEventTypeAffiliateCommentDelete,
+						slug,
+						commentID,
+						withWriteAfterPostID(postID),
+					)
+				}
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
@@ -3522,6 +3609,16 @@ func main() {
 					withWriteAfterPostID(postID),
 				)
 			})
+			if txErr == nil {
+				_ = createWriteAfterEvent(
+					db,
+					writeAfterEventRepo,
+					gnuboard.WriteAfterEventTypeAffiliateCommentSync,
+					slug,
+					commentID,
+					withWriteAfterPostID(postID),
+				)
+			}
 			if txErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 복구 실패"})
 				return
@@ -4912,7 +5009,7 @@ func main() {
 		cronHandler := cron.NewHandler(db)
 		cronHandler.SetPointExpiryDeps(pointConfigRepo, gnuPointWriteRepo, gnurepo.NewNotiRepository(db))
 		cronGroup := router.Group("/api/internal/cron")
-		cronGroup.Use(middleware.RequireLocalhost())
+		cronGroup.Use(middleware.RequireInternalCron())
 		cronGroup.POST("/member-lock-release", cronHandler.MemberLockRelease)
 		cronGroup.POST("/update-member-levels", cronHandler.UpdateMemberLevels)
 		cronGroup.POST("/process-approved-reports", cronHandler.ProcessApprovedReports)

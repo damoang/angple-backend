@@ -15,6 +15,7 @@ type WriteAfterEventRepository interface {
 	ClaimPending(now time.Time, limit int) ([]domain.WriteAfterEvent, error)
 	MarkProcessed(id int64) error
 	MarkFailed(id int64, errMsg string) error
+	MarkFailedWithDelay(id int64, errMsg string, delay time.Duration) error
 	CountPending(now time.Time) (int64, error)
 }
 
@@ -96,17 +97,23 @@ func (r *writeAfterEventRepository) MarkProcessed(id int64) error {
 }
 
 func (r *writeAfterEventRepository) MarkFailed(id int64, errMsg string) error {
+	return r.MarkFailedWithDelay(id, errMsg, 5*time.Second)
+}
+
+func (r *writeAfterEventRepository) MarkFailedWithDelay(id int64, errMsg string, delay time.Duration) error {
 	if len(errMsg) > 2000 {
 		errMsg = errMsg[:2000]
 	}
-	nextDelay := 5 * time.Second
+	if delay <= 0 {
+		delay = 5 * time.Second
+	}
 	return r.db.Model(&domain.WriteAfterEvent{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
 			"status":       domain.WriteAfterEventStatusPending,
 			"retry_count":  gorm.Expr("retry_count + 1"),
 			"last_error":   errMsg,
-			"available_at": time.Now().Add(nextDelay),
+			"available_at": time.Now().Add(delay),
 		}).Error
 }
 
