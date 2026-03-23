@@ -43,7 +43,7 @@ jobs:
 
       - name: Build and push API
         id: build_api
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deployments/docker/api.Dockerfile
@@ -56,7 +56,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=api
 
       - name: Build and push Gateway
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deployments/docker/gateway.Dockerfile
@@ -80,7 +80,7 @@ jobs:
       packages: read
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
           aws-region: ap-northeast-2
@@ -168,7 +168,7 @@ jobs:
       contents: read
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
           aws-region: ap-northeast-2
@@ -259,7 +259,7 @@ jobs:
       packages: read
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
           aws-region: ap-northeast-2

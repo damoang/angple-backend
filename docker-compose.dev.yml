@@ -1,10 +1,10 @@
 # ======================================
-# Local Development Environment (All-in-One)
+# Local Development Environment
 # ======================================
 # MySQL + Redis + API
 #
 # Usage:
-#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml up
 #   docker compose -f docker-compose.dev.yml down
 # ======================================
 
@@ -87,7 +87,8 @@ services:
 
 networks:
   angple-dev-network:
-    driver: bridge
+    external: true
+    name: angple-dev-network
 
 volumes:
   mysql-dev-data:

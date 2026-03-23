@@ -23,7 +23,6 @@ type AutoPromoteResult struct {
 func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteResult, error) {
 	now := time.Now()
 
-	// 조건 충족 회원 조회: mb_level=2, 실명인증, 로그인 7일 이상, 경험치 3000 이상
 	type candidate struct {
 		MbID        string    `gorm:"column:mb_id"`
 		MbLevel     int       `gorm:"column:mb_level"`
@@ -33,6 +32,7 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 		MbCertify   string    `gorm:"column:mb_certify"`
 		MbDatetime  time.Time `gorm:"column:mb_datetime"`
 	}
+
 	var candidates []candidate
 	if err := db.Table("g5_member").
 		Select("mb_id, mb_level, mb_login_days, as_exp, COALESCE(as_level, 0) as as_level, mb_certify, mb_datetime").
@@ -46,7 +46,6 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 	result := &AutoPromoteResult{
 		ExecutedAt: now.Format("2006-01-02 15:04:05"),
 	}
-
 	if len(candidates) == 0 {
 		return result, nil
 	}
@@ -72,6 +71,7 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 			if update.RowsAffected != 1 {
 				return nil
 			}
+
 			if err := memberlevel.RecordPromotion(tx, &member, 3, memberlevel.ReasonAutoPromoteCron); err != nil {
 				if memberlevel.IsMissingHistoryTableError(err) {
 					log.Printf("[Cron:auto-promote] member level history table missing; promotion log skipped for %s: %v", candidate.MbID, err)
@@ -79,6 +79,7 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 				}
 				return err
 			}
+
 			result.PromotedCount++
 			result.PromotedIDs = append(result.PromotedIDs, candidate.MbID)
 			return nil
@@ -88,7 +89,6 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 		}
 	}
 
-	// 알림 발송 (best-effort)
 	if notiRepo != nil {
 		for _, mbID := range result.PromotedIDs {
 			noti := &gnurepo.Notification{
