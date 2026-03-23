@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
+	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
+	"github.com/damoang/angple-backend/internal/memberlevel"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/damoang/angple-backend/pkg/jwt"
@@ -212,34 +214,60 @@ func (s *V2AuthService) checkAndPromote(mbID string) (bool, int) {
 		return false, 0
 	}
 
-	var member struct {
-		MbLevel   int `gorm:"column:mb_level"`
-		LoginDays int `gorm:"column:mb_login_days"`
-		Exp       int `gorm:"column:as_exp"`
-		Certify   string `gorm:"column:mb_certify"`
-	}
-	if err := s.db.Table("g5_member").
-		Select("mb_level, mb_login_days, as_exp, mb_certify").
-		Where("mb_id = ?", mbID).
-		First(&member).Error; err != nil {
-		log.Printf("[v2-auth] checkAndPromote: member query failed for %s: %v", mbID, err)
-		return false, 0
-	}
+	var (
+		previousLevel int
+		promoted      bool
+		newLevel      int
+	)
 
-	// 2→3 (앙님) 조건: 실명인증 + 로그인 7일 이상 + 경험치 3000 이상
-	if isEligibleForAutoPromotion(member.MbLevel, member.LoginDays, member.Exp, member.Certify) {
-		if err := s.db.Table("g5_member").
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var member gnudomain.G5Member
+		if err := tx.Table("g5_member").
+			Select("mb_id, mb_level, mb_login_days, as_exp, as_level, mb_certify, mb_datetime").
 			Where("mb_id = ?", mbID).
-			Update("mb_level", 3).Error; err != nil {
-			log.Printf("[v2-auth] checkAndPromote: level update failed for %s: %v", mbID, err)
-			return false, member.MbLevel
+			Take(&member).Error; err != nil {
+			return err
 		}
-		log.Printf("[v2-auth] auto-promoted %s from level 2 to 3", mbID)
+
+		previousLevel = member.MbLevel
+		newLevel = member.MbLevel
+
+		if !isEligibleForAutoPromotion(member.MbLevel, member.MbLoginDays, member.AsExp, member.MbCertify) {
+			return nil
+		}
+
+		result := tx.Table("g5_member").
+			Where("mb_id = ? AND mb_level = ?", mbID, member.MbLevel).
+			Update("mb_level", 3)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+
+		if err := memberlevel.RecordPromotion(tx, &member, 3, memberlevel.ReasonAutoPromoteLoginAPI); err != nil {
+			if memberlevel.IsMissingHistoryTableError(err) {
+				log.Printf("[v2-auth] member level history table missing; promotion logged skipped for %s: %v", mbID, err)
+			} else {
+				return err
+			}
+		}
+
+		promoted = true
+		newLevel = 3
+		return nil
+	})
+	if err != nil {
+		log.Printf("[v2-auth] checkAndPromote failed for %s: %v", mbID, err)
+		return false, previousLevel
+	}
+	if promoted {
+		log.Printf("[v2-auth] auto-promoted %s from level %d to %d", mbID, previousLevel, newLevel)
 		go s.sendPromotionNotification(mbID)
-		return true, 3
 	}
 
-	return false, member.MbLevel
+	return promoted, newLevel
 }
 
 // sendPromotionNotification sends a promotion notification (best-effort)
