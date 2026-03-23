@@ -201,6 +201,10 @@ func isBcryptHash(hash string) bool {
 	return len(hash) == 60 && (hash[:4] == "$2a$" || hash[:4] == "$2b$" || hash[:4] == "$2y$")
 }
 
+func isEligibleForAutoPromotion(level, loginDays, exp int, certify string) bool {
+	return level == 2 && loginDays >= 7 && exp >= 3000 && certify != ""
+}
+
 // checkAndPromote checks if the user meets auto-promotion criteria and promotes them.
 // Currently supports 2→3 (앙님) promotion.
 func (s *V2AuthService) checkAndPromote(mbID string) (bool, int) {
@@ -212,17 +216,18 @@ func (s *V2AuthService) checkAndPromote(mbID string) (bool, int) {
 		MbLevel   int `gorm:"column:mb_level"`
 		LoginDays int `gorm:"column:mb_login_days"`
 		Exp       int `gorm:"column:as_exp"`
+		Certify   string `gorm:"column:mb_certify"`
 	}
 	if err := s.db.Table("g5_member").
-		Select("mb_level, mb_login_days, as_exp").
+		Select("mb_level, mb_login_days, as_exp, mb_certify").
 		Where("mb_id = ?", mbID).
 		First(&member).Error; err != nil {
 		log.Printf("[v2-auth] checkAndPromote: member query failed for %s: %v", mbID, err)
 		return false, 0
 	}
 
-	// 2→3 (앙님) 조건: 로그인 7일 이상 + 경험치 3000 이상
-	if member.MbLevel == 2 && member.LoginDays >= 7 && member.Exp >= 3000 {
+	// 2→3 (앙님) 조건: 실명인증 + 로그인 7일 이상 + 경험치 3000 이상
+	if isEligibleForAutoPromotion(member.MbLevel, member.LoginDays, member.Exp, member.Certify) {
 		if err := s.db.Table("g5_member").
 			Where("mb_id = ?", mbID).
 			Update("mb_level", 3).Error; err != nil {

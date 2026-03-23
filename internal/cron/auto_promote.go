@@ -17,11 +17,11 @@ type AutoPromoteResult struct {
 }
 
 // runAutoPromote promotes members from mb_level 2 to 3
-// Conditions: mb_login_days >= 7 AND as_exp >= 3000
+// Conditions: mb_certify <> '' AND mb_login_days >= 7 AND as_exp >= 3000
 func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteResult, error) {
 	now := time.Now()
 
-	// 조건 충족 회원 조회: mb_level=2, 로그인 7일 이상, 경험치 3000 이상
+	// 조건 충족 회원 조회: mb_level=2, 실명인증, 로그인 7일 이상, 경험치 3000 이상
 	type candidate struct {
 		MbID string `gorm:"column:mb_id"`
 	}
@@ -29,6 +29,7 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 	if err := db.Table("g5_member").
 		Select("mb_id").
 		Where("mb_level = 2 AND mb_login_days >= 7 AND as_exp >= 3000").
+		Where("COALESCE(mb_certify, '') <> ''").
 		Where("mb_leave_date = '' AND mb_intercept_date = ''").
 		Find(&candidates).Error; err != nil {
 		return nil, fmt.Errorf("후보 조회 실패: %w", err)
