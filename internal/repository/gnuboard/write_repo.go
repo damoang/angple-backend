@@ -121,6 +121,14 @@ func tableName(boardID string) string {
 	return fmt.Sprintf("g5_write_%s", boardID)
 }
 
+func clampCommentDelta(delta int) interface{} {
+	return gorm.Expr(
+		"CASE WHEN COALESCE(wr_comment, 0) + ? < 0 THEN 0 ELSE COALESCE(wr_comment, 0) + ? END",
+		delta,
+		delta,
+	)
+}
+
 func visibleCommentCountExpr(_ string, alias string) string {
 	if alias != "" {
 		return alias + ".wr_comment AS wr_comment"
@@ -770,14 +778,47 @@ func (r *writeRepository) FindCommentByID(boardID string, wrID int) (*gnuboard.G
 
 // CreateComment creates a new comment
 func (r *writeRepository) CreateComment(boardID string, comment *gnuboard.G5Write) error {
-	return r.db.Table(tableName(boardID)).Create(comment).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Table(tableName(boardID)).Create(comment).Error; err != nil {
+			return err
+		}
+		if comment.WrParent <= 0 || comment.WrIsComment != 1 || comment.WrDeletedAt != nil {
+			return nil
+		}
+		return tx.Table(tableName(boardID)).
+			Where("wr_id = ?", comment.WrParent).
+			Update("wr_comment", clampCommentDelta(1)).
+			Error
+	})
 }
 
 // DeleteComment permanently deletes a comment from the database
 func (r *writeRepository) DeleteComment(boardID string, wrID int) error {
-	return r.db.Table(tableName(boardID)).
-		Where("wr_id = ? AND wr_is_comment = 1", wrID).
-		Delete(&gnuboard.G5Write{}).Error
+	table := tableName(boardID)
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var comment struct {
+			WrParent    int        `gorm:"column:wr_parent"`
+			WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
+		}
+		if err := tx.Table(table).
+			Select("wr_parent, wr_deleted_at").
+			Where("wr_id = ? AND wr_is_comment = 1", wrID).
+			Take(&comment).Error; err != nil {
+			return err
+		}
+		if err := tx.Table(table).
+			Where("wr_id = ? AND wr_is_comment = 1", wrID).
+			Delete(&gnuboard.G5Write{}).Error; err != nil {
+			return err
+		}
+		if comment.WrParent <= 0 || comment.WrDeletedAt != nil {
+			return nil
+		}
+		return tx.Table(table).
+			Where("wr_id = ?", comment.WrParent).
+			Update("wr_comment", clampCommentDelta(-1)).
+			Error
+	})
 }
 
 // SoftDeleteComment marks a comment as deleted
@@ -804,22 +845,67 @@ func (r *writeRepository) SoftDeleteComment(boardID string, wrID int, deletedBy 
 			boardID, wrID, comment.MbID, comment.WrName, deletedBy, now, string(prevData))
 	}
 
-	return r.db.Table(table).
-		Where("wr_id = ? AND wr_is_comment = 1", wrID).
-		Updates(map[string]interface{}{
-			"wr_deleted_at": now,
-			"wr_deleted_by": deletedBy,
-		}).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var comment struct {
+			WrParent    int        `gorm:"column:wr_parent"`
+			WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
+		}
+		if err := tx.Table(table).
+			Select("wr_parent, wr_deleted_at").
+			Where("wr_id = ? AND wr_is_comment = 1", wrID).
+			Take(&comment).Error; err != nil {
+			return err
+		}
+		result := tx.Table(table).
+			Where("wr_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", wrID).
+			Updates(map[string]interface{}{
+				"wr_deleted_at": now,
+				"wr_deleted_by": deletedBy,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 || comment.WrParent <= 0 || comment.WrDeletedAt != nil {
+			return nil
+		}
+		return tx.Table(table).
+			Where("wr_id = ?", comment.WrParent).
+			Update("wr_comment", clampCommentDelta(-1)).
+			Error
+	})
 }
 
 // RestoreComment restores a soft deleted comment
 func (r *writeRepository) RestoreComment(boardID string, wrID int) error {
-	return r.db.Table(tableName(boardID)).
-		Where("wr_id = ? AND wr_is_comment = 1", wrID).
-		Updates(map[string]interface{}{
-			"wr_deleted_at": nil,
-			"wr_deleted_by": nil,
-		}).Error
+	table := tableName(boardID)
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var comment struct {
+			WrParent    int        `gorm:"column:wr_parent"`
+			WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
+		}
+		if err := tx.Table(table).
+			Select("wr_parent, wr_deleted_at").
+			Where("wr_id = ? AND wr_is_comment = 1", wrID).
+			Take(&comment).Error; err != nil {
+			return err
+		}
+		result := tx.Table(table).
+			Where("wr_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NOT NULL", wrID).
+			Updates(map[string]interface{}{
+				"wr_deleted_at": nil,
+				"wr_deleted_by": nil,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 || comment.WrParent <= 0 || comment.WrDeletedAt == nil {
+			return nil
+		}
+		return tx.Table(table).
+			Where("wr_id = ?", comment.WrParent).
+			Update("wr_comment", clampCommentDelta(1)).
+			Error
+	})
 }
 
 // CountCommentReplies counts the number of replies to a specific comment.

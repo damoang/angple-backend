@@ -83,13 +83,17 @@ func (w *DeleteWorker) processPending() {
 			}
 			if err := w.db.Transaction(func(tx *gorm.DB) error {
 				now := time.Now()
-				if err := tx.Table("g5_write_"+sd.BoTable).
-					Where("wr_id = ? AND wr_is_comment = 1", sd.WrID).
+				result := tx.Table("g5_write_"+sd.BoTable).
+					Where("wr_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", sd.WrID).
 					Updates(map[string]interface{}{
 						"wr_deleted_at": now,
 						"wr_deleted_by": sd.RequestedBy,
-					}).Error; err != nil {
-					return err
+					})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected == 0 {
+					return nil
 				}
 				if err := tx.Table("g5_write_"+sd.BoTable).
 					Where("wr_id = ?", comment.WrParent).
