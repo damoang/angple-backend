@@ -87,6 +87,20 @@ func getConfigPath() string {
 	return fmt.Sprintf("configs/config.%s.yaml", env)
 }
 
+func shouldRunBootMigrations(env string) bool {
+	if override := strings.TrimSpace(os.Getenv("AUTO_MIGRATE_ON_BOOT")); override != "" {
+		override = strings.ToLower(override)
+		return override == "1" || override == "true" || override == "yes" || override == "on"
+	}
+
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "", "local", "development", "dev", "test":
+		return true
+	default:
+		return false
+	}
+}
+
 // memCachedPosts holds parsed post data in memory for fast filtering.
 type memCachedPosts struct {
 	items     []map[string]any // parsed post items (for filtering)
@@ -440,11 +454,15 @@ func main() {
 		db = nil
 	} else {
 		pkglogger.Info("Connected to MySQL")
-		if err := migration.Run(db); err != nil {
-			pkglogger.Info("Migration warning: %v", err)
-		}
-		if err := migration.RunV2Schema(db); err != nil {
-			pkglogger.Info("V2 schema migration warning: %v", err)
+		if shouldRunBootMigrations(env) {
+			if err := migration.Run(db); err != nil {
+				pkglogger.Info("Migration warning: %v", err)
+			}
+			if err := migration.RunV2Schema(db); err != nil {
+				pkglogger.Info("V2 schema migration warning: %v", err)
+			}
+		} else {
+			pkglogger.Info("Skipping boot migrations in APP_ENV=%s (set AUTO_MIGRATE_ON_BOOT=true to enable)", env)
 		}
 		if env == "" || env == "development" || env == "local" {
 			if err := migration.MigrateV2Data(db); err != nil {
