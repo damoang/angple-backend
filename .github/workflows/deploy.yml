@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_mode:
+        description: 'Deploy mode. canary_only by default. full = canary + production.'
+        required: true
+        type: choice
+        default: canary_only
+        options:
+          - canary_only
+          - full
 
 env:
   REGISTRY: ghcr.io
@@ -307,6 +316,7 @@ jobs:
 
   deploy-production:
     needs: [build, deploy-canary, verify-canary]
+    if: always() && needs.verify-canary.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.release_mode == 'full'
     runs-on: ubuntu-latest
     environment:
       name: production
