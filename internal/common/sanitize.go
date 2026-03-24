@@ -93,6 +93,7 @@ func newCommentPolicy() *bluemonday.Policy {
 
 	p.AllowElements("p", "br", "span")
 	p.AllowElements("strong", "b", "em", "i", "code", "s", "del")
+	p.AllowElements("img")
 
 	// a 태그 — nofollow noopener 강제
 	p.AllowAttrs("href", "target", "rel").OnElements("a")
@@ -100,6 +101,9 @@ func newCommentPolicy() *bluemonday.Policy {
 	p.RequireNoFollowOnLinks(true)
 	p.RequireNoFollowOnFullyQualifiedLinks(true)
 	p.AddTargetBlankToFullyQualifiedLinks(true)
+
+	// 댓글 이미지 — 업로드된 첨부 이미지만 안전하게 렌더링
+	p.AllowAttrs("src", "alt", "title", "width", "height", "loading").OnElements("img")
 
 	return p
 }

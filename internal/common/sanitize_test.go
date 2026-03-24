@@ -111,11 +111,14 @@ func TestSanitizeComment_BasicFormatting(t *testing.T) {
 	}
 }
 
-func TestSanitizeComment_NoImgAllowed(t *testing.T) {
-	input := `<p>text</p><img src="https://example.com/img.jpg"><p>more</p>`
+func TestSanitizeComment_AllowsSafeImg(t *testing.T) {
+	input := `<p>text</p><img src="https://example.com/img.jpg" alt="첨부" loading="lazy" onerror="alert('xss')"><p>more</p>`
 	result := SanitizeComment(input)
-	if strings.Contains(result, "<img") {
-		t.Errorf("img tag should not be allowed in comments: %s", result)
+	if !strings.Contains(result, "<img") {
+		t.Errorf("img tag removed from comment: %s", result)
+	}
+	if strings.Contains(result, "onerror") {
+		t.Errorf("unsafe img attribute not removed from comment: %s", result)
 	}
 }
 
