@@ -154,3 +154,21 @@ func (h *Handler) AutoPromote(c *gin.Context) {
 	log.Printf("[Cron:auto-promote] promoted %d members: %v", result.PromotedCount, result.PromotedIDs)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
+
+// SyncVisibleCommentCounts handles POST /api/internal/cron/sync-visible-comment-counts
+func (h *Handler) SyncVisibleCommentCounts(c *gin.Context) {
+	if !h.verifySecret(c) {
+		return
+	}
+
+	result, err := runSyncVisibleCommentCounts(h.db)
+	if err != nil {
+		log.Printf("[Cron:sync-visible-comment-counts] error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	log.Printf("[Cron:sync-visible-comment-counts] checked=%d synced=%d rows=%d errors=%d",
+		result.BoardsChecked, result.BoardsSynced, result.RowsUpdated, result.Errors)
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}

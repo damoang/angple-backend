@@ -240,6 +240,46 @@ func adjustPostCommentCount(tx *gorm.DB, boardID string, postID int, delta int) 
 		Error
 }
 
+func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, commentID int, deletedBy string, deletedAt time.Time) (bool, error) {
+	tableName := fmt.Sprintf("g5_write_%s", boardID)
+	result := tx.Table(tableName).
+		Where("wr_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", commentID).
+		Updates(map[string]interface{}{
+			"wr_deleted_at": deletedAt,
+			"wr_deleted_by": deletedBy,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return false, nil
+	}
+	if err := adjustPostCommentCount(tx, boardID, postID, -1); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func restoreCommentAndAdjust(tx *gorm.DB, boardID string, postID int, commentID int) (bool, error) {
+	tableName := fmt.Sprintf("g5_write_%s", boardID)
+	result := tx.Table(tableName).
+		Where("wr_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NOT NULL", commentID).
+		Updates(map[string]interface{}{
+			"wr_deleted_at": nil,
+			"wr_deleted_by": nil,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return false, nil
+	}
+	if err := adjustPostCommentCount(tx, boardID, postID, 1); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func logWritePhase(c *gin.Context, op, boardID string, targetID int, started time.Time, fields map[string]time.Duration) {
 	parts := make([]string, 0, len(fields))
 	for key, value := range fields {
@@ -3460,14 +3500,12 @@ func main() {
 			if userLevel >= 10 {
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
-					if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ? AND wr_is_comment = 1", commentID).Updates(map[string]interface{}{
-						"wr_deleted_at": now,
-						"wr_deleted_by": userID,
-					}).Error; err != nil {
+					changed, err := softDeleteCommentAndAdjust(tx, slug, postID, commentID, userID, now)
+					if err != nil {
 						return err
 					}
-					if err := adjustPostCommentCount(tx, slug, postID, -1); err != nil {
-						return err
+					if !changed {
+						return nil
 					}
 					return createWriteAfterEvent(
 						tx,
@@ -3511,14 +3549,12 @@ func main() {
 				// 답글 없으면 즉시 삭제
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
-					if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ? AND wr_is_comment = 1", commentID).Updates(map[string]interface{}{
-						"wr_deleted_at": now,
-						"wr_deleted_by": userID,
-					}).Error; err != nil {
+					changed, err := softDeleteCommentAndAdjust(tx, slug, postID, commentID, userID, now)
+					if err != nil {
 						return err
 					}
-					if err := adjustPostCommentCount(tx, slug, postID, -1); err != nil {
-						return err
+					if !changed {
+						return nil
 					}
 					return createWriteAfterEvent(
 						tx,
@@ -3609,14 +3645,12 @@ func main() {
 			// 댓글 복구
 			postID, _ := strconv.Atoi(c.Param("id"))
 			txErr := db.Transaction(func(tx *gorm.DB) error {
-				if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ? AND wr_is_comment = 1", commentID).Updates(map[string]interface{}{
-					"wr_deleted_at": nil,
-					"wr_deleted_by": nil,
-				}).Error; err != nil {
+				changed, err := restoreCommentAndAdjust(tx, slug, postID, commentID)
+				if err != nil {
 					return err
 				}
-				if err := adjustPostCommentCount(tx, slug, postID, 1); err != nil {
-					return err
+				if !changed {
+					return nil
 				}
 				return createWriteAfterEvent(
 					tx,
@@ -5036,6 +5070,7 @@ func main() {
 		cronGroup.POST("/point-expiry", cronHandler.PointExpiry)
 		cronGroup.POST("/point-expiry-notify", cronHandler.PointExpiryNotify)
 		cronGroup.POST("/auto-promote", cronHandler.AutoPromote)
+		cronGroup.POST("/sync-visible-comment-counts", cronHandler.SyncVisibleCommentCounts)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo, writeAfterEventRepo)
