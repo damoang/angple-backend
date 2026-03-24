@@ -8,9 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// BoardSlugRegex allows lowercase letters, digits, and underscores, max 20 chars.
-// Matches Gnuboard's board ID rules.
-var BoardSlugRegex = regexp.MustCompile(`^[a-z0-9_]{1,20}$`)
+// BoardSlugRegex allows ASCII letters, digits, and underscores, max 20 chars.
+// Some legacy Gnuboard boards in production use mixed-case bo_table values
+// such as MSSurface, so uppercase slugs must also pass validation.
+var BoardSlugRegex = regexp.MustCompile(`^[A-Za-z0-9_]{1,20}$`)
 
 // ValidateBoardSlug rejects requests whose :slug parameter contains invalid characters.
 func ValidateBoardSlug() gin.HandlerFunc {
