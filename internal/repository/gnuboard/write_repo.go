@@ -26,6 +26,16 @@ type cachedCount struct {
 }
 
 const countCacheTTL = 30 * time.Second
+const hotBoardCountCacheTTL = 3 * time.Minute
+
+func countCacheTTLForBoard(boardID string) time.Duration {
+	switch boardID {
+	case "free", "hello":
+		return hotBoardCountCacheTTL
+	default:
+		return countCacheTTL
+	}
+}
 
 // sortFieldCache caches bo_sort_field per board (60s TTL)
 // Eliminates extra g5_board query on every post list request
@@ -615,15 +625,17 @@ func (r *writeRepository) getCachedPostCount(boardID string) int64 {
 
 // setCachedPostCount stores count in both Redis (shared) and in-memory (local fallback)
 func (r *writeRepository) setCachedPostCount(boardID string, total int64) {
+	ttl := countCacheTTLForBoard(boardID)
+
 	// Store in Redis (shared across pods)
 	if r.redis != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		r.redis.Set(ctx, postCountRedisKey(boardID), total, countCacheTTL)
+		r.redis.Set(ctx, postCountRedisKey(boardID), total, ttl)
 	}
 
 	// Also store in local memory as fallback
-	postCountCache.Store("count:"+boardID, &cachedCount{total: total, expiresAt: time.Now().Add(countCacheTTL)})
+	postCountCache.Store("count:"+boardID, &cachedCount{total: total, expiresAt: time.Now().Add(ttl)})
 }
 
 // invalidatePostCount clears the cached post count for a board from both Redis and memory
