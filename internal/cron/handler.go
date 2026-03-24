@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
@@ -121,12 +122,24 @@ func (h *Handler) DisciplineRelease(c *gin.Context) {
 }
 
 // UpdateReportPattern handles POST /api/internal/cron/update-report-pattern
+// Optional query param: ?date=2026-03-22 to override reference date
 func (h *Handler) UpdateReportPattern(c *gin.Context) {
 	if !h.verifySecret(c) {
 		return
 	}
 
-	result, err := runUpdateReportPattern(h.db)
+	var result *ReportPatternResult
+	var err error
+	if dateStr := c.Query("date"); dateStr != "" {
+		t, parseErr := time.Parse("2006-01-02", dateStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid date format, use YYYY-MM-DD"})
+			return
+		}
+		result, err = runUpdateReportPatternAt(h.db, t)
+	} else {
+		result, err = runUpdateReportPattern(h.db)
+	}
 	if err != nil {
 		log.Printf("[Cron:update-report-pattern] error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
