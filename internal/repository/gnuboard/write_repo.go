@@ -121,16 +121,11 @@ func tableName(boardID string) string {
 	return fmt.Sprintf("g5_write_%s", boardID)
 }
 
-func visibleCommentCountExpr(table, alias string) string {
-	parentRef := "wr_id"
+func visibleCommentCountExpr(_ string, alias string) string {
 	if alias != "" {
-		parentRef = alias + ".wr_id"
+		return alias + ".wr_comment AS wr_comment"
 	}
-	return fmt.Sprintf(
-		"(SELECT COUNT(*) FROM `%s` c WHERE c.wr_parent = %s AND c.wr_is_comment = 1 AND (c.wr_deleted_at IS NULL OR c.wr_deleted_at = '0000-00-00 00:00:00')) AS wr_comment",
-		table,
-		parentRef,
-	)
+	return "wr_comment"
 }
 
 func postSelectColumns(boardID, alias string) string {
