@@ -78,7 +78,11 @@ const singoTypeCondition = "sg_type IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1
 
 // runUpdateReportPattern generates a weekly report pattern analysis
 func runUpdateReportPattern(db *gorm.DB) (*ReportPatternResult, error) {
-	now := time.Now()
+	return runUpdateReportPatternAt(db, time.Now())
+}
+
+// runUpdateReportPatternAt generates a report using the given reference time
+func runUpdateReportPatternAt(db *gorm.DB, now time.Time) (*ReportPatternResult, error) {
 
 	// 지난 주 일요일~토요일 계산
 	startDate, endDate := getLastWeekRange(now)
@@ -507,9 +511,9 @@ func saveReportPost(db *gorm.DB, stats *reportStats, subject string, now time.Ti
 			wr_subject = ?,
 			wr_content = ?,
 			wr_9 = ?,
-			mb_id = 'admin',
+			mb_id = 'ai',
 			wr_password = '',
-			wr_name = '관리자',
+			wr_name = '다모앙',
 			wr_datetime = ?,
 			wr_last = ?,
 			wr_ip = '127.0.0.1'
