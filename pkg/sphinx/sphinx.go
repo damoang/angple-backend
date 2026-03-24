@@ -76,7 +76,7 @@ func buildMatchExpr(searchField, searchQuery string) string {
 	case "title_content":
 		return fmt.Sprintf("@(wr_subject,wr_content) %s", wildcarded)
 	case "author":
-		return fmt.Sprintf("@(wr_name,mb_id) %s", escaped)
+		return fmt.Sprintf("@(wr_name,mb_id) %s", wildcarded)
 	default:
 		return fmt.Sprintf("@(wr_subject,wr_content) %s", wildcarded)
 	}
@@ -112,7 +112,7 @@ func (c *Client) Search(boardID, searchField, searchQuery string, page, limit in
 	offset := (page - 1) * limit
 
 	query := fmt.Sprintf(
-		"SELECT wr_id FROM %s WHERE MATCH('%s') AND wr_is_comment=0 ORDER BY wr_id DESC LIMIT %d, %d OPTION max_matches=10000",
+		"SELECT wr_id FROM %s WHERE MATCH('%s') AND wr_is_comment=0 ORDER BY WEIGHT() DESC, wr_id DESC LIMIT %d, %d OPTION max_matches=10000, ranker=sph04",
 		index, matchExpr, offset, limit,
 	)
 
