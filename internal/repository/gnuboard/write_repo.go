@@ -397,14 +397,13 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 
 	// Sphinx로 검색 후 차단 유저 필터링
 	if r.sphinx == nil {
-		return r.searchPostsLikeFiltered(boardID, searchField, searchQuery, page, limit, excludeMbIDs)
+		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
 	}
 
 	// 차단 유저 필터를 위해 여유분 조회 (최대 2배)
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit*2)
 	if err != nil {
-		log.Printf("[SearchPostsFiltered] Sphinx error, falling back to LIKE: %v", err)
-		return r.searchPostsLikeFiltered(boardID, searchField, searchQuery, page, limit, excludeMbIDs)
+		return nil, 0, fmt.Errorf("검색 서비스 오류: %w", err)
 	}
 	if result == nil || len(result.IDs) == 0 {
 		var total int64
@@ -445,16 +444,15 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 }
 
 // SearchPosts retrieves posts matching search criteria (sfl/stx) with pagination.
-// Uses Sphinx full-text search with MySQL LIKE fallback.
+// Requires Sphinx full-text search. Returns error if Sphinx is unavailable.
 func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
 	if r.sphinx == nil {
-		return r.searchPostsLike(boardID, searchField, searchQuery, page, limit)
+		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
 	}
 
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit)
 	if err != nil {
-		log.Printf("[SearchPosts] Sphinx error, falling back to LIKE: %v", err)
-		return r.searchPostsLike(boardID, searchField, searchQuery, page, limit)
+		return nil, 0, fmt.Errorf("검색 서비스 오류: %w", err)
 	}
 	if result == nil || len(result.IDs) == 0 {
 		var total int64
@@ -488,17 +486,16 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 }
 
 // SearchPostsByCategory retrieves posts matching search criteria filtered by ca_name (category).
-// Uses Sphinx for full-text search with MySQL LIKE fallback, then filters by category.
+// Uses Sphinx for full-text search, then filters by category in MySQL.
 func (r *writeRepository) SearchPostsByCategory(boardID string, searchField, searchQuery, category string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
 	if r.sphinx == nil {
-		return r.searchPostsLikeByCategory(boardID, searchField, searchQuery, category, page, limit)
+		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
 	}
 
 	// Fetch extra results from Sphinx since category filter will reduce count
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, 1, limit*page*3)
 	if err != nil {
-		log.Printf("[SearchPostsByCategory] Sphinx error, falling back to LIKE: %v", err)
-		return r.searchPostsLikeByCategory(boardID, searchField, searchQuery, category, page, limit)
+		return nil, 0, fmt.Errorf("검색 서비스 오류: %w", err)
 	}
 	if result == nil || len(result.IDs) == 0 {
 		return nil, 0, nil
@@ -981,102 +978,4 @@ func ParseNoticeIDs(noticeStr string) []int {
 	}
 
 	return ids
-}
-
-// likeCondition builds a WHERE clause for MySQL LIKE fallback search.
-func likeCondition(searchField, searchQuery string) (string, string) {
-	like := "%" + searchQuery + "%"
-	switch searchField {
-	case "title":
-		return "wr_subject LIKE ?", like
-	case "content":
-		return "wr_content LIKE ?", like
-	case "title_content":
-		return "(wr_subject LIKE ? OR wr_content LIKE ?)", like
-	case "author":
-		return "(wr_name LIKE ? OR mb_id LIKE ?)", like
-	default:
-		return "(wr_subject LIKE ? OR wr_content LIKE ?)", like
-	}
-}
-
-// searchPostsLike is a MySQL LIKE fallback when Sphinx is unavailable.
-func (r *writeRepository) searchPostsLike(boardID, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
-	table := tableName(boardID)
-	cond, like := likeCondition(searchField, searchQuery)
-	offset := (page - 1) * limit
-
-	var args []interface{}
-	if searchField == "title_content" || searchField == "author" || searchField == "" {
-		args = []interface{}{like, like}
-	} else {
-		args = []interface{}{like}
-	}
-
-	baseQuery := r.db.Table(table).Where("wr_is_comment = 0 AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')").Where(cond, args...)
-
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var posts []*gnuboard.G5Write
-	if err := baseQuery.Select(postSelectColumns(boardID, "")).Order("wr_id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
-		return nil, 0, err
-	}
-	return posts, total, nil
-}
-
-// searchPostsLikeFiltered is a MySQL LIKE fallback with member exclusion.
-func (r *writeRepository) searchPostsLikeFiltered(boardID, searchField, searchQuery string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error) {
-	table := tableName(boardID)
-	cond, like := likeCondition(searchField, searchQuery)
-	offset := (page - 1) * limit
-
-	var args []interface{}
-	if searchField == "title_content" || searchField == "author" || searchField == "" {
-		args = []interface{}{like, like}
-	} else {
-		args = []interface{}{like}
-	}
-
-	baseQuery := r.db.Table(table).Where("wr_is_comment = 0 AND mb_id NOT IN ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", excludeMbIDs).Where(cond, args...)
-
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var posts []*gnuboard.G5Write
-	if err := baseQuery.Select(postSelectColumns(boardID, "")).Order("wr_id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
-		return nil, 0, err
-	}
-	return posts, total, nil
-}
-
-// searchPostsLikeByCategory is a MySQL LIKE fallback with category filter.
-func (r *writeRepository) searchPostsLikeByCategory(boardID, searchField, searchQuery, category string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
-	table := tableName(boardID)
-	cond, like := likeCondition(searchField, searchQuery)
-	offset := (page - 1) * limit
-
-	var args []interface{}
-	if searchField == "title_content" || searchField == "author" || searchField == "" {
-		args = []interface{}{like, like}
-	} else {
-		args = []interface{}{like}
-	}
-
-	baseQuery := r.db.Table(table).Where("wr_is_comment = 0 AND ca_name = ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", category).Where(cond, args...)
-
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var posts []*gnuboard.G5Write
-	if err := baseQuery.Select(postSelectColumns(boardID, "")).Order("wr_id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
-		return nil, 0, err
-	}
-	return posts, total, nil
 }
