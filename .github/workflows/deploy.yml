@@ -132,7 +132,7 @@ jobs:
           echo "Timeout"
           exit 1
 
-      - name: Smoke test
+      - name: Smoke test (public canary 200)
         run: |
           for i in {1..30}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" -A "GitHub-Actions-Healthcheck" https://canary.damoang.net/api/v1/health || echo "000")
@@ -238,6 +238,21 @@ jobs:
           echo "Timeout"
           exit 1
 
+      - name: Verify public canary returns 200
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /tmp/backend-canary-public-health.out -w "%{http_code}" --max-time 10 "https://canary.damoang.net/api/v1/health" || echo "000")
+            echo "CHECK public canary /api/v1/health -> ${code}"
+            if [ "$code" = "200" ]; then
+              echo "✅ Public canary health check passed"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ Public canary health check failed"
+          cat /tmp/backend-canary-public-health.out || true
+          exit 1
+
       - name: Notify Telegram (Approval)
         if: success()
         run: |
@@ -309,6 +324,21 @@ jobs:
             sleep 5
           done
           echo "Timeout"
+          exit 1
+
+      - name: Verify production returns 200
+        run: |
+          for i in $(seq 1 36); do
+            code=$(curl -sS -o /tmp/backend-production-health.out -w "%{http_code}" --max-time 10 "https://damoang.net/api/v1/health" || echo "000")
+            echo "CHECK production /api/v1/health -> ${code}"
+            if [ "$code" = "200" ]; then
+              echo "✅ Production health check passed"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ Production health check failed"
+          cat /tmp/backend-production-health.out || true
           exit 1
 
       - name: Notify Discord (Production)
