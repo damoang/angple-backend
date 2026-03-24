@@ -38,15 +38,6 @@ type cachedSortField struct {
 
 const sortFieldCacheTTL = 60 * time.Second
 
-// prefixColumns returns columns prefixed with a table alias (e.g., "t.wr_id, t.wr_num, ...")
-func prefixColumns(cols []string, alias string) string {
-	parts := make([]string, len(cols))
-	for i, c := range cols {
-		parts[i] = alias + "." + c
-	}
-	return strings.Join(parts, ", ")
-}
-
 // coreColumns are the columns that exist in all g5_write_* tables
 var coreColumns = []string{
 	"wr_id", "wr_num", "wr_reply", "wr_parent", "wr_is_comment",
@@ -130,6 +121,35 @@ func tableName(boardID string) string {
 	return fmt.Sprintf("g5_write_%s", boardID)
 }
 
+func visibleCommentCountExpr(table, alias string) string {
+	parentRef := "wr_id"
+	if alias != "" {
+		parentRef = alias + ".wr_id"
+	}
+	return fmt.Sprintf(
+		"(SELECT COUNT(*) FROM `%s` c WHERE c.wr_parent = %s AND c.wr_is_comment = 1 AND (c.wr_deleted_at IS NULL OR c.wr_deleted_at = '0000-00-00 00:00:00')) AS wr_comment",
+		table,
+		parentRef,
+	)
+}
+
+func postSelectColumns(boardID, alias string) string {
+	table := tableName(boardID)
+	parts := make([]string, 0, len(coreColumns))
+	for _, col := range coreColumns {
+		if col == "wr_comment" {
+			parts = append(parts, visibleCommentCountExpr(table, alias))
+			continue
+		}
+		if alias != "" {
+			parts = append(parts, alias+"."+col)
+			continue
+		}
+		parts = append(parts, col)
+	}
+	return strings.Join(parts, ", ")
+}
+
 // allowedSortColumns is the whitelist for bo_sort_field values
 var allowedSortColumns = map[string]bool{
 	"wr_num, wr_reply":            true,
@@ -201,22 +221,22 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 
 	// 게시판별 커스텀 정렬 (bo_sort_field) — 캐시된 단일 조회 사용
 	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumns(boardID, "")
 
 	// Deferred JOIN: subquery scans only wr_id via covering index, then JOIN fetches full rows.
 	// This avoids reading wide rows during the OFFSET skip phase (max 119s → ~200ms).
 	if orderClause == "wr_num, wr_reply" {
-		cols := prefixColumns(coreColumns, "t")
 		err := r.db.Raw(
 			fmt.Sprintf(
 				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
-				cols, table, table,
+				postSelectColumns(boardID, "t"), table, table,
 			),
 			limit, offset,
 		).Scan(&posts).Error
 		// Fallback if idx_list_page doesn't exist on this table
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
-				Select(coreColumns).
+				Select(selectCols).
 				Where("wr_is_comment = 0").
 				Order(orderClause).
 				Offset(offset).
@@ -227,7 +247,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	}
 
 	err := r.db.Table(table).
-		Select(coreColumns).
+		Select(selectCols).
 		Where("wr_is_comment = 0").
 		Order(orderClause).
 		Offset(offset).
@@ -252,9 +272,10 @@ func (r *writeRepository) FindPostsByCategory(boardID string, category string, p
 	}
 
 	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumns(boardID, "")
 
 	err := r.db.Table(table).
-		Select(coreColumns).
+		Select(selectCols).
 		Where(baseWhere, category).
 		Order(orderClause).
 		Offset(offset).
@@ -286,18 +307,17 @@ func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum 
 		return r.FindPosts(boardID, 1, limit)
 	}
 
-	selectCols := strings.Join(coreColumns, ", ")
 	err := r.db.Raw(
 		fmt.Sprintf(
 			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?)) ORDER BY wr_num, wr_reply LIMIT ?",
-			selectCols,
+			postSelectColumns(boardID, ""),
 			table,
 		),
 		cursorWrNum, cursorWrNum, cursorWrReply, limit,
 	).Scan(&posts).Error
 	if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 		err = r.db.Table(table).
-			Select(coreColumns).
+			Select(postSelectColumns(boardID, "")).
 			Where("wr_is_comment = 0 AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?))", cursorWrNum, cursorWrNum, cursorWrReply).
 			Order(orderClause).
 			Limit(limit).
@@ -331,20 +351,20 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	}
 
 	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumns(boardID, "")
 
 	// Deferred JOIN with exclusion filter applied in subquery
 	if orderClause == "wr_num, wr_reply" {
-		cols := prefixColumns(coreColumns, "t")
 		err := r.db.Raw(
 			fmt.Sprintf(
 				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
-				cols, table, table,
+				postSelectColumns(boardID, "t"), table, table,
 			),
 			excludeMbIDs, limit, offset,
 		).Scan(&posts).Error
 		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 			err = r.db.Table(table).
-				Select(coreColumns).
+				Select(selectCols).
 				Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
 				Order(orderClause).
 				Offset(offset).
@@ -355,7 +375,7 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	}
 
 	err := r.db.Table(table).
-		Select(coreColumns).
+		Select(selectCols).
 		Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
 		Order(orderClause).
 		Offset(offset).
@@ -394,7 +414,7 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 	var posts []*gnuboard.G5Write
 	table := tableName(boardID)
 	if err := r.db.Table(table).
-		Select(coreColumns).
+		Select(postSelectColumns(boardID, "")).
 		Where("wr_id IN ? AND mb_id NOT IN ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs, excludeMbIDs).
 		Find(&posts).Error; err != nil {
 		return nil, 0, err
@@ -443,7 +463,7 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 	var posts []*gnuboard.G5Write
 	table := tableName(boardID)
 	if err := r.db.Table(table).
-		Select(coreColumns).
+		Select(postSelectColumns(boardID, "")).
 		Where("wr_id IN ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs).
 		Find(&posts).Error; err != nil {
 		return nil, 0, err
@@ -490,7 +510,7 @@ func (r *writeRepository) SearchPostsByCategory(boardID string, searchField, sea
 	var posts []*gnuboard.G5Write
 	offset := (page - 1) * limit
 	if err := r.db.Table(table).
-		Select(coreColumns).
+		Select(postSelectColumns(boardID, "")).
 		Where("wr_id IN ? AND ca_name = ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs, category).
 		Order("wr_id DESC").
 		Offset(offset).
@@ -506,7 +526,7 @@ func (r *writeRepository) SearchPostsByCategory(boardID string, searchField, sea
 func (r *writeRepository) FindPostByID(boardID string, wrID int) (*gnuboard.G5Write, error) {
 	var post gnuboard.G5Write
 	err := r.db.Table(tableName(boardID)).
-		Select(coreColumns).
+		Select(postSelectColumns(boardID, "")).
 		Where("wr_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL", wrID).
 		First(&post).Error
 	return &post, err
@@ -516,7 +536,7 @@ func (r *writeRepository) FindPostByID(boardID string, wrID int) (*gnuboard.G5Wr
 func (r *writeRepository) FindPostByIDIncludeDeleted(boardID string, wrID int) (*gnuboard.G5Write, error) {
 	var post gnuboard.G5Write
 	err := r.db.Table(tableName(boardID)).
-		Select(coreColumns).
+		Select(postSelectColumns(boardID, "")).
 		Where("wr_id = ? AND wr_is_comment = 0", wrID).
 		First(&post).Error
 	return &post, err
@@ -530,7 +550,7 @@ func (r *writeRepository) FindNotices(boardID string, noticeIDs []int) ([]*gnubo
 
 	var notices []*gnuboard.G5Write
 	err := r.db.Table(tableName(boardID)).
-		Select(coreColumns).
+		Select(postSelectColumns(boardID, "")).
 		Where("wr_id IN ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL", noticeIDs).
 		Order("wr_num, wr_reply").
 		Find(&notices).Error
@@ -551,7 +571,7 @@ func (r *writeRepository) FindDeletedPosts(boardID string, page, limit int) ([]*
 	}
 
 	err := r.db.Table(table).
-		Select(coreColumns).
+		Select(postSelectColumns(boardID, "")).
 		Where("wr_is_comment = 0 AND wr_deleted_at IS NOT NULL").
 		Order("wr_deleted_at DESC").
 		Offset(offset).
