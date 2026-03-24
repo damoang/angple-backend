@@ -277,7 +277,7 @@ func collectStats(db *gorm.DB, startDate, endDate string, now time.Time) *report
 	db.Raw(fmt.Sprintf(`
 		SELECT report_date, COUNT(*) as daily_reports
 		FROM (
-			SELECT DISTINCT DATE(sg_time) as report_date, CONCAT(sg_table, '_', sg_id, '_', mb_id) as unique_key
+			SELECT DISTINCT CAST(DATE(sg_time) AS CHAR) as report_date, CONCAT(sg_table, '_', sg_id, '_', mb_id) as unique_key
 			FROM g5_na_singo
 			WHERE (%s)
 			AND sg_time >= ? AND sg_time <= ?
@@ -300,7 +300,7 @@ func collectStats(db *gorm.DB, startDate, endDate string, now time.Time) *report
 	}
 	var dailyPosts []dailyPostRow
 	db.Raw(`
-		SELECT DATE(bn_datetime) as post_date,
+		SELECT CAST(DATE(bn_datetime) AS CHAR) as post_date,
 			SUM(CASE WHEN wr_id=wr_parent THEN 1 ELSE 0 END) as daily_posts,
 			SUM(CASE WHEN wr_id!=wr_parent THEN 1 ELSE 0 END) as daily_comments
 		FROM g5_board_new
