@@ -1333,9 +1333,18 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		})
 
-		// Admin member memo CRUD
+		// Admin member management + memo CRUD
+		adminMemberHandler := handler.NewAdminMemberHandler(db)
 		adminMemoGroup := router.Group("/api/v1/admin/members")
 		adminMemoGroup.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+
+		// Member CRUD
+		adminMemoGroup.GET("", adminMemberHandler.ListMembers)
+		adminMemoGroup.GET("/:mbId", adminMemberHandler.GetMember)
+		adminMemoGroup.PUT("/:mbId", adminMemberHandler.UpdateMember)
+		adminMemoGroup.POST("/:mbId/ban", adminMemberHandler.BanMember)
+		adminMemoGroup.POST("/:mbId/unban", adminMemberHandler.UnbanMember)
+		adminMemoGroup.POST("/bulk/level", adminMemberHandler.BulkUpdateLevel)
 
 		// GET /api/v1/admin/members/:mbId/memos — 특정 회원에 대한 메모 목록
 		adminMemoGroup.GET("/:mbId/memos", func(c *gin.Context) {
@@ -4591,7 +4600,7 @@ func main() {
 		})
 
 		// v2 Admin
-		v2AdminSvc := v2svc.NewAdminService(v2UserRepo, v2BoardRepo, v2PostRepo, v2CommentRepo)
+		v2AdminSvc := v2svc.NewAdminService(db, v2UserRepo, v2BoardRepo, v2PostRepo, v2CommentRepo, gnuMemberRepo)
 		v2AdminHandler := v2handler.NewAdminHandler(v2AdminSvc)
 		v2routes.SetupAdmin(router, v2AdminHandler, jwtManager)
 
