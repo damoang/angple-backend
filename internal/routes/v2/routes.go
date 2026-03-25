@@ -222,6 +222,19 @@ func SetupMyPage(router *gin.Engine, pointHandler *v2handler.PointHandler, expHa
 	my.GET("/stats", myPageHandler.GetBoardStats)
 }
 
+// SetupAnniversaryEvent configures anniversary event routes.
+func SetupAnniversaryEvent(router *gin.Engine, h *v2handler.AnniversaryEventHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	events := router.Group("/api/v1/events", auth)
+	events.GET("/anniversary-draw", h.GetStatus)
+	events.POST("/anniversary-draw", h.Participate)
+
+	admin := router.Group("/api/v1/admin/events")
+	admin.Use(auth, middleware.RequireAdmin())
+	admin.POST("/anniversary-draw/grant", h.AdminGrantPending)
+}
+
 // SetupMemberActivity configures public member activity route
 func SetupMemberActivity(router *gin.Engine, myPageHandler *handler.MyPageHandler) {
 	router.GET("/api/v1/members/:id/activity", myPageHandler.GetMemberActivity)
