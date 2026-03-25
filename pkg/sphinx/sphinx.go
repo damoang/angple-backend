@@ -106,14 +106,22 @@ func escapeSphinx(s string) string {
 }
 
 // Search queries Sphinx for matching post IDs using the distributed index (main + delta).
-func (c *Client) Search(boardID, searchField, searchQuery string, page, limit int) (*SearchResult, error) {
+// sortBy: "relevance" for WEIGHT() DESC, anything else for wr_id DESC (default).
+func (c *Client) Search(boardID, searchField, searchQuery string, page, limit int, sortBy ...string) (*SearchResult, error) {
 	index := fmt.Sprintf("g5_write_%s_dist", boardID)
 	matchExpr := buildMatchExpr(searchField, searchQuery)
 	offset := (page - 1) * limit
 
+	orderClause := "ORDER BY wr_id DESC"
+	optionClause := "OPTION max_matches=10000"
+	if len(sortBy) > 0 && sortBy[0] == "relevance" {
+		orderClause = "ORDER BY WEIGHT() DESC, wr_id DESC"
+		optionClause = "OPTION max_matches=10000, ranker=sph04"
+	}
+
 	query := fmt.Sprintf(
-		"SELECT wr_id FROM %s WHERE MATCH('%s') AND wr_is_comment=0 ORDER BY WEIGHT() DESC, wr_id DESC LIMIT %d, %d OPTION max_matches=10000, ranker=sph04",
-		index, matchExpr, offset, limit,
+		"SELECT wr_id FROM %s WHERE MATCH('%s') AND wr_is_comment=0 %s LIMIT %d, %d %s",
+		index, matchExpr, orderClause, offset, limit, optionClause,
 	)
 
 	rows, err := c.db.Query(query)
