@@ -47,6 +47,7 @@ type WriteRestrictionResult struct {
 type BoardWriteRestrictionService struct {
 	db                   *gorm.DB
 	extendedSettingsRepo v2repo.BoardExtendedSettingsRepository
+	advertiserPolicySvc  *AdvertiserBoardPolicyService
 }
 
 // NewBoardWriteRestrictionService creates a new BoardWriteRestrictionService.
@@ -55,6 +56,11 @@ func NewBoardWriteRestrictionService(db *gorm.DB, repo v2repo.BoardExtendedSetti
 		db:                   db,
 		extendedSettingsRepo: repo,
 	}
+}
+
+// SetAdvertiserPolicyService keeps compatibility with shadow-mode tests and callers.
+func (s *BoardWriteRestrictionService) SetAdvertiserPolicyService(svc *AdvertiserBoardPolicyService) {
+	s.advertiserPolicySvc = svc
 }
 
 // Check verifies whether the given member can write to the specified board.
