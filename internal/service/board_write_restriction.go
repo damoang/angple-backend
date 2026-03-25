@@ -47,6 +47,12 @@ type WriteRestrictionResult struct {
 type BoardWriteRestrictionService struct {
 	db                   *gorm.DB
 	extendedSettingsRepo v2repo.BoardExtendedSettingsRepository
+	advertiserPolicySvc  *AdvertiserBoardPolicyService
+}
+
+// SetAdvertiserPolicyService sets the advertiser policy service for shadow-mode comparison.
+func (s *BoardWriteRestrictionService) SetAdvertiserPolicyService(svc *AdvertiserBoardPolicyService) {
+	s.advertiserPolicySvc = svc
 }
 
 // NewBoardWriteRestrictionService creates a new BoardWriteRestrictionService.
