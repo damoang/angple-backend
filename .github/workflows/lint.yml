@@ -31,9 +31,78 @@ jobs:
         version: v2.11.2
         args: --timeout=5m
 
+  prepare-lint-targets:
+    name: Prepare Lint Targets
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.targets.outputs.should_run }}
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    - name: Resolve lint targets
+      id: targets
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BASE_REF="origin/${{ github.base_ref }}"
+        git fetch origin "${{ github.base_ref }}" --depth=1
+
+        CHANGED_FILES="$(git diff --name-only "${BASE_REF}...${{ github.sha }}")"
+
+        if [ -z "${CHANGED_FILES}" ]; then
+          echo "should_run=false" >> "$GITHUB_OUTPUT"
+          echo "targets=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        if printf '%s\n' "${CHANGED_FILES}" | grep -Eq '^(go\.mod|go\.sum|\.golangci\.yml|\.github/workflows/lint\.yml)$'; then
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          echo "targets=./..." >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        mapfile -t GO_FILES < <(printf '%s\n' "${CHANGED_FILES}" | grep '\.go$' | grep -vE '^(plugins|vendor)/' || true)
+
+        if [ "${#GO_FILES[@]}" -eq 0 ]; then
+          echo "should_run=false" >> "$GITHUB_OUTPUT"
+          echo "targets=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        mapfile -t TARGETS < <(
+          printf '%s\n' "${GO_FILES[@]}" \
+            | xargs -n1 dirname \
+            | sort -u \
+            | while read -r dir; do
+                go list "./${dir}"
+              done
+        )
+
+        if [ "${#TARGETS[@]}" -eq 0 ]; then
+          echo "should_run=false" >> "$GITHUB_OUTPUT"
+          echo "targets=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        TARGETS_JOINED="$(printf '%s\n' "${TARGETS[@]}" | tr '\n' ' ' | xargs)"
+        echo "should_run=true" >> "$GITHUB_OUTPUT"
+        echo "targets=${TARGETS_JOINED}" >> "$GITHUB_OUTPUT"
+
   golangci-lint:
     name: golangci-lint
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.prepare-lint-targets.outputs.should_run == 'true'
+    needs: prepare-lint-targets
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -54,7 +123,8 @@ jobs:
       run: |
         set -o pipefail
         "$(go env GOPATH)/bin/golangci-lint" version
-        time "$(go env GOPATH)/bin/golangci-lint" run --timeout=8m -v ./... 2>&1 | tee golangci-lint.log
+        echo "lint targets: ${{ needs.prepare-lint-targets.outputs.targets }}"
+        time "$(go env GOPATH)/bin/golangci-lint" run --timeout=8m -v ${{ needs.prepare-lint-targets.outputs.targets }} 2>&1 | tee golangci-lint.log
 
     - name: Upload golangci-lint log
       if: always()
@@ -66,7 +136,8 @@ jobs:
 
   golangci-reviewdog:
     name: golangci-lint reviewdog
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.prepare-lint-targets.outputs.should_run == 'true'
+    needs: prepare-lint-targets
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -86,7 +157,8 @@ jobs:
     - name: Run golangci-lint for reviewdog
       run: |
         set -o pipefail
-        "$(go env GOPATH)/bin/golangci-lint" run --timeout=8m --out-format=line-number ./... > golangci-reviewdog.log 2>&1 || true
+        echo "lint targets: ${{ needs.prepare-lint-targets.outputs.targets }}"
+        "$(go env GOPATH)/bin/golangci-lint" run --timeout=8m --out-format=line-number ${{ needs.prepare-lint-targets.outputs.targets }} > golangci-reviewdog.log 2>&1 || true
 
     - name: Setup reviewdog
       uses: reviewdog/action-setup@v1
