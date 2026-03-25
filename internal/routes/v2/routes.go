@@ -94,6 +94,8 @@ func SetupAdmin(router *gin.Engine, h *v2handler.AdminHandler, jwtManager *jwt.M
 	adminMembers.GET("/:id", h.GetMember)
 	adminMembers.PUT("/:id", h.UpdateMember)
 	adminMembers.POST("/:id/ban", h.BanMember)
+	adminMembers.POST("/:id/anonymize", h.AnonymizeMember)
+	adminMembers.POST("/by-username/:username/anonymize", h.AnonymizeMemberByUsername)
 
 	// Admin Dashboard
 	admin.GET("/dashboard/stats", h.GetDashboardStats)

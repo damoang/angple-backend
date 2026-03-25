@@ -4,7 +4,9 @@ import (
 	"time"
 
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+	"gorm.io/gorm"
 )
 
 // User status constants
@@ -19,20 +21,26 @@ type AdminService struct {
 	boardRepo   v2repo.BoardRepository
 	postRepo    v2repo.PostRepository
 	commentRepo v2repo.CommentRepository
+	memberRepo  gnurepo.MemberRepository
+	db          *gorm.DB
 }
 
 // NewAdminService creates a new AdminService
 func NewAdminService(
+	db *gorm.DB,
 	userRepo v2repo.UserRepository,
 	boardRepo v2repo.BoardRepository,
 	postRepo v2repo.PostRepository,
 	commentRepo v2repo.CommentRepository,
+	memberRepo gnurepo.MemberRepository,
 ) *AdminService {
 	return &AdminService{
 		userRepo:    userRepo,
 		boardRepo:   boardRepo,
 		postRepo:    postRepo,
 		commentRepo: commentRepo,
+		memberRepo:  memberRepo,
+		db:          db,
 	}
 }
 

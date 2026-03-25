@@ -229,6 +229,50 @@ func (h *AdminHandler) BanMember(c *gin.Context) {
 	common.V2Success(c, gin.H{"message": msg})
 }
 
+// AnonymizeMember handles POST /api/v2/admin/members/:id/anonymize
+func (h *AdminHandler) AnonymizeMember(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 회원 ID", err)
+		return
+	}
+
+	var req v2svc.AnonymizeMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		return
+	}
+
+	result, err := h.adminService.AnonymizeMember(id, req)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "회원 익명화 실패", err)
+		return
+	}
+	common.V2Success(c, result)
+}
+
+// AnonymizeMemberByUsername handles POST /api/v2/admin/members/by-username/:username/anonymize
+func (h *AdminHandler) AnonymizeMemberByUsername(c *gin.Context) {
+	username := c.Param("username")
+	if username == "" {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 회원 username", nil)
+		return
+	}
+
+	var req v2svc.AnonymizeMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
+		return
+	}
+
+	result, err := h.adminService.AnonymizeMemberByUsername(username, req)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "회원 익명화 실패", err)
+		return
+	}
+	common.V2Success(c, result)
+}
+
 // GetDashboardStats handles GET /api/v2/admin/dashboard/stats
 func (h *AdminHandler) GetDashboardStats(c *gin.Context) {
 	stats, err := h.adminService.GetDashboardStats()
