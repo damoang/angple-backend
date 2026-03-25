@@ -34,6 +34,9 @@ func NewScheduledDeleteRepository(db *gorm.DB) ScheduledDeleteRepository {
 }
 
 func (r *scheduledDeleteRepository) Create(sd *gnuboard.ScheduledDelete) error {
+	// 이전 cancelled/executed 레코드가 있으면 삭제하여 UNIQUE KEY 충돌 방지
+	r.db.Where("bo_table = ? AND wr_id = ? AND status IN ('cancelled', 'executed')",
+		sd.BoTable, sd.WrID).Delete(&gnuboard.ScheduledDelete{})
 	return r.db.Create(sd).Error
 }
 
