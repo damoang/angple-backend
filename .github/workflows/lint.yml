@@ -31,10 +31,11 @@ jobs:
         version: v2.11.2
         args: --timeout=5m
 
-  golangci-reviewdog:
-    name: golangci-lint with reviewdog
+  golangci-lint:
+    name: golangci-lint
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -46,12 +47,55 @@ jobs:
       with:
         go-version: '1.25'
 
+    - name: Install golangci-lint
+      run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.2
+
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v9
+      run: |
+        set -o pipefail
+        "$(go env GOPATH)/bin/golangci-lint" version
+        time "$(go env GOPATH)/bin/golangci-lint" run --timeout=8m -v ./... 2>&1 | tee golangci-lint.log
+
+    - name: Upload golangci-lint log
+      if: always()
+      uses: actions/upload-artifact@v4
       with:
-        version: v2.11.2
-        args: --timeout=5m
-        only-new-issues: true
+        name: golangci-lint-log
+        path: golangci-lint.log
+        if-no-files-found: warn
+
+  golangci-reviewdog:
+    name: golangci-lint reviewdog
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    - name: Install golangci-lint
+      run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.2
+
+    - name: Run golangci-lint for reviewdog
+      run: |
+        set -o pipefail
+        "$(go env GOPATH)/bin/golangci-lint" run --timeout=8m --out-format=line-number ./... > golangci-reviewdog.log 2>&1 || true
+
+    - name: Setup reviewdog
+      uses: reviewdog/action-setup@v1
+
+    - name: Report with reviewdog
+      env:
+        REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        reviewdog -f=golangci-lint -name="golangci-lint reviewdog" -reporter=github-pr-review -filter-mode=nofilter -fail-on-error=false < golangci-reviewdog.log
 
   format:
     name: Format Check
