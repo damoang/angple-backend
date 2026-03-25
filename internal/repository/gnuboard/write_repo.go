@@ -72,7 +72,7 @@ type WriteRepository interface {
 	FindPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
-	SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	SearchPosts(boardID string, searchField, searchQuery string, page, limit int, sortBy ...string) ([]*gnuboard.G5Write, int64, error)
 	SearchPostsByCategory(boardID string, searchField, searchQuery, category string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	SearchPostsFiltered(boardID string, searchField, searchQuery string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	FindPostByID(boardID string, wrID int) (*gnuboard.G5Write, error)
@@ -613,12 +613,12 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 
 // SearchPosts retrieves posts matching search criteria (sfl/stx) with pagination.
 // Requires Sphinx full-text search. Returns error if Sphinx is unavailable.
-func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery string, page, limit int, sortBy ...string) ([]*gnuboard.G5Write, int64, error) {
 	if r.sphinx == nil {
 		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
 	}
 
-	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit)
+	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit, sortBy...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("검색 서비스 오류: %w", err)
 	}

@@ -1072,9 +1072,10 @@ func main() {
 		router.GET("/api/v1/boards/:slug/notices", middleware.ValidateBoardSlug(), func(c *gin.Context) {
 			slug := c.Param("slug")
 			ctx := c.Request.Context()
+			summaryMode := c.Query("summary") == "1" && (slug == "free" || slug == "hello")
 
 			// Try cache first
-			if cacheService != nil {
+			if !summaryMode && cacheService != nil {
 				if cached, err := cacheService.GetNotices(ctx, slug); err == nil {
 					c.Header("X-Cache", "HIT")
 					c.Data(http.StatusOK, "application/json", cached)
@@ -1106,6 +1107,9 @@ func main() {
 			// Transform to v1 format (all are notices)
 			noticeIDMap := v1handler.BuildNoticeIDMap(noticeIDs)
 			items := v1handler.TransformToV1Posts(notices, noticeIDMap)
+			if summaryMode {
+				items = v1handler.TransformToV1PostsSummary(notices, noticeIDMap)
+			}
 
 			// Admin sees full (unmasked) IP
 			if middleware.GetUserLevel(c) >= 10 {
@@ -1115,7 +1119,7 @@ func main() {
 			response := gin.H{"success": true, "data": items}
 
 			// Cache the response
-			if cacheService != nil {
+			if !summaryMode && cacheService != nil {
 				_ = cacheService.SetNotices(ctx, slug, response)
 			}
 
@@ -1665,14 +1669,15 @@ func main() {
 		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
 			slug := c.Param("slug")
 			ctx := c.Request.Context()
+			summaryMode := c.Query("summary") == "1" && (slug == "free" || slug == "hello")
 
 			page, err2 := strconv.Atoi(c.DefaultQuery("page", "1"))
 			if err2 != nil || page < 1 {
 				page = 1
 			}
-			limit, err3 := strconv.Atoi(c.DefaultQuery("limit", "20"))
+			limit, err3 := strconv.Atoi(c.DefaultQuery("limit", "24"))
 			if err3 != nil || limit < 1 || limit > 100 {
-				limit = 20
+				limit = 24
 			}
 			cursorWrNum, cursorNumErr := strconv.Atoi(c.Query("cursor_wr_num"))
 			cursorWrReply := c.Query("cursor_wr_reply")
@@ -1681,6 +1686,7 @@ func main() {
 			// Search parameters
 			sfl := c.Query("sfl")           // search field: title, content, title_content, author
 			stx := c.Query("stx")           // search text
+			sortBy := c.Query("sort")       // search sort: "relevance" or default (date)
 			category := c.Query("category") // category filter (ca_name)
 			isSearching := sfl != "" && stx != ""
 
@@ -1699,7 +1705,7 @@ func main() {
 				memKey = fmt.Sprintf("posts:%s:cursor:%d:%s:%d", slug, cursorWrNum, cursorWrReply, limit)
 			}
 
-			if !isSearching && !useCursor && category == "" {
+			if !summaryMode && !isSearching && !useCursor && category == "" {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
@@ -1754,7 +1760,7 @@ func main() {
 			// Layer 3: DB query
 			board, err := gnuBoardRepo.FindByID(slug)
 			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 20}})
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}, "meta": gin.H{"total": 0, "page": 1, "limit": 24}})
 				return
 			}
 
@@ -1764,6 +1770,8 @@ func main() {
 			useHasNextPagination := !isSearching && !useCursor && (slug == "free" || slug == "hello")
 			if isSearching && category != "" {
 				posts, total, err = gnuWriteRepo.SearchPostsByCategory(slug, sfl, stx, category, page, limit)
+			} else if isSearching && sortBy == "relevance" {
+				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit, "relevance")
 			} else if isSearching {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
 			} else if useCursor {
@@ -1796,6 +1804,9 @@ func main() {
 
 			// Transform to v1 format
 			items := v1handler.TransformToV1Posts(posts, noticeIDMap)
+			if summaryMode {
+				items = v1handler.TransformToV1PostsSummary(posts, noticeIDMap)
+			}
 
 			// Admin sees full (unmasked) IP
 			if middleware.GetUserLevel(c) >= 10 {
@@ -1813,7 +1824,7 @@ func main() {
 					}
 				}
 			}
-			if len(needFileIDs) > 0 {
+			if !summaryMode && len(needFileIDs) > 0 {
 				if fileImages, err := gnuFileRepo.GetFirstImagesByPostIDs(slug, needFileIDs); err == nil && len(fileImages) > 0 {
 					cdnURL := strings.TrimRight(cfg.Storage.CDNURL, "/")
 					for i, item := range items {
@@ -1850,7 +1861,7 @@ func main() {
 			}
 
 			// Store in both caches (only for non-search, non-category requests, unfiltered data)
-			if !isSearching && !useCursor && category == "" {
+			if !summaryMode && !isSearching && !useCursor && category == "" {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
