@@ -66,6 +66,10 @@ type WriteRepository interface {
 	// Posts
 	FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostsByCategory(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	FindPostsHasNext(boardID string, page, limit int) ([]*gnuboard.G5Write, bool, error)
+	FindPostsByCategoryHasNext(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, bool, error)
+	FindPostsFilteredHasNext(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
+	FindPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	SearchPosts(boardID string, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error)
@@ -210,6 +214,13 @@ func (r *writeRepository) getSortField(boardID string) string {
 // Beyond this offset, the deferred JOIN subquery still scans too many index rows.
 const maxPostOffset = 30000
 
+func trimHasNextPosts(posts []*gnuboard.G5Write, limit int) ([]*gnuboard.G5Write, bool) {
+	if len(posts) > limit {
+		return posts[:limit], true
+	}
+	return posts, false
+}
+
 // FindPosts retrieves posts (not comments) from a board with pagination.
 // Soft-deleted posts stay in the list so users can still trace their own activity.
 func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
@@ -270,6 +281,50 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 	return posts, total, err
 }
 
+func (r *writeRepository) FindPostsHasNext(boardID string, page, limit int) ([]*gnuboard.G5Write, bool, error) {
+	var posts []*gnuboard.G5Write
+
+	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
+	table := tableName(boardID)
+	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumns(boardID, "")
+	queryLimit := limit + 1
+
+	if orderClause == "wr_num, wr_reply" {
+		err := r.db.Raw(
+			fmt.Sprintf(
+				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
+				postSelectColumns(boardID, "t"), table, table,
+			),
+			queryLimit, offset,
+		).Scan(&posts).Error
+		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
+			err = r.db.Table(table).
+				Select(selectCols).
+				Where("wr_is_comment = 0").
+				Order(orderClause).
+				Offset(offset).
+				Limit(queryLimit).
+				Find(&posts).Error
+		}
+		trimmed, hasNext := trimHasNextPosts(posts, limit)
+		return trimmed, hasNext, err
+	}
+
+	err := r.db.Table(table).
+		Select(selectCols).
+		Where("wr_is_comment = 0").
+		Order(orderClause).
+		Offset(offset).
+		Limit(queryLimit).
+		Find(&posts).Error
+	trimmed, hasNext := trimHasNextPosts(posts, limit)
+	return trimmed, hasNext, err
+}
+
 // FindPostsByCategory retrieves posts filtered by ca_name (category) with pagination
 func (r *writeRepository) FindPostsByCategory(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
 	var posts []*gnuboard.G5Write
@@ -280,8 +335,12 @@ func (r *writeRepository) FindPostsByCategory(boardID string, category string, p
 
 	baseWhere := "wr_is_comment = 0 AND ca_name = ?"
 
-	if err := r.db.Table(table).Where(baseWhere, category).Count(&total).Error; err != nil {
-		return nil, 0, err
+	total = r.getCachedPostCountByCategory(boardID, category)
+	if total == 0 {
+		if err := r.db.Table(table).Where(baseWhere, category).Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		r.setCachedPostCountByCategory(boardID, category, total)
 	}
 
 	orderClause := r.getSortField(boardID)
@@ -296,6 +355,31 @@ func (r *writeRepository) FindPostsByCategory(boardID string, category string, p
 		Find(&posts).Error
 
 	return posts, total, err
+}
+
+func (r *writeRepository) FindPostsByCategoryHasNext(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, bool, error) {
+	var posts []*gnuboard.G5Write
+
+	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
+	table := tableName(boardID)
+	baseWhere := "wr_is_comment = 0 AND ca_name = ?"
+	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumns(boardID, "")
+	queryLimit := limit + 1
+
+	err := r.db.Table(table).
+		Select(selectCols).
+		Where(baseWhere, category).
+		Order(orderClause).
+		Offset(offset).
+		Limit(queryLimit).
+		Find(&posts).Error
+
+	trimmed, hasNext := trimHasNextPosts(posts, limit)
+	return trimmed, hasNext, err
 }
 
 // FindPostsAfter retrieves posts using cursor pagination for the default gnuboard sort.
@@ -396,6 +480,80 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 		Find(&posts).Error
 
 	return posts, total, err
+}
+
+func (r *writeRepository) FindPostsFilteredHasNext(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error) {
+	if len(excludeMbIDs) == 0 {
+		return r.FindPostsHasNext(boardID, page, limit)
+	}
+
+	var posts []*gnuboard.G5Write
+	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
+	table := tableName(boardID)
+	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumns(boardID, "")
+	queryLimit := limit + 1
+
+	if orderClause == "wr_num, wr_reply" {
+		err := r.db.Raw(
+			fmt.Sprintf(
+				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
+				postSelectColumns(boardID, "t"), table, table,
+			),
+			excludeMbIDs, queryLimit, offset,
+		).Scan(&posts).Error
+		if err != nil && strings.Contains(err.Error(), "idx_list_page") {
+			err = r.db.Table(table).
+				Select(selectCols).
+				Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
+				Order(orderClause).
+				Offset(offset).
+				Limit(queryLimit).
+				Find(&posts).Error
+		}
+		trimmed, hasNext := trimHasNextPosts(posts, limit)
+		return trimmed, hasNext, err
+	}
+
+	err := r.db.Table(table).
+		Select(selectCols).
+		Where("wr_is_comment = 0 AND mb_id NOT IN ?", excludeMbIDs).
+		Order(orderClause).
+		Offset(offset).
+		Limit(queryLimit).
+		Find(&posts).Error
+	trimmed, hasNext := trimHasNextPosts(posts, limit)
+	return trimmed, hasNext, err
+}
+
+func (r *writeRepository) FindPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error) {
+	if len(excludeMbIDs) == 0 {
+		return r.FindPostsByCategoryHasNext(boardID, category, page, limit)
+	}
+
+	var posts []*gnuboard.G5Write
+	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
+	table := tableName(boardID)
+	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumns(boardID, "")
+	queryLimit := limit + 1
+
+	err := r.db.Table(table).
+		Select(selectCols).
+		Where("wr_is_comment = 0 AND ca_name = ? AND mb_id NOT IN ?", category, excludeMbIDs).
+		Order(orderClause).
+		Offset(offset).
+		Limit(queryLimit).
+		Find(&posts).Error
+
+	trimmed, hasNext := trimHasNextPosts(posts, limit)
+	return trimmed, hasNext, err
 }
 
 // SearchPostsFiltered retrieves posts matching search criteria excluding specified members.
@@ -595,17 +753,36 @@ func (r *writeRepository) FindDeletedPosts(boardID string, page, limit int) ([]*
 }
 
 // postCountRedisKey returns the Redis key for post count cache
-func postCountRedisKey(boardID string) string {
-	return "postcount:" + boardID
+func postCountCacheKey(boardID string, category string) string {
+	if category == "" {
+		return boardID
+	}
+	return boardID + ":" + category
+}
+
+func postCountRedisKey(boardID string, category string) string {
+	return "postcount:" + postCountCacheKey(boardID, category)
+}
+
+func postCountRedisPrefix(boardID string) string {
+	return "postcount:" + boardID + ":"
+}
+
+func postCountMemoryKey(boardID string, category string) string {
+	return "count:" + postCountCacheKey(boardID, category)
 }
 
 // getCachedPostCount tries Redis first, then falls back to in-memory cache
 func (r *writeRepository) getCachedPostCount(boardID string) int64 {
+	return r.getCachedPostCountByCategory(boardID, "")
+}
+
+func (r *writeRepository) getCachedPostCountByCategory(boardID string, category string) int64 {
 	// Try Redis first (shared across all pods)
 	if r.redis != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		val, err := r.redis.Get(ctx, postCountRedisKey(boardID)).Result()
+		val, err := r.redis.Get(ctx, postCountRedisKey(boardID, category)).Result()
 		if err == nil {
 			if count, err := strconv.ParseInt(val, 10, 64); err == nil {
 				return count
@@ -614,7 +791,7 @@ func (r *writeRepository) getCachedPostCount(boardID string) int64 {
 	}
 
 	// Fallback to in-memory cache
-	cacheKey := "count:" + boardID
+	cacheKey := postCountMemoryKey(boardID, category)
 	if cached, ok := postCountCache.Load(cacheKey); ok {
 		if cc, ok2 := cached.(*cachedCount); ok2 && time.Now().Before(cc.expiresAt) {
 			return cc.total
@@ -625,17 +802,24 @@ func (r *writeRepository) getCachedPostCount(boardID string) int64 {
 
 // setCachedPostCount stores count in both Redis (shared) and in-memory (local fallback)
 func (r *writeRepository) setCachedPostCount(boardID string, total int64) {
+	r.setCachedPostCountByCategory(boardID, "", total)
+}
+
+func (r *writeRepository) setCachedPostCountByCategory(boardID string, category string, total int64) {
 	ttl := countCacheTTLForBoard(boardID)
 
 	// Store in Redis (shared across pods)
 	if r.redis != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		r.redis.Set(ctx, postCountRedisKey(boardID), total, ttl)
+		r.redis.Set(ctx, postCountRedisKey(boardID, category), total, ttl)
 	}
 
 	// Also store in local memory as fallback
-	postCountCache.Store("count:"+boardID, &cachedCount{total: total, expiresAt: time.Now().Add(ttl)})
+	postCountCache.Store(
+		postCountMemoryKey(boardID, category),
+		&cachedCount{total: total, expiresAt: time.Now().Add(ttl)},
+	)
 }
 
 // invalidatePostCount clears the cached post count for a board from both Redis and memory
@@ -644,16 +828,48 @@ func (r *writeRepository) invalidatePostCount(boardID string) {
 	if r.redis != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		r.redis.Del(ctx, postCountRedisKey(boardID))
+		r.redis.Del(ctx, postCountRedisKey(boardID, ""))
+
+		var cursor uint64
+		prefix := postCountRedisPrefix(boardID)
+		for {
+			keys, nextCursor, err := r.redis.Scan(ctx, cursor, prefix+"*", 100).Result()
+			if err != nil {
+				break
+			}
+			if len(keys) > 0 {
+				r.redis.Del(ctx, keys...)
+			}
+			cursor = nextCursor
+			if cursor == 0 {
+				break
+			}
+		}
 	}
 
 	// Invalidate in-memory
-	postCountCache.Delete("count:" + boardID)
+	postCountCache.Delete(postCountMemoryKey(boardID, ""))
+	prefix := postCountMemoryKey(boardID, "") + ":"
+	postCountCache.Range(func(key, _ any) bool {
+		keyStr, ok := key.(string)
+		if ok && strings.HasPrefix(keyStr, prefix) {
+			postCountCache.Delete(keyStr)
+		}
+		return true
+	})
 }
 
 // InvalidatePostCount clears the cached post count from in-memory cache (legacy, no Redis)
 func InvalidatePostCount(boardID string) {
-	postCountCache.Delete("count:" + boardID)
+	postCountCache.Delete(postCountMemoryKey(boardID, ""))
+	prefix := postCountMemoryKey(boardID, "") + ":"
+	postCountCache.Range(func(key, _ any) bool {
+		keyStr, ok := key.(string)
+		if ok && strings.HasPrefix(keyStr, prefix) {
+			postCountCache.Delete(keyStr)
+		}
+		return true
+	})
 }
 
 // CreatePost creates a new post

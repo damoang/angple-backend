@@ -38,6 +38,9 @@ func Run(db *gorm.DB) error {
 	if err := CreateAffiliateLinksTable(db); err != nil {
 		return err
 	}
+	if err := CreateAnniversaryDrawEntriesTable(db); err != nil {
+		return err
+	}
 	if err := FixListPageIndexes(db); err != nil {
 		return err
 	}

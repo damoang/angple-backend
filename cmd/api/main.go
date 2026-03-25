@@ -766,8 +766,16 @@ func main() {
 		if redisClient != nil {
 			myPageHandler.SetRedisClient(redisClient)
 		}
+		anniversaryDrawRepo := gnurepo.NewAnniversaryDrawRepository(db)
+		anniversaryEventHandler := v2handler.NewAnniversaryEventHandler(
+			anniversaryDrawRepo,
+			gnuPointWriteRepo,
+			pointConfigRepo,
+			db,
+		)
 		v2routes.SetupMyPage(router, pointHandler, expHandler, myPageHandler, jwtManager)
 		v2routes.SetupMemberActivity(router, myPageHandler)
+		v2routes.SetupAnniversaryEvent(router, anniversaryEventHandler, jwtManager)
 
 		// Admin XP + Point config management routes
 		v2routes.SetupAdminXP(router, expHandler, jwtManager)
@@ -1752,12 +1760,22 @@ func main() {
 
 			var posts []*gnuboard.G5Write
 			var total int64
+			var hasNext bool
+			useHasNextPagination := !isSearching && !useCursor && (slug == "free" || slug == "hello")
 			if isSearching && category != "" {
 				posts, total, err = gnuWriteRepo.SearchPostsByCategory(slug, sfl, stx, category, page, limit)
 			} else if isSearching {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
 			} else if useCursor {
 				posts, total, err = gnuWriteRepo.FindPostsAfter(slug, limit, cursorWrNum, cursorWrReply)
+			} else if useHasNextPagination && category != "" && len(blockedIDs) > 0 {
+				posts, hasNext, err = gnuWriteRepo.FindPostsByCategoryFilteredHasNext(slug, category, page, limit, blockedIDs)
+			} else if useHasNextPagination && category != "" && len(blockedIDs) == 0 {
+				posts, hasNext, err = gnuWriteRepo.FindPostsByCategoryHasNext(slug, category, page, limit)
+			} else if useHasNextPagination && len(blockedIDs) > 0 {
+				posts, hasNext, err = gnuWriteRepo.FindPostsFilteredHasNext(slug, page, limit, blockedIDs)
+			} else if useHasNextPagination {
+				posts, hasNext, err = gnuWriteRepo.FindPostsHasNext(slug, page, limit)
 			} else if category != "" {
 				posts, total, err = gnuWriteRepo.FindPostsByCategory(slug, category, page, limit)
 			} else {
@@ -1814,7 +1832,12 @@ func main() {
 				}
 			}
 
-			meta := gin.H{"board_id": slug, "page": page, "limit": limit, "total": total}
+			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
+			if useHasNextPagination {
+				meta["has_next"] = hasNext
+			} else {
+				meta["total"] = total
+			}
 			if useCursor && len(posts) > 0 {
 				last := posts[len(posts)-1]
 				meta["next_cursor_wr_num"] = last.WrNum
