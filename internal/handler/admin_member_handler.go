@@ -161,7 +161,7 @@ func (h *AdminMemberHandler) ListMembers(c *gin.Context) {
 	if !ok {
 		col = "mb_datetime"
 	}
-	query = query.Order(fmt.Sprintf("%s %s", col, sortOrder))
+	query = query.Order(fmt.Sprintf("%s %s", col, sortOrder)) // #nosec G201 -- col and sortOrder are from allowedSortColumns whitelist, not user input
 
 	// 조회
 	offset := (page - 1) * limit
