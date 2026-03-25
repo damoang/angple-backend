@@ -258,6 +258,27 @@ func TransformToV1Posts(posts []*gnuboard.G5Write, noticeIDs map[int]bool) []map
 	return result
 }
 
+// TransformToV1PostsSummary converts posts to a lighter list payload for hot boards.
+func TransformToV1PostsSummary(posts []*gnuboard.G5Write, noticeIDs map[int]bool) []map[string]any {
+	result := make([]map[string]any, len(posts))
+	for i, p := range posts {
+		isNotice := noticeIDs[p.WrID]
+		item := TransformToV1Post(p, isNotice)
+		item["has_video"] = p.Wr9 != ""
+		item["has_image"] = item["has_file"] == true || p.Wr10 != ""
+		delete(item, "dislikes")
+		delete(item, "link1")
+		delete(item, "link2")
+		delete(item, "author_ip")
+		delete(item, "updated_at")
+		delete(item, "thumbnail")
+		delete(item, "thumbnail_raw")
+		delete(item, "extra_10")
+		result[i] = item
+	}
+	return result
+}
+
 // TransformToV1Comment converts G5Write (comment) to v1 API response format
 func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 	depth := len(w.WrCommentReply)
