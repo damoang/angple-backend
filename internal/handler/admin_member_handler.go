@@ -267,6 +267,10 @@ func (h *AdminMemberHandler) BulkUpdateLevel(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "선택된 회원이 없습니다", nil)
 		return
 	}
+	if len(req.MemberIDs) > 100 {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "최대 100명까지 일괄 변경 가능합니다", nil)
+		return
+	}
 	if err := h.db.Model(&gnuboard.G5Member{}).Where("mb_id IN ?", req.MemberIDs).Update("mb_level", req.Level).Error; err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "일괄 레벨 변경 실패", err)
 		return
