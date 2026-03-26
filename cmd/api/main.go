@@ -4019,8 +4019,8 @@ func main() {
 				return
 			}
 
-			// 게시글 존재 확인 & 작성자 조회
-			post, err := gnuWriteRepo.FindPostByID(slug, postID)
+			// 게시글 존재 확인 & 작성자 조회 (삭제된 글도 신고 가능)
+			post, err := gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
 				return
