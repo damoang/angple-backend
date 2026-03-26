@@ -27,9 +27,12 @@ func NewAdminMemberHandler(db *gorm.DB) *AdminMemberHandler {
 type adminMemberResponse struct {
 	MbID            string  `json:"mb_id"`
 	MbName          string  `json:"mb_name"`
+	MbRealName      string  `json:"mb_real_name"`
 	MbEmail         string  `json:"mb_email"`
 	MbLevel         int     `json:"mb_level"`
 	MbPoint         int     `json:"mb_point"`
+	MbSignature     string  `json:"mb_signature"`
+	MbMemo          string  `json:"mb_memo"`
 	MbDatetime      string  `json:"mb_datetime"`
 	MbTodayLogin    *string `json:"mb_today_login"`
 	MbImage         *string `json:"mb_image,omitempty"`
@@ -39,12 +42,15 @@ type adminMemberResponse struct {
 
 func toAdminMemberResponse(m *gnuboard.G5Member) adminMemberResponse {
 	resp := adminMemberResponse{
-		MbID:       m.MbID,
-		MbName:     m.MbNick,
-		MbEmail:    m.MbEmail,
-		MbLevel:    m.MbLevel,
-		MbPoint:    m.MbPoint,
-		MbDatetime: m.MbDatetime.Format(time.RFC3339),
+		MbID:        m.MbID,
+		MbName:      m.MbNick,
+		MbRealName:  m.MbName,
+		MbEmail:     m.MbEmail,
+		MbLevel:     m.MbLevel,
+		MbPoint:     m.MbPoint,
+		MbSignature: m.MbSignature,
+		MbMemo:      m.MbMemo,
+		MbDatetime:  m.MbDatetime.Format(time.RFC3339),
 	}
 	if m.MbTodayLogin != "" && m.MbTodayLogin != "0000-00-00" {
 		resp.MbTodayLogin = &m.MbTodayLogin
@@ -201,8 +207,14 @@ func (h *AdminMemberHandler) GetMember(c *gin.Context) {
 func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	mbID := c.Param("mbId")
 	var req struct {
-		MbLevel *int `json:"mb_level"`
-		MbPoint *int `json:"mb_point"`
+		MbLevel     *int    `json:"mb_level"`
+		MbPoint     *int    `json:"mb_point"`
+		MbName      *string `json:"mb_name"`
+		MbRealName  *string `json:"mb_real_name"`
+		MbEmail     *string `json:"mb_email"`
+		MbSignature *string `json:"mb_signature"`
+		MbMemo      *string `json:"mb_memo"`
+		MbLeave     *bool   `json:"mb_leave"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
@@ -219,6 +231,38 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	}
 	if req.MbPoint != nil {
 		updates["mb_point"] = *req.MbPoint
+	}
+	if req.MbName != nil {
+		name := strings.TrimSpace(*req.MbName)
+		if name == "" {
+			common.V2ErrorResponse(c, http.StatusBadRequest, "닉네임은 비워둘 수 없습니다", nil)
+			return
+		}
+		updates["mb_nick"] = name
+	}
+	if req.MbRealName != nil {
+		updates["mb_name"] = strings.TrimSpace(*req.MbRealName)
+	}
+	if req.MbEmail != nil {
+		email := strings.TrimSpace(*req.MbEmail)
+		if email == "" {
+			common.V2ErrorResponse(c, http.StatusBadRequest, "이메일은 비워둘 수 없습니다", nil)
+			return
+		}
+		updates["mb_email"] = email
+	}
+	if req.MbSignature != nil {
+		updates["mb_signature"] = *req.MbSignature
+	}
+	if req.MbMemo != nil {
+		updates["mb_memo"] = *req.MbMemo
+	}
+	if req.MbLeave != nil {
+		if *req.MbLeave {
+			updates["mb_leave_date"] = time.Now().Format("2006-01-02")
+		} else {
+			updates["mb_leave_date"] = ""
+		}
 	}
 	if len(updates) == 0 {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "변경할 항목이 없습니다", nil)
