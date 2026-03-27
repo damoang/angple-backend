@@ -62,7 +62,7 @@ func BanCheckScoped(gnuDB *gorm.DB, scope string) gin.HandlerFunc {
 			fallbackErr := gnuDB.Raw(
 				`SELECT CASE
 						WHEN penalty_period = -1 THEN '99991231'
-						ELSE DATE_FORMAT(DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY), '%Y-%m-%d %H:%i:%s')
+						ELSE DATE_FORMAT(DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY), '%Y%m%d')
 					END
 				 FROM g5_da_member_discipline
 				 WHERE penalty_mb_id = ?
