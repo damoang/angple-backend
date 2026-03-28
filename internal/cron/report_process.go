@@ -782,20 +782,20 @@ func autoLockPost(tx *gorm.DB, boTable string, postID, threshold int) {
 		return
 	}
 
-	// 승인된 신고 수 카운트 (해당 게시글 대상)
-	var approvedCount int64
+	// 승인된 고유 신고자 수 카운트 (해당 게시글 대상)
+	var approvedReporterCount int64
 	tx.Raw(`
-		SELECT COUNT(*) FROM g5_na_singo
+		SELECT COUNT(DISTINCT mb_id) FROM g5_na_singo
 		WHERE sg_table = ? AND (sg_id = ? OR sg_parent = ?) AND admin_approved = 1
-	`, boTable, postID, postID).Scan(&approvedCount)
+	`, boTable, postID, postID).Scan(&approvedReporterCount)
 
-	if common.SafeInt64ToInt(approvedCount) < threshold {
+	if common.SafeInt64ToInt(approvedReporterCount) < threshold {
 		return
 	}
 
 	// 잠금 적용
 	tx.Exec(fmt.Sprintf("UPDATE `%s` SET wr_7 = 'lock' WHERE wr_id = ? AND wr_is_comment = 0", tableName), postID)
-	log.Printf("[Cron:auto-lock] locked post %s/%d (approved reports: %d >= threshold: %d)", boTable, postID, approvedCount, threshold)
+	log.Printf("[Cron:auto-lock] locked post %s/%d (approved reporters: %d >= threshold: %d)", boTable, postID, approvedReporterCount, threshold)
 
 	// 진실의방에 참조 글 생성
 	createTruthroomPost(tx, boTable, postID)
@@ -910,20 +910,20 @@ func autoLockComment(tx *gorm.DB, boTable string, commentID, parentID, threshold
 		return
 	}
 
-	// 승인된 신고 수 카운트 (해당 댓글 대상)
-	var approvedCount int64
+	// 승인된 고유 신고자 수 카운트 (해당 댓글 대상)
+	var approvedReporterCount int64
 	tx.Raw(`
-		SELECT COUNT(*) FROM g5_na_singo
+		SELECT COUNT(DISTINCT mb_id) FROM g5_na_singo
 		WHERE sg_table = ? AND sg_id = ? AND sg_parent = ? AND admin_approved = 1
-	`, boTable, commentID, parentID).Scan(&approvedCount)
+	`, boTable, commentID, parentID).Scan(&approvedReporterCount)
 
-	if common.SafeInt64ToInt(approvedCount) < threshold {
+	if common.SafeInt64ToInt(approvedReporterCount) < threshold {
 		return
 	}
 
 	// 잠금 적용
 	tx.Exec(fmt.Sprintf("UPDATE `%s` SET wr_7 = 'lock' WHERE wr_id = ? AND wr_is_comment = 1", tableName), commentID)
-	log.Printf("[Cron:auto-lock] locked comment %s/%d (parent: %d, approved reports: %d >= threshold: %d)", boTable, commentID, parentID, approvedCount, threshold)
+	log.Printf("[Cron:auto-lock] locked comment %s/%d (parent: %d, approved reporters: %d >= threshold: %d)", boTable, commentID, parentID, approvedReporterCount, threshold)
 
 	// 진실의방에 참조 글 생성
 	createTruthroomCommentPost(tx, boTable, commentID, parentID)
