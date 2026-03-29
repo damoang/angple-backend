@@ -43,3 +43,30 @@ type UpdateSiteLogoRequest struct {
 	Priority      *int    `json:"priority,omitempty"`
 	IsActive      *bool   `json:"is_active,omitempty"`
 }
+
+// PresetLogoItemRequest represents a single seasonal preset logo entry.
+type PresetLogoItemRequest struct {
+	Name          string `json:"name" binding:"required"`
+	RecurringDate string `json:"recurring_date" binding:"required"`
+}
+
+// CreatePresetLogosRequest represents a batch request to create seasonal preset logos.
+type CreatePresetLogosRequest struct {
+	LogoURL  string                  `json:"logo_url" binding:"required"`
+	Priority int                     `json:"priority"`
+	IsActive *bool                   `json:"is_active,omitempty"`
+	Items    []PresetLogoItemRequest `json:"items" binding:"required,min=1,dive"`
+}
+
+// CreatePresetLogosResult represents the result of seasonal preset logo creation.
+type CreatePresetLogosResult struct {
+	Created []*SiteLogo               `json:"created"`
+	Skipped []CreatePresetLogoSkipped `json:"skipped"`
+}
+
+// CreatePresetLogoSkipped represents a preset item skipped during batch creation.
+type CreatePresetLogoSkipped struct {
+	Name          string `json:"name"`
+	RecurringDate string `json:"recurring_date"`
+	Reason        string `json:"reason"`
+}

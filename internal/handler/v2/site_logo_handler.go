@@ -14,7 +14,6 @@ import (
 )
 
 var mmddRegex = regexp.MustCompile(`^\d{2}-\d{2}$`)
-var mmddRangeRegex = regexp.MustCompile(`^\d{2}-\d{2}\s*~\s*\d{2}-\d{2}$`)
 
 // SiteLogoHandler handles site logo API endpoints
 type SiteLogoHandler struct {
@@ -83,6 +82,75 @@ func (h *SiteLogoHandler) CreateLogo(c *gin.Context) {
 	}
 
 	common.V2Success(c, logo)
+}
+
+// CreatePresetLogos handles POST /api/v1/admin/logos/presets
+func (h *SiteLogoHandler) CreatePresetLogos(c *gin.Context) {
+	var req v2domain.CreatePresetLogosRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
+	existingLogos, err := h.logoRepo.FindAll()
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "기존 로고 조회 실패", err)
+		return
+	}
+
+	result := &v2domain.CreatePresetLogosResult{
+		Created: []*v2domain.SiteLogo{},
+		Skipped: []v2domain.CreatePresetLogoSkipped{},
+	}
+
+	existingRecurring := map[string][]*v2domain.SiteLogo{}
+	for _, logo := range existingLogos {
+		if logo.ScheduleType != "recurring" || !logo.IsActive || logo.RecurringDate == nil {
+			continue
+		}
+		existingRecurring[*logo.RecurringDate] = append(existingRecurring[*logo.RecurringDate], logo)
+	}
+
+	for _, item := range req.Items {
+		recurringDate := item.RecurringDate
+		if err := h.validateSchedule("recurring", &recurringDate, nil, nil); err != nil {
+			common.V2ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
+			return
+		}
+
+		if h.hasRecurringPresetConflict(existingRecurring[recurringDate], item.Name, req.LogoURL) {
+			result.Skipped = append(result.Skipped, v2domain.CreatePresetLogoSkipped{
+				Name:          item.Name,
+				RecurringDate: recurringDate,
+				Reason:        "같은 날짜에 활성 반복 로고가 이미 존재합니다",
+			})
+			continue
+		}
+
+		logo := &v2domain.SiteLogo{
+			Name:          item.Name,
+			LogoURL:       req.LogoURL,
+			ScheduleType:  "recurring",
+			RecurringDate: &recurringDate,
+			Priority:      req.Priority,
+			IsActive:      isActive,
+		}
+
+		if err := h.logoRepo.Create(logo); err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "절기 프리셋 로고 생성 실패", err)
+			return
+		}
+
+		result.Created = append(result.Created, logo)
+		existingRecurring[recurringDate] = append(existingRecurring[recurringDate], logo)
+	}
+
+	common.V2Success(c, result)
 }
 
 // UpdateLogo handles PUT /api/v1/admin/logos/:id
@@ -197,13 +265,20 @@ func (h *SiteLogoHandler) GetActiveLogo(c *gin.Context) {
 	mmdd := now.Format("01-02")
 	today := now.Format("2006-01-02")
 
-	schedules, err := h.logoRepo.FindAllActive()
+	logo, err := h.logoRepo.FindActiveLogo(mmdd, today)
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			common.V2Success(c, gin.H{"active": nil, "schedules": []interface{}{}})
+			return
+		}
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "로고 조회 실패", err)
 		return
 	}
 
-	logo := h.resolveActiveLogo(schedules, mmdd, today)
+	schedules, err := h.logoRepo.FindAllActive()
+	if err != nil {
+		schedules = []*v2domain.SiteLogo{}
+	}
 
 	common.V2Success(c, gin.H{
 		"active":    logo,
@@ -211,14 +286,23 @@ func (h *SiteLogoHandler) GetActiveLogo(c *gin.Context) {
 	})
 }
 
+func (h *SiteLogoHandler) hasRecurringPresetConflict(existing []*v2domain.SiteLogo, name, logoURL string) bool {
+	for _, logo := range existing {
+		if logo.Name == name || logo.LogoURL == logoURL {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *SiteLogoHandler) validateSchedule(scheduleType string, recurringDate, startDate, endDate *string) error {
 	switch scheduleType {
 	case "recurring":
 		if recurringDate == nil || *recurringDate == "" {
-			return &validationError{"recurring 타입은 recurring_date(MM-DD 또는 MM-DD~MM-DD)가 필수입니다"}
+			return &validationError{"recurring 타입은 recurring_date(MM-DD)가 필수입니다"}
 		}
-		if !mmddRegex.MatchString(*recurringDate) && !mmddRangeRegex.MatchString(*recurringDate) {
-			return &validationError{"recurring_date는 MM-DD 또는 MM-DD~MM-DD 형식이어야 합니다 (예: 03-01, 03-20~04-02)"}
+		if !mmddRegex.MatchString(*recurringDate) {
+			return &validationError{"recurring_date는 MM-DD 형식이어야 합니다 (예: 03-01)"}
 		}
 	case "date_range":
 		if startDate == nil || *startDate == "" || endDate == nil || *endDate == "" {
@@ -231,74 +315,6 @@ func (h *SiteLogoHandler) validateSchedule(scheduleType string, recurringDate, s
 		// no additional validation
 	}
 	return nil
-}
-
-func (h *SiteLogoHandler) resolveActiveLogo(
-	schedules []*v2domain.SiteLogo,
-	mmdd, today string,
-) *v2domain.SiteLogo {
-	if len(schedules) == 0 {
-		return nil
-	}
-
-	var recurringMatch *v2domain.SiteLogo
-	var rangeMatch *v2domain.SiteLogo
-	var defaultMatch *v2domain.SiteLogo
-
-	for _, logo := range schedules {
-		switch logo.ScheduleType {
-		case "recurring":
-			if h.matchesRecurringSchedule(logo.RecurringDate, mmdd) {
-				if recurringMatch == nil || logo.Priority > recurringMatch.Priority {
-					recurringMatch = logo
-				}
-			}
-		case "date_range":
-			if logo.StartDate != nil && logo.EndDate != nil && *logo.StartDate <= today && *logo.EndDate >= today {
-				if rangeMatch == nil || logo.Priority > rangeMatch.Priority {
-					rangeMatch = logo
-				}
-			}
-		case "default":
-			if defaultMatch == nil || logo.Priority > defaultMatch.Priority {
-				defaultMatch = logo
-			}
-		}
-	}
-
-	if recurringMatch != nil {
-		return recurringMatch
-	}
-	if rangeMatch != nil {
-		return rangeMatch
-	}
-	return defaultMatch
-}
-
-func (h *SiteLogoHandler) matchesRecurringSchedule(recurringDate *string, mmdd string) bool {
-	if recurringDate == nil || *recurringDate == "" {
-		return false
-	}
-
-	value := *recurringDate
-	if mmddRegex.MatchString(value) {
-		return value == mmdd
-	}
-	if !mmddRangeRegex.MatchString(value) {
-		return false
-	}
-
-	rangeParts := regexp.MustCompile(`\s*~\s*`).Split(value, 2)
-	if len(rangeParts) != 2 {
-		return false
-	}
-
-	start := rangeParts[0]
-	end := rangeParts[1]
-	if start <= end {
-		return mmdd >= start && mmdd <= end
-	}
-	return mmdd >= start || mmdd <= end
 }
 
 type validationError struct {
