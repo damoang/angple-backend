@@ -23,6 +23,7 @@ type PostRepository interface {
 	Restore(id uint64) error
 	PermanentDelete(id uint64) error
 	IncrementViewCount(id uint64) error
+	DecrementCommentCount(id uint64)
 	Count() (int64, error)
 	CountSince(since time.Time) (int64, error)
 }
@@ -193,6 +194,12 @@ func (r *postRepository) Delete(id uint64) error {
 func (r *postRepository) IncrementViewCount(id uint64) error {
 	return r.db.Model(&v2.V2Post{}).Where("id = ?", id).
 		UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
+}
+
+// DecrementCommentCount decreases the comment_count of a post by 1 (floor 0)
+func (r *postRepository) DecrementCommentCount(id uint64) {
+	r.db.Model(&v2.V2Post{}).Where("id = ? AND comment_count > 0", id).
+		UpdateColumn("comment_count", gorm.Expr("comment_count - 1")) //nolint:errcheck
 }
 
 func (r *postRepository) Count() (int64, error) {

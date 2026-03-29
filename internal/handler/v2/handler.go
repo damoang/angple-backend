@@ -1043,6 +1043,12 @@ func (h *V2Handler) DeleteComment(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "댓글 삭제 실패", err)
 		return
 	}
+
+	// 원글의 comment_count 차감
+	if comment.PostID > 0 {
+		h.postRepo.DecrementCommentCount(comment.PostID)
+	}
+
 	common.V2Success(c, gin.H{"message": "삭제 완료"})
 }
 
