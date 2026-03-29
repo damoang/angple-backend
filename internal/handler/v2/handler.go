@@ -3,6 +3,7 @@ package v2
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -608,7 +609,9 @@ func (h *V2Handler) DeletePost(c *gin.Context) {
 	// 태그 로그 삭제 (삭제된 글의 태그가 검색에 잔존하지 않도록)
 	if h.tagRepo != nil {
 		boTable := fmt.Sprintf("g5_write_%s", slug)
-		_ = h.tagRepo.DeletePostTags(boTable, int(id)) //nolint:errcheck
+		if id <= math.MaxInt32 {
+			_ = h.tagRepo.DeletePostTags(boTable, int(id)) //nolint:errcheck
+		}
 	}
 
 	common.V2Success(c, gin.H{"message": "삭제 완료"})
