@@ -13,6 +13,10 @@ on:
         options:
           - canary_only
           - full
+      image_tag:
+        description: 'Existing sha-* image tag to promote without rebuild. Leave empty to build from current commit.'
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -23,11 +27,40 @@ concurrency:
   group: deploy-main-backend
   cancel-in-progress: true
 
+run-name: >-
+  Deploy
+  ${{ inputs.image_tag && format('promote {0}', inputs.image_tag) || format('{0}', github.sha) }}
+  (${{ github.event_name == 'workflow_dispatch' && inputs.release_mode || 'full' }})
+
 jobs:
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      sha_tag: ${{ steps.release.outputs.sha_tag }}
+      should_build: ${{ steps.release.outputs.should_build }}
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve release mode
+        id: release
+        env:
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          echo "Deploy standard: main build -> canary verify -> same artifact prod"
+          if [ -n "${INPUT_IMAGE_TAG}" ]; then
+            echo "sha_tag=${INPUT_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: resolve-release
+    if: needs.resolve-release.outputs.should_build == 'true'
     runs-on: ubuntu-24.04-arm
     outputs:
-      sha_tag: ${{ steps.tags.outputs.sha_tag }}
+      sha_tag: ${{ needs.resolve-release.outputs.sha_tag }}
       image_repo: ${{ env.IMAGE_NAME }}-api
       image_digest: ${{ steps.build_api.outputs.digest }}
     permissions:
@@ -48,7 +81,7 @@ jobs:
 
       - name: Set image tags
         id: tags
-        run: echo "sha_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+        run: echo "sha_tag=${{ needs.resolve-release.outputs.sha_tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push API
         id: build_api
@@ -78,7 +111,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=gateway
 
   deploy-canary:
-    needs: build
+    needs: [resolve-release, build]
+    if: always() && needs.resolve-release.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     environment:
       name: canary
@@ -94,9 +128,23 @@ jobs:
           role-to-assume: arn:aws:iam::891376997084:role/GitHubActionsDeployRole
           aws-region: ap-northeast-2
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify promoted images exist
+        env:
+          SHA_TAG: ${{ needs.resolve-release.outputs.sha_tag }}
+        run: |
+          docker buildx imagetools inspect "${{ env.IMAGE_NAME }}-api:${SHA_TAG}" >/dev/null
+          docker buildx imagetools inspect "${{ env.IMAGE_NAME }}-gateway:${SHA_TAG}" >/dev/null
+
       - name: Deploy canary via SSM
         env:
-          IMAGE_TAG: ${{ needs.build.outputs.sha_tag }}
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.sha_tag }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
@@ -207,13 +255,13 @@ jobs:
               \"title\": \"🚀 Backend Canary $STATUS\",
               \"color\": $COLOR,
               \"fields\": [
-                {\"name\": \"Tag\", \"value\": \"\`${{ needs.build.outputs.sha_tag }}\`\"}
+                {\"name\": \"Tag\", \"value\": \"\`${{ needs.resolve-release.outputs.sha_tag }}\`\"}
               ]
             }]
           }"
 
   verify-canary:
-    needs: [build, deploy-canary]
+    needs: [resolve-release, build, deploy-canary]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -311,11 +359,11 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}" \
-            -d "text=✅ angple backend canary verified%0A%0ARepo: ${{ github.repository }}%0ACommit: ${{ github.sha }}%0ATag: \`${{ needs.build.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0ACanary Host: https://canary.damoang.net%0AGate Approval: ${RUN_URL}%0A%0A백엔드 canary 헬스체크는 배포 대상 인스턴스에서 내부 NodePort 기준으로 검증되었습니다." \
+            -d "text=✅ angple backend canary verified%0A%0ARepo: ${{ github.repository }}%0ACommit: ${{ github.sha }}%0ATag: \`${{ needs.resolve-release.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0ACanary Host: https://canary.damoang.net%0AGate Approval: ${RUN_URL}%0A%0A백엔드 canary 헬스체크는 배포 대상 인스턴스에서 내부 NodePort 기준으로 검증되었습니다." \
             -d "reply_markup={\"inline_keyboard\":[[{\"text\":\"Canary Host\",\"url\":\"https://canary.damoang.net\"},{\"text\":\"Gate Approval\",\"url\":\"${RUN_URL}\"}]]}"
 
   deploy-production:
-    needs: [build, deploy-canary, verify-canary]
+    needs: [resolve-release, build, deploy-canary, verify-canary]
     if: always() && needs.verify-canary.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.release_mode == 'full'
     runs-on: ubuntu-latest
     environment:
@@ -334,7 +382,7 @@ jobs:
 
       - name: Deploy production via SSM
         env:
-          IMAGE_TAG: ${{ needs.build.outputs.sha_tag }}
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.sha_tag }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-038a1d1f00798d94b" \
@@ -404,7 +452,7 @@ jobs:
               \"title\": \"🎉 Backend Production $STATUS\",
               \"color\": $COLOR,
               \"fields\": [
-                {\"name\": \"Tag\", \"value\": \"\`${{ needs.build.outputs.sha_tag }}\`\"}
+                {\"name\": \"Tag\", \"value\": \"\`${{ needs.resolve-release.outputs.sha_tag }}\`\"}
               ]
             }]
           }"
@@ -416,4 +464,4 @@ jobs:
           EMOJI=$([[ "$STATUS" == "success" ]] && echo "🎉" || echo "❌")
           curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}" \
-            -d "text=${EMOJI} angple backend production ${STATUS}%0A%0ATag: \`${{ needs.build.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0AURL: https://damoang.net/api/health"
+            -d "text=${EMOJI} angple backend production ${STATUS}%0A%0ATag: \`${{ needs.resolve-release.outputs.sha_tag }}\`%0ADigest: \`${{ needs.build.outputs.image_digest }}\`%0AURL: https://damoang.net/api/health"
