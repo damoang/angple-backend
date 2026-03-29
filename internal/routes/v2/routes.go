@@ -294,6 +294,7 @@ func SetupSiteLogo(router *gin.Engine, h *v2handler.SiteLogoHandler, jwtManager 
 	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 	admin.GET("", h.ListLogos)
 	admin.POST("", h.CreateLogo)
+	admin.POST("/presets", h.CreatePresetLogos)
 	admin.PUT("/:id", h.UpdateLogo)
 	admin.DELETE("/:id", h.DeleteLogo)
 
