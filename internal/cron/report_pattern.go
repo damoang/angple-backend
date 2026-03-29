@@ -93,7 +93,7 @@ func runUpdateReportPatternAt(db *gorm.DB, now time.Time) (*ReportPatternResult,
 	subject := fmt.Sprintf("운영 현황 보고서 (%s ~ %s)", startFormatted, endFormatted)
 
 	var dupCount int64
-	db.Table("g5_write_report").Where("wr_subject = ?", subject).Count(&dupCount)
+	db.Raw("SELECT COUNT(*) FROM g5_write_report WHERE wr_subject = ?", subject).Scan(&dupCount)
 	if dupCount > 0 {
 		return &ReportPatternResult{
 			Subject:    subject,
@@ -495,11 +495,19 @@ func saveReportPost(db *gorm.DB, stats *reportStats, subject string, now time.Ti
 		stats.TotalCases, stats.TotalMonthCases, len(statsJSON),
 	)
 
-	// wr_num 계산
-	var wrNum int
-	db.Raw("SELECT COALESCE(MIN(wr_num), 0) - 1 FROM g5_write_report").Scan(&wrNum)
-
+	// wr_num 계산: wr_datetime 기준 올바른 위치에 삽입
+	// 이 보고서보다 최신 글 중 가장 큰 wr_num을 찾아 그보다 1 작은 값 사용
+	// (wr_num이 작을수록 위에 표시됨)
 	nowStr := now.Format("2006-01-02 15:04:05")
+	var wrNum int
+	db.Raw(`
+		SELECT COALESCE(
+			(SELECT wr_num - 1 FROM g5_write_report
+			 WHERE wr_is_comment = 0 AND wr_datetime > ?
+			 ORDER BY wr_datetime ASC LIMIT 1),
+			COALESCE(MIN(wr_num), 0) - 1
+		) FROM g5_write_report
+	`, nowStr).Scan(&wrNum)
 
 	result := db.Exec(`
 		INSERT INTO g5_write_report
