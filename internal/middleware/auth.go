@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"net"
-	"os"
 	"strconv"
 	"strings"
 
@@ -10,9 +9,6 @@ import (
 	"github.com/damoang/angple-backend/pkg/jwt"
 	"github.com/gin-gonic/gin"
 )
-
-// internalSecret is loaded from INTERNAL_SECRET env var at startup
-var internalSecret = os.Getenv("INTERNAL_SECRET")
 
 // getRemoteIP extracts the actual connection IP from RemoteAddr (ignores X-Forwarded-For)
 // RemoteAddr format: "IP:port" or "[IPv6]:port"

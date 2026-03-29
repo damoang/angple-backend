@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -102,7 +103,7 @@ func (s *AdvertiserBoardPolicyService) findActivePromotion(memberID string) (*ad
 		Where("member_id = ? AND is_active = ? AND start_date <= ? AND end_date >= ?", memberID, true, today, today).
 		Limit(1).
 		Take(&row).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {

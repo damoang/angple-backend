@@ -60,6 +60,8 @@ func (w *DeleteWorker) Stop() {
 }
 
 // processPending finds and executes all pending deletes whose scheduled_at has passed
+//
+//nolint:gocyclo // Comment/post delete handling shares infrastructure but diverges in business rules.
 func (w *DeleteWorker) processPending() {
 	now := time.Now()
 	records, err := w.sdRepo.FindPending(now, 50)

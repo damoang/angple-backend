@@ -320,7 +320,10 @@ func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent)
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, w.webBaseURL+"/api/internal/affiliate/sync", bytes.NewReader(body))
+	reqCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, w.webBaseURL+"/api/internal/affiliate/sync", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -344,7 +347,7 @@ func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent)
 func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	if w.cacheService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = w.cacheService.InvalidatePosts(ctx, job.BoardSlug)
+		w.logCacheError("InvalidatePosts", w.cacheService.InvalidatePosts(ctx, job.BoardSlug))
 		cancel()
 	}
 	if w.clearPostCache != nil {
@@ -368,10 +371,11 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	var followerIDs []string
 	w.db.Table("g5_member_follow").Select("mb_id").Where("target_id = ?", job.MemberID).Pluck("mb_id", &followerIDs)
 	for _, fid := range followerIDs {
-		if pref, _ := w.notiPrefRepo.Get(fid); !pref.NotiFollow {
+		pref, ok := w.mustGetNotiPreference(fid)
+		if !ok || !pref.NotiFollow {
 			continue
 		}
-		_ = w.notiRepo.Create(&gnurepo.Notification{
+		w.createNotification(&gnurepo.Notification{
 			PhToCase: "follow", PhFromCase: "write", BoTable: job.BoardSlug,
 			WrID: job.WriteID, MbID: fid, RelMbID: job.MemberID,
 			RelMbNick:  authorName,
@@ -393,10 +397,11 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 		if followerSet[sid] {
 			continue
 		}
-		if pref, _ := w.notiPrefRepo.Get(sid); !pref.NotiFollow {
+		pref, ok := w.mustGetNotiPreference(sid)
+		if !ok || !pref.NotiFollow {
 			continue
 		}
-		_ = w.notiRepo.Create(&gnurepo.Notification{
+		w.createNotification(&gnurepo.Notification{
 			PhToCase: "subscribe", PhFromCase: "write", BoTable: job.BoardSlug,
 			WrID: job.WriteID, MbID: sid, RelMbID: job.MemberID,
 			RelMbNick:  authorName,
@@ -409,11 +414,12 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	}
 }
 
+//nolint:gocyclo // Notification routing for comments is branching-heavy business logic and stays explicit on purpose.
 func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 	if w.cacheService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = w.cacheService.InvalidateComments(ctx, job.BoardSlug, job.PostID)
-		_ = w.cacheService.InvalidatePosts(ctx, job.BoardSlug)
+		w.logCacheError("InvalidateComments", w.cacheService.InvalidateComments(ctx, job.BoardSlug, job.PostID))
+		w.logCacheError("InvalidatePosts", w.cacheService.InvalidatePosts(ctx, job.BoardSlug))
 		cancel()
 	}
 	if w.clearPostCache != nil {
@@ -442,8 +448,8 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 		var parentAuthorMbID string
 		if err := w.db.Table(tableName).Select("mb_id").Where("wr_id = ?", *job.ParentID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != job.MemberID {
 			if !w.isBlocked(parentAuthorMbID, job.MemberID) {
-				if pref, _ := w.notiPrefRepo.Get(parentAuthorMbID); pref.NotiReply {
-					_ = w.notiRepo.Create(&gnurepo.Notification{
+				if pref, ok := w.mustGetNotiPreference(parentAuthorMbID); ok && pref.NotiReply {
+					w.createNotification(&gnurepo.Notification{
 						PhToCase:      "comment_reply",
 						PhFromCase:    "comment",
 						BoTable:       job.BoardSlug,
@@ -466,8 +472,8 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 	if postAuthor.MbID == job.MemberID || w.isBlocked(postAuthor.MbID, job.MemberID) {
 		return
 	}
-	if pref, _ := w.notiPrefRepo.Get(postAuthor.MbID); pref.NotiComment {
-		_ = w.notiRepo.Create(&gnurepo.Notification{
+	if pref, ok := w.mustGetNotiPreference(postAuthor.MbID); ok && pref.NotiComment {
+		w.createNotification(&gnurepo.Notification{
 			PhToCase:      "comment",
 			PhFromCase:    "comment",
 			BoTable:       job.BoardSlug,
@@ -488,8 +494,8 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 func (w *WriteAfterWorker) handlePostChanged(event gnudomain.WriteAfterEvent) {
 	if w.cacheService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = w.cacheService.InvalidatePost(ctx, event.BoardSlug, event.WriteID)
-		_ = w.cacheService.InvalidatePosts(ctx, event.BoardSlug)
+		w.logCacheError("InvalidatePost", w.cacheService.InvalidatePost(ctx, event.BoardSlug, event.WriteID))
+		w.logCacheError("InvalidatePosts", w.cacheService.InvalidatePosts(ctx, event.BoardSlug))
 		cancel()
 	}
 	if w.clearPostCache != nil {
@@ -509,8 +515,8 @@ func (w *WriteAfterWorker) handleCommentChanged(event gnudomain.WriteAfterEvent)
 	}
 	if w.cacheService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = w.cacheService.InvalidateComments(ctx, event.BoardSlug, *event.PostID)
-		_ = w.cacheService.InvalidatePosts(ctx, event.BoardSlug)
+		w.logCacheError("InvalidateComments", w.cacheService.InvalidateComments(ctx, event.BoardSlug, *event.PostID))
+		w.logCacheError("InvalidatePosts", w.cacheService.InvalidatePosts(ctx, event.BoardSlug))
 		cancel()
 	}
 	if w.clearPostCache != nil {
@@ -537,12 +543,33 @@ func ClearPostMemCache(postMemCache *sync.Map) func(string) {
 		if postMemCache == nil {
 			return
 		}
-		postMemCache.Range(func(key, value interface{}) bool {
+		postMemCache.Range(func(key, _ interface{}) bool {
 			keyStr, ok := key.(string)
 			if ok && strings.HasPrefix(keyStr, "posts:"+slug+":") {
 				postMemCache.Delete(key)
 			}
 			return true
 		})
+	}
+}
+
+func (w *WriteAfterWorker) logCacheError(operation string, err error) {
+	if err != nil {
+		log.Printf("[WriteAfterWorker] cache %s failed: %v", operation, err)
+	}
+}
+
+func (w *WriteAfterWorker) mustGetNotiPreference(mbID string) (*gnurepo.NotiPreference, bool) {
+	pref, err := w.notiPrefRepo.Get(mbID)
+	if err != nil {
+		log.Printf("[WriteAfterWorker] notification preference lookup failed for %s: %v", mbID, err)
+		return nil, false
+	}
+	return pref, true
+}
+
+func (w *WriteAfterWorker) createNotification(noti *gnurepo.Notification) {
+	if err := w.notiRepo.Create(noti); err != nil {
+		log.Printf("[WriteAfterWorker] notification create failed for %s/%d: %v", noti.BoTable, noti.WrID, err)
 	}
 }

@@ -38,6 +38,8 @@ type V2Handler struct {
 	tagRepo           gnurepo.TagRepository
 }
 
+const claimBoardSlug = "claim"
+
 // NewV2Handler creates a new V2Handler
 func NewV2Handler(
 	userRepo v2repo.UserRepository,
@@ -506,7 +508,7 @@ func (h *V2Handler) UpdatePost(c *gin.Context) {
 	}
 
 	// 소명글 수정 차단: claim 게시판에서 disciplinelog 연동 글은 수정 불가
-	if slug == "claim" && h.gnuDB != nil && middleware.GetUserLevel(c) < 10 {
+	if slug == claimBoardSlug && h.gnuDB != nil && middleware.GetUserLevel(c) < 10 {
 		var link1 string
 		h.gnuDB.Table("g5_write_claim").Select("wr_link1").Where("wr_id = ?", id).Scan(&link1)
 		if strings.HasPrefix(link1, "disciplinelog") {
@@ -576,7 +578,7 @@ func (h *V2Handler) DeletePost(c *gin.Context) {
 	}
 
 	// 소명글 삭제 차단: claim 게시판에서 disciplinelog 연동 글은 삭제 불가
-	if slug == "claim" && h.gnuDB != nil && middleware.GetUserLevel(c) < 10 {
+	if slug == claimBoardSlug && h.gnuDB != nil && middleware.GetUserLevel(c) < 10 {
 		var link1 string
 		h.gnuDB.Table("g5_write_claim").Select("wr_link1").Where("wr_id = ?", id).Scan(&link1)
 		if strings.HasPrefix(link1, "disciplinelog") {
@@ -834,7 +836,7 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 	userLevel := middleware.GetUserLevel(c)
 
 	// 소명 게시판: admin과 글 작성자만 댓글 가능
-	if slug == "claim" {
+	if slug == claimBoardSlug {
 		isAdmin := userLevel >= 10
 		if !isAdmin {
 			post, postErr := h.postRepo.FindByID(postID)

@@ -349,7 +349,7 @@ func loadIdempotencyCachedResponse(ctx context.Context, redisClient *redis.Clien
 	}
 	raw, err := redisClient.Get(ctx, getIdempotencyRespKey(baseKey)).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, nil
 		}
 		return nil, err

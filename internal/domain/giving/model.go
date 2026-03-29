@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+var seoulLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		return time.FixedZone("KST", 9*60*60)
+	}
+	return loc
+}()
+
 type Status string
 
 const (
@@ -39,9 +47,8 @@ func ParseTime(s string) (time.Time, error) {
 		"2006-01-02 15:04:05",
 		"2006-01-02 15:04",
 	}
-	loc, _ := time.LoadLocation("Asia/Seoul")
 	for _, f := range formats {
-		if t, err := time.ParseInLocation(f, s, loc); err == nil {
+		if t, err := time.ParseInLocation(f, s, seoulLocation); err == nil {
 			return t, nil
 		}
 	}

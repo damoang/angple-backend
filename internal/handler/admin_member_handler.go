@@ -77,6 +77,8 @@ var allowedSortColumns = map[string]string{
 }
 
 // ListMembers handles GET /api/v1/admin/members
+//
+//nolint:gocyclo // Admin filtering stays explicit to keep parameter-to-query mapping easy to audit.
 func (h *AdminMemberHandler) ListMembers(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -204,6 +206,8 @@ func (h *AdminMemberHandler) GetMember(c *gin.Context) {
 }
 
 // UpdateMember handles PUT /api/v1/admin/members/:id
+//
+//nolint:gocyclo // Admin patch validation is clearer inline than split across many tiny helpers.
 func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	mbID := c.Param("mbId")
 	var req struct {

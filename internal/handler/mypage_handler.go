@@ -160,6 +160,8 @@ func formatNullableTime(t *time.Time) interface{} {
 }
 
 // GetMemberActivity handles GET /api/v1/members/:id/activity
+//
+//nolint:gocyclo // Cache-first + parallel fetch control flow is intentionally kept local.
 func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 	mbID := c.Param("id")
 	if mbID == "" {
