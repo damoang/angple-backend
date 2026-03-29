@@ -739,6 +739,7 @@ func main() {
 		v2Handler.SetNotiPreferenceRepository(gnurepo.NewNotiPreferenceRepository(db))
 		v2Handler.SetGnuDB(db)
 		v2Handler.SetBlockRepository(v2repo.NewBlockRepository(db))
+		v2Handler.SetTagRepository(gnurepo.NewTagRepository(db))
 
 		// XP: DI into V2Handler (set after expRepo is created below)
 
