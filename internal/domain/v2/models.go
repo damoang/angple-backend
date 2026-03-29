@@ -46,6 +46,8 @@ type V2Board struct {
 	// 포인트 설정 (양수=지급, 음수=차감)
 	WritePoint    int       `gorm:"column:write_point;default:0" json:"write_point"`
 	CommentPoint  int       `gorm:"column:comment_point;default:0" json:"comment_point"`
+	WriteXP       int       `gorm:"column:write_xp;default:100" json:"write_xp"`
+	CommentXP     int       `gorm:"column:comment_xp;default:50" json:"comment_xp"`
 	DownloadPoint int       `gorm:"column:download_point;default:0" json:"download_point"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
