@@ -34,8 +34,8 @@ type XPConfig struct {
 	WriteXP        int  `json:"write_xp"`        // XP granted per post (default: 100)
 	CommentXP      int  `json:"comment_xp"`      // XP granted per comment (default: 50)
 	LoginEnabled   bool `json:"login_enabled"`   // Enable login XP (default: true)
-	WriteEnabled   bool `json:"write_enabled"`   // Enable write XP (default: false)
-	CommentEnabled bool `json:"comment_enabled"` // Enable comment XP (default: false)
+	WriteEnabled   bool `json:"write_enabled"`   // Enable write XP (default: true)
+	CommentEnabled bool `json:"comment_enabled"` // Enable comment XP (default: true)
 	XPBasePoint    int  `json:"xp_base_point"`   // Base XP per level step (default: 1000, nariya xp_point)
 	XPRate         int  `json:"xp_rate"`         // Level growth rate (default: 2, nariya xp_rate)
 	MaxLevel       int  `json:"max_level"`       // Maximum level cap (default: 5000, nariya xp_max)
@@ -48,8 +48,8 @@ func DefaultXPConfig() *XPConfig {
 		WriteXP:        100,
 		CommentXP:      50,
 		LoginEnabled:   true,
-		WriteEnabled:   false,
-		CommentEnabled: false,
+		WriteEnabled:   true,
+		CommentEnabled: true,
 		XPBasePoint:    1000,
 		XPRate:         2,
 		MaxLevel:       5000,
