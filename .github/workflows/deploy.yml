@@ -262,6 +262,7 @@ jobs:
 
   verify-canary:
     needs: [resolve-release, build, deploy-canary]
+    if: always() && needs.resolve-release.result == 'success' && needs.deploy-canary.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
