@@ -8,7 +8,7 @@ type SiteLogo struct {
 	Name          string    `gorm:"column:name;type:varchar(100);not null" json:"name"`
 	LogoURL       string    `gorm:"column:logo_url;type:varchar(500);not null" json:"logo_url"`
 	ScheduleType  string    `gorm:"column:schedule_type;type:enum('recurring','date_range','default');not null" json:"schedule_type"`
-	RecurringDate *string   `gorm:"column:recurring_date;type:varchar(5)" json:"recurring_date,omitempty"`
+	RecurringDate *string   `gorm:"column:recurring_date;type:varchar(13)" json:"recurring_date,omitempty"`
 	StartDate     *string   `gorm:"column:start_date;type:date" json:"start_date,omitempty"`
 	EndDate       *string   `gorm:"column:end_date;type:date" json:"end_date,omitempty"`
 	Priority      int       `gorm:"column:priority;default:0" json:"priority"`

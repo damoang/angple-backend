@@ -53,6 +53,9 @@ func Run(db *gorm.DB) error {
 	if err := AddRestrictionScopeColumn(db); err != nil {
 		return err
 	}
+	if err := ExpandSiteLogoRecurringDateColumn(db); err != nil {
+		return err
+	}
 	return nil
 }
 
