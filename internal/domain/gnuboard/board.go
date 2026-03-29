@@ -26,6 +26,8 @@ type G5Board struct {
 	BoUseSearch     int    `gorm:"column:bo_use_search" json:"bo_use_search"`
 	BoWritePoint    int    `gorm:"column:bo_write_point" json:"bo_write_point"`
 	BoCommentPoint  int    `gorm:"column:bo_comment_point" json:"bo_comment_point"`
+	BoWriteXP       int    `gorm:"column:bo_write_xp;default:100" json:"bo_write_xp"`
+	BoCommentXP     int    `gorm:"column:bo_comment_xp;default:50" json:"bo_comment_xp"`
 	BoReadPoint     int    `gorm:"column:bo_read_point" json:"bo_read_point"`
 	BoDownloadPoint int    `gorm:"column:bo_download_point" json:"bo_download_point"`
 	BoUseGood       int    `gorm:"column:bo_use_good" json:"bo_use_good"`
@@ -71,6 +73,8 @@ type BoardResponse struct {
 	CategoryList  string `json:"category_list"`
 	WritePoint    int    `json:"write_point"`
 	CommentPoint  int    `json:"comment_point"`
+	WriteXP       int    `json:"write_xp"`
+	CommentXP     int    `json:"comment_xp"`
 	ReadPoint     int    `json:"read_point"`
 	DownloadPoint int    `json:"download_point"`
 	UseGood       bool   `json:"use_good"`
@@ -100,6 +104,8 @@ type AdminBoardResponse struct {
 	DownloadLevel int    `json:"download_level"`
 	WritePoint    int    `json:"write_point"`
 	CommentPoint  int    `json:"comment_point"`
+	WriteXP       int    `json:"write_xp"`
+	CommentXP     int    `json:"comment_xp"`
 	ReadPoint     int    `json:"read_point"`
 	DownloadPoint int    `json:"download_point"`
 	UseCategory   int    `json:"use_category"`
@@ -137,6 +143,8 @@ func (b *G5Board) ToAdminResponse() AdminBoardResponse {
 		DownloadLevel: b.BoDownloadLevel,
 		WritePoint:    b.BoWritePoint,
 		CommentPoint:  b.BoCommentPoint,
+		WriteXP:       b.BoWriteXP,
+		CommentXP:     b.BoCommentXP,
 		ReadPoint:     b.BoReadPoint,
 		DownloadPoint: b.BoDownloadPoint,
 		UseCategory:   b.BoUseCategory,
@@ -175,6 +183,8 @@ func (b *G5Board) ToResponse() BoardResponse {
 		CategoryList:  b.BoCategoryList,
 		WritePoint:    b.BoWritePoint,
 		CommentPoint:  b.BoCommentPoint,
+		WriteXP:       b.BoWriteXP,
+		CommentXP:     b.BoCommentXP,
 		ReadPoint:     b.BoReadPoint,
 		DownloadPoint: b.BoDownloadPoint,
 		UseGood:       b.BoUseGood == 1,

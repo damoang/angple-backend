@@ -453,11 +453,12 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		}
 	}
 
-	// 경험치 부여 (비동기, best-effort)
+	// 경험치 부여 (비동기, best-effort) — 게시판별 XP 사용
 	if h.expRepo != nil {
 		mbID := middleware.GetUserID(c)
 		tableName := fmt.Sprintf("v2_posts_%s", slug)
 		wrID := fmt.Sprintf("%d", post.ID)
+		boardWriteXP := board.WriteXP
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -465,10 +466,17 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 				}
 			}()
 			xpConfig, err := h.expRepo.GetXPConfig()
-			if err != nil || xpConfig == nil || !xpConfig.WriteEnabled || xpConfig.WriteXP <= 0 {
+			if err != nil || xpConfig == nil || !xpConfig.WriteEnabled {
 				return
 			}
-			result, err := h.expRepo.AddExp(mbID, xpConfig.WriteXP, "글쓰기", tableName, wrID, "@write")
+			xpAmount := boardWriteXP
+			if xpAmount <= 0 {
+				xpAmount = xpConfig.WriteXP // 게시판 설정 없으면 전역 기본값
+			}
+			if xpAmount <= 0 {
+				return
+			}
+			result, err := h.expRepo.AddExp(mbID, xpAmount, "글쓰기", tableName, wrID, "@write")
 			if err != nil {
 				log.Printf("[xp] write XP grant failed for %s: %v", mbID, err)
 				return
@@ -937,11 +945,12 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		go h.createCommentNotification(slug, postID, comment, mbID, authorName)
 	}
 
-	// 경험치 부여 (비동기, best-effort)
+	// 경험치 부여 (비동기, best-effort) — 게시판별 XP 사용
 	// 30일 이전 글에 달린 댓글은 XP 미부여 (스팸 방지)
 	if h.expRepo != nil && !isOldPost {
 		tableName := fmt.Sprintf("v2_comments_%s", slug)
 		wrID := fmt.Sprintf("%d", comment.ID)
+		boardCommentXP := board.CommentXP
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -949,10 +958,17 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 				}
 			}()
 			xpConfig, err := h.expRepo.GetXPConfig()
-			if err != nil || xpConfig == nil || !xpConfig.CommentEnabled || xpConfig.CommentXP <= 0 {
+			if err != nil || xpConfig == nil || !xpConfig.CommentEnabled {
 				return
 			}
-			result, err := h.expRepo.AddExp(mbID, xpConfig.CommentXP, "댓글 작성", tableName, wrID, "@comment")
+			xpAmount := boardCommentXP
+			if xpAmount <= 0 {
+				xpAmount = xpConfig.CommentXP
+			}
+			if xpAmount <= 0 {
+				return
+			}
+			result, err := h.expRepo.AddExp(mbID, xpAmount, "댓글 작성", tableName, wrID, "@comment")
 			if err != nil {
 				log.Printf("[xp] comment XP grant failed for %s: %v", mbID, err)
 				return
