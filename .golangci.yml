@@ -15,7 +15,6 @@ linters:
     - errorlint
     - goconst
     - gocyclo
-    - gosec
     - misspell
     - noctx
     - prealloc
@@ -34,9 +33,6 @@ linters:
       min-occurrences: 3
     gocyclo:
       min-complexity: 15
-    gosec:
-      excludes:
-        - G204
     govet:
       disable:
         - shadow

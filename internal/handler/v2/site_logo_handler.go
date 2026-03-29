@@ -14,6 +14,7 @@ import (
 )
 
 var mmddRegex = regexp.MustCompile(`^\d{2}-\d{2}$`)
+var mmddRangeRegex = regexp.MustCompile(`^\d{2}-\d{2}\s*~\s*\d{2}-\d{2}$`)
 
 // SiteLogoHandler handles site logo API endpoints
 type SiteLogoHandler struct {
@@ -196,20 +197,13 @@ func (h *SiteLogoHandler) GetActiveLogo(c *gin.Context) {
 	mmdd := now.Format("01-02")
 	today := now.Format("2006-01-02")
 
-	logo, err := h.logoRepo.FindActiveLogo(mmdd, today)
+	schedules, err := h.logoRepo.FindAllActive()
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			common.V2Success(c, gin.H{"active": nil, "schedules": []interface{}{}})
-			return
-		}
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "로고 조회 실패", err)
 		return
 	}
 
-	schedules, err := h.logoRepo.FindAllActive()
-	if err != nil {
-		schedules = []*v2domain.SiteLogo{}
-	}
+	logo := h.resolveActiveLogo(schedules, mmdd, today)
 
 	common.V2Success(c, gin.H{
 		"active":    logo,
@@ -221,10 +215,10 @@ func (h *SiteLogoHandler) validateSchedule(scheduleType string, recurringDate, s
 	switch scheduleType {
 	case "recurring":
 		if recurringDate == nil || *recurringDate == "" {
-			return &validationError{"recurring 타입은 recurring_date(MM-DD)가 필수입니다"}
+			return &validationError{"recurring 타입은 recurring_date(MM-DD 또는 MM-DD~MM-DD)가 필수입니다"}
 		}
-		if !mmddRegex.MatchString(*recurringDate) {
-			return &validationError{"recurring_date는 MM-DD 형식이어야 합니다 (예: 03-01)"}
+		if !mmddRegex.MatchString(*recurringDate) && !mmddRangeRegex.MatchString(*recurringDate) {
+			return &validationError{"recurring_date는 MM-DD 또는 MM-DD~MM-DD 형식이어야 합니다 (예: 03-01, 03-20~04-02)"}
 		}
 	case "date_range":
 		if startDate == nil || *startDate == "" || endDate == nil || *endDate == "" {
@@ -237,6 +231,74 @@ func (h *SiteLogoHandler) validateSchedule(scheduleType string, recurringDate, s
 		// no additional validation
 	}
 	return nil
+}
+
+func (h *SiteLogoHandler) resolveActiveLogo(
+	schedules []*v2domain.SiteLogo,
+	mmdd, today string,
+) *v2domain.SiteLogo {
+	if len(schedules) == 0 {
+		return nil
+	}
+
+	var recurringMatch *v2domain.SiteLogo
+	var rangeMatch *v2domain.SiteLogo
+	var defaultMatch *v2domain.SiteLogo
+
+	for _, logo := range schedules {
+		switch logo.ScheduleType {
+		case "recurring":
+			if h.matchesRecurringSchedule(logo.RecurringDate, mmdd) {
+				if recurringMatch == nil || logo.Priority > recurringMatch.Priority {
+					recurringMatch = logo
+				}
+			}
+		case "date_range":
+			if logo.StartDate != nil && logo.EndDate != nil && *logo.StartDate <= today && *logo.EndDate >= today {
+				if rangeMatch == nil || logo.Priority > rangeMatch.Priority {
+					rangeMatch = logo
+				}
+			}
+		case "default":
+			if defaultMatch == nil || logo.Priority > defaultMatch.Priority {
+				defaultMatch = logo
+			}
+		}
+	}
+
+	if recurringMatch != nil {
+		return recurringMatch
+	}
+	if rangeMatch != nil {
+		return rangeMatch
+	}
+	return defaultMatch
+}
+
+func (h *SiteLogoHandler) matchesRecurringSchedule(recurringDate *string, mmdd string) bool {
+	if recurringDate == nil || *recurringDate == "" {
+		return false
+	}
+
+	value := *recurringDate
+	if mmddRegex.MatchString(value) {
+		return value == mmdd
+	}
+	if !mmddRangeRegex.MatchString(value) {
+		return false
+	}
+
+	rangeParts := regexp.MustCompile(`\s*~\s*`).Split(value, 2)
+	if len(rangeParts) != 2 {
+		return false
+	}
+
+	start := rangeParts[0]
+	end := rangeParts[1]
+	if start <= end {
+		return mmdd >= start && mmdd <= end
+	}
+	return mmdd >= start || mmdd <= end
 }
 
 type validationError struct {
