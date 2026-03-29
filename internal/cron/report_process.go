@@ -155,6 +155,17 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 	isBulk := len(items) > 1
 
 	return db.Transaction(func(tx *gorm.DB) error {
+		// 레이스 컨디션 방지: 트랜잭션 안에서 미처리 건 재확인 (FOR UPDATE 잠금)
+		var unprocessedCount int64
+		tx.Raw(`
+			SELECT COUNT(*) FROM g5_na_singo
+			WHERE target_mb_id = ? AND admin_approved = 1 AND processed = 0
+			FOR UPDATE
+		`, targetMbID).Scan(&unprocessedCount)
+		if unprocessedCount == 0 {
+			return nil // 이미 다른 실행에서 처리됨
+		}
+
 		// 2-1. 징계 로그 게시글 작성
 		var wrID int
 		if isMergedDiscipline {
@@ -320,7 +331,7 @@ func createDisciplineLogPost(
 ) (int, error) {
 	// 다음 wr_id 조회
 	var maxWrID int
-	tx.Raw("SELECT COALESCE(MAX(wr_id), 0) FROM g5_write_disciplinelog").Scan(&maxWrID)
+	tx.Raw("SELECT COALESCE(MAX(wr_id), 0) FROM g5_write_disciplinelog FOR UPDATE").Scan(&maxWrID)
 	wrID := maxWrID + 1
 
 	// penalty_type 변환
