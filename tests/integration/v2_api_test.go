@@ -69,6 +69,7 @@ func (s *V2APISuite) SetupSuite() {
 			comment_level INTEGER DEFAULT 1, upload_level INTEGER DEFAULT 1,
 			download_level INTEGER DEFAULT 1,
 			write_point INTEGER DEFAULT 0, comment_point INTEGER DEFAULT 0,
+			write_xp INTEGER DEFAULT 100, comment_xp INTEGER DEFAULT 50,
 			download_point INTEGER DEFAULT 0,
 			created_at DATETIME, updated_at DATETIME)`,
 		`CREATE TABLE IF NOT EXISTS v2_posts (
