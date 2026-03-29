@@ -1,10 +1,11 @@
 package gnuboard
 
 import (
-	"github.com/damoang/angple-backend/internal/domain/gnuboard"
-	"gorm.io/gorm"
 	"sync"
 	"time"
+
+	"github.com/damoang/angple-backend/internal/domain/gnuboard"
+	"gorm.io/gorm"
 )
 
 var boardByIDCache sync.Map

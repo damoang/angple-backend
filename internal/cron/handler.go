@@ -101,24 +101,38 @@ func (h *Handler) ProcessApprovedReports(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
-// DisciplineRelease handles POST /api/internal/cron/discipline-release
-// Restores levels and clears intercept dates for expired disciplines
-func (h *Handler) DisciplineRelease(c *gin.Context) {
+func (h *Handler) runCronTask(
+	c *gin.Context,
+	label string,
+	run func() (interface{}, error),
+	logSuccess func(interface{}),
+) {
 	if !h.verifySecret(c) {
 		return
 	}
 
-	result, err := runDisciplineRelease(h.db)
+	result, err := run()
 	if err != nil {
-		log.Printf("[Cron:discipline-release] error: %v", err)
+		log.Printf("[Cron:%s] error: %v", label, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	log.Printf("[Cron:discipline-release] levels restored: %d %v, intercepts released: %d %v",
-		result.LevelRestoredCount, result.LevelRestoredIDs,
-		result.InterceptReleasedCount, result.InterceptReleasedIDs)
+	logSuccess(result)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// DisciplineRelease handles POST /api/internal/cron/discipline-release
+// Restores levels and clears intercept dates for expired disciplines
+func (h *Handler) DisciplineRelease(c *gin.Context) {
+	h.runCronTask(c, "discipline-release", func() (interface{}, error) {
+		return runDisciplineRelease(h.db)
+	}, func(result interface{}) {
+		typed := result.(*DisciplineReleaseResult)
+		log.Printf("[Cron:discipline-release] levels restored: %d %v, intercepts released: %d %v",
+			typed.LevelRestoredCount, typed.LevelRestoredIDs,
+			typed.InterceptReleasedCount, typed.InterceptReleasedIDs)
+	})
 }
 
 // UpdateReportPattern handles POST /api/internal/cron/update-report-pattern
@@ -170,18 +184,11 @@ func (h *Handler) AutoPromote(c *gin.Context) {
 
 // SyncVisibleCommentCounts handles POST /api/internal/cron/sync-visible-comment-counts
 func (h *Handler) SyncVisibleCommentCounts(c *gin.Context) {
-	if !h.verifySecret(c) {
-		return
-	}
-
-	result, err := runSyncVisibleCommentCounts(h.db)
-	if err != nil {
-		log.Printf("[Cron:sync-visible-comment-counts] error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-		return
-	}
-
-	log.Printf("[Cron:sync-visible-comment-counts] checked=%d synced=%d rows=%d errors=%d",
-		result.BoardsChecked, result.BoardsSynced, result.RowsUpdated, result.Errors)
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+	h.runCronTask(c, "sync-visible-comment-counts", func() (interface{}, error) {
+		return runSyncVisibleCommentCounts(h.db)
+	}, func(result interface{}) {
+		typed := result.(*SyncVisibleCommentCountsResult)
+		log.Printf("[Cron:sync-visible-comment-counts] checked=%d synced=%d rows=%d errors=%d",
+			typed.BoardsChecked, typed.BoardsSynced, typed.RowsUpdated, typed.Errors)
+	})
 }

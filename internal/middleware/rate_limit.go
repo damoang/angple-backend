@@ -17,7 +17,10 @@ var k8sInternalNets []*net.IPNet
 
 func init() {
 	for _, cidr := range []string{"10.42.0.0/16", "10.43.0.0/16"} {
-		_, ipNet, _ := net.ParseCIDR(cidr)
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			panic(fmt.Sprintf("invalid internal CIDR %q: %v", cidr, err))
+		}
 		k8sInternalNets = append(k8sInternalNets, ipNet)
 	}
 }

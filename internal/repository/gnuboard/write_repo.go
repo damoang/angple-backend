@@ -920,16 +920,20 @@ func (r *writeRepository) SoftDeletePost(boardID string, wrID int, deletedBy str
 		}
 
 		// g5_da_content_history에도 이중 기록
-		prevData, _ := json.Marshal(map[string]interface{}{
+		prevData, err := json.Marshal(map[string]interface{}{
 			"wr_subject": post.WrSubject,
 			"wr_content": post.WrContent,
 			"wr_name":    post.WrName,
 			"mb_id":      post.MbID,
 		})
-		r.db.Exec(`INSERT INTO g5_da_content_history
-			(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
-			VALUES (?, ?, 0, ?, ?, '삭제', ?, ?, ?)`,
-			boardID, wrID, post.MbID, post.WrName, deletedBy, now, string(prevData))
+		if err != nil {
+			log.Printf("[SoftDeletePost] Failed to marshal content history for %s/%d: %v", boardID, wrID, err)
+		} else {
+			r.db.Exec(`INSERT INTO g5_da_content_history
+				(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+				VALUES (?, ?, 0, ?, ?, '삭제', ?, ?, ?)`,
+				boardID, wrID, post.MbID, post.WrName, deletedBy, now, string(prevData))
+		}
 	}
 
 	// Soft delete the post only (comments are preserved)
@@ -1062,15 +1066,19 @@ func (r *writeRepository) SoftDeleteComment(boardID string, wrID int, deletedBy 
 	}
 	if err := r.db.Table(table).Select("wr_content, wr_name, mb_id").
 		Where("wr_id = ? AND wr_is_comment = 1", wrID).Scan(&comment).Error; err == nil {
-		prevData, _ := json.Marshal(map[string]interface{}{
+		prevData, err := json.Marshal(map[string]interface{}{
 			"wr_content": comment.WrContent,
 			"wr_name":    comment.WrName,
 			"mb_id":      comment.MbID,
 		})
-		r.db.Exec(`INSERT INTO g5_da_content_history
-			(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
-			VALUES (?, ?, 1, ?, ?, '삭제', ?, ?, ?)`,
-			boardID, wrID, comment.MbID, comment.WrName, deletedBy, now, string(prevData))
+		if err != nil {
+			log.Printf("[SoftDeleteComment] Failed to marshal content history for %s/%d: %v", boardID, wrID, err)
+		} else {
+			r.db.Exec(`INSERT INTO g5_da_content_history
+				(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+				VALUES (?, ?, 1, ?, ?, '삭제', ?, ?, ?)`,
+				boardID, wrID, comment.MbID, comment.WrName, deletedBy, now, string(prevData))
+		}
 	}
 
 	return r.db.Transaction(func(tx *gorm.DB) error {

@@ -3,6 +3,7 @@ package v2
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -493,7 +494,7 @@ func applyRowReplacement(tx *gorm.DB, table string, rowID int, searchTexts []str
 	}
 	var row writeRow
 	if err := tx.Table(table).Select("wr_name, wr_subject, wr_content").Where("wr_id = ?", rowID).Take(&row).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, nil
 		}
 		return false, err

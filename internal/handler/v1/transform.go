@@ -102,9 +102,7 @@ func normalizeMediaURL(raw string) string {
 		return raw
 	}
 
-	if strings.HasPrefix(raw, "./") {
-		raw = strings.TrimPrefix(raw, "./")
-	}
+	raw = strings.TrimPrefix(raw, "./")
 	if strings.HasPrefix(raw, "data/") {
 		return cdnURL + "/" + raw
 	}
