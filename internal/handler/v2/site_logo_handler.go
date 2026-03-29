@@ -4,7 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -49,6 +51,13 @@ func (h *SiteLogoHandler) CreateLogo(c *gin.Context) {
 		return
 	}
 
+	recurringDate, startDate, endDate := h.normalizeScheduleFields(
+		req.ScheduleType,
+		req.RecurringDate,
+		req.StartDate,
+		req.EndDate,
+	)
+
 	// default 타입은 활성 상태 1개만 허용
 	isActive := true
 	if req.IsActive != nil {
@@ -70,9 +79,9 @@ func (h *SiteLogoHandler) CreateLogo(c *gin.Context) {
 		Name:          req.Name,
 		LogoURL:       req.LogoURL,
 		ScheduleType:  req.ScheduleType,
-		RecurringDate: req.RecurringDate,
-		StartDate:     req.StartDate,
-		EndDate:       req.EndDate,
+		RecurringDate: recurringDate,
+		StartDate:     startDate,
+		EndDate:       endDate,
 		Priority:      req.Priority,
 		IsActive:      isActive,
 	}
@@ -123,6 +132,12 @@ func (h *SiteLogoHandler) CreatePresetLogos(c *gin.Context) {
 			common.V2ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
 			return
 		}
+		normalizedRecurringDate, _, _ := h.normalizeScheduleFields("recurring", &recurringDate, nil, nil)
+		if normalizedRecurringDate == nil {
+			common.V2ErrorResponse(c, http.StatusBadRequest, "반복 날짜를 정규화할 수 없습니다", nil)
+			return
+		}
+		recurringDate = *normalizedRecurringDate
 
 		if h.hasRecurringPresetConflict(existingRecurring[recurringDate], item.Name, req.LogoURL) {
 			result.Skipped = append(result.Skipped, v2domain.CreatePresetLogoSkipped{
@@ -164,7 +179,7 @@ func (h *SiteLogoHandler) UpdateLogo(c *gin.Context) {
 
 	logo, err := h.logoRepo.FindByID(id)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.V2ErrorResponse(c, http.StatusNotFound, "로고를 찾을 수 없습니다", nil)
 			return
 		}
@@ -188,13 +203,13 @@ func (h *SiteLogoHandler) UpdateLogo(c *gin.Context) {
 		logo.ScheduleType = *req.ScheduleType
 	}
 	if req.RecurringDate != nil {
-		logo.RecurringDate = req.RecurringDate
+		logo.RecurringDate = normalizeOptionalString(req.RecurringDate)
 	}
 	if req.StartDate != nil {
-		logo.StartDate = req.StartDate
+		logo.StartDate = normalizeOptionalString(req.StartDate)
 	}
 	if req.EndDate != nil {
-		logo.EndDate = req.EndDate
+		logo.EndDate = normalizeOptionalString(req.EndDate)
 	}
 	if req.Priority != nil {
 		logo.Priority = *req.Priority
@@ -207,6 +222,12 @@ func (h *SiteLogoHandler) UpdateLogo(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
+	logo.RecurringDate, logo.StartDate, logo.EndDate = h.normalizeScheduleFields(
+		logo.ScheduleType,
+		logo.RecurringDate,
+		logo.StartDate,
+		logo.EndDate,
+	)
 
 	// default 타입 활성화 시 기존 활성 default 확인
 	if logo.ScheduleType == "default" && logo.IsActive {
@@ -243,7 +264,7 @@ func (h *SiteLogoHandler) DeleteLogo(c *gin.Context) {
 	}
 
 	if _, err := h.logoRepo.FindByID(id); err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.V2ErrorResponse(c, http.StatusNotFound, "로고를 찾을 수 없습니다", nil)
 			return
 		}
@@ -261,25 +282,12 @@ func (h *SiteLogoHandler) DeleteLogo(c *gin.Context) {
 
 // GetActiveLogo handles GET /api/v1/logos/active
 func (h *SiteLogoHandler) GetActiveLogo(c *gin.Context) {
-	kst := time.FixedZone("KST", 9*60*60)
-	now := time.Now().In(kst)
-	mmdd := now.Format("01-02")
-	today := now.Format("2006-01-02")
-
-	logo, err := h.logoRepo.FindActiveLogo(mmdd, today)
+	schedules, err := h.logoRepo.FindAllActive()
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.V2Success(c, gin.H{"active": nil, "schedules": []interface{}{}})
-			return
-		}
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "로고 조회 실패", err)
 		return
 	}
-
-	schedules, err := h.logoRepo.FindAllActive()
-	if err != nil {
-		schedules = []*v2domain.SiteLogo{}
-	}
+	logo := resolveActiveLogoFromSchedules(schedules, time.Now())
 
 	common.V2Success(c, gin.H{
 		"active":    logo,
@@ -299,23 +307,171 @@ func (h *SiteLogoHandler) hasRecurringPresetConflict(existing []*v2domain.SiteLo
 func (h *SiteLogoHandler) validateSchedule(scheduleType string, recurringDate, startDate, endDate *string) error {
 	switch scheduleType {
 	case "recurring":
-		if recurringDate == nil || *recurringDate == "" {
-			return &validationError{"recurring 타입은 recurring_date(MM-DD)가 필수입니다"}
+		if recurringDate == nil || strings.TrimSpace(*recurringDate) == "" {
+			return &validationError{"recurring 타입은 recurring_date(MM-DD 또는 MM-DD~MM-DD)가 필수입니다"}
 		}
-		if !mmddRegex.MatchString(*recurringDate) {
-			return &validationError{"recurring_date는 MM-DD 형식이어야 합니다 (예: 03-01)"}
+		if _, err := normalizeRecurringDateValue(*recurringDate); err != nil {
+			return err
 		}
 	case "date_range":
-		if startDate == nil || *startDate == "" || endDate == nil || *endDate == "" {
+		if startDate == nil || strings.TrimSpace(*startDate) == "" || endDate == nil || strings.TrimSpace(*endDate) == "" {
 			return &validationError{"date_range 타입은 start_date와 end_date가 필수입니다"}
 		}
-		if *startDate > *endDate {
+		normalizedStartDate := strings.TrimSpace(*startDate)
+		normalizedEndDate := strings.TrimSpace(*endDate)
+		if _, err := time.Parse("2006-01-02", normalizedStartDate); err != nil {
+			return &validationError{"start_date는 YYYY-MM-DD 형식이어야 합니다"}
+		}
+		if _, err := time.Parse("2006-01-02", normalizedEndDate); err != nil {
+			return &validationError{"end_date는 YYYY-MM-DD 형식이어야 합니다"}
+		}
+		if normalizedStartDate > normalizedEndDate {
 			return &validationError{"start_date는 end_date보다 이전이어야 합니다"}
 		}
 	case "default":
 		// no additional validation
 	}
 	return nil
+}
+
+func (h *SiteLogoHandler) normalizeScheduleFields(
+	scheduleType string,
+	recurringDate, startDate, endDate *string,
+) (*string, *string, *string) {
+	switch scheduleType {
+	case "recurring":
+		if recurringDate == nil {
+			return nil, nil, nil
+		}
+		normalized, err := normalizeRecurringDateValue(*recurringDate)
+		if err != nil {
+			return recurringDate, nil, nil
+		}
+		return &normalized, nil, nil
+	case "date_range":
+		return nil, normalizeOptionalString(startDate), normalizeOptionalString(endDate)
+	default:
+		return nil, nil, nil
+	}
+}
+
+func normalizeOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func normalizeRecurringDateValue(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if mmddRegex.MatchString(trimmed) {
+		if err := validateRecurringMMDD(trimmed); err != nil {
+			return "", err
+		}
+		return trimmed, nil
+	}
+
+	parts := strings.Split(trimmed, "~")
+	if len(parts) != 2 {
+		return "", &validationError{"recurring_date는 MM-DD 또는 MM-DD~MM-DD 형식이어야 합니다 (예: 03-01, 03-20~04-02)"}
+	}
+
+	start := strings.TrimSpace(parts[0])
+	end := strings.TrimSpace(parts[1])
+	if !mmddRegex.MatchString(start) || !mmddRegex.MatchString(end) {
+		return "", &validationError{"recurring_date는 MM-DD 또는 MM-DD~MM-DD 형식이어야 합니다 (예: 03-01, 03-20~04-02)"}
+	}
+	if err := validateRecurringMMDD(start); err != nil {
+		return "", err
+	}
+	if err := validateRecurringMMDD(end); err != nil {
+		return "", err
+	}
+	return start + "~" + end, nil
+}
+
+func validateRecurringMMDD(value string) error {
+	if _, err := time.Parse("2006-01-02", "2004-"+value); err != nil {
+		return &validationError{"recurring_date는 올바른 월-일이어야 합니다"}
+	}
+	return nil
+}
+
+func resolveActiveLogoFromSchedules(schedules []*v2domain.SiteLogo, now time.Time) *v2domain.SiteLogo {
+	if len(schedules) == 0 {
+		return nil
+	}
+
+	kst := time.FixedZone("KST", 9*60*60)
+	current := now.In(kst)
+	currentMMDD := current.Format("01-02")
+	currentDate := current.Format("2006-01-02")
+
+	ordered := append([]*v2domain.SiteLogo(nil), schedules...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left := ordered[i]
+		right := ordered[j]
+		if schedulePriority(left.ScheduleType) != schedulePriority(right.ScheduleType) {
+			return schedulePriority(left.ScheduleType) < schedulePriority(right.ScheduleType)
+		}
+		if left.Priority != right.Priority {
+			return left.Priority > right.Priority
+		}
+		return left.ID > right.ID
+	})
+
+	for _, logo := range ordered {
+		switch logo.ScheduleType {
+		case "recurring":
+			if recurringScheduleMatches(logo.RecurringDate, currentMMDD) {
+				return logo
+			}
+		case "date_range":
+			if logo.StartDate != nil && logo.EndDate != nil && *logo.StartDate <= currentDate && *logo.EndDate >= currentDate {
+				return logo
+			}
+		case "default":
+			return logo
+		}
+	}
+
+	return nil
+}
+
+func schedulePriority(scheduleType string) int {
+	switch scheduleType {
+	case "recurring":
+		return 0
+	case "date_range":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func recurringScheduleMatches(recurringDate *string, currentMMDD string) bool {
+	if recurringDate == nil || *recurringDate == "" {
+		return false
+	}
+	normalized, err := normalizeRecurringDateValue(*recurringDate)
+	if err != nil {
+		return false
+	}
+	if mmddRegex.MatchString(normalized) {
+		return normalized == currentMMDD
+	}
+
+	parts := strings.Split(normalized, "~")
+	start := parts[0]
+	end := parts[1]
+	if start <= end {
+		return currentMMDD >= start && currentMMDD <= end
+	}
+	return currentMMDD >= start || currentMMDD <= end
 }
 
 type validationError struct {
