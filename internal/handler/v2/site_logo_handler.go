@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -267,7 +268,7 @@ func (h *SiteLogoHandler) GetActiveLogo(c *gin.Context) {
 
 	logo, err := h.logoRepo.FindActiveLogo(mmdd, today)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.V2Success(c, gin.H{"active": nil, "schedules": []interface{}{}})
 			return
 		}
