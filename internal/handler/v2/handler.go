@@ -3,6 +3,7 @@ package v2
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -34,6 +35,7 @@ type V2Handler struct {
 	gnuPointWriteRepo v2repo.GnuboardPointWriteRepository
 	pointConfigRepo   v2repo.PointConfigRepository
 	blockRepo         v2repo.BlockRepository
+	tagRepo           gnurepo.TagRepository
 }
 
 // NewV2Handler creates a new V2Handler
@@ -96,6 +98,11 @@ func (h *V2Handler) SetPointConfigRepository(repo v2repo.PointConfigRepository) 
 // SetBlockRepository sets the block repository for filtering blocked users
 func (h *V2Handler) SetBlockRepository(repo v2repo.BlockRepository) {
 	h.blockRepo = repo
+}
+
+// SetTagRepository sets the tag repository for tag cleanup on post deletion
+func (h *V2Handler) SetTagRepository(repo gnurepo.TagRepository) {
+	h.tagRepo = repo
 }
 
 // getBlockedUserIDs returns blocked user IDs (as uint64) for the given mb_id
@@ -598,6 +605,15 @@ func (h *V2Handler) DeletePost(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 삭제 실패", err)
 		return
 	}
+
+	// 태그 로그 삭제 (삭제된 글의 태그가 검색에 잔존하지 않도록)
+	if h.tagRepo != nil {
+		boTable := fmt.Sprintf("g5_write_%s", slug)
+		if id <= math.MaxInt32 {
+			_ = h.tagRepo.DeletePostTags(boTable, int(id)) //nolint:errcheck
+		}
+	}
+
 	common.V2Success(c, gin.H{"message": "삭제 완료"})
 }
 
