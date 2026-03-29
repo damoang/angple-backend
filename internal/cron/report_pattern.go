@@ -93,7 +93,7 @@ func runUpdateReportPatternAt(db *gorm.DB, now time.Time) (*ReportPatternResult,
 	subject := fmt.Sprintf("운영 현황 보고서 (%s ~ %s)", startFormatted, endFormatted)
 
 	var dupCount int64
-	db.Table("g5_write_report").Where("wr_subject = ?", subject).Count(&dupCount)
+	db.Raw("SELECT COUNT(*) FROM g5_write_report WHERE wr_subject = ?", subject).Scan(&dupCount)
 	if dupCount > 0 {
 		return &ReportPatternResult{
 			Subject:    subject,
