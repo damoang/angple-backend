@@ -7,7 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const localhostIPv4 = "127.0.0.1"
+const (
+	localhostIPv4 = "127.0.0.1"
+	localhostIPv6 = "::1"
+)
 
 // RequireInternalCron allows localhost calls or trusted internal callers that
 // present the shared INTERNAL_SECRET header. Cron handlers still validate their
@@ -17,7 +20,7 @@ func RequireInternalCron() gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		ip := getRemoteIP(c)
-		if ip == localhostIPv4 || ip == "::1" {
+		if ip == localhostIPv4 || ip == localhostIPv6 {
 			c.Next()
 			return
 		}
