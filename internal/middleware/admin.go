@@ -11,7 +11,7 @@ import (
 func RequireLocalhost() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := getRemoteIP(c)
-		if ip != "127.0.0.1" && ip != "::1" {
+		if ip != localhostIPv4 && ip != localhostIPv6 {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
