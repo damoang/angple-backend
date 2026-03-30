@@ -3866,6 +3866,45 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": restriction})
 		})
 
+		// PATCH /api/v1/boards/:slug/posts/:id/bump - Bump post to top (promotion board only, owner only)
+		v1Boards.PATCH("/:slug/posts/:id/bump", middleware.JWTAuth(jwtManager), banCheck, func(c *gin.Context) {
+			slug := c.Param("slug")
+			if slug != "promotion" {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "끌어올리기는 직접홍보 게시판에서만 가능합니다"})
+				return
+			}
+
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			// 게시글 조회
+			post, err := gnuWriteRepo.FindPostByID(slug, postID)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
+				return
+			}
+
+			// 본인 글만 끌어올리기 가능
+			userID := middleware.GetUserID(c)
+			if post.MbID != userID {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "본인 글만 끌어올릴 수 있습니다"})
+				return
+			}
+
+			// wr_datetime을 현재 시간으로 업데이트
+			now := time.Now()
+			tableName := fmt.Sprintf("g5_write_%s", slug)
+			if err := db.Table(tableName).Where("wr_id = ?", postID).Update("wr_datetime", now).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "끌어올리기 실패"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "끌어올리기 완료", "bumped_at": now})
+		})
+
 		// POST /api/v1/boards/:slug/posts/:id/move - Move post to another board (admin only)
 		v1Boards.POST("/:slug/posts/:id/move", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
 			srcBoard := c.Param("slug")
