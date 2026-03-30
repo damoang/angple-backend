@@ -27,7 +27,7 @@ func init() {
 
 // isInternalIP checks if the IP is localhost or K8s internal
 func isInternalIP(ip string) bool {
-	if ip == "127.0.0.1" || ip == "::1" {
+	if ip == localhostIPv4 || ip == localhostIPv6 {
 		return true
 	}
 	parsed := net.ParseIP(ip)
