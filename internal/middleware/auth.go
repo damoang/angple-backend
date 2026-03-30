@@ -36,7 +36,7 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		// 내부 신뢰 요청 확인 (두 가지 방식)
 		// 1. 127.0.0.1에서 오는 요청 (nginx → SvelteKit → Backend)
 		// 2. 공유 시크릿 일치 (CloudFront가 직접 Backend로 라우팅하는 경우)
-		isLocalhost := remoteIP == "127.0.0.1" || remoteIP == "::1"
+		isLocalhost := remoteIP == localhostIPv4 || remoteIP == localhostIPv6
 		hasValidSecret := internalSecret != "" && internalSecret == c.GetHeader("X-Internal-Secret")
 		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
 			userID := c.GetHeader("X-Internal-User-ID")
@@ -111,7 +111,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		remoteIP := getRemoteIP(c)
 		internalAuth := c.GetHeader("X-Internal-Auth")
 		internalSecret := c.GetHeader("X-Internal-Secret")
-		isLocalhost := remoteIP == "127.0.0.1" || remoteIP == "::1"
+		isLocalhost := remoteIP == localhostIPv4 || remoteIP == localhostIPv6
 		hasValidSecret := internalSecret != "" && internalSecret == c.GetHeader("X-Internal-Secret")
 		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
 			userID := c.GetHeader("X-Internal-User-ID")
