@@ -344,6 +344,7 @@ func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent)
 	return nil
 }
 
+//nolint:gocyclo // Notification routing for post creation is branching-heavy business logic and stays explicit on purpose.
 func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	if w.cacheService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
