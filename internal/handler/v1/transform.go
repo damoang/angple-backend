@@ -154,6 +154,10 @@ func normalizeMediaContent(raw string, _ ...string) string {
 
 func rewriteLegacyCDNHost(raw, cdnURL string) string {
 	replacements := [][2]string{
+		{"https://damoang.net/data/", cdnURL + "/data/"},
+		{"http://damoang.net/data/", cdnURL + "/data/"},
+		{"https://www.damoang.net/data/", cdnURL + "/data/"},
+		{"http://www.damoang.net/data/", cdnURL + "/data/"},
 		{"https://s3.damoang.net/data/", cdnURL + "/data/"},
 		{"http://s3.damoang.net/data/", cdnURL + "/data/"},
 		{"https://cdn.damoang.net/data/", cdnURL + "/data/"},
