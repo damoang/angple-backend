@@ -1783,6 +1783,22 @@ func main() {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit, "relevance")
 			} else if isSearching {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
+			} else if summaryMode && useCursor {
+				posts, total, err = gnuWriteRepo.FindPostsAfterSummary(slug, limit, cursorWrNum, cursorWrReply)
+			} else if summaryMode && useHasNextPagination && category != "" && len(blockedIDs) > 0 {
+				posts, hasNext, err = gnuWriteRepo.FindPostsByCategoryFilteredHasNextSummary(slug, category, page, limit, blockedIDs)
+			} else if summaryMode && useHasNextPagination && category != "" && len(blockedIDs) == 0 {
+				posts, hasNext, err = gnuWriteRepo.FindPostsByCategoryHasNextSummary(slug, category, page, limit)
+			} else if summaryMode && useHasNextPagination && len(blockedIDs) > 0 {
+				posts, hasNext, err = gnuWriteRepo.FindPostsFilteredHasNextSummary(slug, page, limit, blockedIDs)
+			} else if summaryMode && useHasNextPagination {
+				posts, hasNext, err = gnuWriteRepo.FindPostsHasNextSummary(slug, page, limit)
+			} else if summaryMode && category != "" {
+				posts, total, err = gnuWriteRepo.FindPostsByCategorySummary(slug, category, page, limit)
+			} else if summaryMode && len(blockedIDs) > 0 {
+				posts, total, err = gnuWriteRepo.FindPostsFilteredSummary(slug, page, limit, blockedIDs)
+			} else if summaryMode {
+				posts, total, err = gnuWriteRepo.FindPostsSummary(slug, page, limit)
 			} else if useCursor {
 				posts, total, err = gnuWriteRepo.FindPostsAfter(slug, limit, cursorWrNum, cursorWrReply)
 			} else if useHasNextPagination && category != "" && len(blockedIDs) > 0 {

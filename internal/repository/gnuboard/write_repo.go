@@ -65,13 +65,21 @@ var coreColumns = []string{
 type WriteRepository interface {
 	// Posts
 	FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	FindPostsSummary(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostsByCategory(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error)
+	FindPostsByCategorySummary(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostsHasNext(boardID string, page, limit int) ([]*gnuboard.G5Write, bool, error)
+	FindPostsHasNextSummary(boardID string, page, limit int) ([]*gnuboard.G5Write, bool, error)
 	FindPostsByCategoryHasNext(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, bool, error)
+	FindPostsByCategoryHasNextSummary(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, bool, error)
 	FindPostsFilteredHasNext(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
+	FindPostsFilteredHasNextSummary(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
+	FindPostsByCategoryFilteredHasNextSummary(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
+	FindPostsAfterSummary(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
+	FindPostsFilteredSummary(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	SearchPosts(boardID string, searchField, searchQuery string, page, limit int, sortBy ...string) ([]*gnuboard.G5Write, int64, error)
 	SearchPostsByCategory(boardID string, searchField, searchQuery, category string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	SearchPostsFiltered(boardID string, searchField, searchQuery string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
@@ -150,10 +158,13 @@ func visibleCommentCountExpr(_ string, alias string) string {
 	return "wr_comment"
 }
 
-func postSelectColumns(boardID, alias string) string {
+func postSelectColumnsForList(boardID, alias string, includeContent bool) string {
 	table := tableName(boardID)
 	parts := make([]string, 0, len(coreColumns))
 	for _, col := range coreColumns {
+		if !includeContent && col == "wr_content" {
+			continue
+		}
 		if col == "wr_comment" {
 			parts = append(parts, visibleCommentCountExpr(table, alias))
 			continue
@@ -165,6 +176,10 @@ func postSelectColumns(boardID, alias string) string {
 		parts = append(parts, col)
 	}
 	return strings.Join(parts, ", ")
+}
+
+func postSelectColumns(boardID, alias string) string {
+	return postSelectColumnsForList(boardID, alias, true)
 }
 
 // allowedSortColumns is the whitelist for bo_sort_field values
@@ -224,6 +239,14 @@ func trimHasNextPosts(posts []*gnuboard.G5Write, limit int) ([]*gnuboard.G5Write
 // FindPosts retrieves posts (not comments) from a board with pagination.
 // Soft-deleted posts stay in the list so users can still trace their own activity.
 func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPosts(boardID, page, limit, true)
+}
+
+func (r *writeRepository) FindPostsSummary(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPosts(boardID, page, limit, false)
+}
+
+func (r *writeRepository) findPosts(boardID string, page, limit int, includeContent bool) ([]*gnuboard.G5Write, int64, error) {
 	var posts []*gnuboard.G5Write
 	var total int64
 
@@ -245,7 +268,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 
 	// 게시판별 커스텀 정렬 (bo_sort_field) — 캐시된 단일 조회 사용
 	orderClause := r.getSortField(boardID)
-	selectCols := postSelectColumns(boardID, "")
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
 
 	// Deferred JOIN: subquery scans only wr_id via covering index, then JOIN fetches full rows.
 	// This avoids reading wide rows during the OFFSET skip phase (max 119s → ~200ms).
@@ -253,7 +276,7 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 		err := r.db.Raw(
 			fmt.Sprintf(
 				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
-				postSelectColumns(boardID, "t"), table, table,
+				postSelectColumnsForList(boardID, "t", includeContent), table, table,
 			),
 			limit, offset,
 		).Scan(&posts).Error
@@ -282,6 +305,14 @@ func (r *writeRepository) FindPosts(boardID string, page, limit int) ([]*gnuboar
 }
 
 func (r *writeRepository) FindPostsHasNext(boardID string, page, limit int) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsHasNext(boardID, page, limit, true)
+}
+
+func (r *writeRepository) FindPostsHasNextSummary(boardID string, page, limit int) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsHasNext(boardID, page, limit, false)
+}
+
+func (r *writeRepository) findPostsHasNext(boardID string, page, limit int, includeContent bool) ([]*gnuboard.G5Write, bool, error) {
 	var posts []*gnuboard.G5Write
 
 	offset := (page - 1) * limit
@@ -290,14 +321,14 @@ func (r *writeRepository) FindPostsHasNext(boardID string, page, limit int) ([]*
 	}
 	table := tableName(boardID)
 	orderClause := r.getSortField(boardID)
-	selectCols := postSelectColumns(boardID, "")
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
 	queryLimit := limit + 1
 
 	if orderClause == "wr_num, wr_reply" {
 		err := r.db.Raw(
 			fmt.Sprintf(
 				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
-				postSelectColumns(boardID, "t"), table, table,
+				postSelectColumnsForList(boardID, "t", includeContent), table, table,
 			),
 			queryLimit, offset,
 		).Scan(&posts).Error
@@ -327,6 +358,14 @@ func (r *writeRepository) FindPostsHasNext(boardID string, page, limit int) ([]*
 
 // FindPostsByCategory retrieves posts filtered by ca_name (category) with pagination
 func (r *writeRepository) FindPostsByCategory(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsByCategory(boardID, category, page, limit, true)
+}
+
+func (r *writeRepository) FindPostsByCategorySummary(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsByCategory(boardID, category, page, limit, false)
+}
+
+func (r *writeRepository) findPostsByCategory(boardID string, category string, page, limit int, includeContent bool) ([]*gnuboard.G5Write, int64, error) {
 	var posts []*gnuboard.G5Write
 	var total int64
 
@@ -344,7 +383,7 @@ func (r *writeRepository) FindPostsByCategory(boardID string, category string, p
 	}
 
 	orderClause := r.getSortField(boardID)
-	selectCols := postSelectColumns(boardID, "")
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
 
 	err := r.db.Table(table).
 		Select(selectCols).
@@ -358,6 +397,14 @@ func (r *writeRepository) FindPostsByCategory(boardID string, category string, p
 }
 
 func (r *writeRepository) FindPostsByCategoryHasNext(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsByCategoryHasNext(boardID, category, page, limit, true)
+}
+
+func (r *writeRepository) FindPostsByCategoryHasNextSummary(boardID string, category string, page, limit int) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsByCategoryHasNext(boardID, category, page, limit, false)
+}
+
+func (r *writeRepository) findPostsByCategoryHasNext(boardID string, category string, page, limit int, includeContent bool) ([]*gnuboard.G5Write, bool, error) {
 	var posts []*gnuboard.G5Write
 
 	offset := (page - 1) * limit
@@ -367,7 +414,7 @@ func (r *writeRepository) FindPostsByCategoryHasNext(boardID string, category st
 	table := tableName(boardID)
 	baseWhere := "wr_is_comment = 0 AND ca_name = ?"
 	orderClause := r.getSortField(boardID)
-	selectCols := postSelectColumns(boardID, "")
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
 	queryLimit := limit + 1
 
 	err := r.db.Table(table).
@@ -385,6 +432,14 @@ func (r *writeRepository) FindPostsByCategoryHasNext(boardID string, category st
 // FindPostsAfter retrieves posts using cursor pagination for the default gnuboard sort.
 // Cursor is the last seen (wr_num, wr_reply) pair from the previous page.
 func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsAfter(boardID, limit, cursorWrNum, cursorWrReply, true)
+}
+
+func (r *writeRepository) FindPostsAfterSummary(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsAfter(boardID, limit, cursorWrNum, cursorWrReply, false)
+}
+
+func (r *writeRepository) findPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string, includeContent bool) ([]*gnuboard.G5Write, int64, error) {
 	var posts []*gnuboard.G5Write
 	var total int64
 
@@ -401,20 +456,20 @@ func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum 
 
 	orderClause := r.getSortField(boardID)
 	if orderClause != "wr_num, wr_reply" {
-		return r.FindPosts(boardID, 1, limit)
+		return r.findPosts(boardID, 1, limit, includeContent)
 	}
 
 	err := r.db.Raw(
 		fmt.Sprintf(
 			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?)) ORDER BY wr_num, wr_reply LIMIT ?",
-			postSelectColumns(boardID, ""),
+			postSelectColumnsForList(boardID, "", includeContent),
 			table,
 		),
 		cursorWrNum, cursorWrNum, cursorWrReply, limit,
 	).Scan(&posts).Error
 	if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 		err = r.db.Table(table).
-			Select(postSelectColumns(boardID, "")).
+			Select(postSelectColumnsForList(boardID, "", includeContent)).
 			Where("wr_is_comment = 0 AND (wr_num > ? OR (wr_num = ? AND wr_reply > ?))", cursorWrNum, cursorWrNum, cursorWrReply).
 			Order(orderClause).
 			Limit(limit).
@@ -427,8 +482,16 @@ func (r *writeRepository) FindPostsAfter(boardID string, limit int, cursorWrNum 
 // FindPostsFiltered retrieves posts excluding specified members. Delegates to FindPosts if excludeMbIDs is empty.
 // Uses the same cached count as FindPosts (차단 유저 수가 적어 total 차이 무시 가능).
 func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsFiltered(boardID, page, limit, excludeMbIDs, true)
+}
+
+func (r *writeRepository) FindPostsFilteredSummary(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsFiltered(boardID, page, limit, excludeMbIDs, false)
+}
+
+func (r *writeRepository) findPostsFiltered(boardID string, page, limit int, excludeMbIDs []string, includeContent bool) ([]*gnuboard.G5Write, int64, error) {
 	if len(excludeMbIDs) == 0 {
-		return r.FindPosts(boardID, page, limit)
+		return r.findPosts(boardID, page, limit, includeContent)
 	}
 
 	var posts []*gnuboard.G5Write
@@ -448,14 +511,14 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 	}
 
 	orderClause := r.getSortField(boardID)
-	selectCols := postSelectColumns(boardID, "")
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
 
 	// Deferred JOIN with exclusion filter applied in subquery
 	if orderClause == "wr_num, wr_reply" {
 		err := r.db.Raw(
 			fmt.Sprintf(
 				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
-				postSelectColumns(boardID, "t"), table, table,
+				postSelectColumnsForList(boardID, "t", includeContent), table, table,
 			),
 			excludeMbIDs, limit, offset,
 		).Scan(&posts).Error
@@ -483,8 +546,16 @@ func (r *writeRepository) FindPostsFiltered(boardID string, page, limit int, exc
 }
 
 func (r *writeRepository) FindPostsFilteredHasNext(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsFilteredHasNext(boardID, page, limit, excludeMbIDs, true)
+}
+
+func (r *writeRepository) FindPostsFilteredHasNextSummary(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsFilteredHasNext(boardID, page, limit, excludeMbIDs, false)
+}
+
+func (r *writeRepository) findPostsFilteredHasNext(boardID string, page, limit int, excludeMbIDs []string, includeContent bool) ([]*gnuboard.G5Write, bool, error) {
 	if len(excludeMbIDs) == 0 {
-		return r.FindPostsHasNext(boardID, page, limit)
+		return r.findPostsHasNext(boardID, page, limit, includeContent)
 	}
 
 	var posts []*gnuboard.G5Write
@@ -494,14 +565,14 @@ func (r *writeRepository) FindPostsFilteredHasNext(boardID string, page, limit i
 	}
 	table := tableName(boardID)
 	orderClause := r.getSortField(boardID)
-	selectCols := postSelectColumns(boardID, "")
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
 	queryLimit := limit + 1
 
 	if orderClause == "wr_num, wr_reply" {
 		err := r.db.Raw(
 			fmt.Sprintf(
 				"SELECT %s FROM `%s` t JOIN (SELECT wr_id FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND mb_id NOT IN ? ORDER BY wr_num, wr_reply LIMIT ? OFFSET ?) ids ON t.wr_id = ids.wr_id ORDER BY t.wr_num, t.wr_reply",
-				postSelectColumns(boardID, "t"), table, table,
+				postSelectColumnsForList(boardID, "t", includeContent), table, table,
 			),
 			excludeMbIDs, queryLimit, offset,
 		).Scan(&posts).Error
@@ -530,8 +601,16 @@ func (r *writeRepository) FindPostsFilteredHasNext(boardID string, page, limit i
 }
 
 func (r *writeRepository) FindPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsByCategoryFilteredHasNext(boardID, category, page, limit, excludeMbIDs, true)
+}
+
+func (r *writeRepository) FindPostsByCategoryFilteredHasNextSummary(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error) {
+	return r.findPostsByCategoryFilteredHasNext(boardID, category, page, limit, excludeMbIDs, false)
+}
+
+func (r *writeRepository) findPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string, includeContent bool) ([]*gnuboard.G5Write, bool, error) {
 	if len(excludeMbIDs) == 0 {
-		return r.FindPostsByCategoryHasNext(boardID, category, page, limit)
+		return r.findPostsByCategoryHasNext(boardID, category, page, limit, includeContent)
 	}
 
 	var posts []*gnuboard.G5Write
@@ -541,7 +620,7 @@ func (r *writeRepository) FindPostsByCategoryFilteredHasNext(boardID string, cat
 	}
 	table := tableName(boardID)
 	orderClause := r.getSortField(boardID)
-	selectCols := postSelectColumns(boardID, "")
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
 	queryLimit := limit + 1
 
 	err := r.db.Table(table).
