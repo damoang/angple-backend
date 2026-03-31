@@ -2377,6 +2377,16 @@ func main() {
 				return
 			}
 
+			// 중고거래 게시판: as_level 30 이상 필요
+			if slug == "trade" {
+				var asLevel int
+				db.Table("g5_member").Select("COALESCE(as_level, 0)").Where("mb_id = ?", mbID).Scan(&asLevel)
+				if asLevel < 30 {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": fmt.Sprintf("중고거래 게시판은 레벨 30 이상부터 글쓰기가 가능합니다. (현재 레벨: %d)", asLevel)})
+					return
+				}
+			}
+
 			// 포인트 차감 게시판인 경우 잔액 확인 (g5_member.mb_point 기반)
 			if board.BoWritePoint < 0 {
 				canAfford, err := gnuPointWriteRepo.CanAfford(mbID, board.BoWritePoint)
