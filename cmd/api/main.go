@@ -1679,8 +1679,6 @@ func main() {
 		v1Boards.GET("/:slug/posts", func(c *gin.Context) {
 			slug := c.Param("slug")
 			ctx := c.Request.Context()
-			summaryMode := c.Query("summary") == "1" && (slug == "free" || slug == "hello")
-
 			page, err2 := strconv.Atoi(c.DefaultQuery("page", "1"))
 			if err2 != nil || page < 1 {
 				page = 1
@@ -1699,6 +1697,7 @@ func main() {
 			sortBy := c.Query("sort")       // search sort: "relevance" or default (date)
 			category := c.Query("category") // category filter (ca_name)
 			isSearching := sfl != "" && stx != ""
+			summaryMode := c.Query("summary") == "1" && !isSearching
 
 			// Get blocked user IDs (skip for admins)
 			var blockedIDs []string
