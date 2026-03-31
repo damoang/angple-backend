@@ -3867,6 +3867,7 @@ func main() {
 		})
 
 		// PATCH /api/v1/boards/:slug/posts/:id/bump - Bump post to top (promotion board only, owner only)
+		// 끌어올리기 1회 = 글 작성권 1회 소진, 하루 2회 제한, 최소 1시간 간격
 		v1Boards.PATCH("/:slug/posts/:id/bump", middleware.JWTAuth(jwtManager), banCheck, func(c *gin.Context) {
 			slug := c.Param("slug")
 			if slug != "promotion" {
@@ -3894,15 +3895,62 @@ func main() {
 				return
 			}
 
-			// wr_datetime을 현재 시간으로 업데이트
 			now := time.Now()
 			tableName := fmt.Sprintf("g5_write_%s", slug)
-			if err := db.Table(tableName).Where("wr_id = ?", postID).Update("wr_datetime", now).Error; err != nil {
+
+			// wr_10에 마지막 끌어올리기 시각 저장, 1시간 간격 체크
+			var wr10 string
+			db.Table(tableName).Select("wr_10").Where("wr_id = ?", postID).Scan(&wr10)
+			if wr10 != "" {
+				if lastBump, parseErr := time.Parse("2006-01-02 15:04:05", wr10); parseErr == nil {
+					elapsed := now.Sub(lastBump)
+					if elapsed < time.Hour {
+						remaining := time.Hour - elapsed
+						mins := int(remaining.Minutes())
+						c.JSON(http.StatusTooManyRequests, gin.H{
+							"success": false,
+							"error":   fmt.Sprintf("끌어올리기는 1시간에 1회만 가능합니다. %d분 후에 다시 시도해 주세요.", mins+1),
+						})
+						return
+					}
+				}
+			}
+
+			// 하루 끌어올리기 횟수 체크 (같은 사용자의 모든 글 기준, 오늘 00:00 ~ 현재)
+			todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			var todayBumpCount int64
+			db.Table(tableName).
+				Where("mb_id = ? AND wr_is_comment = 0 AND wr_10 >= ?", userID, todayStart.Format("2006-01-02 15:04:05")).
+				Count(&todayBumpCount)
+			if todayBumpCount >= 2 {
+				c.JSON(http.StatusTooManyRequests, gin.H{
+					"success": false,
+					"error":   "하루에 2회까지만 끌어올릴 수 있습니다. 내일 다시 시도해 주세요.",
+				})
+				return
+			}
+
+			// wr_datetime + wr_10(bumped_at) 업데이트
+			if err := db.Table(tableName).Where("wr_id = ?", postID).Updates(map[string]interface{}{
+				"wr_datetime": now,
+				"wr_10":       now.Format("2006-01-02 15:04:05"),
+			}).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "끌어올리기 실패"})
 				return
 			}
 
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "끌어올리기 완료", "bumped_at": now})
+			// Redis 캐시 무효화 (promotion 목록 갱신)
+			if redisClient != nil {
+				ctx := c.Request.Context()
+				redisClient.Del(ctx, "promotion:board_posts", "promotion:posts") //nolint:errcheck
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success":         true,
+				"message":         "끌어올리기 완료",
+				"bumped_at":       now,
+				"remaining_bumps": 2 - todayBumpCount - 1,
+			})
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/move - Move post to another board (admin only)
