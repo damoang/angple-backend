@@ -228,12 +228,25 @@ func (h *SiteLogoHandler) UpdateLogo(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
-	logo.RecurringDate, logo.StartDate, logo.EndDate = h.normalizeScheduleFields(
-		logo.ScheduleType,
-		logo.RecurringDate,
-		logo.StartDate,
-		logo.EndDate,
-	)
+	// 스케줄 타입에 따라 사용하지 않는 필드를 빈 문자열로 명시적 클리어
+	// GORM Save()가 nil 포인터를 UPDATE에서 제외하므로, 빈 문자열 포인터로 설정해야 DB에 반영됨
+	emptyStr := ""
+	switch logo.ScheduleType {
+	case scheduleRecurring:
+		rd, _, _ := h.normalizeScheduleFields(logo.ScheduleType, logo.RecurringDate, logo.StartDate, logo.EndDate)
+		logo.RecurringDate = rd
+		logo.StartDate = &emptyStr
+		logo.EndDate = &emptyStr
+	case scheduleDateRange:
+		_, sd, ed := h.normalizeScheduleFields(logo.ScheduleType, logo.RecurringDate, logo.StartDate, logo.EndDate)
+		logo.RecurringDate = &emptyStr
+		logo.StartDate = sd
+		logo.EndDate = ed
+	default:
+		logo.RecurringDate = &emptyStr
+		logo.StartDate = &emptyStr
+		logo.EndDate = &emptyStr
+	}
 
 	// default 타입 활성화 시 기존 활성 default 확인
 	if logo.ScheduleType == scheduleDefault && logo.IsActive {
