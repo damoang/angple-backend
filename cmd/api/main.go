@@ -4742,6 +4742,74 @@ func main() {
 		v1Messages.POST("", banCheck, v1MsgHandler.SendMessage)
 		v1Messages.DELETE("/:id", v1MsgHandler.DeleteMessage)
 
+		// Trade Reviews
+		tradeReviews := router.Group("/api/v1/trade/reviews")
+		tradeReviews.GET("", func(c *gin.Context) {
+			boardID := c.DefaultQuery("board_id", "trade")
+			postID := c.Query("post_id")
+			if postID == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "post_id required"})
+				return
+			}
+			var reviews []struct {
+				ID           uint64 `gorm:"column:id" json:"id"`
+				ReviewerNick string `gorm:"column:reviewer_nick" json:"reviewer_nick"`
+				Rating       uint8  `gorm:"column:rating" json:"rating"`
+				Content      string `gorm:"column:content" json:"content"`
+				CreatedAt    string `gorm:"column:created_at" json:"created_at"`
+			}
+			db.Table("trade_reviews").
+				Where("board_id = ? AND post_id = ?", boardID, postID).
+				Order("created_at DESC").
+				Scan(&reviews)
+			if reviews == nil {
+				reviews = make([]struct {
+					ID           uint64 `gorm:"column:id" json:"id"`
+					ReviewerNick string `gorm:"column:reviewer_nick" json:"reviewer_nick"`
+					Rating       uint8  `gorm:"column:rating" json:"rating"`
+					Content      string `gorm:"column:content" json:"content"`
+					CreatedAt    string `gorm:"column:created_at" json:"created_at"`
+				}, 0)
+			}
+			c.JSON(http.StatusOK, gin.H{"reviews": reviews})
+		})
+		tradeReviews.POST("", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+			var req struct {
+				BoardID  string `json:"board_id"`
+				PostID   int    `json:"post_id"`
+				SellerID string `json:"seller_id"`
+				Rating   uint8  `json:"rating"`
+				Content  string `json:"content"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "잘못된 요청"})
+				return
+			}
+			if req.Rating < 1 || req.Rating > 5 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "별점은 1~5 사이여야 합니다"})
+				return
+			}
+			mbID := middleware.GetUserID(c)
+			mbNick := middleware.GetNickname(c)
+			if mbID == req.SellerID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "본인 글에는 리뷰를 남길 수 없습니다"})
+				return
+			}
+			// 중복 리뷰 체크
+			var count int64
+			db.Table("trade_reviews").Where("board_id = ? AND post_id = ? AND reviewer_id = ?", req.BoardID, req.PostID, mbID).Count(&count)
+			if count > 0 {
+				c.JSON(http.StatusConflict, gin.H{"error": "이미 리뷰를 작성했습니다"})
+				return
+			}
+			if err := db.Exec("INSERT INTO trade_reviews (board_id, post_id, reviewer_id, reviewer_nick, seller_id, rating, content) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				req.BoardID, req.PostID, mbID, mbNick, req.SellerID, req.Rating, req.Content).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "리뷰 저장 실패"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true})
+		})
+
 		// Site Logo
 		siteLogoRepo := v2repo.NewSiteLogoRepository(db)
 		v2routes.SetupSiteLogo(router, v2handler.NewSiteLogoHandler(siteLogoRepo), jwtManager)
