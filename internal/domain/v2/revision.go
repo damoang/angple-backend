@@ -12,6 +12,7 @@ type V2ContentRevision struct {
 	Content      string    `gorm:"column:content;type:mediumtext" json:"content"`
 	EditedBy     uint64    `gorm:"column:edited_by" json:"edited_by"`
 	EditedByName string    `gorm:"column:edited_by_name;type:varchar(100)" json:"edited_by_name"`
+	EditSummary  string    `gorm:"column:edit_summary;type:varchar(200)" json:"edit_summary"`
 	EditedAt     time.Time `gorm:"column:edited_at;autoCreateTime" json:"edited_at"`
 }
 
