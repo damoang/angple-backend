@@ -730,6 +730,11 @@ func main() {
 		// 리비전
 		v2RevisionRepo := v2repo.NewRevisionRepository(db)
 
+		// 위키 백링크
+		wikiBacklinkRepo := v2repo.NewWikiBacklinkRepository(db)
+		_ = wikiBacklinkRepo.AutoMigrate()
+		wikiHandler := v2handler.NewWikiHandler(wikiBacklinkRepo)
+
 		// 권한 체크
 		permChecker := middleware.NewDBBoardPermissionChecker(v2BoardRepo)
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo, permChecker)
@@ -745,6 +750,10 @@ func main() {
 
 		v2routes.Setup(router, v2Handler, jwtManager, permChecker, db)
 		v2routes.SetupAdminPosts(router, v2Handler, jwtManager)
+
+		// 위키 API 라우트
+		v2Api := router.Group("/api/v2")
+		v2Api.GET("/posts/:id/backlinks", wikiHandler.GetBacklinks)
 
 		// MyPage routes (point, exp, posts, comments, stats)
 		v2ExpRepo := v2repo.NewExpRepository(db)
@@ -2555,6 +2564,33 @@ func main() {
 				})
 			}
 
+			// 위키 백링크 갱신
+			if wikiBacklinkRepo != nil {
+				go func(postID int, content string) {
+					links := v2svc.ParseWikiLinks(content)
+					if len(links) > 0 {
+						var backlinks []*v2domain.WikiBacklink
+						for _, link := range links {
+							// 대상 문서를 제목으로 검색
+							var targetID uint64
+							db.Table("v2_posts").
+								Select("id").
+								Where("title = ? AND deleted_at IS NULL", link.Text).
+								Limit(1).
+								Scan(&targetID)
+
+							backlinks = append(backlinks, &v2domain.WikiBacklink{
+								SourcePostID: safeIntToUint64(postID),
+								TargetPostID: targetID,
+								LinkText:     link.Text,
+								IsBroken:     targetID == 0,
+							})
+						}
+						_ = wikiBacklinkRepo.ReplaceBacklinks(safeIntToUint64(postID), backlinks)
+					}
+				}(post.WrID, post.WrContent)
+			}
+
 			// 태그 저장 (g5_na_tag / g5_na_tag_log)
 			if len(req.Tags) > 0 {
 				if err := gnuTagRepo.SetPostTags(slug, post.WrID, req.Tags, mbID); err != nil {
@@ -3067,6 +3103,29 @@ func main() {
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 수정 실패"})
 				return
+			}
+
+			// 위키 백링크 갱신 (수정 시)
+			if wikiBacklinkRepo != nil && req.Content != nil {
+				go func(pid int, content string) {
+					links := v2svc.ParseWikiLinks(content)
+					var backlinks []*v2domain.WikiBacklink
+					for _, link := range links {
+						var targetID uint64
+						db.Table("v2_posts").
+							Select("id").
+							Where("title = ? AND deleted_at IS NULL", link.Text).
+							Limit(1).
+							Scan(&targetID)
+						backlinks = append(backlinks, &v2domain.WikiBacklink{
+							SourcePostID: safeIntToUint64(pid),
+							TargetPostID: targetID,
+							LinkText:     link.Text,
+							IsBroken:     targetID == 0,
+						})
+					}
+					_ = wikiBacklinkRepo.ReplaceBacklinks(safeIntToUint64(pid), backlinks)
+				}(postID, *req.Content)
 			}
 
 			// 태그 업데이트 (tags 필드가 전송된 경우)
