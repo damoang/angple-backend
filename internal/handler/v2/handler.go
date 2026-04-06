@@ -839,12 +839,16 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 	if slug == claimBoardSlug {
 		isAdmin := userLevel >= 10
 		if !isAdmin {
-			post, postErr := h.postRepo.FindByID(postID)
-			if postErr != nil {
-				common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 조회 실패", postErr)
-				return
+			// g5_write_claim에서 직접 작성자 확인 (v2_posts와 ID가 다르므로)
+			var postAuthorID string
+			if h.gnuDB != nil {
+				h.gnuDB.Table("g5_write_claim").
+					Select("mb_id").
+					Where("wr_id = ? AND wr_is_comment = 0", postID).
+					Scan(&postAuthorID)
 			}
-			if post.UserID != userID {
+			currentUserMbID := middleware.GetUserID(c)
+			if postAuthorID == "" || postAuthorID != currentUserMbID {
 				common.V2ErrorResponse(c, http.StatusForbidden, "소명 게시판에서는 관리자와 글 작성자만 댓글을 작성할 수 있습니다.", nil)
 				return
 			}
