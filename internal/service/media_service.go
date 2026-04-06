@@ -55,13 +55,17 @@ type MediaUploadResult struct {
 
 // UploadImage uploads an image, optionally converting to JPEG and resizing
 func (s *MediaService) UploadImage(ctx context.Context, file *multipart.FileHeader, maxWidth int) (*MediaUploadResult, error) {
-	if file.Size > s.maxSize {
-		return nil, fmt.Errorf("file too large (max %dMB)", s.maxSize/(1024*1024))
-	}
-
 	ext := strings.ToLower(path.Ext(file.Filename))
 	if !isImageExt(ext) {
 		return nil, fmt.Errorf("unsupported image format: %s", ext)
+	}
+
+	maxImageSize := int64(20 * 1024 * 1024)
+	if ext == ".gif" {
+		maxImageSize = 8 * 1024 * 1024
+	}
+	if file.Size > maxImageSize {
+		return nil, fmt.Errorf("file too large (max %dMB)", maxImageSize/(1024*1024))
 	}
 
 	src, err := file.Open()
@@ -205,7 +209,7 @@ func (s *MediaService) UploadAttachment(ctx context.Context, file *multipart.Fil
 
 // UploadVideo uploads a video file
 func (s *MediaService) UploadVideo(ctx context.Context, file *multipart.FileHeader) (*MediaUploadResult, error) {
-	maxVideoSize := int64(500 * 1024 * 1024) // 500MB for video
+	maxVideoSize := int64(40 * 1024 * 1024) // 40MB for video
 	if file.Size > maxVideoSize {
 		return nil, fmt.Errorf("video too large (max %dMB)", maxVideoSize/(1024*1024))
 	}
