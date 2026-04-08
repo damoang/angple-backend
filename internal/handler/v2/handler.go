@@ -366,9 +366,10 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 	}
 
 	var req struct {
-		Title    string `json:"title" binding:"required"`
-		Content  string `json:"content" binding:"required"`
-		IsSecret *bool  `json:"is_secret,omitempty"`
+		Title              string `json:"title" binding:"required"`
+		Content            string `json:"content" binding:"required"`
+		IsSecret           *bool  `json:"is_secret,omitempty"`
+		IsCommentsDisabled *bool  `json:"is_comments_disabled,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "요청 형식이 올바르지 않습니다", err)
