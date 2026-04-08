@@ -47,25 +47,26 @@ type G5Write struct {
 
 // PostResponse is the API response format for posts
 type PostResponse struct {
-	ID            int        `json:"id"`
-	Title         string     `json:"title"`
-	Content       string     `json:"content,omitempty"`
-	Author        string     `json:"author"`
-	AuthorID      string     `json:"author_id"`
-	Category      string     `json:"category,omitempty"`
-	Views         int        `json:"views"`
-	Likes         int        `json:"likes"`
-	Dislikes      int        `json:"dislikes"`
-	CommentsCount int        `json:"comments_count"`
-	HasFile       bool       `json:"has_file"`
-	IsNotice      bool       `json:"is_notice"`
-	IsSecret      bool       `json:"is_secret"`
-	Link1         string     `json:"link1,omitempty"`
-	Link2         string     `json:"link2,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
-	DeletedBy     *string    `json:"deleted_by,omitempty"`
+	ID                 int        `json:"id"`
+	Title              string     `json:"title"`
+	Content            string     `json:"content,omitempty"`
+	Author             string     `json:"author"`
+	AuthorID           string     `json:"author_id"`
+	Category           string     `json:"category,omitempty"`
+	Views              int        `json:"views"`
+	Likes              int        `json:"likes"`
+	Dislikes           int        `json:"dislikes"`
+	CommentsCount      int        `json:"comments_count"`
+	HasFile            bool       `json:"has_file"`
+	IsNotice           bool       `json:"is_notice"`
+	IsSecret           bool       `json:"is_secret"`
+	IsCommentsDisabled bool       `json:"is_comments_disabled"`
+	Link1              string     `json:"link1,omitempty"`
+	Link2              string     `json:"link2,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          *time.Time `json:"updated_at,omitempty"`
+	DeletedAt          *time.Time `json:"deleted_at,omitempty"`
+	DeletedBy          *string    `json:"deleted_by,omitempty"`
 }
 
 // parseWrLast converts DB datetime string to time.Time
@@ -89,24 +90,25 @@ func parseWrLast(wrLast string, createdAt time.Time) *time.Time {
 // ToPostResponse converts G5Write to post API response format
 func (w *G5Write) ToPostResponse() PostResponse {
 	return PostResponse{
-		ID:            w.WrID,
-		Title:         w.WrSubject,
-		Author:        w.WrName,
-		AuthorID:      w.MbID,
-		Category:      w.CaName,
-		Views:         w.WrHit,
-		Likes:         w.WrGood,
-		Dislikes:      w.WrNogood,
-		CommentsCount: w.WrComment,
-		HasFile:       w.WrFile > 0,
-		IsNotice:      false, // Will be set externally based on board notice list
-		IsSecret:      strings.Contains(w.WrOption, "secret"),
-		Link1:         w.WrLink1,
-		Link2:         w.WrLink2,
-		CreatedAt:     w.WrDatetime,
-		UpdatedAt:     parseWrLast(w.WrLast, w.WrDatetime),
-		DeletedAt:     w.WrDeletedAt,
-		DeletedBy:     w.WrDeletedBy,
+		ID:                 w.WrID,
+		Title:              w.WrSubject,
+		Author:             w.WrName,
+		AuthorID:           w.MbID,
+		Category:           w.CaName,
+		Views:              w.WrHit,
+		Likes:              w.WrGood,
+		Dislikes:           w.WrNogood,
+		CommentsCount:      w.WrComment,
+		HasFile:            w.WrFile > 0,
+		IsNotice:           false, // Will be set externally based on board notice list
+		IsSecret:           strings.Contains(w.WrOption, "secret"),
+		IsCommentsDisabled: strings.Contains(w.WrOption, "comments_disabled"),
+		Link1:              w.WrLink1,
+		Link2:              w.WrLink2,
+		CreatedAt:          w.WrDatetime,
+		UpdatedAt:          parseWrLast(w.WrLast, w.WrDatetime),
+		DeletedAt:          w.WrDeletedAt,
+		DeletedBy:          w.WrDeletedBy,
 	}
 }
 

@@ -98,19 +98,23 @@ dev-gateway:
 	go run cmd/gateway/main.go
 
 # 빌드 (swagger 자동 생성 포함)
+# EC2에서 빌드 시 GOMAXPROCS=4 + nice로 운영 서비스에 영향 최소화
+BUILD_NICE := nice -n 10
+BUILD_ENV := GOMAXPROCS=4
+
 build: swagger build-api build-gateway build-migrate
 
 build-api:
 	@echo "Building API server..."
-	go build -o bin/api cmd/api/main.go
+	$(BUILD_ENV) $(BUILD_NICE) go build -o bin/api cmd/api/main.go
 
 build-gateway:
 	@echo "Building Gateway..."
-	go build -o bin/gateway cmd/gateway/main.go
+	$(BUILD_ENV) $(BUILD_NICE) go build -o bin/gateway cmd/gateway/main.go
 
 build-migrate:
 	@echo "Building Migration tool..."
-	go build -o bin/migrate cmd/migrate/main.go
+	$(BUILD_ENV) $(BUILD_NICE) go build -o bin/migrate cmd/migrate/main.go
 
 # 마이그레이션
 migrate:
