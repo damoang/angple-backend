@@ -143,7 +143,7 @@ func calculateLevelInfo(totalExp int) (currentLevel, nextLevel, nextLevelExp, ex
 		expToNext = nextLevelExp - totalExp
 		levelRange := nextLevelExp - prevLevelExp
 		if levelRange > 0 {
-			progress = (totalExp - prevLevelExp) * 100 / levelRange
+			progress = ((totalExp-prevLevelExp)*200/levelRange + 1) / 2 // 반올림
 		}
 	}
 
