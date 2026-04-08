@@ -108,10 +108,10 @@ func (h *Handler) PointExpiryNotify(c *gin.Context) {
 	today := time.Now().Format("2006-01-02")
 	for _, m := range expiringMembers {
 		// Check for duplicate notification today
-		relID := fmt.Sprintf("point_expiry_%s", today)
+		dedupeKey := fmt.Sprintf("point_expiry_%s", today)
 		var count int64
 		h.db.Table("g5_na_noti").
-			Where("mb_id = ? AND ph_from_case = ? AND rel_url = ?", m.MbID, "point_expiry", relID).
+			Where("mb_id = ? AND ph_from_case = ? AND parent_subject = ?", m.MbID, "point_expiry", dedupeKey).
 			Count(&count)
 		if count > 0 {
 			continue
@@ -126,9 +126,9 @@ func (h *Handler) PointExpiryNotify(c *gin.Context) {
 			RelMbID:       "system",
 			RelMbNick:     "시스템",
 			RelMsg:        fmt.Sprintf("7일 내 %dP가 만료됩니다", m.ExpiringAmount),
-			RelURL:        relID,
+			RelURL:        "/point",
 			PhReaded:      "N",
-			ParentSubject: "포인트 만료 예정",
+			ParentSubject: dedupeKey,
 		}
 		if err := h.notiRepo.Create(noti); err != nil {
 			log.Printf("[Cron:point-expiry-notify] notification failed for %s: %v", m.MbID, err)
