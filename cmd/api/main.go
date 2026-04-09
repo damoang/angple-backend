@@ -1185,7 +1185,7 @@ func main() {
 		})
 
 		// POST /api/v1/members/:id/memo — 메모 생성/수정 (upsert)
-		memberMemoGroup.POST("", func(c *gin.Context) {
+		memberMemoGroup.POST("", middleware.BanCheck(db), func(c *gin.Context) {
 			currentUserID := middleware.GetUserID(c)
 			targetID := c.Param("id")
 
@@ -1246,7 +1246,7 @@ func main() {
 		})
 
 		// PUT /api/v1/members/:id/memo — 메모 수정 (POST와 동일한 upsert)
-		memberMemoGroup.PUT("", func(c *gin.Context) {
+		memberMemoGroup.PUT("", middleware.BanCheck(db), func(c *gin.Context) {
 			currentUserID := middleware.GetUserID(c)
 			targetID := c.Param("id")
 
@@ -1571,7 +1571,7 @@ func main() {
 
 		// v1 block routes
 		v1Members := router.Group("/api/v1/members")
-		v1Members.POST("/:id/block", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		v1Members.POST("/:id/block", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			userID := middleware.GetUserID(c)
 			targetID := c.Param("id")
 			if userID == targetID {
@@ -1596,7 +1596,7 @@ func main() {
 			}
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "차단 완료"})
 		})
-		v1Members.DELETE("/:id/block", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		v1Members.DELETE("/:id/block", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			userID := middleware.GetUserID(c)
 			targetID := c.Param("id")
 			if err := blockRepo.Delete(userID, targetID); err != nil {
@@ -3876,7 +3876,7 @@ func main() {
 		}
 		displaySettingsHandler := v2handler.NewDisplaySettingsHandler(v2BoardRepo, v2DisplaySettingsRepo)
 		v1Boards.GET("/:slug/display-settings", middleware.CacheWithTTL(redisClient, 5*time.Minute), displaySettingsHandler.GetDisplaySettings)
-		v1Boards.PUT("/:slug/display-settings", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		v1Boards.PUT("/:slug/display-settings", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			displaySettingsHandler.UpdateDisplaySettings(c)
 			// 변경 시 캐시 무효화
 			if c.Writer.Status() == http.StatusOK {
@@ -4038,7 +4038,7 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/move - Move post to another board (admin only)
-		v1Boards.POST("/:slug/posts/:id/move", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		v1Boards.POST("/:slug/posts/:id/move", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			srcBoard := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -4168,7 +4168,7 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/report - Report a post
-		v1Boards.POST("/:slug/posts/:id/report", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		v1Boards.POST("/:slug/posts/:id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			slug := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -4239,7 +4239,7 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/comments/:comment_id/report - Report a comment
-		v1Boards.POST("/:slug/posts/:id/comments/:comment_id/report", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		v1Boards.POST("/:slug/posts/:id/comments/:comment_id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			slug := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -4787,7 +4787,7 @@ func main() {
 		v2MessageRepo := v2repo.NewMessageRepository(db)
 		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager, db)
 		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager, db)
-		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager)
+		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager, db)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager, db)
 		v2routes.SetupFavorite(router, v2handler.NewFavoriteHandler(db), jwtManager)
 
@@ -4832,7 +4832,7 @@ func main() {
 			}
 			c.JSON(http.StatusOK, gin.H{"reviews": reviews})
 		})
-		tradeReviews.POST("", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
+		tradeReviews.POST("", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			var req struct {
 				BoardID  string `json:"board_id"`
 				PostID   int    `json:"post_id"`
@@ -4982,7 +4982,7 @@ func main() {
 
 			// TODO: UploadRateLimitConfig 구현 후 활성화
 			// uploadRateLimit := middleware.RateLimit(redisClient, middleware.UploadRateLimitConfig())
-			media := router.Group("/api/v2/media", middleware.JWTAuth(jwtManager))
+			media := router.Group("/api/v2/media", middleware.JWTAuth(jwtManager), middleware.BanCheck(db))
 			media.POST("/images", mediaHandler.UploadImage)
 			media.POST("/attachments", mediaHandler.UploadAttachment)
 			media.POST("/videos", mediaHandler.UploadVideo)
@@ -4991,7 +4991,7 @@ func main() {
 			// Member profile image
 			memberSvc := service.NewMemberService(s3Client, gnuMemberRepo)
 			memberHandler := handler.NewMemberHandler(memberSvc)
-			memberImage := router.Group("/api/v2/members/me", middleware.JWTAuth(jwtManager))
+			memberImage := router.Group("/api/v2/members/me", middleware.JWTAuth(jwtManager), middleware.BanCheck(db))
 			memberImage.POST("/image", memberHandler.UploadImage)
 			memberImage.DELETE("/image", memberHandler.DeleteImage)
 		}
