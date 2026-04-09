@@ -165,16 +165,10 @@ func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Man
 func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.Manager, gnuDB ...*gorm.DB) {
 	auth := middleware.JWTAuth(jwtManager)
 
-	// Block/Unblock member
+	// Block/Unblock member — BanCheck 제외 (차단은 쓰기 제한과 무관)
 	members := router.Group("/api/v2/members")
-	if len(gnuDB) > 0 && gnuDB[0] != nil {
-		banCheck := middleware.BanCheck(gnuDB[0])
-		members.POST("/:id/block", auth, banCheck, h.BlockMember)
-		members.DELETE("/:id/block", auth, banCheck, h.UnblockMember)
-	} else {
-		members.POST("/:id/block", auth, h.BlockMember)
-		members.DELETE("/:id/block", auth, h.UnblockMember)
-	}
+	members.POST("/:id/block", auth, h.BlockMember)
+	members.DELETE("/:id/block", auth, h.UnblockMember)
 
 	// List blocked members
 	me := router.Group("/api/v2/members/me", auth)

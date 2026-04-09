@@ -1571,7 +1571,7 @@ func main() {
 
 		// v1 block routes
 		v1Members := router.Group("/api/v1/members")
-		v1Members.POST("/:id/block", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
+		v1Members.POST("/:id/block", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
 			userID := middleware.GetUserID(c)
 			targetID := c.Param("id")
 			if userID == targetID {
@@ -1596,7 +1596,7 @@ func main() {
 			}
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "차단 완료"})
 		})
-		v1Members.DELETE("/:id/block", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
+		v1Members.DELETE("/:id/block", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
 			userID := middleware.GetUserID(c)
 			targetID := c.Param("id")
 			if err := blockRepo.Delete(userID, targetID); err != nil {
@@ -4787,7 +4787,7 @@ func main() {
 		v2MessageRepo := v2repo.NewMessageRepository(db)
 		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager, db)
 		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager, db)
-		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager, db)
+		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager, db)
 		v2routes.SetupFavorite(router, v2handler.NewFavoriteHandler(db), jwtManager)
 
