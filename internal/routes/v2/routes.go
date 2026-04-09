@@ -142,7 +142,7 @@ func SetupScrap(router *gin.Engine, h *v2handler.ScrapHandler, jwtManager *jwt.M
 
 	posts := router.Group("/api/v2/posts")
 	posts.POST("/:id/scrap", auth, banCheck, h.AddScrap)
-	posts.DELETE("/:id/scrap", auth, h.RemoveScrap)
+	posts.DELETE("/:id/scrap", auth, banCheck, h.RemoveScrap)
 
 	me := router.Group("/api/v2/me", auth)
 	me.GET("/scraps", h.ListScraps)
@@ -156,19 +156,25 @@ func SetupMemo(router *gin.Engine, h *v2handler.MemoHandler, jwtManager *jwt.Man
 	memo := router.Group("/api/v2/members/:id/memo", auth)
 	memo.GET("", h.GetMemo)
 	memo.POST("", banCheck, h.CreateMemo)
-	memo.PUT("", h.UpdateMemo)
-	memo.DELETE("", h.DeleteMemo)
+	memo.PUT("", banCheck, h.UpdateMemo)
+	memo.DELETE("", banCheck, h.DeleteMemo)
 	memo.GET("/all", middleware.RequireAdmin(), h.GetAllMemos)
 }
 
 // SetupBlock configures v2 block routes
-func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.Manager) {
+func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.Manager, gnuDB ...*gorm.DB) {
 	auth := middleware.JWTAuth(jwtManager)
 
 	// Block/Unblock member
 	members := router.Group("/api/v2/members")
-	members.POST("/:id/block", auth, h.BlockMember)
-	members.DELETE("/:id/block", auth, h.UnblockMember)
+	if len(gnuDB) > 0 && gnuDB[0] != nil {
+		banCheck := middleware.BanCheck(gnuDB[0])
+		members.POST("/:id/block", auth, banCheck, h.BlockMember)
+		members.DELETE("/:id/block", auth, banCheck, h.UnblockMember)
+	} else {
+		members.POST("/:id/block", auth, h.BlockMember)
+		members.DELETE("/:id/block", auth, h.UnblockMember)
+	}
 
 	// List blocked members
 	me := router.Group("/api/v2/members/me", auth)
@@ -188,7 +194,11 @@ func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *j
 	messages.GET("/inbox", h.GetInbox)
 	messages.GET("/sent", h.GetSent)
 	messages.GET("/:id", h.GetMessage)
-	messages.DELETE("/:id", h.DeleteMessage)
+	if len(gnuDB) > 0 && gnuDB[0] != nil {
+		messages.DELETE("/:id", middleware.BanCheck(gnuDB[0]), h.DeleteMessage)
+	} else {
+		messages.DELETE("/:id", h.DeleteMessage)
+	}
 }
 
 // SetupInstall configures v2 installation routes
