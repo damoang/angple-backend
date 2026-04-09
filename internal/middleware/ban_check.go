@@ -117,7 +117,7 @@ func BanCheckScoped(gnuDB *gorm.DB, scope string) gin.HandlerFunc {
 
 		// User is currently banned — only promotion and claim boards are allowed
 		slug := c.Param("slug")
-		if slug == promotionBoardSlug || slug == claimBoardSlug {
+		if slug != "" && (slug == promotionBoardSlug || slug == claimBoardSlug) {
 			c.Next()
 			return
 		}
