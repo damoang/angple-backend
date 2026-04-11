@@ -4780,15 +4780,17 @@ func main() {
 		adminSettingsHandler := v2handler.NewAdminSettingsHandler(db)
 		v2routes.SetupAdminSettings(router, adminSettingsHandler, jwtManager)
 
-		// v2 Scrap, Memo, Block, Message
+		// v2 Scrap, Memo, Block, Message, Devices (FCM)
 		v2ScrapRepo := v2repo.NewScrapRepository(db)
 		v2MemoRepo := v2repo.NewMemoRepository(db)
 		v2BlockRepo := v2repo.NewBlockRepository(db)
 		v2MessageRepo := v2repo.NewMessageRepository(db)
+		v2DeviceRepo := v2repo.NewDeviceRepository(db)
 		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager, db)
 		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager, db)
 		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager, db)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager, db)
+		v2routes.SetupDevices(router, v2handler.NewDeviceHandler(v2DeviceRepo), jwtManager)
 		v2routes.SetupFavorite(router, v2handler.NewFavoriteHandler(db), jwtManager)
 
 		// v1 message routes (uses g5_memo table directly)

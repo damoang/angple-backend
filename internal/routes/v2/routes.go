@@ -181,6 +181,16 @@ func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.M
 	me.GET("/blocks", h.ListBlocks)
 }
 
+// SetupDevices configures v2 device (FCM push token) routes
+func SetupDevices(router *gin.Engine, h *v2handler.DeviceHandler, jwtManager *jwt.Manager) {
+	auth := middleware.JWTAuth(jwtManager)
+
+	devices := router.Group("/api/v2/devices", auth)
+	devices.POST("", h.RegisterDevice)
+	devices.GET("", h.ListDevices)
+	devices.DELETE("/:token", h.UnregisterDevice)
+}
+
 // SetupMessage configures v2 message routes
 func SetupMessage(router *gin.Engine, h *v2handler.MessageHandler, jwtManager *jwt.Manager, gnuDB ...*gorm.DB) {
 	auth := middleware.JWTAuth(jwtManager)
