@@ -125,11 +125,11 @@ func (r *notiRepository) Create(noti *Notification) error {
 	return r.db.Create(noti).Error
 }
 
-// Exists checks if a duplicate notification already exists
+// Exists checks if a duplicate unread notification already exists
 func (r *notiRepository) Exists(mbID, boTable string, wrID int, fromCase, relMbID string) (bool, error) {
 	var count int64
 	err := r.db.Model(&Notification{}).
-		Where("mb_id = ? AND bo_table = ? AND wr_id = ? AND ph_from_case = ? AND rel_mb_id = ?", mbID, boTable, wrID, fromCase, relMbID).
+		Where("mb_id = ? AND bo_table = ? AND wr_id = ? AND ph_from_case = ? AND rel_mb_id = ? AND ph_readed = 'N'", mbID, boTable, wrID, fromCase, relMbID).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -146,6 +146,8 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 		fromCaseFilter = "AND ph_from_case = 'good'"
 	case "mention":
 		fromCaseFilter = "AND ph_from_case = 'mention'"
+	case "memo":
+		fromCaseFilter = "AND ph_from_case = 'memo'"
 	case "system":
 		fromCaseFilter = "AND ph_from_case IN ('write', 'inquire', 'answer')"
 	}
