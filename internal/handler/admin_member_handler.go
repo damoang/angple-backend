@@ -283,7 +283,7 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 // BanMember handles POST /api/v1/admin/members/:id/ban
 func (h *AdminMemberHandler) BanMember(c *gin.Context) {
 	mbID := c.Param("mbId")
-	now := time.Now().Format("2006-01-02")
+	now := time.Now().Format("20060102")
 	if err := h.db.Model(&gnuboard.G5Member{}).Where("mb_id = ?", mbID).Update("mb_intercept_date", now).Error; err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "차단 실패", err)
 		return

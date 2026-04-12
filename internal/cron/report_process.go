@@ -454,7 +454,7 @@ func applyUserRestriction(tx *gorm.DB, targetMbID, disciplineType string, discip
 		if disciplineDays == 9999 {
 			restrictionEndDate = "99991231"
 		} else {
-			restrictionEndDate = now.AddDate(0, 0, disciplineDays).Format("2006-01-02 15:04:05")
+			restrictionEndDate = now.AddDate(0, 0, disciplineDays).Format("20060102")
 		}
 		if err := tx.Table("g5_member").Where("mb_id = ?", targetMbID).
 			Update("mb_intercept_date", restrictionEndDate).Error; err != nil {
