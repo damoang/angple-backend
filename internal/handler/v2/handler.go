@@ -836,6 +836,20 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 	// 레벨 체크 (미들웨어 우회 방어)
 	userLevel := middleware.GetUserLevel(c)
 
+	// 댓글 비활성화 체크 (wr_option에 comments_disabled 포함 시 차단)
+	if h.gnuDB != nil {
+		tableName := "g5_write_" + slug
+		var wrOption string
+		h.gnuDB.Table(tableName).
+			Select("wr_option").
+			Where("wr_id = ? AND wr_is_comment = 0", postID).
+			Scan(&wrOption)
+		if strings.Contains(wrOption, "comments_disabled") {
+			common.V2ErrorResponse(c, http.StatusForbidden, "본 게시물은 댓글이 비활성화되어 있습니다.", nil)
+			return
+		}
+	}
+
 	// 소명 게시판: admin과 글 작성자만 댓글 가능
 	if slug == claimBoardSlug {
 		isAdmin := userLevel >= 10
