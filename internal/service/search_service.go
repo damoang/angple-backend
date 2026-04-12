@@ -178,7 +178,7 @@ func (s *SearchService) SearchPosts(ctx context.Context, keyword, boardID string
 			"multi_match": map[string]interface{}{
 				"query":  keyword,
 				"fields": []string{"title^3", "content", "author"},
-				"type":   "best_fields",
+				"type":   "phrase",
 			},
 		},
 	}
@@ -226,7 +226,7 @@ func (s *SearchService) SearchPosts(ctx context.Context, keyword, boardID string
 func (s *SearchService) SearchComments(ctx context.Context, keyword, boardID string, page, perPage int) (*es.SearchResponse, error) {
 	must := []map[string]interface{}{
 		{
-			"match": map[string]interface{}{
+			"match_phrase": map[string]interface{}{
 				"content": map[string]interface{}{
 					"query":    keyword,
 					"analyzer": "korean",
