@@ -280,7 +280,6 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 			PenaltyDateTo:   penaltyDateTo,
 			ViolationTypes:  data.SgTypes,
 			ViolationTitles: titles,
-			Memo:            data.Content,
 		})
 	}
 
@@ -345,7 +344,6 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		PenaltyDateTo:   penaltyDateTo,
 		ViolationTypes:  violations,
 		ReportedItems:   reportedItems,
-		Memo:            data.Content,
 		CreatedBy:       post.MbID,
 		CreatedAt:       post.WrDatetime.Format("2006-01-02 15:04:05"),
 	}
