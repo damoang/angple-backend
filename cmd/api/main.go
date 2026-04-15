@@ -37,7 +37,9 @@ import (
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
+	"github.com/damoang/angple-backend/internal/telemetry"
 	"github.com/damoang/angple-backend/internal/worker"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"github.com/damoang/angple-backend/internal/ws"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
@@ -590,9 +592,23 @@ func main() {
 	pluginLogger := plugin.NewDefaultLogger("plugin")
 	_ = plugin.NewHookManager(pluginLogger)
 
+	// OpenTelemetry 초기화 (OTEL_ENABLED=true 시에만)
+	otelShutdown, otelErr := telemetry.Init(context.Background(), "damoang-api", "v1")
+	if otelErr != nil {
+		log.Printf("[telemetry] init failed, continuing without tracing: %v", otelErr)
+	}
+	defer func() {
+		if err := otelShutdown(context.Background()); err != nil {
+			log.Printf("[telemetry] shutdown error: %v", err)
+		}
+	}()
+
 	// Gin 라우터 생성
 	router := gin.Default()
 	router.TrustedPlatform = "CF-Connecting-IP"
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		router.Use(otelgin.Middleware("damoang-api"))
+	}
 
 	// CORS 설정
 	allowOrigins := cfg.CORS.AllowOrigins
