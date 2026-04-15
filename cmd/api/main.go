@@ -39,7 +39,6 @@ import (
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	"github.com/damoang/angple-backend/internal/telemetry"
 	"github.com/damoang/angple-backend/internal/worker"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"github.com/damoang/angple-backend/internal/ws"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 	pkges "github.com/damoang/angple-backend/pkg/elasticsearch"
@@ -49,6 +48,7 @@ import (
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
 	pkgsphinx "github.com/damoang/angple-backend/pkg/sphinx"
 	pkgstorage "github.com/damoang/angple-backend/pkg/storage"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
