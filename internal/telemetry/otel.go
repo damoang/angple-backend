@@ -45,14 +45,13 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (shutdown fun
 		return nil, fmt.Errorf("otel exporter: %w", err)
 	}
 
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
 			semconv.ServiceName(serviceName),
 			semconv.ServiceVersion(serviceVersion),
 			semconv.DeploymentEnvironment(envOr("DEPLOYMENT_ENV", "prd")),
 		),
+		resource.WithHost(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("otel resource: %w", err)
