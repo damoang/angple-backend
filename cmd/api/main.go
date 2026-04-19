@@ -60,6 +60,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -5507,6 +5508,14 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// OTel GORM 계측 — OTEL_ENABLED=true 시에만 활성 (DB query span 추가)
+	// outlier 600ms+ 원인 정밀 분석용 (W4-D)
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		if pluginErr := db.Use(otelgorm.NewPlugin()); pluginErr != nil {
+			log.Printf("[WARN] otelgorm plugin registration failed: %v", pluginErr)
+		}
 	}
 
 	db.Exec("SET SESSION sql_mode = ''")
