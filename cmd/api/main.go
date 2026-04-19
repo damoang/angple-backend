@@ -3868,7 +3868,11 @@ func main() {
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/delete-status - Check scheduled delete status
-		v1Boards.GET("/:slug/posts/:id/delete-status", middleware.CacheWithTTL(redisClient, 5*time.Minute), func(c *gin.Context) {
+		// DEPRECATED: SvelteKit SSR이 더 이상 이 endpoint를 호출하지 않음 (PR #1243).
+		// Posts API 응답의 inline `scheduled_delete` 필드를 사용 (PR #430).
+		// 이 endpoint는 backward 호환을 위해 유지되며 ~2026-10에 제거 예정.
+		// 캐시 제거: 응답이 사용자 권한별로 다르므로 공유 캐시 사용 불가 (PII 보호).
+		v1Boards.GET("/:slug/posts/:id/delete-status", func(c *gin.Context) {
 			slug := c.Param("slug")
 			wrID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -3877,8 +3881,20 @@ func main() {
 			}
 
 			sd, err := scheduledDeleteRepo.FindByPost(slug, wrID)
-			if err != nil {
+			if err != nil || sd == nil {
 				c.JSON(http.StatusOK, gin.H{"success": true, "scheduled": false})
+				return
+			}
+
+			// 권한 체크: 예약 요청자 본인 또는 관리자만 상세 정보 노출
+			// 비본인은 boolean만 반환 (다른 유저의 삭제 예약 시점/요청자 PII 차단)
+			currentUserID := middleware.GetUserID(c)
+			currentUserLevel := middleware.GetUserLevel(c)
+			isRequester := currentUserID != "" && currentUserID == sd.RequestedBy
+			isAdmin := currentUserLevel >= 10
+
+			if !isRequester && !isAdmin {
+				c.JSON(http.StatusOK, gin.H{"success": true, "scheduled": true})
 				return
 			}
 
