@@ -434,6 +434,79 @@ func filterItems(items []map[string]any, blockedIDs []string) []map[string]any {
 	return filtered
 }
 
+// enrichWithAuthorMemo augments items with current user's `author_memo` field for each post/comment.
+// Replaces the previous N+1 pattern (frontend per-author /api/v1/members/{id}/memo fetch).
+// Returns a NEW slice when enrichment occurs (cached items must not be mutated). When the user is
+// anonymous or has no relevant memos, returns the input slice unchanged.
+//
+// Cache safety: input items may be shared across requests (in-memory or Redis cache hit), so any
+// item receiving an `author_memo` is shallow-copied before mutation.
+func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]any) []map[string]any {
+	if currentUserID == "" || len(items) == 0 {
+		return items
+	}
+	seen := make(map[string]struct{}, len(items))
+	targetIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		id, ok := item["author_id"].(string)
+		if !ok || id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		targetIDs = append(targetIDs, id)
+	}
+	if len(targetIDs) == 0 {
+		return items
+	}
+	type memoRow struct {
+		TargetID   string `gorm:"column:target_member_id"`
+		Memo       string `gorm:"column:memo"`
+		MemoDetail string `gorm:"column:memo_detail"`
+		Color      string `gorm:"column:color"`
+	}
+	var memos []memoRow
+	if err := db.Table("g5_member_memo").
+		Select("target_member_id, memo, memo_detail, color").
+		Where("member_id = ? AND target_member_id IN ?", currentUserID, targetIDs).
+		Find(&memos).Error; err != nil || len(memos) == 0 {
+		return items
+	}
+	memoMap := make(map[string]gin.H, len(memos))
+	for _, m := range memos {
+		if m.Memo == "" {
+			continue
+		}
+		memoMap[m.TargetID] = gin.H{
+			"content":     m.Memo,
+			"memo_detail": m.MemoDetail,
+			"color":       m.Color,
+		}
+	}
+	if len(memoMap) == 0 {
+		return items
+	}
+	result := make([]map[string]any, len(items))
+	for i, item := range items {
+		id, _ := item["author_id"].(string)
+		memo, hasMemo := memoMap[id]
+		if !hasMemo {
+			result[i] = item
+			continue
+		}
+		// Shallow copy + add author_memo (avoid mutating cached item)
+		newItem := make(map[string]any, len(item)+1)
+		for k, v := range item {
+			newItem[k] = v
+		}
+		newItem["author_memo"] = memo
+		result[i] = newItem
+	}
+	return result
+}
+
 // safeIntToUint64 converts int to uint64, clamping negative values to 0.
 func safeIntToUint64(v int) uint64 {
 	if v < 0 {
@@ -1740,20 +1813,25 @@ func main() {
 				memKey = fmt.Sprintf("posts:%s:cursor:%d:%s:%d", slug, cursorWrNum, cursorWrReply, limit)
 			}
 
+			currentUserIDForMemo := middleware.GetUserID(c)
 			if !summaryMode && !isSearching && !useCursor && category == "" {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
 					if time.Now().Before(mc.expiresAt) {
 						c.Header("X-Cache", "HIT")
-						if len(blockedIDs) == 0 {
-							// Zero blocks: return pre-serialized JSON (zero parsing)
+						if len(blockedIDs) == 0 && currentUserIDForMemo == "" {
+							// Anonymous + no blocks: return pre-serialized JSON (zero parsing)
 							c.Data(http.StatusOK, "application/json", mc.jsonBytes)
 							return
 						}
-						// Has blocks: filter from parsed items, marshal once
-						filtered := filterItems(mc.items, blockedIDs)
-						c.JSON(http.StatusOK, gin.H{"success": true, "data": filtered, "meta": mc.meta})
+						// Logged-in or has blocks: filter + enrich + marshal
+						items := mc.items
+						if len(blockedIDs) > 0 {
+							items = filterItems(items, blockedIDs)
+						}
+						items = enrichWithAuthorMemo(db, currentUserIDForMemo, items)
+						c.JSON(http.StatusOK, gin.H{"success": true, "data": items, "meta": mc.meta})
 						return
 					}
 					// Expired, remove from cache
@@ -1779,12 +1857,16 @@ func main() {
 							postMemCache.Store(memKey, mc)
 
 							c.Header("X-Cache", "HIT")
-							if len(blockedIDs) == 0 {
+							if len(blockedIDs) == 0 && currentUserIDForMemo == "" {
 								c.Data(http.StatusOK, "application/json", cached)
 								return
 							}
-							filtered := filterItems(parsed.Data, blockedIDs)
-							c.JSON(http.StatusOK, gin.H{"success": true, "data": filtered, "meta": parsed.Meta})
+							items := parsed.Data
+							if len(blockedIDs) > 0 {
+								items = filterItems(items, blockedIDs)
+							}
+							items = enrichWithAuthorMemo(db, currentUserIDForMemo, items)
+							c.JSON(http.StatusOK, gin.H{"success": true, "data": items, "meta": parsed.Meta})
 							return
 						}
 						// Parse failed, fall through to DB
@@ -1934,6 +2016,15 @@ func main() {
 				response["data"] = filtered
 			}
 
+			// author_memo inline embed (W4-X) — 로그인 유저의 author 메모 (캐시 저장 후 enrich)
+			if currentUserIDForMemo != "" {
+				dataItems, _ := response["data"].([]map[string]any)
+				if dataItems == nil {
+					dataItems = items
+				}
+				response["data"] = enrichWithAuthorMemo(db, currentUserIDForMemo, dataItems)
+			}
+
 			c.Header("X-Cache", "MISS")
 			c.JSON(http.StatusOK, response)
 		})
@@ -2046,6 +2137,16 @@ func main() {
 				}
 			}
 
+			// author_memo inline embed (W4-X) — 로그인 유저의 author 메모 inline
+			// SvelteKit/플러그인이 더 이상 /api/v1/members/{id}/memo 개별 fetch 안 함
+			if currentUserID := middleware.GetUserID(c); currentUserID != "" && post != nil {
+				postDetail["author_id"] = post.MbID
+				enriched := enrichWithAuthorMemo(db, currentUserID, []map[string]any{postDetail})
+				if len(enriched) > 0 {
+					postDetail = enriched[0]
+				}
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data":    postDetail,
@@ -2143,6 +2244,11 @@ func main() {
 				if cnt, ok := editCountMap[comment.WrID]; ok && cnt > 0 {
 					transformed[i]["edit_count"] = cnt
 				}
+			}
+
+			// author_memo inline embed (W4-X) — 댓글 작성자별 현재 유저의 메모
+			if currentUserID := middleware.GetUserID(c); currentUserID != "" {
+				transformed = enrichWithAuthorMemo(db, currentUserID, transformed)
 			}
 
 			c.JSON(http.StatusOK, gin.H{
