@@ -3858,7 +3858,7 @@ func main() {
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/delete-status - Check scheduled delete status
-		v1Boards.GET("/:slug/posts/:id/delete-status", middleware.CacheWithTTL(redisClient, 30*time.Second), func(c *gin.Context) {
+		v1Boards.GET("/:slug/posts/:id/delete-status", middleware.CacheWithTTL(redisClient, 5*time.Minute), func(c *gin.Context) {
 			slug := c.Param("slug")
 			wrID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
