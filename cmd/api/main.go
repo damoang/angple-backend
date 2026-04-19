@@ -2035,6 +2035,16 @@ func main() {
 				}
 			}
 
+			// scheduled_delete inline embed — SvelteKit SSR이 별도 /delete-status fetch 회피
+			if sd, sdErr := scheduledDeleteRepo.FindByPost(slug, id); sdErr == nil && sd != nil {
+				postDetail["scheduled_delete"] = gin.H{
+					"scheduled_at":  sd.ScheduledAt,
+					"requested_at":  sd.RequestedAt,
+					"requested_by":  sd.RequestedBy,
+					"delay_minutes": sd.DelayMinutes,
+				}
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data":    postDetail,

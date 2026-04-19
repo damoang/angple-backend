@@ -45,28 +45,38 @@ type G5Write struct {
 	WrDeletedBy *string    `gorm:"column:wr_deleted_by" json:"deleted_by,omitempty"`
 }
 
+// ScheduledDeleteInfo describes a pending hard-delete schedule for a post.
+// Embedded in PostResponse so the SvelteKit SSR avoids a separate /delete-status fetch.
+type ScheduledDeleteInfo struct {
+	ScheduledAt  time.Time `json:"scheduled_at"`
+	RequestedAt  time.Time `json:"requested_at"`
+	RequestedBy  string    `json:"requested_by,omitempty"`
+	DelayMinutes int       `json:"delay_minutes"`
+}
+
 // PostResponse is the API response format for posts
 type PostResponse struct {
-	ID                 int        `json:"id"`
-	Title              string     `json:"title"`
-	Content            string     `json:"content,omitempty"`
-	Author             string     `json:"author"`
-	AuthorID           string     `json:"author_id"`
-	Category           string     `json:"category,omitempty"`
-	Views              int        `json:"views"`
-	Likes              int        `json:"likes"`
-	Dislikes           int        `json:"dislikes"`
-	CommentsCount      int        `json:"comments_count"`
-	HasFile            bool       `json:"has_file"`
-	IsNotice           bool       `json:"is_notice"`
-	IsSecret           bool       `json:"is_secret"`
-	IsCommentsDisabled bool       `json:"is_comments_disabled"`
-	Link1              string     `json:"link1,omitempty"`
-	Link2              string     `json:"link2,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          *time.Time `json:"updated_at,omitempty"`
-	DeletedAt          *time.Time `json:"deleted_at,omitempty"`
-	DeletedBy          *string    `json:"deleted_by,omitempty"`
+	ID                 int                  `json:"id"`
+	Title              string               `json:"title"`
+	Content            string               `json:"content,omitempty"`
+	Author             string               `json:"author"`
+	AuthorID           string               `json:"author_id"`
+	Category           string               `json:"category,omitempty"`
+	Views              int                  `json:"views"`
+	Likes              int                  `json:"likes"`
+	Dislikes           int                  `json:"dislikes"`
+	CommentsCount      int                  `json:"comments_count"`
+	HasFile            bool                 `json:"has_file"`
+	IsNotice           bool                 `json:"is_notice"`
+	IsSecret           bool                 `json:"is_secret"`
+	IsCommentsDisabled bool                 `json:"is_comments_disabled"`
+	Link1              string               `json:"link1,omitempty"`
+	Link2              string               `json:"link2,omitempty"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          *time.Time           `json:"updated_at,omitempty"`
+	DeletedAt          *time.Time           `json:"deleted_at,omitempty"`
+	DeletedBy          *string              `json:"deleted_by,omitempty"`
+	ScheduledDelete    *ScheduledDeleteInfo `json:"scheduled_delete,omitempty"`
 }
 
 // parseWrLast converts DB datetime string to time.Time
