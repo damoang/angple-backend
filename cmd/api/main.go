@@ -471,7 +471,7 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 	if err := db.Table("g5_member_memo").
 		Select("target_member_id, memo, memo_detail, color").
 		Where("member_id = ? AND target_member_id IN ?", currentUserID, targetIDs).
-		Find(&memos).Error; err != nil || len(memos) == 0 {
+		Find(&memos).Error; err != nil {
 		return items
 	}
 	memoMap := make(map[string]gin.H, len(memos))
@@ -485,23 +485,22 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 			"color":       m.Color,
 		}
 	}
-	if len(memoMap) == 0 {
-		return items
-	}
+	// 메모 없는 author도 author_memo: nil 명시 — frontend preloadMemos가 cache 채우도록.
+	// 필드 누락 시 frontend가 fallback batch API 호출 (4/22 진단: prod batch memo 1180 req/min 주범).
 	result := make([]map[string]any, len(items))
 	for i, item := range items {
 		id, _ := item["author_id"].(string)
-		memo, hasMemo := memoMap[id]
-		if !hasMemo {
+		if id == "" {
 			result[i] = item
 			continue
 		}
-		// Shallow copy + add author_memo (avoid mutating cached item)
+		// Shallow copy + add author_memo (avoid mutating cached item).
+		// memoMap[id]는 없으면 nil → frontend는 "메모 없음" 으로 cache 채움.
 		newItem := make(map[string]any, len(item)+1)
 		for k, v := range item {
 			newItem[k] = v
 		}
-		newItem["author_memo"] = memo
+		newItem["author_memo"] = memoMap[id]
 		result[i] = newItem
 	}
 	return result
