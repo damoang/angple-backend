@@ -35,7 +35,7 @@ func Get[T any](ctx context.Context, c *Cache, key string) (T, error) {
 		return zero, ErrCacheMiss
 	}
 	raw, err := c.client.Get(ctx, key).Bytes()
-	if err == goredis.Nil {
+	if errors.Is(err, goredis.Nil) {
 		return zero, ErrCacheMiss
 	}
 	if err != nil {
@@ -83,7 +83,9 @@ func GetOrSet[T any](
 		return v, err
 	}
 	if c != nil && c.client != nil {
-		_ = Set(ctx, c, key, v, ttl)
+		// 캐시 쓰기 실패는 path-blocking 이 아님 — best-effort.
+		//nolint:errcheck // intentionally ignored: cache miss case still returns loader value
+		Set(ctx, c, key, v, ttl)
 	}
 	return v, nil
 }
