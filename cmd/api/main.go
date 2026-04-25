@@ -5460,6 +5460,17 @@ func main() {
 		// Angple Sites builder content (M1 A1 PoC, issue #1288)
 		// Public route exists for SSR consumption; admin routes are RequireAdmin-gated.
 		// site_id FK omitted at PoC; Phase 2 will wire it once `sites` is in prod.
+		//
+		// Zero-impact migration (multi-host friendly):
+		//   - First boot: HasTable=false → AutoMigrate runs CREATE TABLE on a NEW table (no lock contention).
+		//   - Subsequent boots: HasTable=true (~1ms SELECT to information_schema) → AutoMigrate skipped.
+		//   - Each angple-backend deployment (damoang / ChurchRe / self-hosted) applies idempotently.
+		if !db.Migrator().HasTable(&domain.AngpleSiteContent{}) {
+			if err := db.AutoMigrate(&domain.AngpleSiteContent{}); err != nil {
+				log.Printf("warning: angple_site_content AutoMigrate failed: %v", err)
+			}
+		}
+
 		siteContentRepo := repository.NewSiteContentRepository(db)
 		siteContentSvc := service.NewSiteContentService(siteContentRepo)
 		siteContentHandler := handler.NewSiteContentHandler(siteContentSvc)
