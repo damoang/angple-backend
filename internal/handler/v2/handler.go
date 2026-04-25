@@ -15,6 +15,7 @@ import (
 	"github.com/damoang/angple-backend/internal/middleware"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+	pkgredis "github.com/damoang/angple-backend/pkg/redis"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -36,6 +37,7 @@ type V2Handler struct {
 	pointConfigRepo   v2repo.PointConfigRepository
 	blockRepo         v2repo.BlockRepository
 	tagRepo           gnurepo.TagRepository
+	cache             *pkgredis.Cache // 비인증 GET 응답 캐시 (nil-safe — 미주입 시 fallthrough)
 }
 
 const claimBoardSlug = "claim"
@@ -55,6 +57,12 @@ func NewV2Handler(
 		boardRepo:   boardRepo,
 		permChecker: permChecker,
 	}
+}
+
+// SetCache sets the optional Redis cache for anonymous GET responses.
+// nil-safe: when not set, handlers bypass cache and call the loader directly.
+func (h *V2Handler) SetCache(c *pkgredis.Cache) {
+	h.cache = c
 }
 
 // SetPointRepository sets the optional point repository for point operations
@@ -260,16 +268,19 @@ type boardWithPermissions struct {
 }
 
 // ListBoards handles GET /api/v1/boards
+//
+// Caching: 비인증 사용자에 한해 Redis 5분 캐시. 인증 사용자는 per-user
+// permissions 가 결과에 포함되므로 캐시 bypass.
 func (h *V2Handler) ListBoards(c *gin.Context) {
-	boards, err := h.boardRepo.FindAll()
-	if err != nil {
-		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시판 목록 조회 실패", err)
-		return
-	}
-
-	// 인증된 사용자면 각 게시판별 permissions 포함
 	memberLevel := middleware.GetUserLevel(c)
+
+	// 인증 사용자: per-user permissions 포함, 캐시 bypass
 	if memberLevel > 0 && h.permChecker != nil {
+		boards, err := h.boardRepo.FindAll()
+		if err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "게시판 목록 조회 실패", err)
+			return
+		}
 		result := make([]boardWithPermissions, len(boards))
 		for i, board := range boards {
 			perms, _ := h.permChecker.GetAllPermissions(board.Slug, memberLevel)
@@ -279,6 +290,20 @@ func (h *V2Handler) ListBoards(c *gin.Context) {
 		return
 	}
 
+	// 비인증: Redis 5분 캐시 (cache nil 이면 자동 fallthrough)
+	boards, err := pkgredis.GetOrSet(
+		c.Request.Context(),
+		h.cache,
+		"v2:boards:active:v1",
+		5*time.Minute,
+		func() ([]*v2domain.V2Board, error) {
+			return h.boardRepo.FindAll()
+		},
+	)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시판 목록 조회 실패", err)
+		return
+	}
 	common.V2Success(c, boards)
 }
 

@@ -827,6 +827,10 @@ func main() {
 		// 권한 체크
 		permChecker := middleware.NewDBBoardPermissionChecker(v2BoardRepo)
 		v2Handler := v2handler.NewV2Handler(v2UserRepo, v2PostRepo, v2CommentRepo, v2BoardRepo, permChecker)
+		// 비인증 GET 응답 Redis 캐시 (nil-safe — Redis 미가용 시 자동 fallthrough)
+		if redisClient != nil {
+			v2Handler.SetCache(pkgredis.NewCache(redisClient))
+		}
 		v2Handler.SetPointRepository(v2PointRepo)
 		v2Handler.SetRevisionRepository(v2RevisionRepo)
 		v2Handler.SetNotiRepository(gnurepo.NewNotiRepository(db))
