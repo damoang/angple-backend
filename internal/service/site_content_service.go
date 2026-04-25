@@ -61,7 +61,7 @@ func validateBlocks(blocksJSON string) error {
 	}
 	var envelope blockListEnvelope
 	if err := json.Unmarshal([]byte(blocksJSON), &envelope); err != nil {
-		return fmt.Errorf("%w: invalid blocks JSON: %v", common.ErrBadRequest, err)
+		return fmt.Errorf("%w: invalid blocks JSON: %w", common.ErrBadRequest, err)
 	}
 	if envelope.SchemaVersion != 1 {
 		return fmt.Errorf("%w: schema_version must be 1", common.ErrBadRequest)
