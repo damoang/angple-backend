@@ -5453,6 +5453,23 @@ func main() {
 			adminPlugins.GET("/:name/detail", storeHandler.PluginDetail)
 		}
 
+		// Angple Sites builder content (M1 A1 PoC, issue #1288)
+		// Public route exists for SSR consumption; admin routes are RequireAdmin-gated.
+		// site_id FK omitted at PoC; Phase 2 will wire it once `sites` is in prod.
+		siteContentRepo := repository.NewSiteContentRepository(db)
+		siteContentSvc := service.NewSiteContentService(siteContentRepo)
+		siteContentHandler := handler.NewSiteContentHandler(siteContentSvc)
+
+		router.GET("/api/v1/sites/:id/content/:key", siteContentHandler.GetPublic)
+
+		adminSiteContent := router.Group("/api/v1/admin/sites/:id/content")
+		adminSiteContent.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+		{
+			adminSiteContent.GET("/:key", siteContentHandler.GetAdmin)
+			adminSiteContent.PUT("/:key", siteContentHandler.Upsert)
+			adminSiteContent.DELETE("/:key", siteContentHandler.Delete)
+		}
+
 		// Marketplace
 		marketplaceRepo := pluginstoreRepo.NewMarketplaceRepository(db)
 		if err := marketplaceRepo.AutoMigrate(); err != nil {
