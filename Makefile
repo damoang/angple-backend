@@ -54,15 +54,15 @@ setup:
 	fi
 	@echo "Next: edit .env (set DB_PASSWORD, JWT_SECRET) → make dev"
 
-# 로컬 개발 환경 (Docker All-in-One)
-dev-docker:
-	@echo "Ensuring Docker network exists: angple-dev-network"
+# Docker network 존재 보장 (compose 의 external network 참조 전 필수)
+dev-docker-network:
 	@if ! docker network inspect angple-dev-network >/dev/null 2>&1; then \
 		echo "Creating network: angple-dev-network"; \
 		docker network create angple-dev-network >/dev/null; \
-	else \
-		echo "Network already exists: angple-dev-network"; \
 	fi
+
+# 로컬 개발 환경 (Docker All-in-One)
+dev-docker: dev-docker-network
 	@echo "Starting development environment with Docker (MySQL + Redis + API)..."
 	@echo "Containers: angple-dev-mysql, angple-dev-redis, angple-dev-api"
 	docker compose -f docker-compose.dev.yml up
@@ -83,7 +83,7 @@ dev-docker-logs:
 	@echo "Showing logs (Ctrl+C to exit)..."
 	docker compose -f docker-compose.dev.yml logs -f
 
-dev-docker-rebuild:
+dev-docker-rebuild: dev-docker-network
 	@echo "Rebuilding development environment..."
 	docker compose -f docker-compose.dev.yml up -d --build
 

@@ -50,7 +50,7 @@ jobs:
       run: pip install -r tests/load/requirements.txt
 
     - name: Start all services
-      run: docker compose -f docker-compose.dev.yml up -d --build
+      run: make dev-docker-rebuild
 
     - name: Wait for API to be healthy
       run: |
