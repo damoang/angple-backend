@@ -113,10 +113,9 @@ func (c *Client) Search(boardID, searchField, searchQuery string, page, limit in
 	offset := (page - 1) * limit
 
 	orderClause := "ORDER BY wr_id DESC"
-	optionClause := "OPTION max_matches=10000"
+	optionClause := "OPTION max_matches=10000, ranker=proximity_bm25, field_weights=(wr_subject=10, wr_content=1)"
 	if len(sortBy) > 0 && sortBy[0] == "relevance" {
 		orderClause = "ORDER BY WEIGHT() DESC, wr_id DESC"
-		optionClause = "OPTION max_matches=10000, ranker=sph04"
 	}
 
 	query := fmt.Sprintf(
