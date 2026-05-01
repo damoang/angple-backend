@@ -780,17 +780,24 @@ func main() {
 		v2UserRepo := v2repo.NewUserRepository(db)
 		siteRepo := repository.NewSiteRepository(db)
 
-		// Sphinx full-text search (SphinxQL on port 9306)
+		// Sphinx/Manticore full-text search via SphinxQL (default port 9306).
+		// SPHINX_PORT override allows cutover to Manticore container (port 9307).
 		sphinxHost := os.Getenv("SPHINX_HOST")
 		if sphinxHost == "" {
 			sphinxHost = "127.0.0.1"
 		}
+		sphinxPort := 9306
+		if v := os.Getenv("SPHINX_PORT"); v != "" {
+			if p, err := strconv.Atoi(v); err == nil && p > 0 {
+				sphinxPort = p
+			}
+		}
 		var sphinxClient *pkgsphinx.Client
-		if sc, err := pkgsphinx.New(sphinxHost, 9306); err != nil {
+		if sc, err := pkgsphinx.New(sphinxHost, sphinxPort); err != nil {
 			pkglogger.Info("Sphinx unavailable, falling back to MySQL LIKE: %v", err)
 		} else {
 			sphinxClient = sc
-			pkglogger.Info("Sphinx connected (%s:9306)", sphinxHost)
+			pkglogger.Info("Sphinx connected (%s:%d)", sphinxHost, sphinxPort)
 		}
 
 		// Gnuboard repositories for v1 API (g5_* tables)
