@@ -76,6 +76,7 @@ type WriteRepository interface {
 	FindPostsFilteredHasNextSummary(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsByCategoryFilteredHasNextSummary(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
+	FindMessagePostsByPeriod(period string, today time.Time, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsAfterSummary(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
@@ -427,6 +428,54 @@ func (r *writeRepository) findPostsByCategoryHasNext(boardID string, category st
 
 	trimmed, hasNext := trimHasNextPosts(posts, limit)
 	return trimmed, hasNext, err
+}
+
+func (r *writeRepository) FindMessagePostsByPeriod(period string, today time.Time, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	var posts []*gnuboard.G5Write
+	var total int64
+
+	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
+
+	table := tableName("message")
+	selectCols := postSelectColumnsForList("message", "", true)
+	dateExpr := "COALESCE(STR_TO_DATE(wr_subject, '%Y.%m.%d'), STR_TO_DATE(wr_subject, '%Y-%m-%d'))"
+	baseWhere := "wr_is_comment = 0 AND " + dateExpr + " IS NOT NULL"
+	args := make([]any, 0, 2)
+	orderClause := "wr_id DESC"
+
+	switch period {
+	case "month":
+		monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
+		nextMonth := monthStart.AddDate(0, 1, 0)
+		baseWhere += " AND " + dateExpr + " >= ? AND " + dateExpr + " < ?"
+		args = append(args, monthStart.Format("2006-01-02"), nextMonth.Format("2006-01-02"))
+		orderClause = dateExpr + " ASC, wr_id DESC"
+	case "upcoming":
+		tomorrow := today.AddDate(0, 0, 1)
+		baseWhere += " AND " + dateExpr + " >= ?"
+		args = append(args, tomorrow.Format("2006-01-02"))
+		orderClause = dateExpr + " ASC, wr_id DESC"
+	default:
+		baseWhere += " AND " + dateExpr + " = ?"
+		args = append(args, today.Format("2006-01-02"))
+	}
+
+	if err := r.db.Table(table).Where(baseWhere, args...).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	err := r.db.Table(table).
+		Select(selectCols).
+		Where(baseWhere, args...).
+		Order(orderClause).
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
+
+	return posts, total, err
 }
 
 // FindPostsAfter retrieves posts using cursor pagination for the default gnuboard sort.

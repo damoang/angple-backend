@@ -1807,6 +1807,13 @@ func main() {
 			category := c.Query("category") // category filter (ca_name)
 			isSearching := sfl != "" && stx != ""
 			summaryMode := c.Query("summary") == "1" && !isSearching
+			celebrationPeriod := c.Query("celebration_period")
+			if slug != "message" {
+				celebrationPeriod = ""
+			}
+			if celebrationPeriod != "" && celebrationPeriod != "today" && celebrationPeriod != "month" && celebrationPeriod != "upcoming" {
+				celebrationPeriod = "today"
+			}
 
 			// Get blocked user IDs (skip for admins)
 			var blockedIDs []string
@@ -1824,7 +1831,7 @@ func main() {
 			}
 
 			currentUserIDForMemo := middleware.GetUserID(c)
-			if !summaryMode && !isSearching && !useCursor && category == "" {
+			if !summaryMode && !isSearching && !useCursor && category == "" && celebrationPeriod == "" {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
@@ -1901,6 +1908,11 @@ func main() {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit, "relevance")
 			} else if isSearching {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit)
+			} else if celebrationPeriod != "" && !isSearching {
+				kst := time.FixedZone("KST", 9*60*60)
+				now := time.Now().In(kst)
+				today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, kst)
+				posts, total, err = gnuWriteRepo.FindMessagePostsByPeriod(celebrationPeriod, today, page, limit)
 			} else if summaryMode && useCursor {
 				posts, total, err = gnuWriteRepo.FindPostsAfterSummary(slug, limit, cursorWrNum, cursorWrReply)
 			} else if summaryMode && useHasNextPagination && category != "" && len(blockedIDs) > 0 {
@@ -2004,7 +2016,7 @@ func main() {
 			}
 
 			// Store in both caches (only for non-search, non-category requests, unfiltered data)
-			if !summaryMode && !isSearching && !useCursor && category == "" {
+			if !summaryMode && !isSearching && !useCursor && category == "" && celebrationPeriod == "" {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
