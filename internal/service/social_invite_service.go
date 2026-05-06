@@ -39,7 +39,7 @@ func (s *SocialInviteService) CreateInvite(targetMbID string, adminID string) (*
 		return nil, fmt.Errorf("회원 '%s'을(를) 찾을 수 없습니다", targetMbID)
 	}
 	if member.MbLeaveDate != "" {
-		return nil, fmt.Errorf("대상 계정이 탈퇴 상태입니다. 먼저 탈퇴 해제 후 초대 링크를 생성해주세요.")
+		return nil, fmt.Errorf("대상 계정이 탈퇴 상태입니다. 먼저 탈퇴 해제 후 초대 링크를 생성해주세요")
 	}
 
 	token, err := generateSocialInviteToken()

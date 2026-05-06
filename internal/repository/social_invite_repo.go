@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,7 +25,7 @@ func (r *SocialInviteRepository) Create(invite *domain.SocialInvite) error {
 func (r *SocialInviteRepository) FindByToken(token string) (*domain.SocialInvite, error) {
 	var invite domain.SocialInvite
 	if err := r.db.Where("token = ?", token).First(&invite).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("초대 토큰 조회 실패: %w", err)
