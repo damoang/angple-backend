@@ -2512,17 +2512,18 @@ func main() {
 
 			// 요청 바디 파싱
 			var req struct {
-				Title    string   `json:"title" binding:"required"`
-				Content  string   `json:"content" binding:"required"`
-				Category *string  `json:"category"`
-				IsSecret *bool    `json:"is_secret"`
-				Link1    *string  `json:"link1"`
-				Link2    *string  `json:"link2"`
-				Extra1   *string  `json:"extra_1"`
-				Extra2   *string  `json:"extra_2"`
-				Extra3   *string  `json:"extra_3"`
-				Tags     []string `json:"tags"`
-				Files    []struct {
+				Title              string   `json:"title" binding:"required"`
+				Content            string   `json:"content" binding:"required"`
+				Category           *string  `json:"category"`
+				IsSecret           *bool    `json:"is_secret"`
+				IsCommentsDisabled *bool    `json:"is_comments_disabled"`
+				Link1              *string  `json:"link1"`
+				Link2              *string  `json:"link2"`
+				Extra1             *string  `json:"extra_1"`
+				Extra2             *string  `json:"extra_2"`
+				Extra3             *string  `json:"extra_3"`
+				Tags               []string `json:"tags"`
+				Files              []struct {
 					Key      string `json:"key"`
 					URL      string `json:"url"`
 					Filename string `json:"filename"`
@@ -2598,10 +2599,16 @@ func main() {
 			now := time.Now()
 			nowStr := now.Format("2006-01-02 15:04:05")
 
-			wrOption := ""
+			// wr_option: 콤마 구분 토큰 — 검증 측은 strings.Contains 로 체크하므로 형식 일치
+			var wrOptionTokens []string
 			if req.IsSecret != nil && *req.IsSecret {
-				wrOption = "secret"
+				wrOptionTokens = append(wrOptionTokens, "secret")
 			}
+			// 댓글 비활성화는 admin (mb_level >= 10) 만 설정 가능 (frontend 게이트와 동일)
+			if req.IsCommentsDisabled != nil && *req.IsCommentsDisabled && userLevel >= 10 {
+				wrOptionTokens = append(wrOptionTokens, "comments_disabled")
+			}
+			wrOption := strings.Join(wrOptionTokens, ",")
 
 			post := gnuboard.G5Write{
 				WrNum:       0,
@@ -3137,16 +3144,17 @@ func main() {
 
 			// 요청 바디 파싱
 			var req struct {
-				Title    *string  `json:"title"`
-				Content  *string  `json:"content"`
-				Category *string  `json:"category"`
-				Link1    *string  `json:"link1"`
-				Link2    *string  `json:"link2"`
-				Extra1   *string  `json:"extra_1"`
-				Extra2   *string  `json:"extra_2"`
-				Extra3   *string  `json:"extra_3"`
-				Tags     []string `json:"tags"`
-				Files    *[]struct {
+				Title              *string  `json:"title"`
+				Content            *string  `json:"content"`
+				Category           *string  `json:"category"`
+				IsCommentsDisabled *bool    `json:"is_comments_disabled"`
+				Link1              *string  `json:"link1"`
+				Link2              *string  `json:"link2"`
+				Extra1             *string  `json:"extra_1"`
+				Extra2             *string  `json:"extra_2"`
+				Extra3             *string  `json:"extra_3"`
+				Tags               []string `json:"tags"`
+				Files              *[]struct {
 					Key      string `json:"key"`
 					URL      string `json:"url"`
 					Filename string `json:"filename"`
@@ -3221,6 +3229,23 @@ func main() {
 			}
 			if req.Extra3 != nil {
 				updates["wr_3"] = *req.Extra3
+			}
+
+			// 댓글 비활성화 토글 (admin only) — 기존 wr_option 의 다른 토큰 (secret 등) 은 보존
+			if req.IsCommentsDisabled != nil && userLevel >= 10 {
+				existing := strings.Split(post.WrOption, ",")
+				kept := existing[:0]
+				for _, tok := range existing {
+					tok = strings.TrimSpace(tok)
+					if tok == "" || tok == "comments_disabled" {
+						continue
+					}
+					kept = append(kept, tok)
+				}
+				if *req.IsCommentsDisabled {
+					kept = append(kept, "comments_disabled")
+				}
+				updates["wr_option"] = strings.Join(kept, ",")
 			}
 
 			if len(updates) == 0 {
