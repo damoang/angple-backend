@@ -458,6 +458,10 @@ func (r *writeRepository) FindMessagePostsByPeriod(period string, today time.Tim
 		baseWhere += " AND " + dateExpr + " >= ?"
 		args = append(args, tomorrow.Format("2006-01-02"))
 		orderClause = dateExpr + " ASC, wr_id DESC"
+	case "past":
+		baseWhere += " AND " + dateExpr + " < ?"
+		args = append(args, today.Format("2006-01-02"))
+		orderClause = dateExpr + " DESC, wr_id DESC"
 	default:
 		baseWhere += " AND " + dateExpr + " = ?"
 		args = append(args, today.Format("2006-01-02"))
