@@ -1821,7 +1821,7 @@ func main() {
 			if slug != "message" {
 				celebrationPeriod = ""
 			}
-			if celebrationPeriod != "" && celebrationPeriod != "today" && celebrationPeriod != "month" && celebrationPeriod != "upcoming" {
+			if celebrationPeriod != "" && celebrationPeriod != "today" && celebrationPeriod != "month" && celebrationPeriod != "upcoming" && celebrationPeriod != "past" {
 				celebrationPeriod = "today"
 			}
 
