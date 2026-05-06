@@ -1,6 +1,7 @@
 package gnuboard
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -77,6 +78,22 @@ func TestTableName(t *testing.T) {
 		result := tableName(tt.boardID)
 		if result != tt.expected {
 			t.Errorf("tableName(%q) = %q, want %q", tt.boardID, result, tt.expected)
+		}
+	}
+}
+
+func TestMessageSubjectDateExpr(t *testing.T) {
+	expr := messageSubjectDateExpr("wr_subject")
+	checks := []string{
+		"STR_TO_DATE(TRIM(wr_subject), '%Y.%m.%d')",
+		"STR_TO_DATE(TRIM(wr_subject), '%Y.%c.%e')",
+		"STR_TO_DATE(TRIM(wr_subject), '%Y-%m-%d')",
+		"STR_TO_DATE(TRIM(wr_subject), '%Y-%c-%e')",
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(expr, check) {
+			t.Fatalf("messageSubjectDateExpr() missing %q in %q", check, expr)
 		}
 	}
 }

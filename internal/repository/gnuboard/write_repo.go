@@ -183,6 +183,14 @@ func postSelectColumns(boardID, alias string) string {
 	return postSelectColumnsForList(boardID, alias, true)
 }
 
+func messageSubjectDateExpr(column string) string {
+	trimmed := fmt.Sprintf("TRIM(%s)", column)
+	return fmt.Sprintf(
+		"COALESCE(STR_TO_DATE(%s, '%%Y.%%m.%%d'), STR_TO_DATE(%s, '%%Y.%%c.%%e'), STR_TO_DATE(%s, '%%Y-%%m-%%d'), STR_TO_DATE(%s, '%%Y-%%c-%%e'))",
+		trimmed, trimmed, trimmed, trimmed,
+	)
+}
+
 // allowedSortColumns is the whitelist for bo_sort_field values
 var allowedSortColumns = map[string]bool{
 	"wr_num, wr_reply":            true,
@@ -441,8 +449,9 @@ func (r *writeRepository) FindMessagePostsByPeriod(period string, today time.Tim
 
 	table := tableName("message")
 	selectCols := postSelectColumnsForList("message", "", true)
-	dateExpr := "COALESCE(STR_TO_DATE(wr_subject, '%Y.%m.%d'), STR_TO_DATE(wr_subject, '%Y-%m-%d'))"
-	baseWhere := "wr_is_comment = 0 AND " + dateExpr + " IS NOT NULL"
+	dateExpr := messageSubjectDateExpr("wr_subject")
+	messageDayExpr := "DATE(wr_datetime)"
+	baseWhere := "wr_is_comment = 0"
 	args := make([]any, 0, 2)
 	orderClause := "wr_id DESC"
 
@@ -450,20 +459,20 @@ func (r *writeRepository) FindMessagePostsByPeriod(period string, today time.Tim
 	case "month":
 		monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())
 		nextMonth := monthStart.AddDate(0, 1, 0)
-		baseWhere += " AND " + dateExpr + " >= ? AND " + dateExpr + " < ?"
+		baseWhere += " AND " + dateExpr + " IS NOT NULL AND " + dateExpr + " >= ? AND " + dateExpr + " < ?"
 		args = append(args, monthStart.Format("2006-01-02"), nextMonth.Format("2006-01-02"))
 		orderClause = dateExpr + " ASC, wr_id DESC"
 	case "upcoming":
 		tomorrow := today.AddDate(0, 0, 1)
-		baseWhere += " AND " + dateExpr + " >= ?"
+		baseWhere += " AND " + dateExpr + " IS NOT NULL AND " + dateExpr + " >= ?"
 		args = append(args, tomorrow.Format("2006-01-02"))
 		orderClause = dateExpr + " ASC, wr_id DESC"
 	case "past":
-		baseWhere += " AND " + dateExpr + " < ?"
-		args = append(args, today.Format("2006-01-02"))
-		orderClause = dateExpr + " DESC, wr_id DESC"
+		baseWhere += " AND ((" + dateExpr + " IS NOT NULL AND " + dateExpr + " < ?) OR (" + dateExpr + " IS NULL AND " + messageDayExpr + " < ?))"
+		args = append(args, today.Format("2006-01-02"), today.Format("2006-01-02"))
+		orderClause = "COALESCE(" + dateExpr + ", " + messageDayExpr + ") DESC, wr_id DESC"
 	default:
-		baseWhere += " AND " + dateExpr + " = ?"
+		baseWhere += " AND " + dateExpr + " IS NOT NULL AND " + dateExpr + " = ?"
 		args = append(args, today.Format("2006-01-02"))
 	}
 
