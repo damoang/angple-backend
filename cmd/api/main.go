@@ -816,6 +816,12 @@ func main() {
 		gnuTagRepo := gnurepo.NewTagRepository(db)
 		gnuMemberRepo := gnurepo.NewMemberRepository(db)
 		scheduledDeleteRepo := gnurepo.NewScheduledDeleteRepository(db)
+		if err := db.AutoMigrate(&domain.SocialInvite{}); err != nil {
+			pkglogger.Error("SocialInvite AutoMigrate failed: %v", err)
+		}
+		socialInviteRepo := repository.NewSocialInviteRepository(db)
+		socialInviteService := service.NewSocialInviteService(socialInviteRepo)
+		socialInviteHandler := handler.NewSocialInviteHandler(socialInviteService)
 
 		// v2 Core API
 		v2PostRepo := v2repo.NewPostRepository(db)
@@ -915,6 +921,10 @@ func main() {
 		v1Auth.POST("/logout", v2AuthHandler.Logout)
 		v1Auth.GET("/me", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
 		v1Auth.GET("/profile", middleware.JWTAuth(jwtManager), v2AuthHandler.GetMe)
+		router.POST("/api/v1/member-recovery/social-invite", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), socialInviteHandler.CreateInvite)
+		socialInviteGroup := router.Group("/api/v1/social-invite")
+		socialInviteGroup.GET("/:token", middleware.OptionalJWTAuth(jwtManager), socialInviteHandler.GetInviteInfo)
+		socialInviteGroup.POST("/:token/confirm", middleware.JWTAuth(jwtManager), socialInviteHandler.ConfirmInvite)
 		router.GET("/api/v1/menus/sidebar", func(c *gin.Context) {
 			var menus []domain.Menu
 			if err := db.Where("is_active = ? AND (show_in_sidebar = ? OR show_in_header = ?)", true, true, true).
