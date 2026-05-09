@@ -3,11 +3,15 @@ package v2
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/middleware"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // V2AuthHandler handles v2 authentication endpoints
@@ -23,8 +27,16 @@ func NewV2AuthHandler(authService *v2svc.V2AuthService) *V2AuthHandler {
 }
 
 type v2LoginRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username"`
+	UserID   string `json:"user_id"`
 	Password string `json:"password" binding:"required"`
+}
+
+func (r *v2LoginRequest) GetUsername() string {
+	if r.Username != "" {
+		return r.Username
+	}
+	return r.UserID
 }
 
 type v2RefreshRequest struct {
@@ -37,14 +49,77 @@ func isSecureCookie() bool {
 	return gin.Mode() == gin.ReleaseMode
 }
 
-// cookieDomain returns the cookie domain for cross-subdomain sharing.
-// Production: ".damoang.net" (shared across damoang.net, web.damoang.net, etc.)
-// Development: "" (current host only)
-func cookieDomain() string {
-	if gin.Mode() == gin.ReleaseMode {
-		return ".damoang.net"
+// authDomainGroup — auth_domain_groups 테이블 1 row (cookie domain 멀티 테넌트 매핑)
+type authDomainGroup struct {
+	Suffix       string `gorm:"primaryKey"`
+	CookieDomain string
+}
+
+func (authDomainGroup) TableName() string { return "auth_domain_groups" }
+
+// cookieDomainCache — DB-backed lookup 의 in-memory cache (5분 TTL)
+type cookieDomainCache struct {
+	mu       sync.RWMutex
+	rules    map[string]string // suffix → cookie_domain
+	loadedAt time.Time
+}
+
+var globalCDCache = &cookieDomainCache{rules: map[string]string{}}
+
+const cdCacheTTL = 5 * time.Minute
+
+// StartCookieDomainCacheRefresher — 앱 부팅 시 1회 호출하여 즉시 cache 로드 + 5분마다 background refresh.
+// 새 사이트 admin UI 추가 시 5분 안에 자동 적용.
+func StartCookieDomainCacheRefresher(db *gorm.DB) {
+	refresh := func() {
+		var rules []authDomainGroup
+		if err := db.Find(&rules).Error; err != nil {
+			return // DB 에러 시 기존 cache 유지 (fail-safe)
+		}
+		m := make(map[string]string, len(rules))
+		for _, r := range rules {
+			m[r.Suffix] = r.CookieDomain
+		}
+		globalCDCache.mu.Lock()
+		globalCDCache.rules = m
+		globalCDCache.loadedAt = time.Now()
+		globalCDCache.mu.Unlock()
 	}
-	return ""
+	refresh() // 즉시 1회
+	go func() {
+		ticker := time.NewTicker(cdCacheTTL)
+		defer ticker.Stop()
+		for range ticker.C {
+			refresh()
+		}
+	}()
+}
+
+// cookieDomain returns the cookie Domain for the given request host.
+// DB 기반 멀티 테넌트 매핑 (auth_domain_groups 테이블) + 5분 in-memory cache.
+//   - 미등록 host → "" (host-only, 가장 안전)
+//   - 정확 매치 또는 suffix 매치 시 → 해당 cookie_domain
+//
+// Development (gin debug mode): 항상 "" (host-only).
+// 새 SSO 그룹 추가는 admin UI / SQL 로 auth_domain_groups 에 row 추가 (코드 변경 X).
+func cookieDomain(host string) string {
+	if gin.Mode() != gin.ReleaseMode {
+		return ""
+	}
+	if i := strings.Index(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	globalCDCache.mu.RLock()
+	defer globalCDCache.mu.RUnlock()
+	if cd, ok := globalCDCache.rules[host]; ok {
+		return cd
+	}
+	for suffix, cd := range globalCDCache.rules {
+		if strings.HasSuffix(host, "."+suffix) {
+			return cd
+		}
+	}
+	return "" // host-only fallback
 }
 
 // Login handles POST /api/v2/auth/login
@@ -55,14 +130,19 @@ func (h *V2AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.authService.Login(req.Username, req.Password)
+	username := req.GetUsername()
+	if username == "" {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "아이디를 입력해주세요", nil)
+		return
+	}
+	resp, err := h.authService.Login(username, req.Password)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusUnauthorized, "로그인에 실패했습니다", err)
 		return
 	}
 
 	// Set refresh token as httpOnly cookie (domain shared across subdomains)
-	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(), isSecureCookie(), true)
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(c.Request.Host), isSecureCookie(), true)
 
 	common.V2Success(c, gin.H{
 		"access_token": resp.AccessToken,
@@ -89,7 +169,7 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(), isSecureCookie(), true)
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(c.Request.Host), isSecureCookie(), true)
 
 	common.V2Success(c, gin.H{
 		"access_token": resp.AccessToken,
@@ -98,8 +178,22 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 }
 
 // Logout handles POST /api/v2/auth/logout
+//
+// 자동 재로그인 방지: damoang.net 외 도메인(muzia.net 등)도 동일 backend 를 쓰므로
+// 요청 host 기준 cookie 도 함께 만료시킨다. damoang_jwt 는 일부 클라이언트에서
+// access_token 폴백으로 읽히므로 함께 삭제.
 func (h *V2AuthHandler) Logout(c *gin.Context) {
-	c.SetCookie("refresh_token", "", -1, "/", cookieDomain(), isSecureCookie(), true)
+	secure := isSecureCookie()
+	hostDomain := c.Request.Host
+	if i := strings.Index(hostDomain, ":"); i >= 0 {
+		hostDomain = hostDomain[:i]
+	}
+
+	for _, domain := range []string{cookieDomain(c.Request.Host), "", hostDomain} {
+		c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
+		c.SetCookie("damoang_jwt", "", -1, "/", domain, secure, false)
+		c.SetCookie("oauth_state", "", -1, "/", domain, secure, true)
+	}
 	common.V2Success(c, gin.H{"message": "로그아웃되었습니다"})
 }
 
@@ -119,7 +213,7 @@ func (h *V2AuthHandler) ExchangeToken(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(), isSecureCookie(), true)
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(c.Request.Host), isSecureCookie(), true)
 
 	common.V2Success(c, gin.H{
 		"access_token": resp.AccessToken,
@@ -132,7 +226,14 @@ func (h *V2AuthHandler) GetMe(c *gin.Context) {
 	userIDStr := middleware.GetUserID(c)
 	userID, err := strconv.ParseUint(userIDStr, 10, 64)
 	if err != nil {
-		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증 정보가 올바르지 않습니다", err)
+		// OAuth user: user_id is a string like "oauth_google_..."
+		// Fall back to g5_member lookup by mb_id
+		user, mbErr := h.authService.GetCurrentUserByMbID(userIDStr)
+		if mbErr != nil {
+			common.V2ErrorResponse(c, http.StatusUnauthorized, "인증 정보가 올바르지 않습니다", mbErr)
+			return
+		}
+		common.V2Success(c, user)
 		return
 	}
 
