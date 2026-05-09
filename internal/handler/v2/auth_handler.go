@@ -226,14 +226,7 @@ func (h *V2AuthHandler) GetMe(c *gin.Context) {
 	userIDStr := middleware.GetUserID(c)
 	userID, err := strconv.ParseUint(userIDStr, 10, 64)
 	if err != nil {
-		// OAuth user: user_id is a string like "oauth_google_..."
-		// Fall back to g5_member lookup by mb_id
-		user, mbErr := h.authService.GetCurrentUserByMbID(userIDStr)
-		if mbErr != nil {
-			common.V2ErrorResponse(c, http.StatusUnauthorized, "인증 정보가 올바르지 않습니다", mbErr)
-			return
-		}
-		common.V2Success(c, user)
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증 정보가 올바르지 않습니다", err)
 		return
 	}
 
