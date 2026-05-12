@@ -137,8 +137,10 @@ func (r *notiRepository) Exists(mbID, boTable string, wrID int, fromCase, relMbI
 // GetGroupedNotifications returns notifications grouped by (bo_table, wr_id, ph_from_case)
 // Optimized: 2-pass approach — first identify top N groups (lightweight), then enrich only those groups
 func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, filterType string) ([]GroupedNotification, int64, int64, error) {
-	// Build filter condition
-	fromCaseFilter := ""
+	// Build filter condition.
+	// 'reaction' 타입은 항상 제외 — 이모지 리액션 알림은 운영 정책상 비활성.
+	// ph_from_case='reaction' 행이 DB에 존재하지만 사용자에게 노출하지 않는다.
+	fromCaseFilter := "AND ph_from_case != 'reaction'"
 	switch filterType {
 	case "comment":
 		fromCaseFilter = "AND ph_from_case IN ('board', 'comment', 'reply')"
