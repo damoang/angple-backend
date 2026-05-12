@@ -37,6 +37,7 @@ type adminMemberResponse struct {
 	MbTodayLogin    *string `json:"mb_today_login"`
 	MbImage         *string `json:"mb_image,omitempty"`
 	MbLeaveDate     *string `json:"mb_leave_date,omitempty"`
+	MbLeaveReason   *string `json:"mb_leave_reason,omitempty"`
 	MbInterceptDate *string `json:"mb_intercept_date,omitempty"`
 }
 
@@ -57,6 +58,9 @@ func toAdminMemberResponse(m *gnuboard.G5Member) adminMemberResponse {
 	}
 	if m.MbLeaveDate != "" {
 		resp.MbLeaveDate = &m.MbLeaveDate
+		if m.MbLeaveReason != "" {
+			resp.MbLeaveReason = &m.MbLeaveReason
+		}
 	}
 	if m.MbInterceptDate != "" {
 		resp.MbInterceptDate = &m.MbInterceptDate
@@ -211,14 +215,15 @@ func (h *AdminMemberHandler) GetMember(c *gin.Context) {
 func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	mbID := c.Param("mbId")
 	var req struct {
-		MbLevel     *int    `json:"mb_level"`
-		MbPoint     *int    `json:"mb_point"`
-		MbName      *string `json:"mb_name"`
-		MbRealName  *string `json:"mb_real_name"`
-		MbEmail     *string `json:"mb_email"`
-		MbSignature *string `json:"mb_signature"`
-		MbMemo      *string `json:"mb_memo"`
-		MbLeave     *bool   `json:"mb_leave"`
+		MbLevel       *int    `json:"mb_level"`
+		MbPoint       *int    `json:"mb_point"`
+		MbName        *string `json:"mb_name"`
+		MbRealName    *string `json:"mb_real_name"`
+		MbEmail       *string `json:"mb_email"`
+		MbSignature   *string `json:"mb_signature"`
+		MbMemo        *string `json:"mb_memo"`
+		MbLeave       *bool   `json:"mb_leave"`
+		MbLeaveReason *string `json:"mb_leave_reason"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
@@ -263,9 +268,15 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	}
 	if req.MbLeave != nil {
 		if *req.MbLeave {
-			updates["mb_leave_date"] = time.Now().Format("2006-01-02")
+			updates["mb_leave_date"] = time.Now().Format("20060102")
+			reason := "self"
+			if req.MbLeaveReason != nil && *req.MbLeaveReason != "" {
+				reason = *req.MbLeaveReason
+			}
+			updates["mb_leave_reason"] = reason
 		} else {
 			updates["mb_leave_date"] = ""
+			updates["mb_leave_reason"] = ""
 		}
 	}
 	if len(updates) == 0 {

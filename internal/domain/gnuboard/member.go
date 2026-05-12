@@ -34,6 +34,7 @@ type G5Member struct {
 	MbDatetime       time.Time  `gorm:"column:mb_datetime" json:"mb_datetime"`
 	MbIP             string     `gorm:"column:mb_ip" json:"-"`
 	MbLeaveDate      string     `gorm:"column:mb_leave_date" json:"mb_leave_date"`
+	MbLeaveReason    string     `gorm:"column:mb_leave_reason" json:"mb_leave_reason"`
 	MbInterceptDate  string     `gorm:"column:mb_intercept_date" json:"mb_intercept_date"`
 	MbEmailCertify   string     `gorm:"column:mb_email_certify" json:"mb_email_certify"`
 	MbMemo           string     `gorm:"column:mb_memo" json:"-"`
