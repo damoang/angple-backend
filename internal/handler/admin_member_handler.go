@@ -215,15 +215,15 @@ func (h *AdminMemberHandler) GetMember(c *gin.Context) {
 func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	mbID := c.Param("mbId")
 	var req struct {
-		MbLevel     *int    `json:"mb_level"`
-		MbPoint     *int    `json:"mb_point"`
-		MbName      *string `json:"mb_name"`
-		MbRealName  *string `json:"mb_real_name"`
-		MbEmail     *string `json:"mb_email"`
-		MbSignature *string `json:"mb_signature"`
-		MbMemo      *string `json:"mb_memo"`
-		MbLeave        *bool   `json:"mb_leave"`
-		MbLeaveReason  *string `json:"mb_leave_reason"`
+		MbLevel       *int    `json:"mb_level"`
+		MbPoint       *int    `json:"mb_point"`
+		MbName        *string `json:"mb_name"`
+		MbRealName    *string `json:"mb_real_name"`
+		MbEmail       *string `json:"mb_email"`
+		MbSignature   *string `json:"mb_signature"`
+		MbMemo        *string `json:"mb_memo"`
+		MbLeave       *bool   `json:"mb_leave"`
+		MbLeaveReason *string `json:"mb_leave_reason"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
