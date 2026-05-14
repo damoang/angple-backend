@@ -3387,6 +3387,24 @@ func main() {
 				return
 			}
 
+			// 자식 댓글(대댓글) 존재 시 작성자 수정 차단 — 관리자는 우회
+			// 그누보드 답글 트리 규칙: 같은 wr_parent 안에서 wr_comment_reply 가
+			// 본 댓글의 prefix 로 시작하고 길이가 더 긴 row 가 자식.
+			if userLevel < 10 {
+				var childCount int64
+				parentReply := comment.WrCommentReply
+				tbl := fmt.Sprintf("g5_write_%s", slug)
+				if err := db.Table(tbl).
+					Where("wr_parent = ?", comment.WrParent).
+					Where("wr_is_comment = 1").
+					Where("wr_comment_reply LIKE ?", parentReply+"%").
+					Where("LENGTH(wr_comment_reply) > ?", len(parentReply)).
+					Count(&childCount).Error; err == nil && childCount > 0 {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "대댓글이 있는 댓글은 수정할 수 없습니다"})
+					return
+				}
+			}
+
 			// 요청 바디 파싱
 			var req struct {
 				Content string `json:"content" binding:"required"`
@@ -3814,6 +3832,22 @@ func main() {
 			if comment.MbID != userID && userLevel < 10 {
 				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "삭제 권한이 없습니다"})
 				return
+			}
+
+			// 자식 댓글(대댓글) 존재 시 작성자 삭제 차단 — 관리자는 우회
+			if userLevel < 10 {
+				var childCount int64
+				parentReply := comment.WrCommentReply
+				tbl := fmt.Sprintf("g5_write_%s", slug)
+				if err := db.Table(tbl).
+					Where("wr_parent = ?", comment.WrParent).
+					Where("wr_is_comment = 1").
+					Where("wr_comment_reply LIKE ?", parentReply+"%").
+					Where("LENGTH(wr_comment_reply) > ?", len(parentReply)).
+					Count(&childCount).Error; err == nil && childCount > 0 {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "대댓글이 있는 댓글은 삭제할 수 없습니다"})
+					return
+				}
 			}
 
 			// 관리자(level >= 10)는 즉시 삭제
