@@ -3426,6 +3426,30 @@ func main() {
 				return
 			}
 
+			// 댓글 수정 포인트 차감 — 작성자 부담, 관리자 면제
+			// 수정 행위 자체에 비용을 부과하여 "신중한 작성" 을 유도. UI 와 API 우회 호출 양쪽 동일 적용.
+			const commentEditCost = 10000
+			pointDeducted := false
+			if userLevel < 10 {
+				canAfford, err := gnuPointWriteRepo.CanAfford(userID, -commentEditCost)
+				if err != nil {
+					releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "포인트 확인 실패"})
+					return
+				}
+				if !canAfford {
+					releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": fmt.Sprintf("댓글 수정에 %d 포인트가 필요합니다. 보유 포인트가 부족합니다.", commentEditCost)})
+					return
+				}
+				if err := gnuPointWriteRepo.AddPoint(userID, -commentEditCost, "댓글 수정", fmt.Sprintf("g5_write_%s", slug), strconv.Itoa(commentID), "comment_edit", nil); err != nil {
+					releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "포인트 차감 실패"})
+					return
+				}
+				pointDeducted = true
+			}
+
 			// 수정 전 내용을 리비전에 저장 — 양쪽 테이블 모두 기록
 			var nextVersion int
 			db.Raw("SELECT COALESCE(MAX(version), 0) + 1 FROM g5_write_revisions WHERE board_id = ? AND wr_id = ?",
@@ -3492,6 +3516,12 @@ func main() {
 				)
 			}
 			if txErr != nil {
+				// 본문 update 실패 시 차감 보상 트랜잭션 — 사용자 손해 방지
+				if pointDeducted {
+					if err := gnuPointWriteRepo.AddPoint(userID, commentEditCost, "댓글 수정 실패 환불", fmt.Sprintf("g5_write_%s", slug), strconv.Itoa(commentID), "comment_edit_rollback", nil); err != nil {
+						log.Printf("[CRITICAL] 댓글 수정 차감 롤백 실패 mb_id=%s wr_id=%d: %v", userID, commentID, err)
+					}
+				}
 				releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 수정 실패"})
 				return
