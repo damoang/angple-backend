@@ -127,6 +127,26 @@ var writeDuplicateDetectedTotal = promauto.NewCounterVec(
 	[]string{"operation", "reason"},
 )
 
+// getCommentEditPolicy returns the comment-edit cost (in points) and grace period (in seconds)
+// from environment variables, falling back to safe defaults. Defaults match the operator
+// decision of 2026-05-15: 50,000 P per edit with a 5-minute grace window after creation.
+// Setting COMMENT_EDIT_COST=0 disables charging entirely (revision-only mode).
+func getCommentEditPolicy() (cost, graceSeconds int) {
+	cost = 50000
+	if v := os.Getenv("COMMENT_EDIT_COST"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			cost = parsed
+		}
+	}
+	graceSeconds = 300
+	if v := os.Getenv("COMMENT_EDIT_GRACE_SECONDS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			graceSeconds = parsed
+		}
+	}
+	return cost, graceSeconds
+}
+
 func makePostDedupKey(boardID, memberID, title string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(title))))
 	return fmt.Sprintf("write:dedupe:%s:%s:%s", boardID, memberID, hex.EncodeToString(sum[:]))
@@ -2286,9 +2306,17 @@ func main() {
 				transformed = enrichWithAuthorMemo(db, currentUserID, transformed)
 			}
 
+			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
+			editCost, editGraceSeconds := getCommentEditPolicy()
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data":    transformed,
+				"meta": gin.H{
+					"comment_edit_policy": gin.H{
+						"cost":          editCost,
+						"grace_seconds": editGraceSeconds,
+					},
+				},
 			})
 		})
 
@@ -3426,11 +3454,13 @@ func main() {
 				return
 			}
 
-			// 댓글 수정 포인트 차감 — 작성자 부담, 관리자 면제
-			// 수정 행위 자체에 비용을 부과하여 "신중한 작성" 을 유도. UI 와 API 우회 호출 양쪽 동일 적용.
-			const commentEditCost = 10000
+			// 댓글 수정 포인트 차감 정책 — env 기반, 하드코딩 금지 (getCommentEditPolicy 참고).
+			// 관리자(mb_level >= 10) 는 항상 면제. UI / API 우회 호출 동일 적용.
+			commentEditCost, graceSeconds := getCommentEditPolicy()
+			inGracePeriod := time.Since(comment.WrDatetime) <= time.Duration(graceSeconds)*time.Second
+
 			pointDeducted := false
-			if userLevel < 10 {
+			if userLevel < 10 && !inGracePeriod && commentEditCost > 0 {
 				canAfford, err := gnuPointWriteRepo.CanAfford(userID, -commentEditCost)
 				if err != nil {
 					releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
