@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,7 +50,7 @@ func isSecureCookie() bool {
 	return gin.Mode() == gin.ReleaseMode
 }
 
-// authDomainGroup — auth_domain_groups 테이블 1 row (cookie domain 멀티 테넌트 매핑)
+// authDomainGroup — auth_domain_groups 테이블 1 row (legacy, Phase 8 Day 6 에서 deprecated 예정)
 type authDomainGroup struct {
 	Suffix       string `gorm:"primaryKey"`
 	CookieDomain string
@@ -57,10 +58,21 @@ type authDomainGroup struct {
 
 func (authDomainGroup) TableName() string { return "auth_domain_groups" }
 
+// site — sites 테이블 1 row (Phase 8 Day 1, multi-tenant SaaS 통합 식별)
+type site struct {
+	Slug         string `gorm:"column:slug"`
+	PrimaryHost  string `gorm:"column:primary_host"`
+	Aliases      string `gorm:"column:aliases;type:json"` // JSON 문자열 (gorm 이 raw 로 가져옴)
+	CookieDomain string `gorm:"column:cookie_domain"`
+	Status       string `gorm:"column:status"`
+}
+
+func (site) TableName() string { return "sites" }
+
 // cookieDomainCache — DB-backed lookup 의 in-memory cache (5분 TTL)
 type cookieDomainCache struct {
 	mu       sync.RWMutex
-	rules    map[string]string // suffix → cookie_domain
+	rules    map[string]string // host/suffix → cookie_domain
 	loadedAt time.Time
 }
 
@@ -70,16 +82,48 @@ const cdCacheTTL = 5 * time.Minute
 
 // StartCookieDomainCacheRefresher — 앱 부팅 시 1회 호출하여 즉시 cache 로드 + 5분마다 background refresh.
 // 새 사이트 admin UI 추가 시 5분 안에 자동 적용.
+//
+// Phase 8 Day 2 — dual-read: sites 테이블 우선, auth_domain_groups fallback.
+//   - sites.primary_host + sites.aliases → cookie_domain (활성 상태만)
+//   - auth_domain_groups.suffix (sites 미커버 suffix backfill)
+//
+// Phase 8 Day 6 에서 auth_domain_groups 제거 예정 (sites 단일 source).
 func StartCookieDomainCacheRefresher(db *gorm.DB) {
 	refresh := func() {
+		m := make(map[string]string)
+
+		// 1) sites 테이블 — primary_host + aliases 등록 (활성만)
+		var sites []site
+		if err := db.Where("status = ?", "active").Find(&sites).Error; err == nil {
+			for _, s := range sites {
+				m[s.PrimaryHost] = s.CookieDomain
+				if s.Aliases != "" && s.Aliases != "null" {
+					var aliases []string
+					if err := json.Unmarshal([]byte(s.Aliases), &aliases); err == nil {
+						for _, a := range aliases {
+							m[a] = s.CookieDomain
+						}
+					}
+				}
+			}
+		}
+		// sites 쿼리 실패 시: m 비어있어도 다음 단계 진행 (auth_domain_groups fallback)
+
+		// 2) auth_domain_groups — sites 미커버 suffix 만 backfill (legacy 호환)
 		var rules []authDomainGroup
-		if err := db.Find(&rules).Error; err != nil {
-			return // DB 에러 시 기존 cache 유지 (fail-safe)
+		if err := db.Find(&rules).Error; err == nil {
+			for _, r := range rules {
+				if _, exists := m[r.Suffix]; !exists {
+					m[r.Suffix] = r.CookieDomain
+				}
+			}
 		}
-		m := make(map[string]string, len(rules))
-		for _, r := range rules {
-			m[r.Suffix] = r.CookieDomain
+
+		// 둘 다 실패 + 기존 cache 있으면 유지 (fail-safe)
+		if len(m) == 0 {
+			return
 		}
+
 		globalCDCache.mu.Lock()
 		globalCDCache.rules = m
 		globalCDCache.loadedAt = time.Now()
