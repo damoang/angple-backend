@@ -65,10 +65,10 @@ func writeSecret(plain string) error {
 }
 
 type colInfo struct {
-	name      string
-	notNull   bool
+	name       string
+	notNull    bool
 	hasDefault bool
-	colType   string
+	colType    string
 }
 
 func showColumns(db *sql.DB, table string) (map[string]colInfo, error) {
