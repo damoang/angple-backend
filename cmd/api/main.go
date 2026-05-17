@@ -2850,6 +2850,11 @@ func main() {
 				}
 			}
 
+			// 직접홍보 게시판: Redis 캐시 무효화 (서버 측 — 클라이언트 의존 제거)
+			if slug == "promotion" && redisClient != nil {
+				redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
+			}
+
 			payload := gin.H{
 				"success": true,
 				"data":    v1handler.TransformToV1PostDetail(&post, false, slug),
@@ -3386,6 +3391,11 @@ func main() {
 				}
 			}
 
+			// 직접홍보 게시판: Redis 캐시 무효화
+			if slug == "promotion" && redisClient != nil {
+				redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
+			}
+
 			payload := gin.H{"success": true, "message": "수정 완료"}
 			storeIdempotentWriteResponse(c.Request.Context(), redisClient, idempotencyBaseKey, http.StatusOK, payload)
 			c.JSON(http.StatusOK, payload)
@@ -3686,6 +3696,10 @@ func main() {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
 				}
+				// 직접홍보 게시판: Redis 캐시 무효화
+				if slug == "promotion" && redisClient != nil {
+					redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
+				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
 			}
@@ -3724,6 +3738,10 @@ func main() {
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
+				}
+				// 직접홍보 게시판: Redis 캐시 무효화
+				if slug == "promotion" && redisClient != nil {
+					redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
