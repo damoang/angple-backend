@@ -3178,6 +3178,21 @@ func main() {
 				return
 			}
 
+			// #12420: 신고 누적으로 자동 잠긴 글 수정 차단. admin (level>=10) 만 예외.
+			// G5Write struct 가 wr_7 컬럼을 직접 매핑하지 않으므로 raw select.
+			// wr_7 컬럼 없는 게시판에서는 Scan 실패하나 wrLock 이 "" 유지 → lock 체크 통과 (defensive).
+			if userLevel < 10 {
+				var wrLock string
+				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
+					Select("COALESCE(wr_7, '')").
+					Where("wr_id = ?", postID).
+					Scan(&wrLock).Error
+				if wrLock == "lock" {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "신고 누적으로 잠긴 게시물은 수정할 수 없습니다"})
+					return
+				}
+			}
+
 			// 요청 바디 파싱
 			var req struct {
 				Title              *string  `json:"title"`
@@ -3423,6 +3438,19 @@ func main() {
 			if comment.MbID != userID && userLevel < 10 {
 				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "수정 권한이 없습니다"})
 				return
+			}
+
+			// #12420: 신고 누적으로 자동 잠긴 댓글 수정 차단. admin (level>=10) 만 예외.
+			if userLevel < 10 {
+				var wrLock string
+				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
+					Select("COALESCE(wr_7, '')").
+					Where("wr_id = ?", commentID).
+					Scan(&wrLock).Error
+				if wrLock == "lock" {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "신고 누적으로 잠긴 댓글은 수정할 수 없습니다"})
+					return
+				}
 			}
 
 			// 자식 댓글(대댓글) 존재 시 작성자 수정 차단 — 관리자는 우회
@@ -4525,6 +4553,19 @@ func main() {
 				return
 			}
 
+			// #12420: 이미 신고 누적으로 자동 잠긴 글은 추가 신고 차단 (idempotent — 처리 완료 신호)
+			{
+				var wrLock string
+				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
+					Select("COALESCE(wr_7, '')").
+					Where("wr_id = ?", postID).
+					Scan(&wrLock).Error
+				if wrLock == "lock" {
+					c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고 처리가 완료된 게시물입니다"})
+					return
+				}
+			}
+
 			// 중복 신고 확인 (g5_na_singo 테이블)
 			var count int64
 			db.Table("g5_na_singo").Where("sg_table = ? AND sg_id = ? AND mb_id = ?", slug, postID, userID).Count(&count)
@@ -4602,6 +4643,19 @@ func main() {
 			if comment.MbID == userID {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "자신의 댓글은 신고할 수 없습니다"})
 				return
+			}
+
+			// #12420: 이미 신고 누적으로 자동 잠긴 댓글은 추가 신고 차단 (idempotent)
+			{
+				var wrLock string
+				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
+					Select("COALESCE(wr_7, '')").
+					Where("wr_id = ?", commentID).
+					Scan(&wrLock).Error
+				if wrLock == "lock" {
+					c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고 처리가 완료된 댓글입니다"})
+					return
+				}
 			}
 
 			// 중복 신고 확인 (g5_na_singo 테이블)
