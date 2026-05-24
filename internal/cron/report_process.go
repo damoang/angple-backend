@@ -794,10 +794,16 @@ func autoLockPost(tx *gorm.DB, boTable string, postID, threshold int) {
 	}
 
 	// 승인된 고유 신고자 수 카운트 (해당 게시글 대상)
+	// 글 자체 신고만 카운트 (#truthroom-lock 버그 수정).
+	// 신고 INSERT 패턴: 글 신고는 sg_id=sg_parent=postID, 댓글 신고는 sg_id=commentID, sg_parent=postID.
+	// 기존 (sg_id=? OR sg_parent=?) 는 그 글의 모든 "댓글 신고"까지 부모 글로 합산하여
+	// 본문 신고 0건인 글이 댓글 신고만으로 오잠금되는 문제가 있었음.
+	// autoLockComment 와 대칭으로 sg_id AND sg_parent (글 자체 신고) 만 집계한다.
+	// 댓글 신고는 autoLockComment 가 댓글 단위로 개별 처리.
 	var approvedReporterCount int64
 	tx.Raw(`
 		SELECT COUNT(DISTINCT mb_id) FROM g5_na_singo
-		WHERE sg_table = ? AND (sg_id = ? OR sg_parent = ?) AND admin_approved = 1
+		WHERE sg_table = ? AND sg_id = ? AND sg_parent = ? AND admin_approved = 1
 	`, boTable, postID, postID).Scan(&approvedReporterCount)
 
 	if common.SafeInt64ToInt(approvedReporterCount) < threshold {
