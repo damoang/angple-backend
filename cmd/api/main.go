@@ -129,12 +129,14 @@ var writeDuplicateDetectedTotal = promauto.NewCounterVec(
 
 // getCommentEditPolicy returns the comment-edit cost (in points) and grace period (in seconds)
 // from environment variables, falling back to safe defaults.
-// 정책 재설정 (operator decision 2026-05-25): 대댓글이 없는 댓글은 항상 무료 수정,
-// 대댓글이 달린 댓글만 cost(기본 5,000 P) 차감. grace 윈도우는 더 이상 차감 판단에
-// 사용하지 않으며(대댓글 유무 기준), graceSeconds 는 호환을 위해 남겨둔다.
+// 정책 (operator decision 2026-05-25):
+//   - 작성 후 grace(기본 5분=300s) 이내: 무료 (대댓글 유무 무관)
+//   - grace 밖 + 대댓글 없음: 무료
+//   - grace 밖 + 대댓글 있음: cost(기본 50,000 P) 차감
+//   - 관리자(level>=10): 항상 면제
 // Setting COMMENT_EDIT_COST=0 disables charging entirely (revision-only mode).
 func getCommentEditPolicy() (cost, graceSeconds int) {
-	cost = 5000
+	cost = 50000
 	if v := os.Getenv("COMMENT_EDIT_COST"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
 			cost = parsed
@@ -3496,12 +3498,13 @@ func main() {
 			}
 
 			// 댓글 수정 포인트 차감 정책 — env 기반, 하드코딩 금지 (getCommentEditPolicy 참고).
-			// 정책 (2026-05-25): 대댓글 없으면 무료, 대댓글 있으면 cost 차감.
-			// 관리자(mb_level >= 10) 는 항상 면제. UI / API 우회 호출 동일 적용.
-			commentEditCost, _ := getCommentEditPolicy()
+			// 정책 (2026-05-25): grace(5분) 이내 무료, grace 밖 + 대댓글 있으면 cost 차감,
+			// 대댓글 없으면 무료. 관리자(mb_level >= 10) 는 항상 면제. UI / API 우회 동일.
+			commentEditCost, graceSeconds := getCommentEditPolicy()
+			inGracePeriod := time.Since(comment.WrDatetime) <= time.Duration(graceSeconds)*time.Second
 
 			pointDeducted := false
-			if userLevel < 10 && hasReplies && commentEditCost > 0 {
+			if userLevel < 10 && hasReplies && !inGracePeriod && commentEditCost > 0 {
 				canAfford, err := gnuPointWriteRepo.CanAfford(userID, -commentEditCost)
 				if err != nil {
 					releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
