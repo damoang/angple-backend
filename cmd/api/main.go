@@ -134,6 +134,7 @@ var writeDuplicateDetectedTotal = promauto.NewCounterVec(
 //   - grace 밖 + 대댓글 없음: 무료
 //   - grace 밖 + 대댓글 있음: cost(기본 50,000 P) 차감
 //   - 관리자(level>=10): 항상 면제
+//
 // Setting COMMENT_EDIT_COST=0 disables charging entirely (revision-only mode).
 func getCommentEditPolicy() (cost, graceSeconds int) {
 	cost = 50000
