@@ -128,8 +128,13 @@ var writeDuplicateDetectedTotal = promauto.NewCounterVec(
 )
 
 // getCommentEditPolicy returns the comment-edit cost (in points) and grace period (in seconds)
-// from environment variables, falling back to safe defaults. Defaults match the operator
-// decision of 2026-05-15: 50,000 P per edit with a 5-minute grace window after creation.
+// from environment variables, falling back to safe defaults.
+// 정책 (operator decision 2026-05-25):
+//   - 작성 후 grace(기본 5분=300s) 이내: 무료 (대댓글 유무 무관)
+//   - grace 밖 + 대댓글 없음: 무료
+//   - grace 밖 + 대댓글 있음: cost(기본 50,000 P) 차감
+//   - 관리자(level>=10): 항상 면제
+//
 // Setting COMMENT_EDIT_COST=0 disables charging entirely (revision-only mode).
 func getCommentEditPolicy() (cost, graceSeconds int) {
 	cost = 50000
@@ -3453,9 +3458,11 @@ func main() {
 				}
 			}
 
-			// 자식 댓글(대댓글) 존재 시 작성자 수정 차단 — 관리자는 우회
+			// 자식 댓글(대댓글) 존재 여부 계산 — 차단하지 않고 포인트 차감 판단에 사용.
+			// 정책 (2026-05-25): 대댓글 없으면 무료 수정, 대댓글 있으면 cost 차감. 관리자 면제.
 			// 그누보드 답글 트리 규칙: 같은 wr_parent 안에서 wr_comment_reply 가
 			// 본 댓글의 prefix 로 시작하고 길이가 더 긴 row 가 자식.
+			hasReplies := false
 			if userLevel < 10 {
 				var childCount int64
 				parentReply := comment.WrCommentReply
@@ -3466,8 +3473,7 @@ func main() {
 					Where("wr_comment_reply LIKE ?", parentReply+"%").
 					Where("LENGTH(wr_comment_reply) > ?", len(parentReply)).
 					Count(&childCount).Error; err == nil && childCount > 0 {
-					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "대댓글이 있는 댓글은 수정할 수 없습니다"})
-					return
+					hasReplies = true
 				}
 			}
 
@@ -3493,12 +3499,13 @@ func main() {
 			}
 
 			// 댓글 수정 포인트 차감 정책 — env 기반, 하드코딩 금지 (getCommentEditPolicy 참고).
-			// 관리자(mb_level >= 10) 는 항상 면제. UI / API 우회 호출 동일 적용.
+			// 정책 (2026-05-25): grace(5분) 이내 무료, grace 밖 + 대댓글 있으면 cost 차감,
+			// 대댓글 없으면 무료. 관리자(mb_level >= 10) 는 항상 면제. UI / API 우회 동일.
 			commentEditCost, graceSeconds := getCommentEditPolicy()
 			inGracePeriod := time.Since(comment.WrDatetime) <= time.Duration(graceSeconds)*time.Second
 
 			pointDeducted := false
-			if userLevel < 10 && !inGracePeriod && commentEditCost > 0 {
+			if userLevel < 10 && hasReplies && !inGracePeriod && commentEditCost > 0 {
 				canAfford, err := gnuPointWriteRepo.CanAfford(userID, -commentEditCost)
 				if err != nil {
 					releaseIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey)
