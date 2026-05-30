@@ -47,14 +47,18 @@ func containsCJK(s string) bool {
 }
 
 // addInfixWildcards wraps each whitespace-separated token with * for partial matching.
-// For CJK tokens (ngram_len=1), uses phrase search ("*token*") to ensure
-// adjacent ngram matching instead of scattered individual character matches.
+// For CJK tokens (ngram_len=1), uses strict phrase search ("token") so that
+// 1-character ngrams must be adjacent — prevents "산불" matching "생산 불가"
+// where "산" and "불" appear in different words (#12543, #11791 재발 패턴).
+// Non-CJK (영문/숫자) 은 기존 infix wildcard 그대로 유지.
 func addInfixWildcards(escaped string) string {
 	tokens := strings.Fields(escaped)
 	for i, t := range tokens {
 		if containsCJK(t) && len([]rune(t)) >= 2 {
-			// CJK phrase: "단파" → "*단파*" (adjacent ngram matching)
-			tokens[i] = `"*` + t + `*"`
+			// CJK 2자+ phrase: strict ordered match ("산불").
+			// 이전엔 `"*산불*"` 였으나 Manticore 가 wildcard expand 시 1글자
+			// ngram ("산", "불") 단독 매칭으로 분해되어 false positive 발생.
+			tokens[i] = `"` + t + `"`
 		} else {
 			tokens[i] = "*" + t + "*"
 		}
