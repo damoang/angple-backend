@@ -2376,6 +2376,13 @@ func main() {
 				}
 			}
 
+			// is_discipline_related enrich (이용제한 처분 근거 글 표시).
+			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
+			// list/comments endpoint 와 일관성 유지 (PR #484 후속).
+			if enriched := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}); len(enriched) > 0 {
+				postDetail = enriched[0]
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data":    postDetail,
