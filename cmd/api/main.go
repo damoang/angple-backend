@@ -2402,7 +2402,7 @@ func main() {
 					commentIDs = append(commentIDs, cm.WrID)
 				}
 				type lockRow struct {
-					WrID  int    `gorm:"column:wr_id"`
+					WrID   int    `gorm:"column:wr_id"`
 					Wr7Val string `gorm:"column:wr_7_value"`
 				}
 				var locks []lockRow
