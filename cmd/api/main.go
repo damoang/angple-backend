@@ -2393,6 +2393,37 @@ func main() {
 				transformed = enrichWithAuthorMemo(db, currentUserID, transformed)
 			}
 
+			// is_restricted enrich — 댓글의 wr_7='lock' 검사 (damoang-backend UnlockPostContent
+			// 가 잠금 시 wr_7='lock' 설정). batch 1 query. board 마다 wr_7 컬럼 유무 다름 →
+			// 에러 무시 (defensive, COALESCE).
+			if len(comments) > 0 {
+				commentIDs := make([]int, 0, len(comments))
+				for _, cm := range comments {
+					commentIDs = append(commentIDs, cm.WrID)
+				}
+				type lockRow struct {
+					WrID   int    `gorm:"column:wr_id"`
+					Wr7Val string `gorm:"column:wr_7_value"`
+				}
+				var locks []lockRow
+				tbl := fmt.Sprintf("g5_write_%s", slug)
+				_ = db.Table(tbl).
+					Select("wr_id, COALESCE(wr_7, '') AS wr_7_value").
+					Where("wr_id IN ?", commentIDs).
+					Find(&locks).Error
+				lockSet := make(map[int]struct{}, len(locks))
+				for _, l := range locks {
+					if l.Wr7Val == "lock" {
+						lockSet[l.WrID] = struct{}{}
+					}
+				}
+				for i, cm := range comments {
+					if _, ok := lockSet[cm.WrID]; ok {
+						transformed[i]["is_restricted"] = true
+					}
+				}
+			}
+
 			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
 			editCost, editGraceSeconds := getCommentEditPolicy()
 			c.JSON(http.StatusOK, gin.H{
