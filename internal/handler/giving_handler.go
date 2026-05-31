@@ -148,7 +148,7 @@ func (h *GivingHandler) List(c *gin.Context) {
 
 	contentExcerpt := "LEFT(g.wr_content, " + strconv.Itoa(givingContentExcerptLen) + ") AS wr_content"
 	query := h.db.Table("g5_write_giving AS g").
-		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7, g.wr_10, `+contentExcerpt+`,
+		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7, g.wr_10, ` + contentExcerpt + `,
 			COALESCE((SELECT COUNT(DISTINCT b.mb_id) FROM g5_giving_bid b WHERE b.wr_id = g.wr_id), 0) AS participant_count`).
 		Where("g.wr_is_comment = 0").
 		Where("g.wr_deleted_at IS NULL")
