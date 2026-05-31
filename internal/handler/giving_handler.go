@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,12 @@ import (
 
 // givingBoardSlug is the g5_write_{slug} table suffix + g5_board_file.bo_table key.
 const givingBoardSlug = "giving"
+
+// givingContentExcerptLen limits the wr_content slice read for first-image extraction.
+const givingContentExcerptLen = 1000
+
+// givingImgRegex extracts the first <img src="..."> URL from a giving post body.
+var givingImgRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
 
 // GivingHandler handles giving plugin API endpoints
 type GivingHandler struct {
@@ -49,6 +56,82 @@ type GivingListItem struct {
 	IsUrgent         bool   `json:"is_urgent"`
 }
 
+// givingRow holds raw columns selected from g5_write_giving.
+type givingRow struct {
+	WrID             int    `gorm:"column:wr_id"`
+	WrSubject        string `gorm:"column:wr_subject"`
+	Wr4              string `gorm:"column:wr_4"`  // start_time
+	Wr5              string `gorm:"column:wr_5"`  // end_time
+	Wr7              string `gorm:"column:wr_7"`  // state
+	Wr10             string `gorm:"column:wr_10"` // image URL (사용자 입력)
+	WrContent        string `gorm:"column:wr_content"`
+	ParticipantCount int    `gorm:"column:participant_count"`
+}
+
+// extractFirstImageURL returns the first <img src> in HTML content, or "".
+func extractFirstImageURL(html string) string {
+	m := givingImgRegex.FindStringSubmatch(html)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
+}
+
+// shouldKeep decides whether a row passes the tab filter.
+func shouldKeep(meta givingdomain.Meta, tab string) bool {
+	if meta.Status == givingdomain.StatusNoGiving {
+		// active 탭에는 noGiving (시간 미정) 도 진행중으로 포함, ended 탭에서는 제외
+		return tab != "ended"
+	}
+	if tab == "active" && meta.Status == givingdomain.StatusEnded {
+		return false
+	}
+	if tab == "ended" && meta.Status != givingdomain.StatusEnded {
+		return false
+	}
+	return true
+}
+
+// enrichThumbnails fills Thumbnail when Extra10 is empty.
+// Priority: extra_10 (already set) > 본문 첫 <img> > g5_board_file 첫 이미지.
+func (h *GivingHandler) enrichThumbnails(items []GivingListItem, contentByID map[int]string) {
+	needFileLookup := make([]int, 0, len(items))
+	for i := range items {
+		if items[i].Extra10 != "" || items[i].Thumbnail != "" {
+			continue
+		}
+		if c := contentByID[items[i].ID]; c != "" {
+			if url := extractFirstImageURL(c); url != "" {
+				items[i].Thumbnail = url
+				continue
+			}
+		}
+		needFileLookup = append(needFileLookup, items[i].ID)
+	}
+
+	if h.fileRepo == nil || len(needFileLookup) == 0 {
+		return
+	}
+	files, err := h.fileRepo.GetFirstImagesByPostIDs(givingBoardSlug, needFileLookup)
+	if err != nil || len(files) == 0 {
+		return
+	}
+	for i := range items {
+		if items[i].Extra10 != "" || items[i].Thumbnail != "" {
+			continue
+		}
+		fname, ok := files[items[i].ID]
+		if !ok {
+			continue
+		}
+		if h.cdnURL != "" {
+			items[i].Thumbnail = h.cdnURL + "/data/file/" + givingBoardSlug + "/" + fname
+		} else {
+			items[i].Thumbnail = "data/file/" + givingBoardSlug + "/" + fname
+		}
+	}
+}
+
 // List returns giving posts filtered by tab (active/ended)
 // GET /api/plugins/giving/list?tab=active&limit=8&sort=urgent
 func (h *GivingHandler) List(c *gin.Context) {
@@ -63,18 +146,9 @@ func (h *GivingHandler) List(c *gin.Context) {
 
 	now := time.Now()
 
-	type givingRow struct {
-		WrID             int    `gorm:"column:wr_id"`
-		WrSubject        string `gorm:"column:wr_subject"`
-		Wr4              string `gorm:"column:wr_4"`  // start_time
-		Wr5              string `gorm:"column:wr_5"`  // end_time
-		Wr7              string `gorm:"column:wr_7"`  // state
-		Wr10             string `gorm:"column:wr_10"` // image URL (사용자 입력)
-		ParticipantCount int    `gorm:"column:participant_count"`
-	}
-
+	contentExcerpt := "LEFT(g.wr_content, " + strconv.Itoa(givingContentExcerptLen) + ") AS wr_content"
 	query := h.db.Table("g5_write_giving AS g").
-		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7, g.wr_10,
+		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7, g.wr_10, `+contentExcerpt+`,
 			COALESCE((SELECT COUNT(DISTINCT b.mb_id) FROM g5_giving_bid b WHERE b.wr_id = g.wr_id), 0) AS participant_count`).
 		Where("g.wr_is_comment = 0").
 		Where("g.wr_deleted_at IS NULL")
@@ -89,6 +163,7 @@ func (h *GivingHandler) List(c *gin.Context) {
 	}
 
 	items := make([]GivingListItem, 0, len(rows))
+	contentByID := make(map[int]string, len(rows))
 	for _, r := range rows {
 		meta := givingdomain.Normalize(now, givingdomain.Meta{
 			StartRaw:         r.Wr4,
@@ -97,22 +172,11 @@ func (h *GivingHandler) List(c *gin.Context) {
 			ParticipantCount: r.ParticipantCount,
 		})
 
-		// 시작/종료 시각 미입력 (wr_4='' 또는 wr_5='') 글도 active 탭에 노출.
-		// damoang-backend ListActive 정책 (wr_4='' OR wr_5 > NOW + wr_5='' OR wr_5 > NOW) 과 일치.
-		// /giving/2238 처럼 시간 미정 진행중 글이 noGiving 으로 분류되어 응답 누락되던 #new 버그 fix.
-		if meta.Status == givingdomain.StatusNoGiving {
-			if tab == "ended" {
-				continue
-			}
-			// active 탭 에는 noGiving 도 포함 (진행중 으로 간주)
-		}
-		if tab == "active" && meta.Status == givingdomain.StatusEnded {
-			continue
-		}
-		if tab == "ended" && meta.Status != givingdomain.StatusEnded {
+		if !shouldKeep(meta, tab) {
 			continue
 		}
 
+		contentByID[r.WrID] = r.WrContent
 		items = append(items, GivingListItem{
 			ID:               r.WrID,
 			Title:            r.WrSubject,
@@ -142,33 +206,9 @@ func (h *GivingHandler) List(c *gin.Context) {
 		items = items[:limit]
 	}
 
-	// Thumbnail enrich: extra_10 비어있는 row 에 한해 g5_board_file 첫 이미지 사용.
-	// batch IN (bo_table='giving', wr_id IN …). frontend giving-card 의 fallback 우선순위
-	// (extra_10 → thumbnail → images[0]) 와 일관.
-	if h.fileRepo != nil {
-		needIDs := make([]int, 0, len(items))
-		for _, it := range items {
-			if it.Extra10 == "" {
-				needIDs = append(needIDs, it.ID)
-			}
-		}
-		if len(needIDs) > 0 {
-			if files, ferr := h.fileRepo.GetFirstImagesByPostIDs(givingBoardSlug, needIDs); ferr == nil && len(files) > 0 {
-				for i := range items {
-					if items[i].Extra10 != "" {
-						continue
-					}
-					if fname, ok := files[items[i].ID]; ok {
-						if h.cdnURL != "" {
-							items[i].Thumbnail = h.cdnURL + "/data/file/" + givingBoardSlug + "/" + fname
-						} else {
-							items[i].Thumbnail = "data/file/" + givingBoardSlug + "/" + fname
-						}
-					}
-				}
-			}
-		}
-	}
+	// Thumbnail enrich (extra_10 → 본문 첫 <img> → g5_board_file).
+	// frontend giving-card 의 우선순위 (extra_10 → thumbnail → images[0]) 와 일관.
+	h.enrichThumbnails(items, contentByID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
