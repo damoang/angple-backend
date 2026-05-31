@@ -539,6 +539,84 @@ func safeIntToUint64(v int) uint64 {
 	return uint64(v) // #nosec G115 -- IDs are always non-negative
 }
 
+// enrichWithAuthorImage augments items with each author's mb_image_url + mb_image_updated_at
+// as `author_image` + `author_image_updated_at` fields. Matches the shape consumed by
+// frontend `classic.svelte` layout (post.author_image / post.author_image_updated_at).
+//
+// Mirrors enrichWithAuthorMemo pattern:
+//   - Items whose author has no image (or no record) are returned unchanged.
+//   - Cache safety: items may be shared across requests (in-memory or Redis cache hit),
+//     so any item receiving image fields is shallow-copied before mutation.
+//
+// Anonymous users 도 author_image 가 필요하므로 currentUserID 입력 X.
+func enrichWithAuthorImage(db *gorm.DB, items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return items
+	}
+	seen := make(map[string]struct{}, len(items))
+	targetIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		id, ok := item["author_id"].(string)
+		if !ok || id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		targetIDs = append(targetIDs, id)
+	}
+	if len(targetIDs) == 0 {
+		return items
+	}
+	type imageRow struct {
+		MbID             string     `gorm:"column:mb_id"`
+		MbImageURL       string     `gorm:"column:mb_image_url"`
+		MbImageUpdatedAt *time.Time `gorm:"column:mb_image_updated_at"`
+	}
+	var rows []imageRow
+	if err := db.Table("g5_member").
+		Select("mb_id, mb_image_url, mb_image_updated_at").
+		Where("mb_id IN ? AND mb_image_url != ''", targetIDs).
+		Find(&rows).Error; err != nil {
+		return items
+	}
+	if len(rows) == 0 {
+		return items
+	}
+	type imgEntry struct {
+		URL       string
+		UpdatedAt *time.Time
+	}
+	imgMap := make(map[string]imgEntry, len(rows))
+	for _, r := range rows {
+		imgMap[r.MbID] = imgEntry{URL: r.MbImageURL, UpdatedAt: r.MbImageUpdatedAt}
+	}
+	result := make([]map[string]any, len(items))
+	for i, item := range items {
+		id, _ := item["author_id"].(string)
+		if id == "" {
+			result[i] = item
+			continue
+		}
+		entry, ok := imgMap[id]
+		if !ok {
+			result[i] = item
+			continue
+		}
+		copied := make(map[string]any, len(item)+2)
+		for k, v := range item {
+			copied[k] = v
+		}
+		copied["author_image"] = entry.URL
+		if entry.UpdatedAt != nil {
+			copied["author_image_updated_at"] = entry.UpdatedAt.UTC().Format(time.RFC3339)
+		}
+		result[i] = copied
+	}
+	return result
+}
+
 // extractDisciplinelogID extracts the numeric ID from link1 values like "disciplinelog/1234" or "disciplinelog:1234"
 func extractDisciplinelogID(link1 string) string {
 	for _, prefix := range []string{"disciplinelog/", "disciplinelog:"} {
@@ -2035,6 +2113,10 @@ func main() {
 					}
 				}
 			}
+
+			// author_image enrich (모든 사용자 대상, cache 저장 전 적용 → cache hit 도 자동 포함).
+			// classic.svelte layout 의 author_image / author_image_updated_at 필드 채움.
+			items = enrichWithAuthorImage(db, items)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			if useHasNextPagination {
