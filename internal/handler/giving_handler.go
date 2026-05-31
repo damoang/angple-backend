@@ -82,8 +82,14 @@ func (h *GivingHandler) List(c *gin.Context) {
 			ParticipantCount: r.ParticipantCount,
 		})
 
+		// 시작/종료 시각 미입력 (wr_4='' 또는 wr_5='') 글도 active 탭에 노출.
+		// damoang-backend ListActive 정책 (wr_4='' OR wr_5 > NOW + wr_5='' OR wr_5 > NOW) 과 일치.
+		// /giving/2238 처럼 시간 미정 진행중 글이 noGiving 으로 분류되어 응답 누락되던 #new 버그 fix.
 		if meta.Status == givingdomain.StatusNoGiving {
-			continue
+			if tab == "ended" {
+				continue
+			}
+			// active 탭 에는 noGiving 도 포함 (진행중 으로 간주)
 		}
 		if tab == "active" && meta.Status == givingdomain.StatusEnded {
 			continue
