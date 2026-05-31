@@ -617,6 +617,89 @@ func enrichWithAuthorImage(db *gorm.DB, items []map[string]any) []map[string]any
 	return result
 }
 
+// enrichWithDisciplineRelated augments items with `is_discipline_related: true` for posts/comments
+// referenced in completed disciplinary actions (이용제한 처분 완료).
+//
+// Data source: `g5_na_singo.discipline_log_id IS NOT NULL` + sg_table + sg_id matches.
+// 운영자가 사용자 이용제한 처분 시 근거로 삼은 글/댓글이며, 신고잠김(wr_7='lock') 과는 별개 개념.
+//
+// INDEX 활용: `idx_table_id_time` 또는 `idx_singo_table_id` (sg_table, sg_id) 복합 INDEX hit.
+// `discipline_log_id IS NOT NULL` 은 IN clause 결과의 작은 row set 안에서만 filter 됨 → slow query 0.
+//
+// Mirrors enrichWithAuthorImage pattern (cache safety: shallow-copy on mutation).
+func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
+	if len(items) == 0 || slug == "" {
+		return items
+	}
+	seen := make(map[int]struct{}, len(items))
+	targetIDs := make([]int, 0, len(items))
+	for _, item := range items {
+		// item["id"] 가 int 인 경우와 float64 (JSON unmarshal) 둘 다 지원
+		var id int
+		switch v := item["id"].(type) {
+		case int:
+			id = v
+		case int64:
+			id = int(v)
+		case float64:
+			id = int(v)
+		default:
+			continue
+		}
+		if id <= 0 {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		targetIDs = append(targetIDs, id)
+	}
+	if len(targetIDs) == 0 {
+		return items
+	}
+	type singoRow struct {
+		SgID int `gorm:"column:sg_id"`
+	}
+	var rows []singoRow
+	if err := db.Table("g5_na_singo").
+		Select("DISTINCT sg_id").
+		Where("sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL", slug, targetIDs).
+		Find(&rows).Error; err != nil {
+		return items
+	}
+	if len(rows) == 0 {
+		return items
+	}
+	disciplinedSet := make(map[int]struct{}, len(rows))
+	for _, r := range rows {
+		disciplinedSet[r.SgID] = struct{}{}
+	}
+	result := make([]map[string]any, len(items))
+	for i, item := range items {
+		var id int
+		switch v := item["id"].(type) {
+		case int:
+			id = v
+		case int64:
+			id = int(v)
+		case float64:
+			id = int(v)
+		}
+		if _, ok := disciplinedSet[id]; !ok {
+			result[i] = item
+			continue
+		}
+		copied := make(map[string]any, len(item)+1)
+		for k, val := range item {
+			copied[k] = val
+		}
+		copied["is_discipline_related"] = true
+		result[i] = copied
+	}
+	return result
+}
+
 // extractDisciplinelogID extracts the numeric ID from link1 values like "disciplinelog/1234" or "disciplinelog:1234"
 func extractDisciplinelogID(link1 string) string {
 	for _, prefix := range []string{"disciplinelog/", "disciplinelog:"} {
@@ -2118,6 +2201,10 @@ func main() {
 			// classic.svelte layout 의 author_image / author_image_updated_at 필드 채움.
 			items = enrichWithAuthorImage(db, items)
 
+			// is_discipline_related enrich (이용제한 처분 근거 글 표시용).
+			// g5_na_singo.discipline_log_id IS NOT NULL 매칭. cache 저장 전 적용 → cache 자동 포함.
+			items = enrichWithDisciplineRelated(db, slug, items)
+
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			if useHasNextPagination {
 				meta["has_next"] = hasNext
@@ -2423,6 +2510,10 @@ func main() {
 					}
 				}
 			}
+
+			// is_discipline_related enrich (이용제한 처분 근거 댓글 표시).
+			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
+			transformed = enrichWithDisciplineRelated(db, slug, transformed)
 
 			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
 			editCost, editGraceSeconds := getCommentEditPolicy()
