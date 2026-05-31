@@ -78,7 +78,7 @@ func extractFirstImageURL(html string) string {
 }
 
 // shouldKeep decides whether a row passes the tab filter.
-func shouldKeep(meta givingdomain.Meta, tab string) bool {
+func shouldKeep(meta givingdomain.Normalized, tab string) bool {
 	if meta.Status == givingdomain.StatusNoGiving {
 		// active 탭에는 noGiving (시간 미정) 도 진행중으로 포함, ended 탭에서는 제외
 		return tab != "ended"
