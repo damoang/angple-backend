@@ -618,10 +618,10 @@ func enrichWithAuthorImage(db *gorm.DB, items []map[string]any) []map[string]any
 }
 
 // enrichWithDisciplineRelated augments items with `is_discipline_related: true` for posts/comments
-// referenced in completed disciplinary actions (이용제한 처분 완료).
+// referenced in completed disciplinary actions (이용제한 적용 완료).
 //
 // Data source: `g5_na_singo.discipline_log_id IS NOT NULL` + sg_table + sg_id matches.
-// 운영자가 사용자 이용제한 처분 시 근거로 삼은 글/댓글이며, 신고잠김(wr_7='lock') 과는 별개 개념.
+// 운영자가 사용자 이용제한 적용 시 근거로 삼은 글/댓글이며, 신고잠김(wr_7='lock') 과는 별개 개념.
 //
 // INDEX 활용: `idx_table_id_time` 또는 `idx_singo_table_id` (sg_table, sg_id) 복합 INDEX hit.
 // `discipline_log_id IS NOT NULL` 은 IN clause 결과의 작은 row set 안에서만 filter 됨 → slow query 0.
@@ -2201,7 +2201,7 @@ func main() {
 			// classic.svelte layout 의 author_image / author_image_updated_at 필드 채움.
 			items = enrichWithAuthorImage(db, items)
 
-			// is_discipline_related enrich (이용제한 처분 근거 글 표시용).
+			// is_discipline_related enrich (이용제한 근거 글 표시용).
 			// g5_na_singo.discipline_log_id IS NOT NULL 매칭. cache 저장 전 적용 → cache 자동 포함.
 			items = enrichWithDisciplineRelated(db, slug, items)
 
@@ -2376,7 +2376,7 @@ func main() {
 				}
 			}
 
-			// is_discipline_related enrich (이용제한 처분 근거 글 표시).
+			// is_discipline_related enrich (이용제한 근거 글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
 			// list/comments endpoint 와 일관성 유지 (PR #484 후속).
 			if enriched := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}); len(enriched) > 0 {
@@ -2518,7 +2518,7 @@ func main() {
 				}
 			}
 
-			// is_discipline_related enrich (이용제한 처분 근거 댓글 표시).
+			// is_discipline_related enrich (이용제한 근거 댓글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
 			transformed = enrichWithDisciplineRelated(db, slug, transformed)
 
