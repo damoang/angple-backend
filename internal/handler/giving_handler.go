@@ -4,21 +4,33 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	givingdomain "github.com/damoang/angple-backend/internal/domain/giving"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
+// givingBoardSlug is the g5_write_{slug} table suffix + g5_board_file.bo_table key.
+const givingBoardSlug = "giving"
+
 // GivingHandler handles giving plugin API endpoints
 type GivingHandler struct {
-	db *gorm.DB
+	db       *gorm.DB
+	fileRepo *gnurepo.FileRepository
+	cdnURL   string
 }
 
-// NewGivingHandler creates a new GivingHandler
-func NewGivingHandler(db *gorm.DB) *GivingHandler {
-	return &GivingHandler{db: db}
+// NewGivingHandler creates a new GivingHandler.
+// fileRepo + cdnURL 는 thumbnail enrich (g5_board_file → CDN URL) 에 사용.
+func NewGivingHandler(db *gorm.DB, fileRepo *gnurepo.FileRepository, cdnURL string) *GivingHandler {
+	return &GivingHandler{
+		db:       db,
+		fileRepo: fileRepo,
+		cdnURL:   strings.TrimRight(cdnURL, "/"),
+	}
 }
 
 // GivingListItem represents a giving item in list response
@@ -27,6 +39,8 @@ type GivingListItem struct {
 	Title            string `json:"title"`
 	Extra4           string `json:"extra_4,omitempty"`
 	Extra5           string `json:"extra_5"`
+	Extra10          string `json:"extra_10,omitempty"`
+	Thumbnail        string `json:"thumbnail,omitempty"`
 	GivingStart      string `json:"giving_start,omitempty"`
 	GivingEnd        string `json:"giving_end,omitempty"`
 	GivingStatus     string `json:"giving_status"`
@@ -52,14 +66,15 @@ func (h *GivingHandler) List(c *gin.Context) {
 	type givingRow struct {
 		WrID             int    `gorm:"column:wr_id"`
 		WrSubject        string `gorm:"column:wr_subject"`
-		Wr4              string `gorm:"column:wr_4"` // start_time
-		Wr5              string `gorm:"column:wr_5"` // end_time
-		Wr7              string `gorm:"column:wr_7"` // state
+		Wr4              string `gorm:"column:wr_4"`  // start_time
+		Wr5              string `gorm:"column:wr_5"`  // end_time
+		Wr7              string `gorm:"column:wr_7"`  // state
+		Wr10             string `gorm:"column:wr_10"` // image URL (사용자 입력)
 		ParticipantCount int    `gorm:"column:participant_count"`
 	}
 
 	query := h.db.Table("g5_write_giving AS g").
-		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7,
+		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7, g.wr_10,
 			COALESCE((SELECT COUNT(DISTINCT b.mb_id) FROM g5_giving_bid b WHERE b.wr_id = g.wr_id), 0) AS participant_count`).
 		Where("g.wr_is_comment = 0").
 		Where("g.wr_deleted_at IS NULL")
@@ -103,6 +118,7 @@ func (h *GivingHandler) List(c *gin.Context) {
 			Title:            r.WrSubject,
 			Extra4:           r.Wr4,
 			Extra5:           r.Wr5,
+			Extra10:          r.Wr10,
 			GivingStart:      meta.GivingStart,
 			GivingEnd:        meta.GivingEnd,
 			GivingStatus:     string(meta.Status),
@@ -124,6 +140,34 @@ func (h *GivingHandler) List(c *gin.Context) {
 	})
 	if len(items) > limit {
 		items = items[:limit]
+	}
+
+	// Thumbnail enrich: extra_10 비어있는 row 에 한해 g5_board_file 첫 이미지 사용.
+	// batch IN (bo_table='giving', wr_id IN …). frontend giving-card 의 fallback 우선순위
+	// (extra_10 → thumbnail → images[0]) 와 일관.
+	if h.fileRepo != nil {
+		needIDs := make([]int, 0, len(items))
+		for _, it := range items {
+			if it.Extra10 == "" {
+				needIDs = append(needIDs, it.ID)
+			}
+		}
+		if len(needIDs) > 0 {
+			if files, ferr := h.fileRepo.GetFirstImagesByPostIDs(givingBoardSlug, needIDs); ferr == nil && len(files) > 0 {
+				for i := range items {
+					if items[i].Extra10 != "" {
+						continue
+					}
+					if fname, ok := files[items[i].ID]; ok {
+						if h.cdnURL != "" {
+							items[i].Thumbnail = h.cdnURL + "/data/file/" + givingBoardSlug + "/" + fname
+						} else {
+							items[i].Thumbnail = "data/file/" + givingBoardSlug + "/" + fname
+						}
+					}
+				}
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
