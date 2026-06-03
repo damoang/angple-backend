@@ -39,9 +39,10 @@ type DisciplineLogContent struct {
 
 // ReportedItem represents a reported post or comment
 type ReportedItem struct {
-	Table  string `json:"table"`
-	ID     int    `json:"id"`
-	Parent int    `json:"parent,omitempty"`
+	Table   string `json:"table"`
+	ID      int    `json:"id"`
+	Parent  int    `json:"parent,omitempty"`
+	SgTypes []int  `json:"sg_types,omitempty"` // 개별 신고 사유 코드 목록 (g5_na_singo.sg_type)
 }
 
 // ViolationType represents a type of rule violation
@@ -325,14 +326,25 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		penaltyDateTo = &dateTo
 	}
 
-	// Convert reported items format (table -> board_id)
+	// Convert reported items format (table -> board_id) + enrich with per-item sg_types from g5_na_singo
 	reportedItems := make([]ReportedItem, 0, len(data.ReportedItems))
 	for _, item := range data.ReportedItems {
-		reportedItems = append(reportedItems, ReportedItem{
+		ri := ReportedItem{
 			Table:  item.Table,
 			ID:     item.ID,
 			Parent: item.Parent,
-		})
+		}
+		// 개별 신고 사유 코드 (sg_type 21~40) 조회 — discipline_log_id 로 처분 연결
+		var sgTypes []int
+		if err := h.db.Raw(`
+			SELECT DISTINCT sg_type
+			FROM g5_na_singo
+			WHERE discipline_log_id = ? AND sg_table = ? AND sg_id = ? AND admin_approved = 1
+			ORDER BY sg_type
+		`, post.WrID, item.Table, item.ID).Scan(&sgTypes).Error; err == nil && len(sgTypes) > 0 {
+			ri.SgTypes = sgTypes
+		}
+		reportedItems = append(reportedItems, ri)
 	}
 
 	detail := DisciplineLogDetail{
