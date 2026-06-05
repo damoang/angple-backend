@@ -124,11 +124,13 @@ func (r *memoRepository) Send(senderID, receiverID, content string) (*gnuboard.G
 	return &recvMemo, nil
 }
 
-// CountUnread returns the count of unread memos for the user
+// CountUnread returns the count of unread memos for the user.
+// me_read_datetime은 NOT NULL datetime 컬럼이라 미열람 = zero date.
+// MySQL 8은 datetime 컬럼과 ''의 비교에서 'Incorrect DATETIME value' 에러를 던지므로 '' 비교 금지.
 func (r *memoRepository) CountUnread(mbID string) (int64, error) {
 	var count int64
 	err := r.db.Model(&gnuboard.G5Memo{}).
-		Where("me_recv_mb_id = ? AND me_type = 'recv' AND (me_read_datetime = '' OR me_read_datetime = '0000-00-00 00:00:00')", mbID).
+		Where("me_recv_mb_id = ? AND me_type = 'recv' AND me_read_datetime = '0000-00-00 00:00:00'", mbID).
 		Count(&count).Error
 	return count, err
 }
