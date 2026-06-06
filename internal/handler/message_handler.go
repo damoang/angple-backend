@@ -296,3 +296,20 @@ func (h *V1MessageHandler) GetUnreadCount(c *gin.Context) {
 	}
 	common.V2Success(c, gin.H{"count": count})
 }
+
+// ReadAllMessages handles POST /api/v1/messages/read-all
+// 받은 쪽지 전체를 읽음 처리한다 ('모두 읽음' 버튼).
+func (h *V1MessageHandler) ReadAllMessages(c *gin.Context) {
+	mbID := h.getMbID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+
+	updated, err := h.memoRepo.MarkAllAsRead(mbID)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "쪽지 일괄 읽음 처리 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"updated": updated})
+}
