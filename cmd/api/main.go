@@ -5392,6 +5392,7 @@ func main() {
 		v1Messages := router.Group("/api/v1/messages", middleware.JWTAuth(jwtManager))
 		v1Messages.GET("", v1MsgHandler.GetMessages)
 		v1Messages.GET("/unread-count", v1MsgHandler.GetUnreadCount)
+		v1Messages.POST("/read-all", v1MsgHandler.ReadAllMessages)
 		v1Messages.GET("/:id", v1MsgHandler.GetMessage)
 		v1Messages.POST("", banCheck, v1MsgHandler.SendMessage)
 		v1Messages.DELETE("/:id", v1MsgHandler.DeleteMessage)

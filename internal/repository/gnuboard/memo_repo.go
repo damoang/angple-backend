@@ -13,6 +13,7 @@ type MemoRepository interface {
 	FindSent(mbID string, page, limit int) ([]*gnuboard.G5Memo, int64, error)
 	FindByID(meID int, mbID string) (*gnuboard.G5Memo, error)
 	MarkAsRead(meID int) error
+	MarkAllAsRead(mbID string) (int64, error)
 	Delete(meID int, mbID string) error
 	Send(senderID, receiverID, content string) (*gnuboard.G5Memo, error)
 	CountUnread(mbID string) (int64, error)
@@ -79,6 +80,17 @@ func (r *memoRepository) MarkAsRead(meID int) error {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	return r.db.Model(&gnuboard.G5Memo{}).Where("me_id = ?", meID).
 		Update("me_read_datetime", now).Error
+}
+
+// MarkAllAsRead marks every unread received memo for the user as read.
+// 미열람 = zero date(0000-00-00 00:00:00) — CountUnread 와 동일한 판정 기준을 사용한다.
+// Returns the number of memos updated.
+func (r *memoRepository) MarkAllAsRead(mbID string) (int64, error) {
+	now := time.Now().Format("2006-01-02 15:04:05")
+	result := r.db.Model(&gnuboard.G5Memo{}).
+		Where("me_recv_mb_id = ? AND me_type = 'recv' AND me_read_datetime = '0000-00-00 00:00:00'", mbID).
+		Update("me_read_datetime", now)
+	return result.RowsAffected, result.Error
 }
 
 // Delete deletes a memo for the user
