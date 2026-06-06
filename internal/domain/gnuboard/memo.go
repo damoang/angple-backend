@@ -1,6 +1,7 @@
 package gnuboard
 
 import (
+	"strings"
 	"time"
 )
 
@@ -22,7 +23,17 @@ func (G5Memo) TableName() string {
 	return "g5_memo"
 }
 
-// IsRead returns whether the memo has been read
+// IsRead returns whether the memo has been read.
+// me_read_datetime은 NOT NULL datetime 컬럼으로 미열람 시 zero date('0000-00-00 00:00:00')가
+// 저장된다. DSN이 parseTime=True라 zero date가 Go zero time 문자열("0001-01-01 ...")로
+// 스캔되므로, 두 형태 모두 미열람으로 판정해야 한다. (기존 코드는 raw 문자열만 비교해
+// 모든 쪽지를 읽음으로 오판 → 미열람 표시·읽음 처리가 전부 동작하지 않았음)
 func (m *G5Memo) IsRead() bool {
-	return m.MeReadDatetime != "" && m.MeReadDatetime != "0000-00-00 00:00:00"
+	if m.MeReadDatetime == "" {
+		return false
+	}
+	if strings.HasPrefix(m.MeReadDatetime, "0000-00-00") || strings.HasPrefix(m.MeReadDatetime, "0001-01-01") {
+		return false
+	}
+	return true
 }
