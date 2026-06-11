@@ -238,9 +238,9 @@ func main() {
 		os.Exit(5)
 	}
 
-	colNames := []string{}
-	placeholders := []string{}
-	args := []any{}
+	colNames := make([]string, 0, len(insertVals))
+	placeholders := make([]string, 0, len(insertVals))
+	args := make([]any, 0, len(insertVals))
 	for k, v := range insertVals {
 		colNames = append(colNames, "`"+k+"`")
 		if v == "__NOW__" {

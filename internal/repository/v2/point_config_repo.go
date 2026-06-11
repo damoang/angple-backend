@@ -17,6 +17,9 @@ var (
 
 const pointConfigCacheTTL = 30 * time.Second
 
+// nullJSON 은 site_settings.settings_json 이 비어있음을 나타내는 리터럴 "null" 문자열.
+const nullJSON = "null"
+
 // PointConfigRepository handles point configuration data access
 type PointConfigRepository interface {
 	// GetPointConfig returns the current point configuration (cached 30s)
@@ -68,7 +71,7 @@ func (r *pointConfigRepository) getPointConfigFromDB() (*PointConfig, error) {
 		return DefaultPointConfig(), nil
 	}
 
-	if row.SettingsJSON == nil || *row.SettingsJSON == "" || *row.SettingsJSON == "null" {
+	if row.SettingsJSON == nil || *row.SettingsJSON == "" || *row.SettingsJSON == nullJSON {
 		return DefaultPointConfig(), nil
 	}
 
@@ -103,7 +106,7 @@ func (r *pointConfigRepository) UpdatePointConfig(config *PointConfig) error {
 
 	// Parse existing JSON to preserve other fields
 	existing := make(map[string]interface{})
-	if err == nil && row.SettingsJSON != nil && *row.SettingsJSON != "" && *row.SettingsJSON != "null" {
+	if err == nil && row.SettingsJSON != nil && *row.SettingsJSON != "" && *row.SettingsJSON != nullJSON {
 		if unmarshalErr := json.Unmarshal([]byte(*row.SettingsJSON), &existing); unmarshalErr != nil {
 			existing = make(map[string]interface{})
 		}
