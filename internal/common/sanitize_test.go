@@ -65,6 +65,33 @@ func TestSanitizePostContent_NonYoutubeIframeRemoved(t *testing.T) {
 	}
 }
 
+// #12686: src가 누락된 깨진 iframe(과 빈 youtube 래퍼)은 제거하고 본문은 보존한다.
+func TestSanitizePostContent_SrclessYoutubeIframeRemoved(t *testing.T) {
+	input := `<div data-youtube-video=""><iframe class="tiptap-youtube" width="640" height="480" allowfullscreen="true"></iframe></div><p>본문 텍스트</p>`
+	result := SanitizePostContent(input)
+	if strings.Contains(result, "<iframe") {
+		t.Errorf("src-less iframe not removed: %s", result)
+	}
+	if strings.Contains(result, "data-youtube-video") {
+		t.Errorf("empty youtube wrapper not cleaned: %s", result)
+	}
+	if !strings.Contains(result, "본문 텍스트") {
+		t.Errorf("body text must be preserved: %s", result)
+	}
+}
+
+// src가 있는 정상 youtube iframe은 깨진 케이스 처리 후에도 보존되어야 한다(회귀 방지).
+func TestSanitizePostContent_ValidYoutubeStillPreservedAfterSrclessFix(t *testing.T) {
+	input := `<div data-youtube-video=""><iframe src="https://www.youtube.com/embed/abc123" width="640" height="480"></iframe></div><p>설명</p>`
+	result := SanitizePostContent(input)
+	if !strings.Contains(result, "youtube.com/embed/abc123") {
+		t.Errorf("valid youtube iframe should be preserved: %s", result)
+	}
+	if !strings.Contains(result, "설명") {
+		t.Errorf("body text must be preserved: %s", result)
+	}
+}
+
 func TestSanitizePostContent_DangerousCSSRemoved(t *testing.T) {
 	input := `<div style="position: fixed; z-index: 9999; top: 0; left: 0; width: 100vw;">overlay</div>`
 	result := SanitizePostContent(input)
