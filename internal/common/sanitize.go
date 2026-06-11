@@ -135,20 +135,28 @@ func SanitizeMessage(text string) string {
 	return strictPolicy.Sanitize(text)
 }
 
-// iframeRegex는 iframe 태그를 매칭하는 정규식
-var iframeRegex = regexp.MustCompile(`(?i)<iframe\s[^>]*src="([^"]*)"[^>]*>[\s\S]*?</iframe>`)
+// iframeAnyRegex는 src 유무와 무관하게 모든 iframe 태그를 매칭한다.
+var iframeAnyRegex = regexp.MustCompile(`(?i)<iframe\b[^>]*>[\s\S]*?</iframe>`)
 
-// removeDisallowedIframes는 허용 도메인이 아닌 iframe을 제거한다.
+// iframeSrcAttrRegex는 iframe의 src 속성값을 추출한다(없으면 미매칭).
+var iframeSrcAttrRegex = regexp.MustCompile(`(?i)\bsrc\s*=\s*"([^"]*)"`)
+
+// emptyYoutubeWrapperRegex는 iframe이 제거돼 빈 껍데기만 남은
+// tiptap youtube 래퍼(<div data-youtube-video>)를 매칭한다.
+var emptyYoutubeWrapperRegex = regexp.MustCompile(`(?i)<div\b[^>]*\bdata-youtube-video\b[^>]*>\s*</div>`)
+
+// removeDisallowedIframes는 허용 도메인 src를 가진 iframe만 남기고 나머지를 제거한다.
+// #12686: 기존에는 src="..."가 있어야만 매칭돼, src가 누락된 깨진 iframe
+// (예: tiptap youtube 노드가 src=null로 직렬화된 경우)이 무방비로 통과·저장됐다.
+// 그 깨진 노드는 수정 진입 시 에디터 본문을 비우는 원인이 된다. 이제 src가 없거나
+// 허용 도메인이 아닌 iframe은 모두 제거하고, 비게 된 youtube 래퍼도 정리한다.
 func removeDisallowedIframes(html string) string {
-	return iframeRegex.ReplaceAllStringFunc(html, func(match string) string {
-		submatch := iframeRegex.FindStringSubmatch(match)
-		if len(submatch) < 2 {
-			return ""
+	html = iframeAnyRegex.ReplaceAllStringFunc(html, func(match string) string {
+		m := iframeSrcAttrRegex.FindStringSubmatch(match)
+		if len(m) < 2 || !allowedIframeSrcRegex.MatchString(m[1]) {
+			return "" // src 없음 또는 비허용 도메인 → 제거
 		}
-		src := submatch[1]
-		if allowedIframeSrcRegex.MatchString(src) {
-			return match
-		}
-		return ""
+		return match
 	})
+	return emptyYoutubeWrapperRegex.ReplaceAllString(html, "")
 }
