@@ -404,12 +404,25 @@ func (h *NotiHandler) MarkGroupAsRead(c *gin.Context) {
 
 // notiPreferenceResponse is the response for notification preferences
 type notiPreferenceResponse struct {
-	NotiComment   bool `json:"noti_comment"`
-	NotiReply     bool `json:"noti_reply"`
-	NotiMention   bool `json:"noti_mention"`
-	NotiLike      bool `json:"noti_like"`
-	NotiFollow    bool `json:"noti_follow"`
-	LikeThreshold int  `json:"like_threshold"`
+	NotiComment        bool `json:"noti_comment"`
+	NotiReply          bool `json:"noti_reply"`
+	NotiMention        bool `json:"noti_mention"`
+	NotiLike           bool `json:"noti_like"`
+	NotiFollow         bool `json:"noti_follow"`
+	NotiBoardSubscribe bool `json:"noti_board_subscribe"`
+	LikeThreshold      int  `json:"like_threshold"`
+}
+
+func toNotiPreferenceResponse(pref *gnurepo.NotiPreference) notiPreferenceResponse {
+	return notiPreferenceResponse{
+		NotiComment:        pref.NotiComment,
+		NotiReply:          pref.NotiReply,
+		NotiMention:        pref.NotiMention,
+		NotiLike:           pref.NotiLike,
+		NotiFollow:         pref.NotiFollow,
+		NotiBoardSubscribe: pref.NotiBoardSubscribe,
+		LikeThreshold:      pref.LikeThreshold,
+	}
 }
 
 // GetPreferences handles GET /api/v1/notifications/preferences
@@ -426,14 +439,7 @@ func (h *NotiHandler) GetPreferences(c *gin.Context) {
 		return
 	}
 
-	common.V2Success(c, notiPreferenceResponse{
-		NotiComment:   pref.NotiComment,
-		NotiReply:     pref.NotiReply,
-		NotiMention:   pref.NotiMention,
-		NotiLike:      pref.NotiLike,
-		NotiFollow:    pref.NotiFollow,
-		LikeThreshold: pref.LikeThreshold,
-	})
+	common.V2Success(c, toNotiPreferenceResponse(pref))
 }
 
 // UpdatePreferences handles PUT /api/v1/notifications/preferences
@@ -448,9 +454,10 @@ func (h *NotiHandler) UpdatePreferences(c *gin.Context) {
 		NotiComment   *bool `json:"noti_comment"`
 		NotiReply     *bool `json:"noti_reply"`
 		NotiMention   *bool `json:"noti_mention"`
-		NotiLike      *bool `json:"noti_like"`
-		NotiFollow    *bool `json:"noti_follow"`
-		LikeThreshold *int  `json:"like_threshold"`
+		NotiLike           *bool `json:"noti_like"`
+		NotiFollow         *bool `json:"noti_follow"`
+		NotiBoardSubscribe *bool `json:"noti_board_subscribe"`
+		LikeThreshold      *int  `json:"like_threshold"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
@@ -478,6 +485,9 @@ func (h *NotiHandler) UpdatePreferences(c *gin.Context) {
 	if req.NotiFollow != nil {
 		pref.NotiFollow = *req.NotiFollow
 	}
+	if req.NotiBoardSubscribe != nil {
+		pref.NotiBoardSubscribe = *req.NotiBoardSubscribe
+	}
 	if req.LikeThreshold != nil {
 		if *req.LikeThreshold < 1 {
 			*req.LikeThreshold = 1
@@ -490,14 +500,7 @@ func (h *NotiHandler) UpdatePreferences(c *gin.Context) {
 		return
 	}
 
-	common.V2Success(c, notiPreferenceResponse{
-		NotiComment:   pref.NotiComment,
-		NotiReply:     pref.NotiReply,
-		NotiMention:   pref.NotiMention,
-		NotiLike:      pref.NotiLike,
-		NotiFollow:    pref.NotiFollow,
-		LikeThreshold: pref.LikeThreshold,
-	})
+	common.V2Success(c, toNotiPreferenceResponse(pref))
 }
 
 // DeleteGroup handles DELETE /api/v1/notifications/group

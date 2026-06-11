@@ -388,8 +388,10 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 		})
 	}
 
+	// level=1(전체)만 글 작성 시 알림. level=2(인기글만)는 추천 임계값 도달 시
+	// 인기글 트리거 cron 이 1회 알림 (#12607 — 자유게시판 등 폭주 방지).
 	var subscriberIDs []string
-	w.db.Table("g5_board_subscribe").Select("mb_id").Where("bo_table = ? AND mb_id != ?", job.BoardSlug, job.MemberID).Pluck("mb_id", &subscriberIDs)
+	w.db.Table("g5_board_subscribe").Select("mb_id").Where("bo_table = ? AND mb_id != ? AND level = 1", job.BoardSlug, job.MemberID).Pluck("mb_id", &subscriberIDs)
 	followerSet := make(map[string]bool, len(followerIDs))
 	for _, fid := range followerIDs {
 		followerSet[fid] = true
@@ -399,7 +401,7 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 			continue
 		}
 		pref, ok := w.mustGetNotiPreference(sid)
-		if !ok || !pref.NotiFollow {
+		if !ok || !pref.NotiBoardSubscribe {
 			continue
 		}
 		w.createNotification(&gnurepo.Notification{

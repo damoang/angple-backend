@@ -5978,6 +5978,7 @@ func main() {
 		cronGroup.POST("/point-expiry-notify", cronHandler.PointExpiryNotify)
 		cronGroup.POST("/auto-promote", cronHandler.AutoPromote)
 		cronGroup.POST("/sync-visible-comment-counts", cronHandler.SyncVisibleCommentCounts)
+		cronGroup.POST("/popular-subscribe-notify", cronHandler.PopularSubscribeNotify)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo, writeAfterEventRepo)
