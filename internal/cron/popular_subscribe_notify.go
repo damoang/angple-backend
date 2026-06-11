@@ -79,6 +79,13 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 			continue
 		}
 
+		// 게시판 한글명 (없으면 slug)
+		boardName := board
+		db.Table("g5_board").Select("bo_subject").Where("bo_table = ?", board).Limit(1).Scan(&boardName)
+		if boardName == "" {
+			boardName = board
+		}
+
 		// 3) 이 보드의 level=2 구독자 (noti_board_subscribe OFF 제외)
 		var subs []string
 		db.Table("g5_board_subscribe").Select("mb_id").
@@ -94,6 +101,15 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 		}
 
 		for _, p := range posts {
+			// claim: 통지 전에 먼저 마킹(원자적 INSERT IGNORE)해 동시 cron 실행 시
+			// 같은 글 중복 통지를 막는다. 이미 선점됐으면(RowsAffected==0) skip.
+			// 구독자 0명이어도 마킹돼 재스캔되지 않는다.
+			claim := db.Exec("INSERT IGNORE INTO g5_board_subscribe_notified (bo_table, wr_id) VALUES (?, ?)", board, p.WrID)
+			if claim.Error != nil || claim.RowsAffected == 0 {
+				continue
+			}
+			res.PostsNotified++
+
 			authorName := p.WrName
 			if authorName == "" {
 				authorName = p.MbID
@@ -106,7 +122,7 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 					PhToCase: "subscribe", PhFromCase: "write", BoTable: board,
 					WrID: p.WrID, MbID: sid, RelMbID: p.MbID,
 					RelMbNick:  authorName,
-					RelMsg:     fmt.Sprintf("%s 게시판 인기글: %s", board, p.Subject),
+					RelMsg:     fmt.Sprintf("%s 게시판 인기글: %s", boardName, p.Subject),
 					RelURL:     fmt.Sprintf("/%s/%d", board, p.WrID),
 					PhReaded:   "N",
 					PhDatetime: now,
@@ -116,9 +132,6 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 					res.NotisCreated++
 				}
 			}
-			// 통지 마킹 (구독자 0명이어도 마킹해 재스캔 방지)
-			db.Exec("INSERT IGNORE INTO g5_board_subscribe_notified (bo_table, wr_id) VALUES (?, ?)", board, p.WrID)
-			res.PostsNotified++
 		}
 	}
 
