@@ -212,7 +212,7 @@ func (h *Handler) NotiCleanup(c *gin.Context) {
 		return runNotiCleanup(h.db)
 	}, func(result interface{}) {
 		typed := result.(*NotiCleanupResult)
-		log.Printf("[Cron:noti-cleanup] read_deleted=%d stale_deleted=%d batches=%d capped=%v",
-			typed.ReadDeleted, typed.StaleDeleted, typed.Batches, typed.Capped)
+		log.Printf("[Cron:noti-cleanup] deleted=%d batches=%d last_id=%d capped=%v",
+			typed.Deleted, typed.Batches, typed.LastID, typed.Capped)
 	})
 }
