@@ -192,3 +192,15 @@ func (h *Handler) SyncVisibleCommentCounts(c *gin.Context) {
 			typed.BoardsChecked, typed.BoardsSynced, typed.RowsUpdated, typed.Errors)
 	})
 }
+
+// PopularSubscribeNotify handles POST /api/internal/cron/popular-subscribe-notify
+// level=2(인기글만) 게시판 구독자에게 추천 임계값 도달 글을 1회 알림 (#12607).
+func (h *Handler) PopularSubscribeNotify(c *gin.Context) {
+	h.runCronTask(c, "popular-subscribe-notify", func() (interface{}, error) {
+		return runPopularSubscribeNotify(h.db)
+	}, func(result interface{}) {
+		typed := result.(*PopularSubscribeResult)
+		log.Printf("[Cron:popular-subscribe-notify] boards=%d posts_notified=%d notis=%d",
+			typed.Boards, typed.PostsNotified, typed.NotisCreated)
+	})
+}

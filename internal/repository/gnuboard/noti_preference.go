@@ -14,8 +14,10 @@ type NotiPreference struct {
 	NotiMention   bool      `gorm:"column:noti_mention;default:1"`
 	NotiLike      bool      `gorm:"column:noti_like;default:1"`
 	NotiFollow    bool      `gorm:"column:noti_follow;default:1"`
-	LikeThreshold int       `gorm:"column:like_threshold;default:1"`
-	UpdatedAt     time.Time `gorm:"column:updated_at"`
+	// 게시판 구독('write' subscribe) 알림 — 회원 팔로우(NotiFollow)와 분리 (#12607)
+	NotiBoardSubscribe bool      `gorm:"column:noti_board_subscribe;default:1"`
+	LikeThreshold      int       `gorm:"column:like_threshold;default:1"`
+	UpdatedAt          time.Time `gorm:"column:updated_at"`
 }
 
 // TableName returns the g5_noti_preference table name
@@ -47,9 +49,10 @@ func (r *notiPreferenceRepository) Get(mbID string) (*NotiPreference, error) {
 				NotiComment:   true,
 				NotiReply:     true,
 				NotiMention:   true,
-				NotiLike:      true,
-				NotiFollow:    true,
-				LikeThreshold: 1,
+				NotiLike:           true,
+				NotiFollow:         true,
+				NotiBoardSubscribe: true,
+				LikeThreshold:      1,
 			}, nil
 		}
 		return nil, err
@@ -68,7 +71,8 @@ func (r *notiPreferenceRepository) Upsert(pref *NotiPreference) error {
 		"noti_reply":     pref.NotiReply,
 		"noti_mention":   pref.NotiMention,
 		"noti_like":      pref.NotiLike,
-		"noti_follow":    pref.NotiFollow,
-		"like_threshold": pref.LikeThreshold,
+		"noti_follow":          pref.NotiFollow,
+		"noti_board_subscribe": pref.NotiBoardSubscribe,
+		"like_threshold":       pref.LikeThreshold,
 	}).Error
 }
