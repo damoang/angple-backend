@@ -36,8 +36,8 @@ var boardSlugRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 // 글 작성 시점엔 추천=0 이라 write 시 못 보내므로, 주기 cron 으로 임계값 도달 글을 잡아
 // 보드당 글당 1회만 알림(g5_board_subscribe_notified 로 중복 방지).
 func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
-	threshold := cronEnvInt("NOTI_POPULAR_THRESHOLD", 10)     // 추천글 기준과 정합되게 운영에서 조정
-	windowDays := cronEnvInt("NOTI_POPULAR_WINDOW_DAYS", 3)   // 최근 N일 내 글만 대상(오래된 글 재통지 방지)
+	threshold := cronEnvInt("NOTI_POPULAR_THRESHOLD", 10)   // 추천글 기준과 정합되게 운영에서 조정
+	windowDays := cronEnvInt("NOTI_POPULAR_WINDOW_DAYS", 3) // 최근 N일 내 글만 대상(오래된 글 재통지 방지)
 	maxPostsPerBoard := cronEnvInt("NOTI_POPULAR_MAX_POSTS", 200)
 	now := time.Now()
 	cutoff := now.AddDate(0, 0, -windowDays)

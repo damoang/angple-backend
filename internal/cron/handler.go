@@ -204,3 +204,15 @@ func (h *Handler) PopularSubscribeNotify(c *gin.Context) {
 			typed.Boards, typed.PostsNotified, typed.NotisCreated)
 	})
 }
+
+// NotiCleanup handles POST /api/internal/cron/noti-cleanup
+// Prunes g5_na_noti (read + old, then very old regardless) to curb table bloat (#12607).
+func (h *Handler) NotiCleanup(c *gin.Context) {
+	h.runCronTask(c, "noti-cleanup", func() (interface{}, error) {
+		return runNotiCleanup(h.db)
+	}, func(result interface{}) {
+		typed := result.(*NotiCleanupResult)
+		log.Printf("[Cron:noti-cleanup] deleted=%d batches=%d last_id=%d capped=%v",
+			typed.Deleted, typed.Batches, typed.LastID, typed.Capped)
+	})
+}

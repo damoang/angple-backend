@@ -451,9 +451,9 @@ func (h *NotiHandler) UpdatePreferences(c *gin.Context) {
 	}
 
 	var req struct {
-		NotiComment   *bool `json:"noti_comment"`
-		NotiReply     *bool `json:"noti_reply"`
-		NotiMention   *bool `json:"noti_mention"`
+		NotiComment        *bool `json:"noti_comment"`
+		NotiReply          *bool `json:"noti_reply"`
+		NotiMention        *bool `json:"noti_mention"`
 		NotiLike           *bool `json:"noti_like"`
 		NotiFollow         *bool `json:"noti_follow"`
 		NotiBoardSubscribe *bool `json:"noti_board_subscribe"`

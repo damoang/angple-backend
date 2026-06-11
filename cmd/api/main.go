@@ -5979,6 +5979,7 @@ func main() {
 		cronGroup.POST("/auto-promote", cronHandler.AutoPromote)
 		cronGroup.POST("/sync-visible-comment-counts", cronHandler.SyncVisibleCommentCounts)
 		cronGroup.POST("/popular-subscribe-notify", cronHandler.PopularSubscribeNotify)
+		cronGroup.POST("/noti-cleanup", cronHandler.NotiCleanup)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo, writeAfterEventRepo)
