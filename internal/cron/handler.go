@@ -216,3 +216,16 @@ func (h *Handler) NotiCleanup(c *gin.Context) {
 			typed.Deleted, typed.Batches, typed.LastID, typed.Capped)
 	})
 }
+
+// AutoDismissReports handles POST /api/internal/cron/auto-dismiss-reports
+// 만장일치 미처리(2명 이상 dismiss + action 0건) 신고를 처리자 'system'으로 자동 기각.
+// singo_settings.auto_dismiss_enabled = 'true' 일 때만 동작.
+func (h *Handler) AutoDismissReports(c *gin.Context) {
+	h.runCronTask(c, "auto-dismiss-reports", func() (interface{}, error) {
+		return runAutoDismissReports(h.db)
+	}, func(result interface{}) {
+		typed := result.(*AutoDismissResult)
+		log.Printf("[Cron:auto-dismiss-reports] enabled=%v min=%d candidates=%d dismissed=%d errors=%d",
+			typed.Enabled, typed.MinOpinions, typed.CandidateCount, typed.DismissedRows, typed.Errors)
+	})
+}
