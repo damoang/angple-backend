@@ -3102,6 +3102,18 @@ func main() {
 			phaseDurations["board_lookup"] = time.Since(phaseStart)
 			phaseStart = time.Now()
 
+			// 댓글 비활성화(읽기 전용) 글이면 작성 차단. admin 이 wr_option 에 comments_disabled 를
+			// 설정 → frontend UI/v2 핸들러는 막지만 v1 경로엔 강제가 누락돼 직접 호출 시 우회 가능했음.
+			{
+				var parentWrOption string
+				db.Table("g5_write_"+slug).Select("wr_option").
+					Where("wr_id = ? AND wr_is_comment = 0", postID).Scan(&parentWrOption)
+				if strings.Contains(parentWrOption, "comments_disabled") {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "본 게시물은 댓글이 비활성화되어 있습니다."})
+					return
+				}
+			}
+
 			// 요청 바디 파싱
 			var req struct {
 				Content  string `json:"content" binding:"required"`
