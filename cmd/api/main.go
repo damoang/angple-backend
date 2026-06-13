@@ -5979,6 +5979,7 @@ func main() {
 		cronGroup.POST("/auto-promote", cronHandler.AutoPromote)
 		cronGroup.POST("/sync-visible-comment-counts", cronHandler.SyncVisibleCommentCounts)
 		cronGroup.POST("/popular-subscribe-notify", cronHandler.PopularSubscribeNotify)
+		cronGroup.POST("/digest-subscribe-notify", cronHandler.DigestSubscribeNotify)
 		cronGroup.POST("/noti-cleanup", cronHandler.NotiCleanup)
 		cronGroup.POST("/auto-dismiss-reports", cronHandler.AutoDismissReports)
 
