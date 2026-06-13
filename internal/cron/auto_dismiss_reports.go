@@ -21,8 +21,17 @@ type AutoDismissResult struct {
 }
 
 // runAutoDismissReports 자동 미처리(기각) 크론.
-// 만장일치 조건: 같은 콘텐츠(sg_table, sg_parent)에 서로 다른 담당자의 "미처리(dismiss)"
-// 의견이 N명(기본 2) 이상이고 "조치(action)" 의견이 0건이면, 미처리 신고를 처리자 'system'으로 자동 기각한다.
+//
+// 후보 판정 기준은 운영 화면(inbox)의 "dismiss_ready" 상태 정의와 100% 동일하다
+// (damoang-backend internal/repository/report_repo.go 의 카운트 서브쿼리 + buildStatusFilter "dismiss_ready" 참조).
+// 즉 화면에서 "만장일치 미조치"로 보이는 신고 == 이 크론이 기각하는 신고. 양쪽 기준을 일치시켜 드리프트를 방지한다.
+//
+//   - 의견 집계는 반드시 is_valid_reviewer = 1 (현재 유효한 담당자) 인 의견만, COUNT(DISTINCT reviewer_id) 로 센다.
+//     (탈퇴/해제된 옛 담당자의 표는 세지 않는다.)
+//   - 미조치(dismiss) 유효 담당자 N명(기본 2) 이상 AND 조치(action) 유효 담당자 0명.
+//   - 신고건(parent) 단위 집계: monitoring_checked=1 AND admin_approved=0 AND processed=0 AND hold=0
+//     (이미 admin이 승인/처리했거나 보류한 건은 제외).
+//
 // singo_settings.auto_dismiss_enabled = 'true' 일 때만 동작한다(기본 비활성).
 func runAutoDismissReports(db *gorm.DB) (*AutoDismissResult, error) {
 	now := time.Now()
@@ -44,29 +53,39 @@ func runAutoDismissReports(db *gorm.DB) (*AutoDismissResult, error) {
 		result.MinOpinions = n
 	}
 
-	// 3. 후보 조회 — 미처리 신고가 남아 있고, distinct 미처리 의견 N명 이상 + 조치 의견 0건
+	// 3. 후보 조회 — inbox "dismiss_ready" 정의와 동일 (report_repo.go 참조).
+	//    유효 담당자(is_valid_reviewer=1)의 distinct 미조치 N명 이상 + distinct 조치 0명,
+	//    그리고 신고건 단위로 monitoring_checked=1, admin_approved=0, processed=0, hold=0.
 	type candidate struct {
 		Table  string `gorm:"column:sg_table"`
 		Parent int    `gorm:"column:sg_parent"`
 	}
 	var candidates []candidate
 	if err := db.Raw(`
-		SELECT o.sg_table, o.sg_parent
-		FROM g5_na_singo_opinions o
-		WHERE EXISTS (
-			SELECT 1 FROM g5_na_singo s
-			WHERE s.sg_table = o.sg_table AND s.sg_parent = o.sg_parent AND s.processed = 0
-		)
-		GROUP BY o.sg_table, o.sg_parent
-		HAVING COUNT(DISTINCT CASE WHEN o.opinion_type = 'dismiss' THEN o.reviewer_id END) >= ?
-		   AND SUM(CASE WHEN o.opinion_type = 'action' THEN 1 ELSE 0 END) = 0
+		SELECT s.sg_table, s.sg_parent
+		FROM g5_na_singo s
+		LEFT JOIN (
+			SELECT o.sg_table, o.sg_parent,
+				COUNT(DISTINCT CASE WHEN o.opinion_type = 'action' THEN o.reviewer_id END) AS action_count,
+				COUNT(DISTINCT CASE WHEN o.opinion_type = 'dismiss' THEN o.reviewer_id END) AS dismiss_count
+			FROM g5_na_singo_opinions o
+			WHERE o.is_valid_reviewer = 1
+			GROUP BY o.sg_table, o.sg_parent
+		) op ON s.sg_table = op.sg_table AND s.sg_parent = op.sg_parent
+		GROUP BY s.sg_table, s.sg_parent
+		HAVING MAX(s.monitoring_checked) = 1
+		   AND MAX(s.admin_approved) = 0
+		   AND MAX(s.processed) = 0
+		   AND MAX(s.hold) = 0
+		   AND IFNULL(MAX(op.dismiss_count), 0) >= ?
+		   AND IFNULL(MAX(op.action_count), 0) = 0
 	`, result.MinOpinions).Scan(&candidates).Error; err != nil {
 		return result, err
 	}
 	result.CandidateCount = len(candidates)
 
 	// 4. 후보별 미처리 신고를 기각 처리 (처리자 system)
-	note := fmt.Sprintf("자동 미처리 (만장일치 %d명)", result.MinOpinions)
+	note := fmt.Sprintf("자동 미처리 (유효 담당자 만장일치 %d명)", result.MinOpinions)
 	for _, cand := range candidates {
 		// 이력 기록용 대표 sg_id (미처리 신고 중 하나)
 		var sgID int
