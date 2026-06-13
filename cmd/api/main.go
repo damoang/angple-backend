@@ -4735,7 +4735,7 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/report - Report a post
-		v1Boards.POST("/:slug/posts/:id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
+		v1Boards.POST("/:slug/posts/:id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
 			slug := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -4792,8 +4792,8 @@ func main() {
 				return
 			}
 
-			// 신고자 IP
-			sgIP := c.ClientIP()
+			// 신고자 IP (IP Protection 적용 — 지정 멤버/관리자는 치환 IP 기록)
+			sgIP := middleware.GetClientIP(c)
 
 			// 사유별 1행씩 INSERT (nariya 호환: sg_type = reason code)
 			now := time.Now()
@@ -4819,7 +4819,7 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/comments/:comment_id/report - Report a comment
-		v1Boards.POST("/:slug/posts/:id/comments/:comment_id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
+		v1Boards.POST("/:slug/posts/:id/comments/:comment_id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
 			slug := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -4884,8 +4884,8 @@ func main() {
 				return
 			}
 
-			// 신고자 IP
-			sgIP := c.ClientIP()
+			// 신고자 IP (IP Protection 적용 — 지정 멤버/관리자는 치환 IP 기록)
+			sgIP := middleware.GetClientIP(c)
 			now := time.Now()
 
 			// 사유별 1행씩 INSERT (nariya 호환)
