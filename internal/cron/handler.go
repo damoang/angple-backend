@@ -205,6 +205,18 @@ func (h *Handler) PopularSubscribeNotify(c *gin.Context) {
 	})
 }
 
+// DigestSubscribeNotify handles POST /api/internal/cron/digest-subscribe-notify
+// level=3(요약) 게시판 구독자에게 주기마다 새 글을 묶어 1건 알림 (#12607 P1).
+func (h *Handler) DigestSubscribeNotify(c *gin.Context) {
+	h.runCronTask(c, "digest-subscribe-notify", func() (interface{}, error) {
+		return runDigestSubscribeNotify(h.db)
+	}, func(result interface{}) {
+		typed := result.(*DigestSubscribeResult)
+		log.Printf("[Cron:digest-subscribe-notify] boards=%d seeded=%d posts=%d notis=%d",
+			typed.Boards, typed.Seeded, typed.PostsSummarized, typed.NotisCreated)
+	})
+}
+
 // NotiCleanup handles POST /api/internal/cron/noti-cleanup
 // Prunes g5_na_noti (read + old, then very old regardless) to curb table bloat (#12607).
 func (h *Handler) NotiCleanup(c *gin.Context) {
