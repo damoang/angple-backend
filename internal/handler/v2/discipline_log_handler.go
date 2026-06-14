@@ -37,12 +37,16 @@ type DisciplineLogContent struct {
 	Content         string         `json:"content,omitempty"`
 }
 
-// ReportedItem represents a reported post or comment
+// ReportedItem represents a reported post or comment.
+// per-item 필드(SgTypes/PenaltyDays/Memo)는 한 disciplinelog 글 안에서 항목별 적용 사유를 보존·표시.
+// 신규 글은 wr_content JSON에 직접 기록되고, 레거시 글은 GetDetail이 g5_na_singo에서 보강한다.
 type ReportedItem struct {
-	Table   string `json:"table"`
-	ID      int    `json:"id"`
-	Parent  int    `json:"parent,omitempty"`
-	SgTypes []int  `json:"sg_types,omitempty"` // 개별 신고 사유 코드 목록 (g5_na_singo.sg_type)
+	Table       string `json:"table"`
+	ID          int    `json:"id"`
+	Parent      int    `json:"parent,omitempty"`
+	SgTypes     []int  `json:"sg_types,omitempty"`     // 항목별 적용 사유 코드(21~40)
+	PenaltyDays *int   `json:"penalty_days,omitempty"` // 항목별 일수(-1=영구), nil=미상
+	Memo        string `json:"memo,omitempty"`         // 항목별 관리자 메모
 }
 
 // ViolationType represents a type of rule violation
@@ -171,6 +175,29 @@ func parseContentJSON(content string) (*DisciplineLogContent, error) {
 	}
 
 	return nil, nil // No valid JSON found
+}
+
+// parseReasonCodes parses admin_discipline_reasons JSON ("[21,22]" 또는 ["21","22"]) into int codes.
+func parseReasonCodes(s string) []int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	var ints []int
+	if err := json.Unmarshal([]byte(s), &ints); err == nil {
+		return ints
+	}
+	var strs []string
+	if err := json.Unmarshal([]byte(s), &strs); err == nil {
+		out := make([]int, 0, len(strs))
+		for _, v := range strs {
+			if n, convErr := strconv.Atoi(strings.TrimSpace(v)); convErr == nil {
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // getMemberNickFromTitle extracts member nickname from title
@@ -326,23 +353,54 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		penaltyDateTo = &dateTo
 	}
 
-	// Convert reported items format (table -> board_id) + enrich with per-item sg_types from g5_na_singo
+	// reported_items 항목별 적용 사유/일수/메모 구성.
+	// 우선순위 1: wr_content에 항목별 값이 이미 기록된 신규 글은 그대로 사용.
+	// 우선순위 2: 레거시 글은 g5_na_singo에서 보강(적용 사유 admin_discipline_reasons, 없으면 신고 사유 sg_type).
 	reportedItems := make([]ReportedItem, 0, len(data.ReportedItems))
 	for _, item := range data.ReportedItems {
 		ri := ReportedItem{
-			Table:  item.Table,
-			ID:     item.ID,
-			Parent: item.Parent,
+			Table:       item.Table,
+			ID:          item.ID,
+			Parent:      item.Parent,
+			SgTypes:     item.SgTypes,
+			PenaltyDays: item.PenaltyDays,
+			Memo:        item.Memo,
 		}
-		// 개별 신고 사유 코드 (sg_type 21~40) 조회 — discipline_log_id 로 처분 연결
-		var sgTypes []int
-		if err := h.db.Raw(`
-			SELECT DISTINCT sg_type
-			FROM g5_na_singo
-			WHERE discipline_log_id = ? AND sg_table = ? AND sg_id = ? AND admin_approved = 1
-			ORDER BY sg_type
-		`, post.WrID, item.Table, item.ID).Scan(&sgTypes).Error; err == nil && len(sgTypes) > 0 {
-			ri.SgTypes = sgTypes
+		if len(ri.SgTypes) == 0 {
+			// 적용 사유/일수/메모를 처분 연결(discipline_log_id)로 조회
+			var row struct {
+				Reasons *string `gorm:"column:admin_discipline_reasons"`
+				Days    *int    `gorm:"column:admin_discipline_days"`
+				Detail  *string `gorm:"column:admin_discipline_detail"`
+			}
+			h.db.Raw(`
+				SELECT admin_discipline_reasons, admin_discipline_days, admin_discipline_detail
+				FROM g5_na_singo
+				WHERE discipline_log_id = ? AND sg_table = ? AND sg_id = ? AND admin_approved = 1
+				ORDER BY id DESC LIMIT 1
+			`, post.WrID, item.Table, item.ID).Scan(&row)
+
+			if row.Reasons != nil {
+				ri.SgTypes = parseReasonCodes(*row.Reasons)
+			}
+			if len(ri.SgTypes) == 0 {
+				// 최종 폴백: 신고자가 선택한 신고 사유(sg_type)
+				var sgTypes []int
+				if err := h.db.Raw(`
+					SELECT DISTINCT sg_type
+					FROM g5_na_singo
+					WHERE discipline_log_id = ? AND sg_table = ? AND sg_id = ? AND admin_approved = 1
+					ORDER BY sg_type
+				`, post.WrID, item.Table, item.ID).Scan(&sgTypes).Error; err == nil {
+					ri.SgTypes = sgTypes
+				}
+			}
+			if ri.PenaltyDays == nil && row.Days != nil {
+				ri.PenaltyDays = row.Days
+			}
+			if ri.Memo == "" && row.Detail != nil {
+				ri.Memo = *row.Detail
+			}
 		}
 		reportedItems = append(reportedItems, ri)
 	}
