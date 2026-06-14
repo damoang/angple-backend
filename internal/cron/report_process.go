@@ -21,26 +21,52 @@ type ProcessReportsResult struct {
 	ExecutedAt  string   `json:"executed_at"`
 }
 
-// singoReportGroup represents a grouped report from na_singo
-type singoReportGroup struct {
-	TargetMbID             string  `gorm:"column:target_mb_id"`
-	AllReports             string  `gorm:"column:all_reports"`
-	AdminDisciplineReasons *string `gorm:"column:admin_discipline_reasons"`
-	AdminDisciplineDays    int     `gorm:"column:admin_discipline_days"`
-	AdminDisciplineType    string  `gorm:"column:admin_discipline_type"`
-	AdminDisciplineDetail  *string `gorm:"column:admin_discipline_detail"`
-	TargetTitle            *string `gorm:"column:target_title"`
-	TargetContent          *string `gorm:"column:target_content"`
-	SgTable                string  `gorm:"column:sg_table"`
-	SgID                   int     `gorm:"column:sg_id"`
-	SgParent               int     `gorm:"column:sg_parent"`
-	ReportCount            int     `gorm:"column:report_count"`
+// permanentDays는 영구 제재의 Go 내부 표현값. DB는 -1, JSON penalty_period는 -1.
+const permanentDays = 9999
+
+// singoRow는 g5_na_singo의 승인·미처리 개별 행(신고자 1명 기준).
+type singoRow struct {
+	TargetMbID             string    `gorm:"column:target_mb_id"`
+	SgTable                string    `gorm:"column:sg_table"`
+	SgID                   int       `gorm:"column:sg_id"`
+	SgParent               int       `gorm:"column:sg_parent"`
+	AdminDisciplineReasons *string   `gorm:"column:admin_discipline_reasons"`
+	AdminDisciplineDays    int       `gorm:"column:admin_discipline_days"`
+	AdminDisciplineType    string    `gorm:"column:admin_discipline_type"`
+	AdminDisciplineDetail  *string   `gorm:"column:admin_discipline_detail"`
+	TargetTitle            *string   `gorm:"column:target_title"`
+	AdminDatetime          time.Time `gorm:"column:admin_datetime"`
 }
 
+// singoReportGroup은 (피신고자, 처리일) 단위 묶음 → disciplinelog 글 1개.
+// Items는 콘텐츠 단위(sg_id)별 제재 메타데이터를 각자 보유하고, Agg* 는 글 레벨 집계값.
+type singoReportGroup struct {
+	TargetMbID  string
+	DateKey     string
+	TargetTitle *string
+	Items       []reportedItem // 콘텐츠 단위별(항목별 사유/일수/유형/메모 포함)
+	AggReasons  []int          // 합집합 사유 코드
+	AggDays     int            // 최댓값(가장 무거운 제재, permanentDays=영구 형태)
+	AggType     string         // 합집합 제재 유형(원본 토큰 "level,access")
+	AggDetail   string         // 항목 메모 합침(기록/소명용)
+	ReportCount int            // 콘텐츠 단위 수
+	// URL 대표(첫 항목)
+	SgTable  string
+	SgID     int
+	SgParent int
+}
+
+// reportedItem은 wr_content JSON의 reported_items[] 한 항목(신고된 글/댓글 1개).
+// per-item 필드(sg_types 등)는 항목별 사유 보존용. 레거시 글은 이 필드들이 비어 있음.
 type reportedItem struct {
-	Table  string `json:"table"`
-	ID     int    `json:"id"`
-	Parent int    `json:"parent"`
+	Table       string   `json:"table"`
+	ID          int      `json:"id"`
+	Parent      int      `json:"parent"`
+	IsComment   bool     `json:"is_comment,omitempty"`
+	SgTypes     []int    `json:"sg_types,omitempty"`     // 항목별 적용 사유 코드
+	PenaltyDays *int     `json:"penalty_days,omitempty"` // 항목별 일수(-1=영구), nil=레거시
+	PenaltyType []string `json:"penalty_type,omitempty"` // 항목별 ["level","access"]
+	Memo        string   `json:"memo,omitempty"`         // 항목별 관리자 메모
 }
 
 // disciplineData is the JSON structure stored in wr_content of g5_write_disciplinelog
@@ -67,29 +93,22 @@ func runProcessApprovedReports(db *gorm.DB) (*ProcessReportsResult, error) {
 		ExecutedAt: now.Format("2006-01-02 15:04:05"),
 	}
 
-	// 1. Admin 승인된 신고 조회 (그룹핑)
-	var groups []singoReportGroup
+	// 1. Admin 승인된 미처리 신고를 개별 행으로 조회 (그룹핑은 Go에서 — 항목별 사유 보존)
+	var rows []singoRow
 	if err := db.Raw(`
-		SELECT
-			target_mb_id,
-			GROUP_CONCAT(DISTINCT CONCAT(sg_table, '/', sg_id, '/', sg_parent) ORDER BY sg_id) as all_reports,
-			MAX(admin_discipline_reasons) as admin_discipline_reasons,
-			MAX(admin_discipline_days) as admin_discipline_days,
-			MAX(admin_discipline_type) as admin_discipline_type,
-			MAX(admin_discipline_detail) as admin_discipline_detail,
-			MAX(target_title) as target_title,
-			MAX(target_content) as target_content,
-			MIN(sg_table) as sg_table,
-			MIN(sg_id) as sg_id,
-			MIN(sg_parent) as sg_parent,
-			COUNT(*) as report_count
+		SELECT target_mb_id, sg_table, sg_id, sg_parent,
+			admin_discipline_reasons, admin_discipline_days,
+			admin_discipline_type, admin_discipline_detail,
+			target_title, admin_datetime
 		FROM g5_na_singo
 		WHERE admin_approved = 1 AND processed = 0
-		GROUP BY target_mb_id, admin_discipline_days, admin_discipline_type, admin_discipline_reasons, DATE(admin_datetime)
-		ORDER BY MAX(admin_datetime) ASC
-	`).Scan(&groups).Error; err != nil {
+		ORDER BY admin_datetime ASC
+	`).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("승인된 신고 조회 실패: %w", err)
 	}
+
+	// 2. (피신고자, 처리일) 단위 그룹핑 — 한 묶음 = disciplinelog 글 1개
+	groups := groupApprovedRows(rows)
 
 	result.TotalGroups = len(groups)
 	if len(groups) == 0 {
@@ -97,9 +116,9 @@ func runProcessApprovedReports(db *gorm.DB) (*ProcessReportsResult, error) {
 		return result, nil
 	}
 
-	// 2. 각 신고 그룹 처리
+	// 3. 각 신고 그룹 처리
 	for _, group := range groups {
-		if err := processReportGroup(db, &group, now); err != nil {
+		if err := processReportGroup(db, group, now); err != nil {
 			result.Errors++
 			result.Messages = append(result.Messages, fmt.Sprintf("실패(%s): %v", group.TargetMbID, err))
 			log.Printf("[Cron:process-approved-reports] error for %s: %v", group.TargetMbID, err)
@@ -112,25 +131,130 @@ func runProcessApprovedReports(db *gorm.DB) (*ProcessReportsResult, error) {
 	return result, nil
 }
 
-// processReportGroup processes a single report group
+// groupApprovedRows는 개별 행을 (피신고자, 처리일) 단위로 묶는다.
+// 같은 콘텐츠(sg_table, sg_id, sg_parent)의 여러 신고자 행은 하나의 reported_item으로 dedup하고,
+// 콘텐츠 단위별 사유/일수/유형/메모를 항목에 보존한다. 글 레벨 집계값(Agg*)도 함께 계산.
+func groupApprovedRows(rows []singoRow) []*singoReportGroup {
+	order := []string{}
+	groupMap := map[string]*singoReportGroup{}
+	seenContent := map[string]map[string]bool{}
+
+	for _, r := range rows {
+		dateKey := r.AdminDatetime.Format("2006-01-02")
+		gKey := r.TargetMbID + "|" + dateKey
+		g, ok := groupMap[gKey]
+		if !ok {
+			g = &singoReportGroup{TargetMbID: r.TargetMbID, DateKey: dateKey}
+			groupMap[gKey] = g
+			seenContent[gKey] = map[string]bool{}
+			order = append(order, gKey)
+		}
+		if g.TargetTitle == nil && r.TargetTitle != nil && *r.TargetTitle != "" {
+			g.TargetTitle = r.TargetTitle
+		}
+
+		cKey := fmt.Sprintf("%s/%d/%d", r.SgTable, r.SgID, r.SgParent)
+		if seenContent[gKey][cKey] {
+			continue // 같은 콘텐츠의 다른 신고자 행 → 중복 제외
+		}
+		seenContent[gKey][cKey] = true
+
+		days := normPermanent(r.AdminDisciplineDays)
+		reasons := parseDisciplineReasons(r.AdminDisciplineReasons)
+		memo := ""
+		if r.AdminDisciplineDetail != nil {
+			memo = *r.AdminDisciplineDetail
+		}
+		period := toPeriod(days)
+		g.Items = append(g.Items, reportedItem{
+			Table:       r.SgTable,
+			ID:          r.SgID,
+			Parent:      r.SgParent,
+			IsComment:   r.SgParent > 0 && r.SgParent != r.SgID,
+			SgTypes:     reasons,
+			PenaltyDays: &period,
+			PenaltyType: parsePenaltyTypes(r.AdminDisciplineType),
+			Memo:        memo,
+		})
+
+		if g.SgID == 0 {
+			g.SgTable, g.SgID, g.SgParent = r.SgTable, r.SgID, r.SgParent
+		}
+		g.AggDays = severer(g.AggDays, days)
+		g.AggReasons = unionInts(g.AggReasons, reasons)
+		g.AggType = joinUnionType(g.AggType, r.AdminDisciplineType)
+		if memo != "" {
+			if g.AggDetail != "" {
+				g.AggDetail += "\n"
+			}
+			g.AggDetail += memo
+		}
+	}
+
+	groups := make([]*singoReportGroup, 0, len(order))
+	for _, k := range order {
+		g := groupMap[k]
+		g.ReportCount = len(g.Items)
+		groups = append(groups, g)
+	}
+	return groups
+}
+
+// mergeItemsIntoLog는 같은 날 이미 만들어진 기존 disciplinelog에 그룹 항목을 append하고
+// 집계 제재를 재계산하여 wr_content/wr_1을 갱신한다. (사유 무관 단순 재사용으로 항목이 사라지던 문제 해소)
+func mergeItemsIntoLog(tx *gorm.DB, logID int, group *singoReportGroup) error {
+	var contentStr string
+	if err := tx.Raw("SELECT wr_content FROM g5_write_disciplinelog WHERE wr_id = ?", logID).Scan(&contentStr).Error; err != nil {
+		return err
+	}
+	var data disciplineData
+	if contentStr != "" {
+		_ = json.Unmarshal([]byte(contentStr), &data)
+	}
+
+	seen := map[string]bool{}
+	for _, it := range data.ReportedItems {
+		seen[fmt.Sprintf("%s/%d/%d", it.Table, it.ID, it.Parent)] = true
+	}
+	for _, it := range group.Items {
+		k := fmt.Sprintf("%s/%d/%d", it.Table, it.ID, it.Parent)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		data.ReportedItems = append(data.ReportedItems, it)
+	}
+
+	data.SgTypes = unionInts(data.SgTypes, group.AggReasons)
+	data.PenaltyType = unionStrings(data.PenaltyType, parsePenaltyTypes(group.AggType))
+	data.PenaltyPeriod = toPeriod(severer(normPermanent(data.PenaltyPeriod), group.AggDays))
+	data.IsBulk = len(data.ReportedItems) > 1
+	data.ReportCount = len(data.ReportedItems)
+
+	contentJSON, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return tx.Exec("UPDATE g5_write_disciplinelog SET wr_content = ?, wr_1 = ? WHERE wr_id = ?",
+		string(contentJSON), buildReasonLabels(data.SgTypes), logID).Error
+}
+
+// processReportGroup processes a single (target, date) incident group
 func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) error {
 	targetMbID := group.TargetMbID
+	items := group.Items
+	if len(items) == 0 {
+		return nil
+	}
 
-	// all_reports 파싱 → reported_items 배열
-	items := parseReportedItems(group.AllReports, group.SgTable, group.SgID, group.SgParent)
-
-	// 통합 제재 체크: discipline_log_id가 이미 설정된 경우
+	// 통합 제재 체크: 같은 날 이미 만들어진 로그가 있으면 그쪽에 병합
 	var existingLogID int
-	isMergedDiscipline := false
 	db.Raw(`
 		SELECT discipline_log_id FROM g5_na_singo
 		WHERE target_mb_id = ? AND admin_approved = 1 AND processed = 0 AND discipline_log_id > 0
 		LIMIT 1
 	`, targetMbID).Scan(&existingLogID)
-
-	if existingLogID > 0 {
-		isMergedDiscipline = true
-	}
+	isMergedDiscipline := existingLogID > 0
 
 	// target_mb_id가 없으면 게시글에서 직접 조회
 	if targetMbID == "" {
@@ -144,14 +268,8 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 		targetNick = targetMbID
 	}
 
-	// discipline reasons 파싱
-	sgTypesArray := parseDisciplineReasons(group.AdminDisciplineReasons)
-
-	disciplineDetail := ""
-	if group.AdminDisciplineDetail != nil {
-		disciplineDetail = *group.AdminDisciplineDetail
-	}
-
+	sgTypesArray := group.AggReasons
+	disciplineDetail := group.AggDetail
 	isBulk := len(items) > 1
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -166,14 +284,17 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 			return nil // 이미 다른 실행에서 처리됨
 		}
 
-		// 2-1. 징계 로그 게시글 작성
+		// 2-1. 징계 로그 게시글 작성(또는 기존 로그에 병합)
 		var wrID int
 		if isMergedDiscipline {
 			wrID = existingLogID
+			if err := mergeItemsIntoLog(tx, existingLogID, group); err != nil {
+				return fmt.Errorf("기존 징계 로그 병합 실패: %w", err)
+			}
 		} else {
 			var err error
 			wrID, err = createDisciplineLogPost(tx, targetMbID, targetNick, sgTypesArray,
-				group.AdminDisciplineDays, group.AdminDisciplineType, disciplineDetail,
+				group.AggDays, group.AggType, disciplineDetail,
 				group.SgTable, group.SgID, group.SgParent, group.ReportCount,
 				items, isBulk, now)
 			if err != nil {
@@ -181,15 +302,15 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 			}
 		}
 
-		// 2-2. 사용자 제재 적용
-		if err := applyUserRestriction(tx, targetMbID, group.AdminDisciplineType,
-			group.AdminDisciplineDays, sgTypesArray, now); err != nil {
+		// 2-2. 사용자 제재 적용 (그룹당 1회, 집계=가장 무거운 제재)
+		if err := applyUserRestriction(tx, targetMbID, group.AggType,
+			group.AggDays, sgTypesArray, now); err != nil {
 			return fmt.Errorf("사용자 제재 적용 실패: %w", err)
 		}
 
 		// 2-3. 제재 알림 쪽지 발송
 		if err := sendDisciplineMemo(tx, targetMbID, targetNick,
-			group.AdminDisciplineDays, group.AdminDisciplineType,
+			group.AggDays, group.AggType,
 			sgTypesArray, disciplineDetail, wrID, now); err != nil {
 			log.Printf("[Cron:process-approved-reports] memo send failed for %s: %v", targetMbID, err)
 			// 쪽지 발송 실패는 전체 처리를 중단하지 않음
@@ -240,24 +361,102 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 	})
 }
 
-// parseReportedItems parses "free/123/0,free/456/400" format
-func parseReportedItems(allReports string, fallbackTable string, fallbackID, fallbackParent int) []reportedItem {
-	var items []reportedItem
-	if allReports != "" {
-		for _, entry := range strings.Split(allReports, ",") {
-			parts := strings.Split(entry, "/")
-			if len(parts) == 3 {
-				var id, parent int
-				fmt.Sscanf(parts[1], "%d", &id)
-				fmt.Sscanf(parts[2], "%d", &parent)
-				items = append(items, reportedItem{Table: parts[0], ID: id, Parent: parent})
+// normPermanent는 DB의 영구 표현(-1)을 Go 내부 표현(permanentDays)으로 정규화한다.
+func normPermanent(d int) int {
+	if d < 0 {
+		return permanentDays
+	}
+	return d
+}
+
+// toPeriod는 Go 내부 일수를 JSON penalty_period 형식(영구=-1)으로 변환한다.
+func toPeriod(d int) int {
+	if d == permanentDays || d < 0 {
+		return -1
+	}
+	return d
+}
+
+// severer는 두 일수 중 더 무거운 제재를 반환한다(영구 우선, 그 외 최댓값). 입력은 정규화된 값.
+func severer(a, b int) int {
+	if a == permanentDays || b == permanentDays {
+		return permanentDays
+	}
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// unionInts는 정수 슬라이스들의 순서 보존 합집합을 반환한다.
+func unionInts(slices ...[]int) []int {
+	seen := map[int]bool{}
+	out := []int{}
+	for _, s := range slices {
+		for _, v := range s {
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
 			}
 		}
 	}
-	if len(items) == 0 {
-		items = append(items, reportedItem{Table: fallbackTable, ID: fallbackID, Parent: fallbackParent})
+	return out
+}
+
+// unionStrings는 문자열 슬라이스들의 순서 보존 합집합을 반환한다.
+func unionStrings(slices ...[]string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, s := range slices {
+		for _, v := range s {
+			if v != "" && !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
 	}
-	return items
+	return out
+}
+
+// joinUnionType은 콤마 구분 제재 유형 문자열들의 합집합(원본 토큰 보존)을 반환한다.
+func joinUnionType(a, b string) string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, s := range []string{a, b} {
+		for _, tok := range strings.Split(s, ",") {
+			tok = strings.TrimSpace(tok)
+			if tok != "" && !seen[tok] {
+				seen[tok] = true
+				out = append(out, tok)
+			}
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// parsePenaltyTypes는 콤마 구분 제재 유형 문자열을 ["level","access"] 배열로 변환한다.
+// 콤마 결합 유형("level,access")과 레거시 토큰(level_down/access_block/both 등)을 모두 처리.
+func parsePenaltyTypes(disciplineType string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(v string) {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	for _, tok := range strings.Split(disciplineType, ",") {
+		switch strings.TrimSpace(tok) {
+		case "level_down", "level":
+			add("level")
+		case "access_block", "access":
+			add("access")
+		case "both", "demotion_and_block":
+			add("level")
+			add("access")
+		}
+	}
+	return out
 }
 
 // parseDisciplineReasons parses JSON discipline reasons
@@ -335,7 +534,7 @@ func createDisciplineLogPost(
 	wrID := maxWrID + 1
 
 	// penalty_type 변환
-	penaltyType := convertDisciplineType(disciplineType)
+	penaltyType := parsePenaltyTypes(disciplineType)
 
 	// 9999일은 영구제재로 변환
 	penaltyPeriod := disciplineDays
@@ -446,7 +645,7 @@ func applyUserRestriction(tx *gorm.DB, targetMbID, disciplineType string, discip
 	}
 
 	// disciplineType에 따라 적절한 필드만 업데이트
-	penaltyTypes := convertDisciplineType(disciplineType)
+	penaltyTypes := parsePenaltyTypes(disciplineType)
 
 	// penalty_type 무관하게 disciplineDays > 0이면 항상 mb_intercept_date 설정
 	if disciplineDays > 0 || disciplineDays == 9999 {
@@ -651,20 +850,6 @@ func processBulkReports(tx *gorm.DB, disciplineDetail string, wrID int) {
 			SET processed = 1, processed_datetime = NOW(), discipline_log_id = ?, version = version + 1
 			WHERE sg_table = ? AND sg_id = ? AND sg_parent = ? AND admin_approved = 1 AND processed = 0
 		`, wrID, br.SgTable, br.SgID, br.SgParent)
-	}
-}
-
-// convertDisciplineType converts discipline type string to penalty type array
-func convertDisciplineType(disciplineType string) []string {
-	switch disciplineType {
-	case "level_down", "level":
-		return []string{"level"}
-	case "access_block", "access":
-		return []string{"access"}
-	case "both", "demotion_and_block":
-		return []string{"level", "access"}
-	default:
-		return []string{}
 	}
 }
 
