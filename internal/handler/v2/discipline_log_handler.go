@@ -353,9 +353,11 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		penaltyDateTo = &dateTo
 	}
 
-	// reported_items 항목별 적용 사유/일수/메모 구성.
-	// 우선순위 1: wr_content에 항목별 값이 이미 기록된 신규 글은 그대로 사용.
-	// 우선순위 2: 레거시 글은 g5_na_singo에서 보강(적용 사유 admin_discipline_reasons, 없으면 신고 사유 sg_type).
+	// reported_items 항목별 "운영자가 적용한 사유"/일수/메모 구성.
+	// 우선순위 1: wr_content에 항목별 값이 기록된 신규 글은 그대로 사용.
+	// 우선순위 2: 레거시 글은 g5_na_singo의 admin_discipline_reasons(적용 사유)/days/detail로 보강.
+	// 적용 사유를 찾지 못하면 항목별 사유 배지를 비워 둔다(상단 "제재 사유"가 적용 사유를 표시).
+	// 절대 신고자 신고 사유(sg_type)로 폴백하지 않는다 — 운영자 결정과 다를 수 있어 오해 소지가 큼.
 	reportedItems := make([]ReportedItem, 0, len(data.ReportedItems))
 	for _, item := range data.ReportedItems {
 		ri := ReportedItem{
@@ -382,18 +384,6 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 
 			if row.Reasons != nil {
 				ri.SgTypes = parseReasonCodes(*row.Reasons)
-			}
-			if len(ri.SgTypes) == 0 {
-				// 최종 폴백: 신고자가 선택한 신고 사유(sg_type)
-				var sgTypes []int
-				if err := h.db.Raw(`
-					SELECT DISTINCT sg_type
-					FROM g5_na_singo
-					WHERE discipline_log_id = ? AND sg_table = ? AND sg_id = ? AND admin_approved = 1
-					ORDER BY sg_type
-				`, post.WrID, item.Table, item.ID).Scan(&sgTypes).Error; err == nil {
-					ri.SgTypes = sgTypes
-				}
 			}
 			if ri.PenaltyDays == nil && row.Days != nil {
 				ri.PenaltyDays = row.Days
