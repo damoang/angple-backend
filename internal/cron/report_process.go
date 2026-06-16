@@ -42,16 +42,16 @@ type singoRow struct {
 // singoReportGroup은 (피신고자, 처리일) 단위 묶음 → disciplinelog 글 1개.
 // Items는 콘텐츠 단위(sg_id)별 제재 메타데이터를 각자 보유하고, Agg* 는 글 레벨 집계값.
 type singoReportGroup struct {
-	TargetMbID  string
-	DateKey     string
-	TargetTitle *string
-	Items       []reportedItem // 콘텐츠 단위별(항목별 사유/일수/유형/메모 포함)
-	AggReasons  []int          // 합집합 사유 코드
-	AggDays     int            // 최댓값(가장 무거운 제재, permanentDays=영구 형태)
-	AggType     string         // 합집합 제재 유형(원본 토큰 "level,access")
-	AggDetail   string         // 항목 메모 합침(기록/소명용)
-	MemberReason string        // 회원 공개 사유(대상 단위 단일값, 첫 비어있지 않은 값)
-	ReportCount int            // 콘텐츠 단위 수
+	TargetMbID   string
+	DateKey      string
+	TargetTitle  *string
+	Items        []reportedItem // 콘텐츠 단위별(항목별 사유/일수/유형/메모 포함)
+	AggReasons   []int          // 합집합 사유 코드
+	AggDays      int            // 최댓값(가장 무거운 제재, permanentDays=영구 형태)
+	AggType      string         // 합집합 제재 유형(원본 토큰 "level,access")
+	AggDetail    string         // 항목 메모 합침(기록/소명용)
+	MemberReason string         // 회원 공개 사유(대상 단위 단일값, 첫 비어있지 않은 값)
+	ReportCount  int            // 콘텐츠 단위 수
 	// URL 대표(첫 항목)
 	SgTable  string
 	SgID     int
