@@ -35,6 +35,7 @@ type DisciplineLogContent struct {
 	SgTypes         []int          `json:"sg_types"`
 	ReportedItems   []ReportedItem `json:"reported_items,omitempty"`
 	Content         string         `json:"content,omitempty"`
+	MemberReason    string         `json:"member_reason,omitempty"` // 회원 공개 사유 (운영자 입력 시 상세에 노출)
 }
 
 // ReportedItem represents a reported post or comment.
@@ -139,6 +140,7 @@ type DisciplineLogDetail struct {
 	ViolationTypes  []ViolationType `json:"violation_types"`
 	ReportedItems   []ReportedItem  `json:"reported_items,omitempty"`
 	Memo            string          `json:"memo,omitempty"`
+	MemberReason    string          `json:"member_reason,omitempty"` // 회원 공개 사유 (운영자 입력 시에만 노출)
 	CreatedBy       string          `json:"created_by"`
 	CreatedAt       string          `json:"created_at"`
 	ClaimPostID     *int            `json:"claim_post_id,omitempty"`
@@ -404,6 +406,7 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		PenaltyDateTo:   penaltyDateTo,
 		ViolationTypes:  violations,
 		ReportedItems:   reportedItems,
+		MemberReason:    data.MemberReason,
 		CreatedBy:       post.MbID,
 		CreatedAt:       post.WrDatetime.Format("2006-01-02 15:04:05"),
 	}
