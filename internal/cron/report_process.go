@@ -34,6 +34,7 @@ type singoRow struct {
 	AdminDisciplineDays    int       `gorm:"column:admin_discipline_days"`
 	AdminDisciplineType    string    `gorm:"column:admin_discipline_type"`
 	AdminDisciplineDetail  *string   `gorm:"column:admin_discipline_detail"`
+	AdminMemberReason      *string   `gorm:"column:admin_member_reason"`
 	TargetTitle            *string   `gorm:"column:target_title"`
 	AdminDatetime          time.Time `gorm:"column:admin_datetime"`
 }
@@ -49,6 +50,7 @@ type singoReportGroup struct {
 	AggDays     int            // 최댓값(가장 무거운 제재, permanentDays=영구 형태)
 	AggType     string         // 합집합 제재 유형(원본 토큰 "level,access")
 	AggDetail   string         // 항목 메모 합침(기록/소명용)
+	MemberReason string        // 회원 공개 사유(대상 단위 단일값, 첫 비어있지 않은 값)
 	ReportCount int            // 콘텐츠 단위 수
 	// URL 대표(첫 항목)
 	SgTable  string
@@ -77,6 +79,7 @@ type disciplineData struct {
 	PenaltyType     []string       `json:"penalty_type"`
 	SgTypes         []int          `json:"sg_types"`
 	Content         string         `json:"content,omitempty"`
+	MemberReason    string         `json:"member_reason,omitempty"` // 회원 공개 사유 (운영자 입력 시에만)
 	ReportedItems   []reportedItem `json:"reported_items"`
 	IsBulk          bool           `json:"is_bulk"`
 	ReportedURL     string         `json:"reported_url,omitempty"`
@@ -98,7 +101,7 @@ func runProcessApprovedReports(db *gorm.DB) (*ProcessReportsResult, error) {
 	if err := db.Raw(`
 		SELECT target_mb_id, sg_table, sg_id, sg_parent,
 			admin_discipline_reasons, admin_discipline_days,
-			admin_discipline_type, admin_discipline_detail,
+			admin_discipline_type, admin_discipline_detail, admin_member_reason,
 			target_title, admin_datetime
 		FROM g5_na_singo
 		WHERE admin_approved = 1 AND processed = 0
@@ -151,6 +154,10 @@ func groupApprovedRows(rows []singoRow) []*singoReportGroup {
 		}
 		if g.TargetTitle == nil && r.TargetTitle != nil && *r.TargetTitle != "" {
 			g.TargetTitle = r.TargetTitle
+		}
+		// 회원 공개 사유: 대상 단위 단일값 — 첫 비어있지 않은 값 채택(메모처럼 합치지 않음)
+		if g.MemberReason == "" && r.AdminMemberReason != nil && *r.AdminMemberReason != "" {
+			g.MemberReason = *r.AdminMemberReason
 		}
 
 		cKey := fmt.Sprintf("%s/%d/%d", r.SgTable, r.SgID, r.SgParent)
@@ -295,6 +302,7 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 			var err error
 			wrID, err = createDisciplineLogPost(tx, targetMbID, targetNick, sgTypesArray,
 				group.AggDays, group.AggType, disciplineDetail,
+				group.MemberReason,
 				group.SgTable, group.SgID, group.SgParent, group.ReportCount,
 				items, isBulk, now)
 			if err != nil {
@@ -523,6 +531,7 @@ func createDisciplineLogPost(
 	sgTypes []int,
 	disciplineDays int,
 	disciplineType, disciplineDetail string,
+	memberReason string,
 	sgTable string, sgID, sgParent, reportCount int,
 	items []reportedItem,
 	isBulk bool,
@@ -563,6 +572,7 @@ func createDisciplineLogPost(
 		PenaltyType:     penaltyType,
 		SgTypes:         sgTypes,
 		Content:         stripTags(disciplineDetail),
+		MemberReason:    memberReason,
 		ReportedItems:   items,
 		IsBulk:          isBulk,
 		ReportedURL:     reportedPath,
