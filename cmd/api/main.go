@@ -65,6 +65,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
+	"gorm.io/plugin/dbresolver"
 )
 
 // @title           Angple Backend API
@@ -6110,6 +6111,33 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 	if os.Getenv("OTEL_ENABLED") == "true" {
 		if pluginErr := db.Use(otelgorm.NewPlugin()); pluginErr != nil {
 			log.Printf("[WARN] otelgorm plugin registration failed: %v", pluginErr)
+		}
+	}
+
+	// dbresolver: read/write 분리 인프라.
+	// reader replica 가 별도로 설정되지 않은 경우(reader DSN == writer DSN)에는
+	// Register 를 호출하지 않아 replica 커넥션 풀조차 생성하지 않는다(완전 no-op).
+	// 2027 RDS 갱신 시 reader replica 추가에 대비한 사전 인프라.
+	readerDSN := cfg.Database.GetReaderDSN()
+	writerDSN := cfg.Database.GetDSN()
+	if readerDSN == writerDSN {
+		log.Printf("[INFO] dbresolver skipped: reader=writer (no-op)")
+	} else {
+		resolverLifetime := time.Duration(cfg.Database.ConnMaxLifetime) * time.Second
+		if resolverLifetime > 5*time.Minute {
+			resolverLifetime = 5 * time.Minute
+		}
+		resolver := dbresolver.Register(dbresolver.Config{
+			Replicas:          []gorm.Dialector{mysql.Open(readerDSN)},
+			TraceResolverMode: true,
+		}).
+			SetMaxIdleConns(cfg.Database.MaxIdleConns).
+			SetMaxOpenConns(cfg.Database.MaxOpenConns).
+			SetConnMaxLifetime(resolverLifetime)
+		if resolverErr := db.Use(resolver); resolverErr != nil {
+			log.Printf("[WARN] dbresolver registration failed (writer-only 로 계속): %v", resolverErr)
+		} else {
+			log.Printf("[INFO] dbresolver enabled: reader replica 활성")
 		}
 	}
 

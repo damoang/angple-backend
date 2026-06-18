@@ -8,7 +8,9 @@ server:
 
 database:
   host: mysql
+  reader_host: ""  # 비우면 writer(host) 재사용 — read/write 분리 미사용 (no-op)
   port: 3306
+  reader_port: 0   # 0이면 port 재사용
   user: ""        # → DB_USER (docker-compose environment:)
   password: ""    # → DB_PASSWORD (docker-compose environment:)
   dbname: ""      # → DB_NAME (docker-compose environment:)

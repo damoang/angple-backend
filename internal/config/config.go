@@ -70,7 +70,9 @@ type DatabaseConfig struct {
 	User            string `yaml:"user"`
 	Password        string `yaml:"password"`
 	DBName          string `yaml:"dbname"`
+	ReaderHost      string `yaml:"reader_host"` // 비어 있으면 writer(Host) 재사용 — read/write 분리 미사용
 	Port            int    `yaml:"port"`
+	ReaderPort      int    `yaml:"reader_port"` // 0이면 Port 재사용
 	MaxIdleConns    int    `yaml:"max_idle_conns"`
 	MaxOpenConns    int    `yaml:"max_open_conns"`
 	ConnMaxLifetime int    `yaml:"conn_max_lifetime"`
@@ -136,6 +138,13 @@ func overrideFromEnv(cfg *Config) {
 	}
 	if dbname := os.Getenv("DB_NAME"); dbname != "" {
 		cfg.Database.DBName = dbname
+	}
+	// Reader replica (선택) — 미설정 시 writer 재사용
+	if readerHost := os.Getenv("DB_READER_HOST"); readerHost != "" {
+		cfg.Database.ReaderHost = readerHost
+	}
+	if readerPort := os.Getenv("DB_READER_PORT"); readerPort != "" {
+		_, _ = fmt.Sscanf(readerPort, "%d", &cfg.Database.ReaderPort) //nolint:errcheck // 파싱 실패 시 기본값 유지
 	}
 
 	// Redis 설정
@@ -225,6 +234,26 @@ func (c *DatabaseConfig) GetDSN() string {
 		c.Password,
 		c.Host,
 		c.Port,
+		c.DBName,
+	)
+}
+
+// GetReaderDSN reader(replica) DSN 문자열 생성.
+// ReaderHost 가 비어 있으면 GetDSN() 을 그대로 반환한다(no-op = writer 재사용).
+// ReaderHost 가 설정된 경우에만 host/port 를 reader 로 치환하며, 포맷은 GetDSN() 과 동일하다.
+func (c *DatabaseConfig) GetReaderDSN() string {
+	if c.ReaderHost == "" {
+		return c.GetDSN()
+	}
+	port := c.ReaderPort
+	if port == 0 {
+		port = c.Port
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Asia%%2FSeoul&sql_mode=''&interpolateParams=true",
+		c.User,
+		c.Password,
+		c.ReaderHost,
+		port,
 		c.DBName,
 	)
 }
