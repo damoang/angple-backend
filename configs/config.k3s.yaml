@@ -5,7 +5,9 @@ server:
 
 database:
   host: damoang-g5-prd.cluster-cduqes60oxt0.ap-northeast-2.rds.amazonaws.com
+  reader_host: ""  # 비우면 writer(host) 재사용 — read/write 분리 미사용 (no-op)
   port: 3306
+  reader_port: 0   # 0이면 port 재사용
   user: damoang
   password: ""  # Set via DB_PASSWORD env var
   dbname: damoang
