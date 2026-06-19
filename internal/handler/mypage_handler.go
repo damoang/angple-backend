@@ -264,6 +264,32 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 		comments = make([]map[string]interface{}, 0)
 	}
 
+	// #12751: 이용제한 근거 댓글(g5_na_singo discipline)은 프로필 최근댓글에서도
+	// 내용을 가린다(링크는 유지). 게시글 상세와 동작을 통일.
+	if len(comments) > 0 {
+		idsByBoard := make(map[string][]int)
+		for _, cm := range comments {
+			board, _ := cm["bo_table"].(string)
+			wrID, _ := cm["wr_id"].(int)
+			if board != "" && wrID > 0 {
+				idsByBoard[board] = append(idsByBoard[board], wrID)
+			}
+		}
+		disciplined := make(map[string]map[int]bool, len(idsByBoard))
+		for board, ids := range idsByBoard {
+			if set, err := h.myPageRepo.FindDisciplinedCommentIDs(board, ids); err == nil {
+				disciplined[board] = set
+			}
+		}
+		for _, cm := range comments {
+			board, _ := cm["bo_table"].(string)
+			wrID, _ := cm["wr_id"].(int)
+			if set := disciplined[board]; set != nil && set[wrID] {
+				cm["preview"] = "[이용제한 댓글]"
+			}
+		}
+	}
+
 	resp := activityResponse{RecentPosts: posts, RecentComments: comments}
 
 	// 4. Store in Redis (60s TTL, non-blocking)
