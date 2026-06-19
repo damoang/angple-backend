@@ -22,6 +22,9 @@ type MyPageRepository interface {
 	GetBoardStats(mbID string) ([]gnuboard.BoardStat, error)
 	FindPublicPostsByMember(mbID string, limit int) ([]gnuboard.ActivityPost, error)
 	FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error)
+	// FindDisciplinedCommentIDs returns the set of wr_ids (within the given board)
+	// that are referenced as discipline evidence in g5_na_singo (#12751 masking).
+	FindDisciplinedCommentIDs(boardID string, wrIDs []int) (map[int]bool, error)
 	GetSearchableBoards() ([]searchableBoard, error)
 }
 
@@ -606,4 +609,26 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		return nil, err
 	}
 	return comments, nil
+}
+
+// FindDisciplinedCommentIDs returns wr_ids (within boardID) that are referenced as
+// discipline evidence (g5_na_singo.discipline_log_id IS NOT NULL). Used to mask the
+// content of such comments in the member profile recent-comments list (#12751).
+func (r *myPageRepository) FindDisciplinedCommentIDs(boardID string, wrIDs []int) (map[int]bool, error) {
+	result := make(map[int]bool)
+	if boardID == "" || len(wrIDs) == 0 {
+		return result, nil
+	}
+	var ids []int
+	err := r.db.Raw(
+		"SELECT DISTINCT sg_id FROM g5_na_singo WHERE sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL",
+		boardID, wrIDs,
+	).Scan(&ids).Error
+	if err != nil {
+		return result, err
+	}
+	for _, id := range ids {
+		result[id] = true
+	}
+	return result, nil
 }
