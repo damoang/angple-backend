@@ -2,6 +2,7 @@ package v2
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -48,7 +49,11 @@ type ReportedItem struct {
 	SgTypes     []int  `json:"sg_types,omitempty"`     // 항목별 적용 사유 코드(21~40)
 	PenaltyDays *int   `json:"penalty_days,omitempty"` // 항목별 일수(-1=영구), nil=미상
 	Memo        string `json:"memo,omitempty"`         // 항목별 관리자 메모
+	Deleted     bool   `json:"deleted"`                // 신고 접수 후 삭제된 글 여부(삭제됨 배지 표시용)
 }
+
+// disciplineBoardSlugRe는 g5_write_{board} 동적 테이블명에 쓰일 보드 슬러그를 검증(SQL 인젝션 방지).
+var disciplineBoardSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // ViolationType represents a type of rule violation
 type ViolationType struct {
@@ -395,6 +400,55 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 			}
 		}
 		reportedItems = append(reportedItems, ri)
+	}
+
+	// 신고 접수 후 삭제된 글 여부를 보드별 배치 조회로 판정(N+1 회피).
+	// 행이 없으면(하드삭제) 또는 wr_deleted_at가 NULL/'0000-00-00'이 아니면 삭제된 글로 표시.
+	if len(reportedItems) > 0 {
+		// 보드별 wr_id 수집
+		idsByTable := make(map[string][]int)
+		for _, ri := range reportedItems {
+			if ri.Table == "" || ri.ID == 0 || !disciplineBoardSlugRe.MatchString(ri.Table) {
+				continue
+			}
+			idsByTable[ri.Table] = append(idsByTable[ri.Table], ri.ID)
+		}
+
+		delKey := func(table string, id int) string { return table + ":" + strconv.Itoa(id) }
+		foundMap := make(map[string]bool)   // 조회 대상이고 행이 존재
+		deletedMap := make(map[string]bool) // 행이 존재하고 소프트삭제됨
+		for table, ids := range idsByTable {
+			var rows []struct {
+				WrID      int     `gorm:"column:wr_id"`
+				DeletedAt *string `gorm:"column:wr_deleted_at"`
+			}
+			if err := h.db.Table("g5_write_"+table).
+				Select("wr_id, wr_deleted_at").
+				Where("wr_id IN ?", ids).
+				Scan(&rows).Error; err != nil {
+				// 조회 실패(없는 보드 등)는 안전 폴백(삭제 표시 안 함) + 로깅
+				log.Printf("[disciplinelog] 삭제여부 조회 실패 log_id=%d table=%s: %v", id, table, err)
+				continue
+			}
+			for _, r := range rows {
+				foundMap[delKey(table, r.WrID)] = true
+				if r.DeletedAt != nil && *r.DeletedAt != "" && *r.DeletedAt != "0000-00-00 00:00:00" {
+					deletedMap[delKey(table, r.WrID)] = true
+				}
+			}
+		}
+
+		for i := range reportedItems {
+			ri := &reportedItems[i]
+			if ri.Table == "" || ri.ID == 0 || !disciplineBoardSlugRe.MatchString(ri.Table) {
+				continue // 조회 대상이 아니면 폴백(Deleted=false)
+			}
+			key := delKey(ri.Table, ri.ID)
+			if deletedMap[key] || !foundMap[key] {
+				// 소프트삭제됐거나, 조회 대상이었는데 행이 없으면(하드삭제) 삭제로 표시
+				ri.Deleted = true
+			}
+		}
 	}
 
 	detail := DisciplineLogDetail{
