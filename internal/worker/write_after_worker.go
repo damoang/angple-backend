@@ -345,6 +345,23 @@ func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent)
 }
 
 //nolint:gocyclo // Notification routing for post creation is branching-heavy business logic and stays explicit on purpose.
+// isPrivateBoard 는 일반 회원(기본 level 1)이 목록 또는 읽기를 할 수 없는 보드인지 판정한다.
+// bo_list_level 또는 bo_read_level 이 1 을 초과하면(=운영/숨김 보드) 비공개로 본다.
+// 조회 실패 시 false(기존 동작=알림 발송) 로 안전 폴백해 정상 보드 알림이 끊기지 않게 한다.
+func (w *WriteAfterWorker) isPrivateBoard(boTable string) bool {
+	var b struct {
+		ListLevel int `gorm:"column:bo_list_level"`
+		ReadLevel int `gorm:"column:bo_read_level"`
+	}
+	if err := w.db.Table("g5_board").
+		Select("bo_list_level, bo_read_level").
+		Where("bo_table = ?", boTable).
+		Scan(&b).Error; err != nil {
+		return false
+	}
+	return b.ListLevel > 1 || b.ReadLevel > 1
+}
+
 func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	if w.cacheService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -367,6 +384,14 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	authorName := job.Author
 	if authorName == "" {
 		authorName = job.MemberID
+	}
+
+	// 비공개/숨김 보드(일반 회원이 목록 또는 읽기 불가)는 팔로우·구독 알림을 보내지 않는다.
+	// 접근 못 하는 회원에게 글 존재/링크가 노출되는 문제 방지(예: test, adm 등 운영 보드).
+	// 기준은 permission_checker 의 CanList/CanRead 와 동일 — 기본 회원(level 1)이
+	// list 또는 read 못 하면 비공개로 간주. 캐시 무효화·activity sync 는 위에서 이미 수행됨.
+	if w.isPrivateBoard(job.BoardSlug) {
+		return
 	}
 
 	var followerIDs []string
