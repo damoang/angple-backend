@@ -344,7 +344,6 @@ func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent)
 	return nil
 }
 
-//nolint:gocyclo // Notification routing for post creation is branching-heavy business logic and stays explicit on purpose.
 // isPrivateBoard 는 일반 회원(기본 level 1)이 목록 또는 읽기를 할 수 없는 보드인지 판정한다.
 // bo_list_level 또는 bo_read_level 이 1 을 초과하면(=운영/숨김 보드) 비공개로 본다.
 // 조회 실패 시 false(기존 동작=알림 발송) 로 안전 폴백해 정상 보드 알림이 끊기지 않게 한다.
@@ -362,6 +361,7 @@ func (w *WriteAfterWorker) isPrivateBoard(boTable string) bool {
 	return b.ListLevel > 1 || b.ReadLevel > 1
 }
 
+//nolint:gocyclo // Notification routing for post creation is branching-heavy business logic and stays explicit on purpose.
 func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	if w.cacheService != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
