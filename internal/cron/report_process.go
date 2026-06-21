@@ -803,6 +803,7 @@ func buildMemoContent(targetMbID, targetNick string, disciplineDays int, discipl
 곧 다시 만나요! 🌈
 
 📝 쉬어가기 상세 내용
+• 기간: %s%s
 • 내 기록 확인: %s
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -818,11 +819,9 @@ func buildMemoContent(targetMbID, targetNick string, disciplineDays int, discipl
 
 🌟 함께 더 좋은 커뮤니티를 만들어가요!
    서로를 배려하는 마음, 그것이 다모앙의 힘입니다 💪`,
-		targetNick, targetNick, disciplineLink, profileLink)
+		targetNick, targetNick, penaltyDay, endDateStr, disciplineLink, profileLink)
 
-	// 실제 PHP 템플릿과의 호환성 유지 (사용하지 않는 플레이스홀더도 포함)
-	_ = penaltyDay
-	_ = endDateStr
+	// 미사용 플레이스홀더 (향후 템플릿 확장 대비)
 	_ = reasonList
 	_ = additionalInfo
 
