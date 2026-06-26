@@ -92,7 +92,7 @@ func (r *gnuboardPointWriteRepository) addNegativePoint(tx *gorm.DB, mbID string
 	if err := tx.Raw(`
 		SELECT po_id, po_point, po_use_point
 		FROM g5_point
-		WHERE po_mb_id = ? AND po_expired = 0 AND po_point > 0
+		WHERE mb_id = ? AND po_expired = 0 AND po_point > 0
 		  AND (po_point - po_use_point) > 0
 		ORDER BY po_expire_date ASC, po_id ASC
 		FOR UPDATE
@@ -171,14 +171,14 @@ func (r *gnuboardPointWriteRepository) ExpireBatch(batchSize int) (int, error) {
 	for {
 		var expired []struct {
 			PoID       int    `gorm:"column:po_id"`
-			MbID       string `gorm:"column:po_mb_id"`
+			MbID       string `gorm:"column:mb_id"`
 			PoPoint    int    `gorm:"column:po_point"`
 			PoUsePoint int    `gorm:"column:po_use_point"`
 		}
 
 		err := r.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Raw(`
-				SELECT po_id, po_mb_id, po_point, po_use_point
+				SELECT po_id, mb_id, po_point, po_use_point
 				FROM g5_point
 				WHERE po_expired = 0 AND po_point > 0
 				  AND po_expire_date < ?
@@ -244,13 +244,13 @@ func (r *gnuboardPointWriteRepository) GetExpiringPoints(withinDays int, limit i
 
 	var results []ExpiringPointInfo
 	err := r.db.Raw(`
-		SELECT po_mb_id AS mb_id, SUM(po_point - po_use_point) AS expiring_amount
+		SELECT mb_id AS mb_id, SUM(po_point - po_use_point) AS expiring_amount
 		FROM g5_point
 		WHERE po_expired = 0 AND po_point > 0
 		  AND po_expire_date BETWEEN ? AND ?
 		  AND po_expire_date != '9999-12-31'
 		  AND (po_point - po_use_point) > 0
-		GROUP BY po_mb_id
+		GROUP BY mb_id
 		HAVING expiring_amount > 0
 		LIMIT ?
 	`, today, futureDate, limit).Scan(&results).Error

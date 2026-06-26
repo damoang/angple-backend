@@ -5,7 +5,7 @@ import "time"
 // G5Point represents the g5_point table (Gnuboard point log)
 type G5Point struct {
 	PoID         int       `gorm:"column:po_id;primaryKey;autoIncrement" json:"po_id"`
-	MbID         string    `gorm:"column:po_mb_id;index" json:"po_mb_id"`
+	MbID         string    `gorm:"column:mb_id;index" json:"po_mb_id"`
 	PoDatetime   time.Time `gorm:"column:po_datetime" json:"po_datetime"`
 	PoContent    string    `gorm:"column:po_content" json:"po_content"`
 	PoPoint      int       `gorm:"column:po_point" json:"po_point"`
@@ -15,7 +15,7 @@ type G5Point struct {
 	PoRelTable   string    `gorm:"column:po_rel_table" json:"po_rel_table"`
 	PoRelID      string    `gorm:"column:po_rel_id" json:"po_rel_id"`
 	PoRelAction  string    `gorm:"column:po_rel_action" json:"po_rel_action"`
-	MbPoint      int       `gorm:"column:mb_point" json:"mb_point"`
+	MbPoint      int       `gorm:"column:po_mb_point" json:"mb_point"`
 }
 
 // TableName returns the table name for GORM
