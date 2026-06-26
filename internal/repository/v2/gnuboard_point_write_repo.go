@@ -2,6 +2,8 @@ package v2
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
@@ -92,7 +94,7 @@ func (r *gnuboardPointWriteRepository) addNegativePoint(tx *gorm.DB, mbID string
 	if err := tx.Raw(`
 		SELECT po_id, po_point, po_use_point
 		FROM g5_point
-		WHERE po_mb_id = ? AND po_expired = 0 AND po_point > 0
+		WHERE mb_id = ? AND po_expired = 0 AND po_point > 0
 		  AND (po_point - po_use_point) > 0
 		ORDER BY po_expire_date ASC, po_id ASC
 		FOR UPDATE
@@ -164,21 +166,31 @@ func (r *gnuboardPointWriteRepository) CanAfford(mbID string, cost int) (bool, e
 }
 
 // ExpireBatch expires points past their expiry date in batches. Returns number of expired rows.
+//
+// 안전 가드: 포인트 적립 컬럼 매핑 정정으로 이 만료 경로가 정상화되면, 그동안 처리되지
+// 못해 쌓인 과거-만료일 포인트(약 600만 행)가 첫 실행에서 일괄 만료되어 회원 잔액이
+// 대량 차감될 수 있다. 백로그 처리 정책을 정하기 전까지는 기본적으로 비활성화하고,
+// 명시적으로 POINT_EXPIRY_ENABLED=true 일 때만 동작시킨다.
 func (r *gnuboardPointWriteRepository) ExpireBatch(batchSize int) (int, error) {
+	if os.Getenv("POINT_EXPIRY_ENABLED") != "true" {
+		log.Printf("[point] ExpireBatch skipped: POINT_EXPIRY_ENABLED != true (대량 만료 방지 가드)")
+		return 0, nil
+	}
+
 	totalExpired := 0
 	today := time.Now().Format("2006-01-02")
 
 	for {
 		var expired []struct {
 			PoID       int    `gorm:"column:po_id"`
-			MbID       string `gorm:"column:po_mb_id"`
+			MbID       string `gorm:"column:mb_id"`
 			PoPoint    int    `gorm:"column:po_point"`
 			PoUsePoint int    `gorm:"column:po_use_point"`
 		}
 
 		err := r.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Raw(`
-				SELECT po_id, po_mb_id, po_point, po_use_point
+				SELECT po_id, mb_id, po_point, po_use_point
 				FROM g5_point
 				WHERE po_expired = 0 AND po_point > 0
 				  AND po_expire_date < ?
@@ -244,13 +256,13 @@ func (r *gnuboardPointWriteRepository) GetExpiringPoints(withinDays int, limit i
 
 	var results []ExpiringPointInfo
 	err := r.db.Raw(`
-		SELECT po_mb_id AS mb_id, SUM(po_point - po_use_point) AS expiring_amount
+		SELECT mb_id AS mb_id, SUM(po_point - po_use_point) AS expiring_amount
 		FROM g5_point
 		WHERE po_expired = 0 AND po_point > 0
 		  AND po_expire_date BETWEEN ? AND ?
 		  AND po_expire_date != '9999-12-31'
 		  AND (po_point - po_use_point) > 0
-		GROUP BY po_mb_id
+		GROUP BY mb_id
 		HAVING expiring_amount > 0
 		LIMIT ?
 	`, today, futureDate, limit).Scan(&results).Error

@@ -36,7 +36,7 @@ func (r *gnuboardPointRepository) GetSummary(mbID string) (*PointSummary, error)
 	}
 	r.db.Model(&gnuboard.G5Point{}).
 		Select("COALESCE(SUM(CASE WHEN po_point > 0 THEN po_point ELSE 0 END), 0) as total_earned, COALESCE(SUM(CASE WHEN po_point < 0 THEN ABS(po_point) ELSE 0 END), 0) as total_used").
-		Where("po_mb_id = ?", mbID).
+		Where("mb_id = ?", mbID).
 		Scan(&result)
 
 	return &PointSummary{
@@ -47,7 +47,7 @@ func (r *gnuboardPointRepository) GetSummary(mbID string) (*PointSummary, error)
 }
 
 func (r *gnuboardPointRepository) GetHistory(mbID string, filter string, page, limit int) ([]gnuboard.PointHistoryItem, int64, error) {
-	query := r.db.Model(&gnuboard.G5Point{}).Where("po_mb_id = ?", mbID)
+	query := r.db.Model(&gnuboard.G5Point{}).Where("mb_id = ?", mbID)
 
 	// Apply filter
 	switch filter {
