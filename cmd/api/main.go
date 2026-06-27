@@ -3044,6 +3044,26 @@ func main() {
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoWritePoint, "글쓰기", tableName, fmt.Sprintf("%d", post.WrID), "@write", pc) //nolint:errcheck
 			}
 
+			// 경험치(XP) 적립 — v2 핸들러와 동일 정책(전역 xpConfig, 기본 글 100).
+			// 비동기·panic 격리. 레벨업 토스트는 프론트가 as_level 변화로 처리하므로 서버 noti 생략.
+			if v2ExpRepo != nil {
+				xpMbID, xpTable, xpWrID := mbID, tableName, post.WrID
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[xp] write XP panic for %s: %v", xpMbID, r)
+						}
+					}()
+					xpConfig, err := v2ExpRepo.GetXPConfig()
+					if err != nil || xpConfig == nil || !xpConfig.WriteEnabled || xpConfig.WriteXP <= 0 {
+						return
+					}
+					if _, err := v2ExpRepo.AddExp(xpMbID, xpConfig.WriteXP, "글쓰기", xpTable, fmt.Sprintf("%d", xpWrID), "@write"); err != nil {
+						log.Printf("[xp] write XP grant failed for %s: %v", xpMbID, err)
+					}
+				}()
+			}
+
 			// 첨부파일 레코드 생성 (g5_board_file)
 			if len(req.Files) > 0 {
 				var boardFiles []gnuboard.G5BoardFile
@@ -3341,6 +3361,26 @@ func main() {
 					pc, _ = pointConfigRepo.GetPointConfig()
 				}
 				_ = gnuPointWriteRepo.AddPoint(mbID, board.BoCommentPoint, "댓글작성", fmt.Sprintf("g5_write_%s", slug), fmt.Sprintf("%d", comment.WrID), "@comment", pc) //nolint:errcheck
+			}
+
+			// 경험치(XP) 적립 — v2 핸들러와 동일 정책(전역 xpConfig, 기본 댓글 50).
+			// 비동기·panic 격리. 레벨업 토스트는 프론트가 as_level 변화로 처리하므로 서버 noti 생략.
+			if v2ExpRepo != nil {
+				xpMbID, xpTable, xpWrID := mbID, fmt.Sprintf("g5_write_%s", slug), comment.WrID
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[xp] comment XP panic for %s: %v", xpMbID, r)
+						}
+					}()
+					xpConfig, err := v2ExpRepo.GetXPConfig()
+					if err != nil || xpConfig == nil || !xpConfig.CommentEnabled || xpConfig.CommentXP <= 0 {
+						return
+					}
+					if _, err := v2ExpRepo.AddExp(xpMbID, xpConfig.CommentXP, "댓글작성", xpTable, fmt.Sprintf("%d", xpWrID), "@comment"); err != nil {
+						log.Printf("[xp] comment XP grant failed for %s: %v", xpMbID, err)
+					}
+				}()
 			}
 
 			// Admin sees full IP, others see masked
