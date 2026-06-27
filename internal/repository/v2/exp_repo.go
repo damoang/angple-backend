@@ -244,6 +244,7 @@ func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID,
 		// Insert exp log
 		log := &gnuboard.G5NaXP{
 			MbID:        mbID,
+			XpDatetime:  time.Now(),
 			XpPoint:     point,
 			XpContent:   content,
 			XpRelTable:  relTable,
