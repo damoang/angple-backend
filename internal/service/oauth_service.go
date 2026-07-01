@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
@@ -147,6 +148,18 @@ func (s *OAuthService) HandleCallback(ctx context.Context, provider domain.OAuth
 		}
 		if err := s.db.WithContext(ctx).Model(&oauthAccount).Updates(updates).Error; err != nil {
 			return nil, fmt.Errorf("update oauth account failed: %w", err)
+		}
+	}
+
+	// 탈퇴 게이트(방어적): 연동 계정이 확정 탈퇴(익명화)된 g5_member 라면 로그인을 차단한다.
+	// oauthAccount.UserID 가 mb_id 와 매칭될 때만 유효(현재 합성 oauth_* id 는 대개 no-op).
+	if s.db != nil {
+		var leaveDate string
+		if err := s.db.WithContext(ctx).Table("g5_member").Select("mb_leave_date").
+			Where("mb_id = ?", oauthAccount.UserID).Row().Scan(&leaveDate); err == nil {
+			if state, _ := common.ClassifyWithdrawal(leaveDate, time.Now()); state == common.WithdrawalConfirmed {
+				return nil, common.ErrAccountWithdrawn
+			}
 		}
 	}
 

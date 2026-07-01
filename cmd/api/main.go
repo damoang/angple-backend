@@ -1871,6 +1871,11 @@ func main() {
 
 		// v1 block routes
 		v1Members := router.Group("/api/v1/members")
+		// 탈퇴 숙려기간 셀프 서비스: 본인 탈퇴 신청/취소. /me 스코프이므로 JWT 주체 계정만 대상(타인 지정 불가).
+		// 취소는 제재중(intercept) 계정도 가능해야 하므로 BanCheck 를 적용하지 않는다(취소는 intercept 를 건드리지 않음).
+		memberLeaveHandler := handler.NewMemberLeaveHandler(db)
+		v1Members.POST("/me/leave", middleware.JWTAuth(jwtManager), memberLeaveHandler.Leave)
+		v1Members.DELETE("/me/leave", middleware.JWTAuth(jwtManager), memberLeaveHandler.CancelLeave)
 		v1Members.POST("/:id/block", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			userID := middleware.GetUserID(c)
 			targetID := c.Param("id")
@@ -6035,6 +6040,7 @@ func main() {
 		cronGroup.POST("/digest-subscribe-notify", cronHandler.DigestSubscribeNotify)
 		cronGroup.POST("/noti-cleanup", cronHandler.NotiCleanup)
 		cronGroup.POST("/auto-dismiss-reports", cronHandler.AutoDismissReports)
+		cronGroup.POST("/withdrawal-grace-anonymize", cronHandler.WithdrawalGraceAnonymize)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo, writeAfterEventRepo)

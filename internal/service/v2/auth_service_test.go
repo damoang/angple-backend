@@ -1,8 +1,14 @@
 package v2
 
 import (
+	"errors"
+	"strconv"
 	"testing"
+	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
+	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+	"github.com/damoang/angple-backend/pkg/jwt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -121,5 +127,62 @@ func TestCheckAndPromoteWritesMemberLevelHistory(t *testing.T) {
 	}
 	if history.SnapshotAsLevel != 4 || history.SnapshotAsExp != 3000 || history.SnapshotLoginDays != 7 {
 		t.Fatalf("unexpected snapshot history: %+v", history)
+	}
+}
+
+// HIGH-1: 세션 유지 경로(refresh)에도 탈퇴 게이트가 적용되어야 한다.
+// 확정(익명화) 계정은 refresh 로 무한 우회할 수 없고(차단), 숙려중이면 grace 상태를 반환한다.
+func TestRefreshTokenWithdrawalGate(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=private"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE v2_users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT, email TEXT, password TEXT, nickname TEXT, level INTEGER, status TEXT
+	)`).Error; err != nil {
+		t.Fatalf("create v2_users: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE g5_member (mb_id TEXT PRIMARY KEY, mb_leave_date TEXT)`).Error; err != nil {
+		t.Fatalf("create g5_member: %v", err)
+	}
+	db.Exec(`INSERT INTO v2_users (id, username, nickname, level, status) VALUES (1, 'zoe', '조', 2, 'active')`)
+
+	jwtManager := jwt.NewManager("test-secret", 15, 7)
+	svc := NewV2AuthService(v2repo.NewUserRepository(db), jwtManager, nil)
+	svc.SetPromotionDeps(db, nil)
+
+	refresh, err := jwtManager.GenerateRefreshToken(strconv.FormatUint(1, 10))
+	if err != nil {
+		t.Fatalf("gen refresh: %v", err)
+	}
+
+	// 확정(40일 경과) → refresh 차단
+	db.Exec(`INSERT INTO g5_member (mb_id, mb_leave_date) VALUES ('zoe', ?)`, time.Now().AddDate(0, 0, -40).Format("20060102"))
+	if _, err := svc.RefreshToken(refresh); !errors.Is(err, common.ErrAccountWithdrawn) {
+		t.Fatalf("confirmed account refresh should be blocked, got %v", err)
+	}
+
+	// 숙려중(5일 경과) → grace 상태 반환(차단 아님, 토큰은 발급)
+	db.Exec(`UPDATE g5_member SET mb_leave_date = ? WHERE mb_id = 'zoe'`, time.Now().AddDate(0, 0, -5).Format("20060102"))
+	resp, err := svc.RefreshToken(refresh)
+	if err != nil {
+		t.Fatalf("grace refresh should not error, got %v", err)
+	}
+	if resp.WithdrawalGrace == nil {
+		t.Fatal("grace refresh should carry WithdrawalGrace info")
+	}
+	if resp.AccessToken == "" {
+		t.Error("grace refresh should still issue access token (for cancel)")
+	}
+
+	// 정상(탈퇴 아님) → 정상 갱신
+	db.Exec(`UPDATE g5_member SET mb_leave_date = '' WHERE mb_id = 'zoe'`)
+	resp2, err := svc.RefreshToken(refresh)
+	if err != nil {
+		t.Fatalf("active account refresh should succeed, got %v", err)
+	}
+	if resp2.WithdrawalGrace != nil {
+		t.Error("active account should not carry WithdrawalGrace")
 	}
 }

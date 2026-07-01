@@ -51,6 +51,31 @@ type V2LoginResponse struct {
 	User         *v2domain.V2User `json:"user"`
 	AccessToken  string           `json:"access_token"`
 	RefreshToken string           `json:"refresh_token"`
+	// WithdrawalGrace 가 non-nil 이면 대상이 탈퇴 숙려중(취소 가능)이다. 정상 로그인 성공이 아니며
+	// 프론트는 취소 UI 를 노출해야 한다. 취소(DELETE /members/me/leave) 호출을 위해 토큰은 함께 발급된다.
+	WithdrawalGrace *WithdrawalGraceInfo `json:"withdrawal_grace,omitempty"`
+}
+
+// WithdrawalGraceInfo 는 숙려중 로그인 시 프론트가 참조하는 상태 정보다.
+type WithdrawalGraceInfo struct {
+	LeaveDate     string `json:"leave_date"`
+	Deadline      string `json:"deadline"`
+	DaysRemaining int    `json:"days_remaining"`
+}
+
+// checkWithdrawal 는 g5_member.mb_leave_date 로 회원 탈퇴 상태를 판정한다.
+// s.db 미설정(테스트 등) 시에는 WithdrawalNone 으로 fail-open 한다.
+func (s *V2AuthService) checkWithdrawal(username string, now time.Time) (common.WithdrawalState, time.Time) {
+	if s.db == nil {
+		return common.WithdrawalNone, time.Time{}
+	}
+	var leaveDate string
+	err := s.db.Table("g5_member").Select("mb_leave_date").
+		Where("mb_id = ?", username).Row().Scan(&leaveDate)
+	if err != nil {
+		return common.WithdrawalNone, time.Time{}
+	}
+	return common.ClassifyWithdrawal(leaveDate, now)
 }
 
 // Login authenticates a user against v2_users table.
@@ -67,6 +92,38 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 
 	if !verifyPassword(password, user.Password) {
 		return nil, common.ErrInvalidCredentials
+	}
+
+	// 탈퇴 숙려기간 분기: mb_leave_date 세팅됨 → 정상 로그인 대신 상태 반환.
+	//   - 숙려중(30일 미경과): 취소 가능. 토큰은 발급하되 WithdrawalGrace 표시(리프레시 쿠키는 핸들러에서 미설정).
+	//   - 확정(30일 경과): 이미 익명화 → 로그인 불가.
+	switch state, deadline := s.checkWithdrawal(user.Username, time.Now()); state {
+	case common.WithdrawalConfirmed:
+		return nil, common.ErrAccountWithdrawn
+	case common.WithdrawalGrace:
+		userIDStr := strconv.FormatUint(user.ID, 10)
+		accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
+		if err != nil {
+			return nil, fmt.Errorf("generate access token: %w", err)
+		}
+		refreshToken, err := s.jwtManager.GenerateRefreshToken(userIDStr)
+		if err != nil {
+			return nil, fmt.Errorf("generate refresh token: %w", err)
+		}
+		days := int(time.Until(deadline).Hours() / 24)
+		if days < 0 {
+			days = 0
+		}
+		return &V2LoginResponse{
+			User:         user,
+			AccessToken:  accessToken,
+			RefreshToken: refreshToken,
+			WithdrawalGrace: &WithdrawalGraceInfo{
+				LeaveDate:     deadline.AddDate(0, 0, -common.WithdrawalGraceDays).Format("20060102"),
+				Deadline:      deadline.Format("2006-01-02"),
+				DaysRemaining: days,
+			},
+		}, nil
 	}
 
 	if !isBcryptHash(user.Password) {
@@ -156,6 +213,12 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 		return nil, common.ErrUnauthorized
 	}
 
+	// 탈퇴 게이트(세션 유지 경로): 확정 계정은 refresh 로도 무한 우회할 수 없도록 차단한다.
+	state, deadline := s.checkWithdrawal(user.Username, time.Now())
+	if state == common.WithdrawalConfirmed {
+		return nil, common.ErrAccountWithdrawn
+	}
+
 	userIDStr := strconv.FormatUint(user.ID, 10)
 	newAccess, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
 	if err != nil {
@@ -166,15 +229,33 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	return &V2LoginResponse{
+	resp := &V2LoginResponse{
 		User:         user,
 		AccessToken:  newAccess,
 		RefreshToken: newRefresh,
-	}, nil
+	}
+	// 숙려중이면 정상 세션 갱신이 아니라 취소 가능 상태를 표시한다(핸들러가 쿠키 미설정 + 상태 반환).
+	if state == common.WithdrawalGrace {
+		days := int(time.Until(deadline).Hours() / 24)
+		if days < 0 {
+			days = 0
+		}
+		resp.WithdrawalGrace = &WithdrawalGraceInfo{
+			LeaveDate:     deadline.AddDate(0, 0, -common.WithdrawalGraceDays).Format("20060102"),
+			Deadline:      deadline.Format("2006-01-02"),
+			DaysRemaining: days,
+		}
+	}
+	return resp, nil
 }
 
 func (s *V2AuthService) GetCurrentUser(userID uint64) (*v2domain.V2User, error) {
 	return s.userRepo.FindByID(userID)
+}
+
+// CheckWithdrawalStatus 는 username(mb_id) 기준 탈퇴 상태와 숙려 만료 시각을 반환한다(SSO /auth/me 분기용).
+func (s *V2AuthService) CheckWithdrawalStatus(username string, now time.Time) (common.WithdrawalState, time.Time) {
+	return s.checkWithdrawal(username, now)
 }
 
 func verifyPassword(plain, hashed string) bool {

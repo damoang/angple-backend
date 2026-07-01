@@ -229,6 +229,18 @@ func (h *Handler) NotiCleanup(c *gin.Context) {
 	})
 }
 
+// WithdrawalGraceAnonymize handles POST /api/internal/cron/withdrawal-grace-anonymize
+// 숙려기간(30일) 경과한 탈퇴 신청 계정을 확정 익명화(닉네임만, 식별자 보존). 멱등.
+func (h *Handler) WithdrawalGraceAnonymize(c *gin.Context) {
+	h.runCronTask(c, "withdrawal-grace-anonymize", func() (interface{}, error) {
+		return runWithdrawalGraceAnonymize(h.db)
+	}, func(result interface{}) {
+		typed := result.(*WithdrawalGraceResult)
+		log.Printf("[Cron:withdrawal-grace-anonymize] candidates=%d anonymized=%d posts=%d skipped=%d errors=%d ids=%v",
+			typed.CandidateCount, typed.AnonymizedCount, typed.PostsUpdated, typed.SkippedCount, typed.Errors, typed.AnonymizedIDs)
+	})
+}
+
 // AutoDismissReports handles POST /api/internal/cron/auto-dismiss-reports
 // 만장일치 미처리(2명 이상 dismiss + action 0건) 신고를 처리자 'system'으로 자동 기각.
 // singo_settings.auto_dismiss_enabled = 'true' 일 때만 동작.

@@ -49,6 +49,7 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 					}
 				}
 				c.Set("userID", userID)
+				c.Set("username", userID) // 내부 신뢰 경로의 X-Internal-User-ID 는 mb_id(username)이다
 				c.Set("nickname", "")
 				c.Set("level", level)
 				c.Set("v2_user_id", userID)
@@ -95,6 +96,7 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		}
 
 		c.Set("userID", claims.UserID)
+		c.Set("username", claims.Username) // Bearer 경로: userID 는 v2_users.id(숫자), username 은 mb_id
 		c.Set("nickname", claims.Nickname)
 		c.Set("level", claims.Level)
 		c.Set("v2_user_id", claims.UserID)
@@ -124,6 +126,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 					}
 				}
 				c.Set("userID", userID)
+				c.Set("username", userID)
 				c.Set("nickname", "")
 				c.Set("level", level)
 				c.Set("v2_user_id", userID)
@@ -155,6 +158,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 			claims, err := jwtManager.VerifyToken(token)
 			if err == nil {
 				c.Set("userID", claims.UserID)
+				c.Set("username", claims.Username)
 				c.Set("nickname", claims.Nickname)
 				c.Set("level", claims.Level)
 				c.Set("v2_user_id", claims.UserID)
@@ -173,6 +177,20 @@ func GetUserID(c *gin.Context) string {
 		return ""
 	}
 	if str, ok := userID.(string); ok {
+		return str
+	}
+	return ""
+}
+
+// GetUsername extracts the member username (g5_member.mb_id) from context.
+// Bearer 토큰 경로에서 GetUserID 는 v2_users.id(숫자)를 반환하므로, g5_member 접근에는
+// 반드시 이 username(mb_id)을 사용해야 한다.
+func GetUsername(c *gin.Context) string {
+	username, exists := c.Get("username")
+	if !exists {
+		return ""
+	}
+	if str, ok := username.(string); ok {
 		return str
 	}
 	return ""
