@@ -72,6 +72,15 @@ func runAutoPromote(db *gorm.DB, notiRepo gnurepo.NotiRepository) (*AutoPromoteR
 				return nil
 			}
 
+			// v2_users.level 미러 동기화 (레벨 이원 저장 desync 방지 — /auth/me 와 /auth/profile 일치).
+			// 미러 동기화 실패는 승급 자체를 막지 않는다(best-effort). prod 에는 v2_users 가 존재하고,
+			// 부재/오류 시에도 g5_member.mb_level 갱신은 유지된다(백필/후속 변경으로 자가수렴).
+			if err := tx.Table("v2_users").
+				Where("username = ?", candidate.MbID).
+				Update("level", 3).Error; err != nil {
+				log.Printf("[Cron:auto-promote] v2_users level 동기화 스킵 (%s): %v", candidate.MbID, err)
+			}
+
 			if err := memberlevel.RecordPromotion(tx, &member, 3, memberlevel.ReasonAutoPromoteCron); err != nil {
 				if memberlevel.IsMissingHistoryTableError(err) {
 					log.Printf("[Cron:auto-promote] member level history table missing; promotion log skipped for %s: %v", candidate.MbID, err)
