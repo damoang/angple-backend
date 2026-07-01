@@ -2,6 +2,7 @@ package v2
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -181,7 +182,30 @@ func (h *V2AuthHandler) Login(c *gin.Context) {
 	}
 	resp, err := h.authService.Login(username, req.Password)
 	if err != nil {
+		if errors.Is(err, common.ErrAccountWithdrawn) {
+			// 숙려기간 경과 → 확정(익명화)된 계정. 로그인 불가.
+			c.JSON(http.StatusForbidden, common.V2Response{
+				Success: false,
+				Error:   &common.V2Error{Code: "account_withdrawn", Message: "탈퇴 처리된 계정입니다."},
+			})
+			return
+		}
 		common.V2ErrorResponse(c, http.StatusUnauthorized, "로그인에 실패했습니다", err)
+		return
+	}
+
+	// 탈퇴 숙려중: 정상 로그인 성공이 아니라 취소 가능 상태를 반환. 리프레시 쿠키는 설정하지 않는다.
+	// access_token 은 취소(DELETE /members/me/leave) 호출용으로만 함께 내려준다.
+	if resp.WithdrawalGrace != nil {
+		c.JSON(http.StatusOK, common.V2Response{
+			Success: true,
+			Data: gin.H{
+				"status":       "withdrawal_grace",
+				"withdrawal":   resp.WithdrawalGrace,
+				"access_token": resp.AccessToken,
+				"user":         resp.User,
+			},
+		})
 		return
 	}
 
@@ -277,6 +301,34 @@ func (h *V2AuthHandler) GetMe(c *gin.Context) {
 	user, err := h.authService.GetCurrentUser(userID)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
+		return
+	}
+
+	// 탈퇴 숙려/확정 분기: 정상 세션이 아니므로 상태 코드로 반환(프론트가 취소 UI 노출 or 로그아웃 처리).
+	switch state, deadline := h.authService.CheckWithdrawalStatus(user.Username, time.Now()); state {
+	case common.WithdrawalConfirmed:
+		c.JSON(http.StatusForbidden, common.V2Response{
+			Success: false,
+			Error:   &common.V2Error{Code: "account_withdrawn", Message: "탈퇴 처리된 계정입니다."},
+		})
+		return
+	case common.WithdrawalGrace:
+		days := int(deadline.Sub(time.Now()).Hours() / 24)
+		if days < 0 {
+			days = 0
+		}
+		c.JSON(http.StatusForbidden, common.V2Response{
+			Success: false,
+			Error: &common.V2Error{
+				Code:    "withdrawal_grace",
+				Message: "탈퇴 숙려중입니다. 탈퇴를 취소하시겠습니까?",
+				Details: gin.H{
+					"leave_date":     deadline.AddDate(0, 0, -common.WithdrawalGraceDays).Format("20060102"),
+					"deadline":       deadline.Format("2006-01-02"),
+					"days_remaining": days,
+				},
+			},
+		})
 		return
 	}
 
