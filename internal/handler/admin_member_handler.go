@@ -288,6 +288,13 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "회원 수정 실패", err)
 		return
 	}
+	// 레벨 변경 시 v2_users.level 미러 동기화 (이원 저장 desync 방지)
+	if req.MbLevel != nil {
+		if err := h.db.Table("v2_users").Where("username = ?", mbID).Update("level", *req.MbLevel).Error; err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "레벨 동기화 실패", err)
+			return
+		}
+	}
 	common.V2Success(c, gin.H{"message": "수정 완료"})
 }
 
@@ -332,6 +339,11 @@ func (h *AdminMemberHandler) BulkUpdateLevel(c *gin.Context) {
 	}
 	if err := h.db.Model(&gnuboard.G5Member{}).Where("mb_id IN ?", req.MemberIDs).Update("mb_level", req.Level).Error; err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "일괄 레벨 변경 실패", err)
+		return
+	}
+	// v2_users.level 미러 동기화 (이원 저장 desync 방지)
+	if err := h.db.Table("v2_users").Where("username IN ?", req.MemberIDs).Update("level", req.Level).Error; err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "레벨 동기화 실패", err)
 		return
 	}
 	common.V2Success(c, gin.H{"message": fmt.Sprintf("%d명 레벨 변경 완료", len(req.MemberIDs))})
