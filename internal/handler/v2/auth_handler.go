@@ -354,7 +354,7 @@ func (h *V2AuthHandler) GetMe(c *gin.Context) {
 		})
 		return
 	case common.WithdrawalGrace:
-		days := int(deadline.Sub(time.Now()).Hours() / 24)
+		days := int(time.Until(deadline).Hours() / 24)
 		if days < 0 {
 			days = 0
 		}

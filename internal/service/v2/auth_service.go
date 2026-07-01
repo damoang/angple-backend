@@ -110,7 +110,7 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		if err != nil {
 			return nil, fmt.Errorf("generate refresh token: %w", err)
 		}
-		days := int(deadline.Sub(time.Now()).Hours() / 24)
+		days := int(time.Until(deadline).Hours() / 24)
 		if days < 0 {
 			days = 0
 		}
@@ -236,7 +236,7 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 	}
 	// 숙려중이면 정상 세션 갱신이 아니라 취소 가능 상태를 표시한다(핸들러가 쿠키 미설정 + 상태 반환).
 	if state == common.WithdrawalGrace {
-		days := int(deadline.Sub(time.Now()).Hours() / 24)
+		days := int(time.Until(deadline).Hours() / 24)
 		if days < 0 {
 			days = 0
 		}

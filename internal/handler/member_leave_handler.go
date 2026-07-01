@@ -74,7 +74,7 @@ func (h *MemberLeaveHandler) Leave(c *gin.Context) {
 }
 
 // CancelLeave handles DELETE /api/v1/members/me/leave
-// 본인 계정의 mb_leave_date='', mb_leave_reason='' 복구. 단 숙려기간(30일) 이내 + 아직 익명화 미확정일 때만.
+// 본인 계정의 mb_leave_date=”, mb_leave_reason=” 복구. 단 숙려기간(30일) 이내 + 아직 익명화 미확정일 때만.
 // mb_intercept_date 는 절대 건드리지 않는다(제재 유지).
 func (h *MemberLeaveHandler) CancelLeave(c *gin.Context) {
 	mbID := resolveMbID(h.db, middleware.GetUsername(c), middleware.GetUserID(c))
