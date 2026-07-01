@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -291,8 +292,8 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	// 레벨 변경 시 v2_users.level 미러 동기화 (이원 저장 desync 방지)
 	if req.MbLevel != nil {
 		if err := h.db.Table("v2_users").Where("username = ?", mbID).Update("level", *req.MbLevel).Error; err != nil {
-			common.V2ErrorResponse(c, http.StatusInternalServerError, "레벨 동기화 실패", err)
-			return
+			// 미러 동기화 실패는 관리자 작업 자체를 막지 않는다(best-effort). g5_member 는 이미 반영됨.
+			log.Printf("[admin] v2_users level 동기화 스킵 (%s): %v", mbID, err)
 		}
 	}
 	common.V2Success(c, gin.H{"message": "수정 완료"})
@@ -343,8 +344,8 @@ func (h *AdminMemberHandler) BulkUpdateLevel(c *gin.Context) {
 	}
 	// v2_users.level 미러 동기화 (이원 저장 desync 방지)
 	if err := h.db.Table("v2_users").Where("username IN ?", req.MemberIDs).Update("level", req.Level).Error; err != nil {
-		common.V2ErrorResponse(c, http.StatusInternalServerError, "레벨 동기화 실패", err)
-		return
+		// 미러 동기화 실패는 일괄 작업 자체를 막지 않는다(best-effort). g5_member 는 이미 반영됨.
+		log.Printf("[admin] v2_users level 일괄 동기화 스킵: %v", err)
 	}
 	common.V2Success(c, gin.H{"message": fmt.Sprintf("%d명 레벨 변경 완료", len(req.MemberIDs))})
 }
