@@ -236,8 +236,8 @@ func (h *Handler) WithdrawalGraceAnonymize(c *gin.Context) {
 		return runWithdrawalGraceAnonymize(h.db)
 	}, func(result interface{}) {
 		typed := result.(*WithdrawalGraceResult)
-		log.Printf("[Cron:withdrawal-grace-anonymize] candidates=%d anonymized=%d skipped=%d errors=%d ids=%v",
-			typed.CandidateCount, typed.AnonymizedCount, typed.SkippedCount, typed.Errors, typed.AnonymizedIDs)
+		log.Printf("[Cron:withdrawal-grace-anonymize] candidates=%d anonymized=%d posts=%d skipped=%d errors=%d ids=%v",
+			typed.CandidateCount, typed.AnonymizedCount, typed.PostsUpdated, typed.SkippedCount, typed.Errors, typed.AnonymizedIDs)
 	})
 }
 

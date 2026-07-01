@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,19 @@ func setupWithdrawalDB(t *testing.T) *gorm.DB {
 	)`).Error; err != nil {
 		t.Fatalf("create v2_users: %v", err)
 	}
+	if err := db.Exec(`CREATE TABLE g5_board (bo_table TEXT)`).Error; err != nil {
+		t.Fatalf("create g5_board: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE g5_write_free (
+		wr_id INTEGER PRIMARY KEY AUTOINCREMENT,
+		mb_id TEXT,
+		wr_name TEXT,
+		wr_subject TEXT,
+		wr_content TEXT
+	)`).Error; err != nil {
+		t.Fatalf("create g5_write_free: %v", err)
+	}
+	db.Exec(`INSERT INTO g5_board (bo_table) VALUES ('free')`)
 	return db
 }
 
@@ -58,10 +72,37 @@ func TestRunWithdrawalGraceAnonymize(t *testing.T) {
 		('done', '탈퇴회원_2', ?, '', 'DI-DONE', '9.9.9.9')`,
 		agoYMD(40), agoYMD(5), agoYMD(60))
 	db.Exec(`INSERT INTO v2_users (username, nickname) VALUES ('gone', '떠난이'), ('staying', '남는이')`)
+	// gone 의 과거 게시물(작성자명 + 본문에 옛 닉 PII), staying 의 게시물(치환되면 안 됨)
+	db.Exec(`INSERT INTO g5_write_free (mb_id, wr_name, wr_subject, wr_content) VALUES
+		('gone', '떠난이', '떠난이의 글', '본문에 떠난이 언급'),
+		('staying', '남는이', '남는이의 글', '남는이 본문')`)
 
 	res, err := runWithdrawalGraceAnonymize(db)
 	if err != nil {
 		t.Fatalf("run: %v", err)
+	}
+
+	// MEDIUM: 과거 게시물 작성자명/본문 내 닉(PII) 치환 확인
+	if res.PostsUpdated < 1 {
+		t.Errorf("PostsUpdated = %d, want >= 1", res.PostsUpdated)
+	}
+	var post struct {
+		WrName    string `gorm:"column:wr_name"`
+		WrSubject string `gorm:"column:wr_subject"`
+		WrContent string `gorm:"column:wr_content"`
+	}
+	db.Table("g5_write_free").Where("mb_id = ?", "gone").Take(&post)
+	if post.WrName == "떠난이" {
+		t.Errorf("gone post wr_name should be anonymized, got %q", post.WrName)
+	}
+	if strings.Contains(post.WrSubject, "떠난이") || strings.Contains(post.WrContent, "떠난이") {
+		t.Errorf("gone post PII should be replaced: subject=%q content=%q", post.WrSubject, post.WrContent)
+	}
+	// staying(숙려중)의 게시물은 절대 건드리면 안 됨
+	var sName string
+	db.Table("g5_write_free").Select("wr_name").Where("mb_id = ?", "staying").Row().Scan(&sName)
+	if sName != "남는이" {
+		t.Errorf("staying post must be untouched, got %q", sName)
 	}
 
 	// confirmed 1건만 익명화, done 은 이미 익명화되어 skip

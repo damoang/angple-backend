@@ -233,7 +233,28 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 
 	resp, err := h.authService.RefreshToken(refreshToken)
 	if err != nil {
+		if errors.Is(err, common.ErrAccountWithdrawn) {
+			c.JSON(http.StatusForbidden, common.V2Response{
+				Success: false,
+				Error:   &common.V2Error{Code: "account_withdrawn", Message: "탈퇴 처리된 계정입니다."},
+			})
+			return
+		}
 		common.V2ErrorResponse(c, http.StatusUnauthorized, "토큰 갱신에 실패했습니다", err)
+		return
+	}
+
+	// 숙려중: 정상 세션 갱신이 아니라 취소 가능 상태 반환. 리프레시 쿠키는 갱신하지 않는다.
+	if resp.WithdrawalGrace != nil {
+		c.JSON(http.StatusOK, common.V2Response{
+			Success: true,
+			Data: gin.H{
+				"status":       "withdrawal_grace",
+				"withdrawal":   resp.WithdrawalGrace,
+				"access_token": resp.AccessToken,
+				"user":         resp.User,
+			},
+		})
 		return
 	}
 
@@ -277,7 +298,27 @@ func (h *V2AuthHandler) ExchangeToken(c *gin.Context) {
 
 	resp, err := h.authService.RefreshToken(refreshToken)
 	if err != nil {
+		if errors.Is(err, common.ErrAccountWithdrawn) {
+			c.JSON(http.StatusForbidden, common.V2Response{
+				Success: false,
+				Error:   &common.V2Error{Code: "account_withdrawn", Message: "탈퇴 처리된 계정입니다."},
+			})
+			return
+		}
 		common.V2ErrorResponse(c, http.StatusUnauthorized, "토큰 교환에 실패했습니다", err)
+		return
+	}
+
+	if resp.WithdrawalGrace != nil {
+		c.JSON(http.StatusOK, common.V2Response{
+			Success: true,
+			Data: gin.H{
+				"status":       "withdrawal_grace",
+				"withdrawal":   resp.WithdrawalGrace,
+				"access_token": resp.AccessToken,
+				"user":         resp.User,
+			},
+		})
 		return
 	}
 

@@ -213,6 +213,12 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 		return nil, common.ErrUnauthorized
 	}
 
+	// 탈퇴 게이트(세션 유지 경로): 확정 계정은 refresh 로도 무한 우회할 수 없도록 차단한다.
+	state, deadline := s.checkWithdrawal(user.Username, time.Now())
+	if state == common.WithdrawalConfirmed {
+		return nil, common.ErrAccountWithdrawn
+	}
+
 	userIDStr := strconv.FormatUint(user.ID, 10)
 	newAccess, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
 	if err != nil {
@@ -223,11 +229,24 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	return &V2LoginResponse{
+	resp := &V2LoginResponse{
 		User:         user,
 		AccessToken:  newAccess,
 		RefreshToken: newRefresh,
-	}, nil
+	}
+	// 숙려중이면 정상 세션 갱신이 아니라 취소 가능 상태를 표시한다(핸들러가 쿠키 미설정 + 상태 반환).
+	if state == common.WithdrawalGrace {
+		days := int(deadline.Sub(time.Now()).Hours() / 24)
+		if days < 0 {
+			days = 0
+		}
+		resp.WithdrawalGrace = &WithdrawalGraceInfo{
+			LeaveDate:     deadline.AddDate(0, 0, -common.WithdrawalGraceDays).Format("20060102"),
+			Deadline:      deadline.Format("2006-01-02"),
+			DaysRemaining: days,
+		}
+	}
+	return resp, nil
 }
 
 func (s *V2AuthService) GetCurrentUser(userID uint64) (*v2domain.V2User, error) {

@@ -138,3 +138,49 @@ func TestCancelSelfLeaveNotWithdrawing(t *testing.T) {
 		t.Fatalf("expected errNotWithdrawing, got %v", err)
 	}
 }
+
+// HIGH-2: 숙려중 사용자는 grace access_token(Bearer)만 보유 → JWT subject 가 v2_users.id(숫자).
+// resolveMbID 는 이 숫자 subject 를 g5_member.mb_id(username)로 역해석해야 한다.
+func TestResolveMbID(t *testing.T) {
+	db := newLeaveTestDB(t)
+	db.Exec(`CREATE TABLE v2_users (id INTEGER PRIMARY KEY, username TEXT)`)
+	db.Exec(`INSERT INTO v2_users (id, username) VALUES (42, 'grace_user')`)
+
+	// username 클레임이 있으면 그대로 사용
+	if got := resolveMbID(db, "grace_user", "42"); got != "grace_user" {
+		t.Errorf("username claim should win, got %q", got)
+	}
+	// username 클레임 없이 숫자 subject 만 → v2_users 역해석
+	if got := resolveMbID(db, "", "42"); got != "grace_user" {
+		t.Errorf("numeric subject should resolve to username, got %q", got)
+	}
+	// 비숫자 subject(내부 경로)는 이미 mb_id
+	if got := resolveMbID(db, "", "alice"); got != "alice" {
+		t.Errorf("non-numeric subject should pass through, got %q", got)
+	}
+	// 미인증
+	if got := resolveMbID(db, "", ""); got != "" {
+		t.Errorf("empty should stay empty, got %q", got)
+	}
+}
+
+// HIGH-2 end-to-end(단위): 숫자 subject 로 들어온 grace 사용자가 취소에 성공해야 한다(404 아님).
+func TestGraceTokenCancelSucceeds(t *testing.T) {
+	db := newLeaveTestDB(t)
+	db.Exec(`CREATE TABLE v2_users (id INTEGER PRIMARY KEY, username TEXT)`)
+	db.Exec(`INSERT INTO v2_users (id, username) VALUES (7, 'grace7')`)
+	db.Exec(`INSERT INTO g5_member (mb_id, mb_nick, mb_leave_date, mb_leave_reason) VALUES ('grace7', '그레이스', ?, 'self')`, leaveDateAgo(2))
+
+	// grace 토큰: username 클레임 없음, subject=숫자 "7"
+	mbID := resolveMbID(db, "", "7")
+	if mbID != "grace7" {
+		t.Fatalf("resolveMbID should map 7 -> grace7, got %q", mbID)
+	}
+	if err := cancelSelfLeave(db, mbID, time.Now()); err != nil {
+		t.Fatalf("cancel should succeed for grace user, got %v", err)
+	}
+	leave, _, _, _ := getMember(t, db, "grace7")
+	if leave != "" {
+		t.Errorf("leave_date should be cleared after cancel, got %q", leave)
+	}
+}

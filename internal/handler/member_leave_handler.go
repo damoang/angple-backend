@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,7 +49,7 @@ var (
 // 본인 계정의 mb_leave_date=오늘, mb_leave_reason 저장(탈퇴 신청 = 숙려 시작).
 // mb_intercept_date 는 절대 건드리지 않는다(제재 세탁 방지). 이미 숙려중이면 신청일을 재설정하지 않는다.
 func (h *MemberLeaveHandler) Leave(c *gin.Context) {
-	mbID := middleware.GetUserID(c)
+	mbID := resolveMbID(h.db, middleware.GetUsername(c), middleware.GetUserID(c))
 	if mbID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "인증이 필요합니다"})
 		return
@@ -76,7 +77,7 @@ func (h *MemberLeaveHandler) Leave(c *gin.Context) {
 // 본인 계정의 mb_leave_date='', mb_leave_reason='' 복구. 단 숙려기간(30일) 이내 + 아직 익명화 미확정일 때만.
 // mb_intercept_date 는 절대 건드리지 않는다(제재 유지).
 func (h *MemberLeaveHandler) CancelLeave(c *gin.Context) {
-	mbID := middleware.GetUserID(c)
+	mbID := resolveMbID(h.db, middleware.GetUsername(c), middleware.GetUserID(c))
 	if mbID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "인증이 필요합니다"})
 		return
@@ -96,6 +97,31 @@ func (h *MemberLeaveHandler) CancelLeave(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"message": "탈퇴가 취소되어 계정이 복구되었습니다."}})
+}
+
+// resolveMbID 는 요청 주체를 g5_member.mb_id(username)로 정규화한다.
+//
+// 숙려중 사용자는 세션 쿠키 없이 grace access_token(Bearer)만 보유하며, 이 경우
+// JWT subject(userID)는 v2_users.id(숫자)다. 따라서 GetUserID 만으로 g5_member 를 조회하면
+// mb_id 미매치로 404 가 난다. username 클레임을 우선 사용하고, 없거나 숫자면 v2_users 로
+// username 을 역해석한다.
+func resolveMbID(db *gorm.DB, usernameClaim, userID string) string {
+	if u := strings.TrimSpace(usernameClaim); u != "" {
+		return u
+	}
+	id := strings.TrimSpace(userID)
+	if id == "" {
+		return ""
+	}
+	// 숫자 subject → v2_users.id 로 username 역해석
+	if _, err := strconv.ParseUint(id, 10, 64); err == nil && db != nil {
+		var username string
+		if scanErr := db.Table("v2_users").Select("username").Where("id = ?", id).Row().Scan(&username); scanErr == nil && username != "" {
+			return username
+		}
+	}
+	// 비숫자 subject(내부 경로 등)는 이미 mb_id 로 간주
+	return id
 }
 
 // applySelfLeave 는 본인(mbID) 계정을 숙려 상태로 전환한다. 이미 숙려중이면 신청일을 유지한다.
