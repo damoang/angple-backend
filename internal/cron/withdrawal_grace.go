@@ -87,16 +87,19 @@ func runWithdrawalGraceAnonymize(db *gorm.DB) (*WithdrawalGraceResult, error) {
 // 행은 보존하며 DI(mb_dupinfo)·IP·mb_intercept_date·mb_leave_date 등 식별자는 변경/삭제하지 않는다.
 // 반환값은 익명화된 게시물 행 수.
 //
-// 순서가 중요하다: 게시물 치환을 먼저 하고(구 닉 필요), 성공 시에만 닉 마커를 세운다.
-// 게시물 치환이 실패하면 닉을 바꾸지 않아 다음 cron 실행에서 다시 대상이 된다(재시도).
+// 순서가 중요하다: 게시물 치환을 먼저 하고(구 닉 필요), **모든 대상 게시판 치환이 성공했을 때만**
+// 닉 마커를 세운다. 하나라도 실패하면 마커를 세우지 않아(에러 반환) 다음 cron 에서 재시도되며,
+// 이미 치환된 글은 REPLACE/조건 no-op 이라 멱등 재실행으로 안전하게 수렴한다.
 func anonymizeWithdrawnMember(db *gorm.DB, cand withdrawalCandidate) (int, error) {
 	oldNick := strings.TrimSpace(cand.MbNick)
 	// mb_no 로 결정론적 익명 닉을 만들어 충돌 없이 멱등 판정이 가능하도록 한다.
 	replacement := fmt.Sprintf("%s회원_%d", common.WithdrawalAnonymizedNickPrefix, cand.MbNo)
 
 	// 1. 과거 게시물의 작성자명(wr_name) 및 본문/제목 내 옛 닉(PII)을 일괄 치환한다(본인 글 한정).
-	posts, err := anonymizeMemberPosts(db, cand.MbID, oldNick, replacement)
+	//    부분 실패 시 err != nil → 아래 닉 마커를 세우지 않고 반환(재시도 보장).
+	posts, failures, err := anonymizeMemberPosts(db, cand.MbID, oldNick, replacement)
 	if err != nil {
+		log.Printf("[Cron:withdrawal-grace] posts anonymize incomplete for %s, marker NOT set (will retry): %v", cand.MbID, failures)
 		return 0, err
 	}
 
@@ -122,14 +125,19 @@ func anonymizeWithdrawnMember(db *gorm.DB, cand withdrawalCandidate) (int, error
 // 모든 게시판(g5_write_{bo_table})에서 치환한다. admin anonymizeMemberUser 의 게시물 익명화와
 // 동등하되, target URL 큐레이션 대신 "작성자 기준 일괄" 경로를 쓴다(개인정보 파기 완전성).
 // 삭제는 하지 않으며 wr_name/wr_subject/wr_content 만 갱신한다.
-func anonymizeMemberPosts(db *gorm.DB, mbID, oldNick, replacement string) (int, error) {
+//
+// 개별 테이블 UPDATE 실패는 집계·전파한다: 하나라도 실패하면 err != nil 을 반환하여 상위에서
+// 닉 마커를 세우지 않게 한다(실패 게시판의 PII 영구 잔존 방지 — 다음 cron 에서 재시도).
+// 반환: (치환된 행 수, 실패 게시판/사유 목록, 에러).
+func anonymizeMemberPosts(db *gorm.DB, mbID, oldNick, replacement string) (int, []string, error) {
 	var boTables []string
 	if err := db.Table("g5_board").Pluck("bo_table", &boTables).Error; err != nil {
 		// 게시판 목록을 못 읽으면 치환 완전성을 보장할 수 없으므로 하드 에러(닉 마킹 보류 → 재시도).
-		return 0, err
+		return 0, nil, err
 	}
 
 	updated := 0
+	var failures []string
 	for _, bt := range boTables {
 		bt = strings.TrimSpace(bt)
 		if bt == "" || !safeBoardTable.MatchString(bt) {
@@ -137,11 +145,12 @@ func anonymizeMemberPosts(db *gorm.DB, mbID, oldNick, replacement string) (int, 
 		}
 		table := "g5_write_" + bt
 
-		// 작성자명(wr_name) 익명화 — 본인 글만. 테이블 부재 등은 soft-skip.
+		// 작성자명(wr_name) 익명화 — 본인 글만.
 		res := db.Table(table).Where("mb_id = ? AND wr_name != ?", mbID, replacement).
 			Update("wr_name", replacement)
 		if res.Error != nil {
-			log.Printf("[Cron:withdrawal-grace] wr_name update skipped on %s (%s): %v", table, mbID, res.Error)
+			log.Printf("[Cron:withdrawal-grace] wr_name update FAILED on %s (%s): %v", table, mbID, res.Error)
+			failures = append(failures, fmt.Sprintf("%s: %v", table, res.Error))
 			continue
 		}
 		updated += int(res.RowsAffected)
@@ -153,9 +162,13 @@ func anonymizeMemberPosts(db *gorm.DB, mbID, oldNick, replacement string) (int, 
 				" WHERE mb_id = ? AND (wr_subject LIKE ? OR wr_content LIKE ?)",
 				oldNick, replacement, oldNick, replacement, mbID, "%"+oldNick+"%", "%"+oldNick+"%")
 			if cres.Error != nil {
-				log.Printf("[Cron:withdrawal-grace] content replace skipped on %s (%s): %v", table, mbID, cres.Error)
+				log.Printf("[Cron:withdrawal-grace] content replace FAILED on %s (%s): %v", table, mbID, cres.Error)
+				failures = append(failures, fmt.Sprintf("%s(content): %v", table, cres.Error))
 			}
 		}
 	}
-	return updated, nil
+	if len(failures) > 0 {
+		return updated, failures, fmt.Errorf("post anonymization incomplete: %d board(s) failed", len(failures))
+	}
+	return updated, nil, nil
 }

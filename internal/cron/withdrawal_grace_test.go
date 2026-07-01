@@ -154,6 +154,54 @@ func TestRunWithdrawalGraceAnonymize(t *testing.T) {
 	}
 }
 
+// MEDIUM(재검): 특정 게시판 UPDATE 실패 시 그 회원은 익명화 마킹되면 안 되고(PII 잔존 방지),
+// 다음 실행에서 재시도되어 수렴해야 한다.
+func TestWithdrawalGracePartialFailureRetries(t *testing.T) {
+	db := setupWithdrawalDB(t)
+	// g5_board 에 'ghost' 게시판을 추가하지만 g5_write_ghost 테이블은 만들지 않는다 → UPDATE 실패 유도.
+	db.Exec(`INSERT INTO g5_board (bo_table) VALUES ('ghost')`)
+	db.Exec(`INSERT INTO g5_member (mb_id, mb_nick, mb_leave_date, mb_dupinfo) VALUES ('gone', '떠난이', ?, 'DI-G')`, agoYMD(40))
+	db.Exec(`INSERT INTO v2_users (username, nickname) VALUES ('gone', '떠난이')`)
+	db.Exec(`INSERT INTO g5_write_free (mb_id, wr_name, wr_subject, wr_content) VALUES ('gone', '떠난이', '떠난이 글', '떠난이 본문')`)
+
+	// 1차: ghost 게시판 실패 → gone 은 마킹 안 됨
+	res, err := runWithdrawalGraceAnonymize(db)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.AnonymizedCount != 0 {
+		t.Errorf("member must NOT be marked anonymized on partial failure, AnonymizedCount=%d", res.AnonymizedCount)
+	}
+	if res.Errors < 1 {
+		t.Errorf("partial failure should be counted in Errors, got %d", res.Errors)
+	}
+	if n := nick(t, db, "gone"); n != "떠난이" {
+		t.Errorf("nick must stay original (unmarked) after partial failure, got %q", n)
+	}
+
+	// 2차: 누락 테이블 생성 → 이제 모든 게시판 성공 → gone 익명화 확정(재시도 수렴)
+	db.Exec(`CREATE TABLE g5_write_ghost (wr_id INTEGER PRIMARY KEY AUTOINCREMENT, mb_id TEXT, wr_name TEXT, wr_subject TEXT, wr_content TEXT)`)
+	res2, err := runWithdrawalGraceAnonymize(db)
+	if err != nil {
+		t.Fatalf("run2: %v", err)
+	}
+	if res2.AnonymizedCount != 1 {
+		t.Errorf("retry should now anonymize the member, AnonymizedCount=%d", res2.AnonymizedCount)
+	}
+	if res2.Errors != 0 {
+		t.Errorf("retry should have no errors, got %d", res2.Errors)
+	}
+	if n := nick(t, db, "gone"); !strings.HasPrefix(n, "탈퇴") {
+		t.Errorf("nick should be anonymized after successful retry, got %q", n)
+	}
+	// 1차에서 이미 치환된 free 게시물이 재실행에서도 안전(수렴)
+	var name string
+	db.Table("g5_write_free").Select("wr_name").Where("mb_id = ?", "gone").Row().Scan(&name)
+	if name == "떠난이" {
+		t.Errorf("free post wr_name should be anonymized, got %q", name)
+	}
+}
+
 // 가드 #4: 멱등 — 2회 실행 시 중복 익명화·에러 없음.
 func TestRunWithdrawalGraceIdempotent(t *testing.T) {
 	db := setupWithdrawalDB(t)
