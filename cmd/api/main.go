@@ -5446,7 +5446,7 @@ func main() {
 
 		// v1 message routes (uses g5_memo table directly)
 		gnuMemoRepo := gnurepo.NewMemoRepository(db)
-		v1MsgHandler := handler.NewV1MessageHandler(gnuMemoRepo, gnuMemberRepo, notiRepo)
+		v1MsgHandler := handler.NewV1MessageHandler(gnuMemoRepo, gnuMemberRepo, notiRepo, v2BlockRepo)
 		v1Messages := router.Group("/api/v1/messages", middleware.JWTAuth(jwtManager))
 		v1Messages.GET("", v1MsgHandler.GetMessages)
 		v1Messages.GET("/unread-count", v1MsgHandler.GetUnreadCount)
