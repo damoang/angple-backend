@@ -11,6 +11,7 @@ import (
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"github.com/damoang/angple-backend/internal/middleware"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
+	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,11 +20,12 @@ type V1MessageHandler struct {
 	memoRepo   gnurepo.MemoRepository
 	memberRepo gnurepo.MemberRepository
 	notiRepo   gnurepo.NotiRepository
+	blockRepo  v2repo.BlockRepository
 }
 
 // NewV1MessageHandler creates a new V1MessageHandler using g5_memo
-func NewV1MessageHandler(memoRepo gnurepo.MemoRepository, memberRepo gnurepo.MemberRepository, notiRepo gnurepo.NotiRepository) *V1MessageHandler {
-	return &V1MessageHandler{memoRepo: memoRepo, memberRepo: memberRepo, notiRepo: notiRepo}
+func NewV1MessageHandler(memoRepo gnurepo.MemoRepository, memberRepo gnurepo.MemberRepository, notiRepo gnurepo.NotiRepository, blockRepo v2repo.BlockRepository) *V1MessageHandler {
+	return &V1MessageHandler{memoRepo: memoRepo, memberRepo: memberRepo, notiRepo: notiRepo, blockRepo: blockRepo}
 }
 
 // v1MessageResponse matches frontend Message type
@@ -212,6 +214,16 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "받는 사람을 찾을 수 없습니다", err)
 		return
+	}
+
+	// 수신자가 발신자를 차단한 경우 전송 차단 (#12825).
+	// blockRepo.Exists(blocker, blocked): 수신자(blocker)의 차단 목록에 발신자(blocked)가 있는지 확인.
+	// 차단 사실을 직접 노출하지 않도록 중립적 메시지로 응답.
+	if h.blockRepo != nil {
+		if blocked, berr := h.blockRepo.Exists(req.ReceiverID, mbID); berr == nil && blocked {
+			common.V2ErrorResponse(c, http.StatusForbidden, "쪽지를 보낼 수 없는 대상입니다", nil)
+			return
+		}
 	}
 
 	sender, err := h.memberRepo.FindByID(mbID)
