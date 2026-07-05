@@ -39,6 +39,27 @@ type reportStats struct {
 	DateTo           string                 `json:"date_to"`
 	PeriodDays       int                    `json:"period_days"`
 	GeneratedAt      string                 `json:"generated_at"`
+	// PrevWeek: 직전 주 동일 지표(전주 대비 변화율 표시용). 구 보고서/구 렌더 호환 위해 omitempty.
+	PrevWeek *prevWeekKPI `json:"prev_week,omitempty"`
+	// DailyAvg4w: 직전 4주 요일별 평균(일별 트렌드 차트 겹치기용). key=요일명("일"~"토").
+	DailyAvg4w map[string]dailyAvgEntry `json:"daily_avg_4w,omitempty"`
+}
+
+// prevWeekKPI: 전주 대비 변화율 계산에 쓰는 직전 주 핵심 지표.
+type prevWeekKPI struct {
+	TotalReports     int `json:"total_reports"`
+	ReportCount      int `json:"report_count"`
+	ReportMonth      int `json:"report_month"`
+	CompletedReports int `json:"completed_reports"`
+	ClaimReports     int `json:"claim_reports"`
+	ReporterCount    int `json:"reporter_count"`
+}
+
+// dailyAvgEntry: 직전 4주 요일별 하루 평균.
+type dailyAvgEntry struct {
+	Reports  float64 `json:"reports"`
+	Posts    float64 `json:"posts"`
+	Comments float64 `json:"comments"`
 }
 
 type boardStat struct {
@@ -105,6 +126,9 @@ func runUpdateReportPatternAt(db *gorm.DB, now time.Time) (*ReportPatternResult,
 
 	// 통계 수집
 	stats := collectStats(db, startDate, endDate, now)
+
+	// 전주 대비 지표(a) + 직전 4주 요일평균(b) 보강 — 추세 비교용 (report/296#c_299)
+	addWeeklyComparison(db, stats, startDate, endDate, now)
 
 	// 보고서 저장
 	if err := saveReportPost(db, stats, subject, now); err != nil {
@@ -460,6 +484,93 @@ func collectStats(db *gorm.DB, startDate, endDate string, now time.Time) *report
 	}
 
 	return stats
+}
+
+// addWeeklyComparison enriches stats with previous-week KPIs (a) and 4-week weekday
+// averages (b) so the report charts can show trend/변화율. report/296#c_299.
+func addWeeklyComparison(db *gorm.DB, stats *reportStats, startDate, endDate string, now time.Time) {
+	dayNames := map[int]string{1: "일", 2: "월", 3: "화", 4: "수", 5: "목", 6: "금", 7: "토"}
+
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return
+	}
+	end, err2 := time.Parse("2006-01-02", endDate)
+	if err2 != nil {
+		return
+	}
+
+	// (a) 전주 대비: 직전 주(-7일) 동일 지표를 동일 로직으로 재수집.
+	prevStart := start.AddDate(0, 0, -7).Format("2006-01-02")
+	prevEnd := end.AddDate(0, 0, -7).Format("2006-01-02")
+	prev := collectStats(db, prevStart, prevEnd, now)
+	stats.PrevWeek = &prevWeekKPI{
+		TotalReports:     prev.TotalReports,
+		ReportCount:      prev.ReportCount,
+		ReportMonth:      prev.ReportMonth,
+		CompletedReports: prev.CompletedReports,
+		ClaimReports:     prev.ClaimReports,
+		ReporterCount:    prev.ReporterCount,
+	}
+
+	// (b) 직전 4주 요일별 평균: 현재 주 시작 직전 28일(=정확히 4주)을 요일 기준 집계 후 /4.
+	fourStart := start.AddDate(0, 0, -28).Format("2006-01-02") + " 00:00:00"
+	fourEnd := start.AddDate(0, 0, -1).Format("2006-01-02") + " 23:59:59"
+
+	avg := make(map[string]dailyAvgEntry)
+	for _, name := range dayNames {
+		avg[name] = dailyAvgEntry{}
+	}
+
+	// 요일별 신고 (4주 합 / 4)
+	type dowRow struct {
+		DayOfWeek int `gorm:"column:day_of_week"`
+		Count     int `gorm:"column:count"`
+	}
+	var rep []dowRow
+	db.Raw(fmt.Sprintf(`
+		SELECT day_of_week, COUNT(*) as count
+		FROM (
+			SELECT DISTINCT DAYOFWEEK(sg_time) as day_of_week, CONCAT(sg_table, '_', sg_id, '_', mb_id) as unique_key
+			FROM g5_na_singo
+			WHERE (%s)
+			AND sg_time >= ? AND sg_time <= ?
+		) as u
+		GROUP BY day_of_week
+	`, singoTypeCondition), fourStart, fourEnd).Scan(&rep)
+	for _, r := range rep {
+		if name, ok := dayNames[r.DayOfWeek]; ok {
+			e := avg[name]
+			e.Reports = float64(r.Count) / 4.0
+			avg[name] = e
+		}
+	}
+
+	// 요일별 글/댓글 (4주 합 / 4)
+	type dowPostRow struct {
+		DayOfWeek     int `gorm:"column:day_of_week"`
+		PostsCount    int `gorm:"column:posts_count"`
+		CommentsCount int `gorm:"column:comments_count"`
+	}
+	var pc []dowPostRow
+	db.Raw(`
+		SELECT DAYOFWEEK(bn_datetime) as day_of_week,
+			SUM(CASE WHEN wr_id=wr_parent THEN 1 ELSE 0 END) as posts_count,
+			SUM(CASE WHEN wr_id!=wr_parent THEN 1 ELSE 0 END) as comments_count
+		FROM g5_board_new
+		WHERE bn_datetime >= ? AND bn_datetime <= ?
+		GROUP BY DAYOFWEEK(bn_datetime)
+	`, fourStart, fourEnd).Scan(&pc)
+	for _, r := range pc {
+		if name, ok := dayNames[r.DayOfWeek]; ok {
+			e := avg[name]
+			e.Posts = float64(r.PostsCount) / 4.0
+			e.Comments = float64(r.CommentsCount) / 4.0
+			avg[name] = e
+		}
+	}
+
+	stats.DailyAvg4w = avg
 }
 
 // saveReportPost saves the report as a post in g5_write_report
