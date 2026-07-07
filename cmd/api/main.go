@@ -2413,17 +2413,14 @@ func main() {
 				postDetail = enriched[0]
 			}
 
-			// 이용제한 근거 글: 비로그인·비작성자·비관리자에게는 제목/본문을 응답에서 제외.
+			// 이용제한 근거 글: 비로그인에게는 제목/본문을 응답에서 제외.
 			// (SvelteKit 이 loader data 를 HTML 에 직렬화하므로, 프론트 마스킹만으로는
-			//  소스 유출을 막을 수 없음 → 원문을 애초에 안 보낸다. 비밀글 strip 패턴 미러.)
-			// 로그인 사용자는 원문을 받아 프론트 DisciplinedContent 가 blur/보기 토글 처리.
-			// flag(is_discipline_related)는 유지해 토글 UI 가 렌더되게 한다.
+			//  소스 유출을 막을 수 없음 → 비로그인에겐 원문을 애초에 안 보낸다. 봇·작업세력 차단.)
+			// 로그인 사용자(작성자·관리자 포함)는 원문을 받아 프론트 DisciplinedContent 가
+			// blur/보기 토글 처리(회원은 "보기" 클릭 시 열람). flag 는 유지해 토글 UI 렌더.
 			if post != nil && post.WrDeletedAt == nil {
 				if discipline, _ := postDetail["is_discipline_related"].(bool); discipline {
-					currentUserID := middleware.GetUserID(c)
-					isAuthor := currentUserID != "" && currentUserID == post.MbID
-					isAdmin := middleware.GetUserLevel(c) >= 10
-					if !isAuthor && !isAdmin {
+					if middleware.GetUserID(c) == "" {
 						postDetail["content"] = ""
 						postDetail["title"] = "[이용제한 근거 글]"
 					}
