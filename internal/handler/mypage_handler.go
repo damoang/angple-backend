@@ -264,6 +264,32 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 		comments = make([]map[string]interface{}, 0)
 	}
 
+	// #12908: 이용제한 근거 글(g5_na_singo discipline)은 프로필 최근글에서도 제목을 가린다
+	// (링크는 유지). 제목에 욕설·분란 유도가 많아 목록 노출을 차단. 게시글 상세와 통일.
+	if len(posts) > 0 {
+		idsByBoard := make(map[string][]int)
+		for _, p := range posts {
+			board, _ := p["bo_table"].(string)
+			wrID, _ := p["wr_id"].(int)
+			if board != "" && wrID > 0 {
+				idsByBoard[board] = append(idsByBoard[board], wrID)
+			}
+		}
+		disciplined := make(map[string]map[int]bool, len(idsByBoard))
+		for board, ids := range idsByBoard {
+			if set, err := h.myPageRepo.FindDisciplinedIDs(board, ids); err == nil {
+				disciplined[board] = set
+			}
+		}
+		for _, p := range posts {
+			board, _ := p["bo_table"].(string)
+			wrID, _ := p["wr_id"].(int)
+			if set := disciplined[board]; set != nil && set[wrID] {
+				p["wr_subject"] = "[이용제한 근거 글]"
+			}
+		}
+	}
+
 	// #12751: 이용제한 근거 댓글(g5_na_singo discipline)은 프로필 최근댓글에서도
 	// 내용을 가린다(링크는 유지). 게시글 상세와 동작을 통일.
 	if len(comments) > 0 {
@@ -277,7 +303,7 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 		}
 		disciplined := make(map[string]map[int]bool, len(idsByBoard))
 		for board, ids := range idsByBoard {
-			if set, err := h.myPageRepo.FindDisciplinedCommentIDs(board, ids); err == nil {
+			if set, err := h.myPageRepo.FindDisciplinedIDs(board, ids); err == nil {
 				disciplined[board] = set
 			}
 		}

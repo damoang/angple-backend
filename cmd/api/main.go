@@ -627,8 +627,13 @@ func enrichWithAuthorImage(db *gorm.DB, items []map[string]any) []map[string]any
 // INDEX 활용: `idx_table_id_time` 또는 `idx_singo_table_id` (sg_table, sg_id) 복합 INDEX hit.
 // `discipline_log_id IS NOT NULL` 은 IN clause 결과의 작은 row set 안에서만 filter 됨 → slow query 0.
 //
+// maskContent=true 이면 근거 글의 제목/본문 계열 필드를 placeholder 로 치환한다.
+// 목록·집계 등 auth 무관 캐시 표면에서 원문(특히 욕설·분란 제목)이 소스에 실려
+// 봇/작업세력에 추출되는 것을 차단하기 위함. 상세는 false 로 flag 만 세팅하고
+// 인증 분기 strip 을 별도로 적용한다.
+//
 // Mirrors enrichWithAuthorImage pattern (cache safety: shallow-copy on mutation).
-func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
+func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]any, maskContent bool) []map[string]any {
 	if len(items) == 0 || slug == "" {
 		return items
 	}
@@ -696,9 +701,28 @@ func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]an
 			copied[k] = val
 		}
 		copied["is_discipline_related"] = true
+		if maskContent {
+			maskDisciplinedFields(copied)
+		}
 		result[i] = copied
 	}
 	return result
+}
+
+// maskDisciplinedFields 는 이용제한 근거 아이템의 제목/본문 계열 필드를 placeholder 로
+// 치환한다. 존재하는 키만 덮어써 응답 스키마를 바꾸지 않는다(누락 키 추가 금지).
+func maskDisciplinedFields(m map[string]any) {
+	const titlePlaceholder = "[이용제한 근거 글]"
+	for _, k := range []string{"title", "subject", "wr_subject"} {
+		if _, ok := m[k]; ok {
+			m[k] = titlePlaceholder
+		}
+	}
+	for _, k := range []string{"content", "wr_content", "summary", "excerpt", "preview"} {
+		if _, ok := m[k]; ok {
+			m[k] = ""
+		}
+	}
 }
 
 // extractDisciplinelogID extracts the numeric ID from link1 values like "disciplinelog/1234" or "disciplinelog:1234"
@@ -2209,7 +2233,7 @@ func main() {
 
 			// is_discipline_related enrich (이용제한 근거 글 표시용).
 			// g5_na_singo.discipline_log_id IS NOT NULL 매칭. cache 저장 전 적용 → cache 자동 포함.
-			items = enrichWithDisciplineRelated(db, slug, items)
+			items = enrichWithDisciplineRelated(db, slug, items, true)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			if useHasNextPagination {
@@ -2385,8 +2409,25 @@ func main() {
 			// is_discipline_related enrich (이용제한 근거 글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
 			// list/comments endpoint 와 일관성 유지 (PR #484 후속).
-			if enriched := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}); len(enriched) > 0 {
+			if enriched := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}, false); len(enriched) > 0 {
 				postDetail = enriched[0]
+			}
+
+			// 이용제한 근거 글: 비로그인·비작성자·비관리자에게는 제목/본문을 응답에서 제외.
+			// (SvelteKit 이 loader data 를 HTML 에 직렬화하므로, 프론트 마스킹만으로는
+			//  소스 유출을 막을 수 없음 → 원문을 애초에 안 보낸다. 비밀글 strip 패턴 미러.)
+			// 로그인 사용자는 원문을 받아 프론트 DisciplinedContent 가 blur/보기 토글 처리.
+			// flag(is_discipline_related)는 유지해 토글 UI 가 렌더되게 한다.
+			if post != nil && post.WrDeletedAt == nil {
+				if discipline, _ := postDetail["is_discipline_related"].(bool); discipline {
+					currentUserID := middleware.GetUserID(c)
+					isAuthor := currentUserID != "" && currentUserID == post.MbID
+					isAdmin := middleware.GetUserLevel(c) >= 10
+					if !isAuthor && !isAdmin {
+						postDetail["content"] = ""
+						postDetail["title"] = "[이용제한 근거 글]"
+					}
+				}
 			}
 
 			c.JSON(http.StatusOK, gin.H{
@@ -2526,7 +2567,7 @@ func main() {
 
 			// is_discipline_related enrich (이용제한 근거 댓글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
-			transformed = enrichWithDisciplineRelated(db, slug, transformed)
+			transformed = enrichWithDisciplineRelated(db, slug, transformed, false)
 
 			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
 			editCost, editGraceSeconds := getCommentEditPolicy()

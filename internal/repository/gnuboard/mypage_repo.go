@@ -22,9 +22,9 @@ type MyPageRepository interface {
 	GetBoardStats(mbID string) ([]gnuboard.BoardStat, error)
 	FindPublicPostsByMember(mbID string, limit int) ([]gnuboard.ActivityPost, error)
 	FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error)
-	// FindDisciplinedCommentIDs returns the set of wr_ids (within the given board)
-	// that are referenced as discipline evidence in g5_na_singo (#12751 masking).
-	FindDisciplinedCommentIDs(boardID string, wrIDs []int) (map[int]bool, error)
+	// FindDisciplinedIDs returns the set of wr_ids (within the given board) that are
+	// referenced as discipline evidence in g5_na_singo. 글·댓글 공용 (#12751/#12908).
+	FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error)
 	GetSearchableBoards() ([]searchableBoard, error)
 }
 
@@ -611,10 +611,10 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 	return comments, nil
 }
 
-// FindDisciplinedCommentIDs returns wr_ids (within boardID) that are referenced as
-// discipline evidence (g5_na_singo.discipline_log_id IS NOT NULL). Used to mask the
-// content of such comments in the member profile recent-comments list (#12751).
-func (r *myPageRepository) FindDisciplinedCommentIDs(boardID string, wrIDs []int) (map[int]bool, error) {
+// FindDisciplinedIDs returns wr_ids (within boardID) that are referenced as
+// discipline evidence (g5_na_singo.discipline_log_id IS NOT NULL). 글/댓글 공용
+// (sg_id 는 글·댓글 wr_id 를 동일 컬럼으로 담음). 프로필 최근 글·댓글 마스킹에 사용.
+func (r *myPageRepository) FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error) {
 	result := make(map[int]bool)
 	if boardID == "" || len(wrIDs) == 0 {
 		return result, nil
