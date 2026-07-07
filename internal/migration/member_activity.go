@@ -72,7 +72,49 @@ CREATE TABLE IF NOT EXISTS member_activity_stats (
 			return err
 		}
 	}
-	return db.Exec(statsDDL).Error
+	if err := db.Exec(statsDDL).Error; err != nil {
+		return err
+	}
+
+	// 프로필 활동피드 조회(board_id + write_id IN + activity_type + is_deleted)가
+	// board_id 에 매칭 인덱스가 없어 풀스캔(EXPLAIN type=ALL, ~800만 행)이던 문제 해소.
+	// uk_table_write_type 는 write_table(테이블명) 기준이라 board_id(슬러그)엔 무효.
+	// 등가조건 3(board_id, activity_type, is_deleted) + IN범위 1(write_id) 복합 인덱스.
+	// 운영 대용량 테이블 대비 온라인 DDL(LOCK=NONE) 명시. 멱등(존재 시 스킵) —
+	// 운영은 저트래픽 윈도우에 별도 온라인 DDL 로 선반영하고, 이 마이그레이션은 기록·
+	// 신규 환경 재현용이다.
+	if err := addIndexIfMissing(db, "member_activity_feed", "idx_board_type_del_write",
+		"ALTER TABLE member_activity_feed ADD INDEX idx_board_type_del_write "+
+			"(board_id, activity_type, is_deleted, write_id), ALGORITHM=INPLACE, LOCK=NONE"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addIndexIfMissing 은 인덱스가 없을 때만 주어진 DDL 을 실행한다(멱등).
+func addIndexIfMissing(db *gorm.DB, tableName, indexName, ddl string) error {
+	exists, err := tableIndexExists(db, tableName, indexName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return db.Exec(ddl).Error
+}
+
+// tableIndexExists 는 테이블에 해당 인덱스가 존재하는지 반환한다.
+func tableIndexExists(db *gorm.DB, tableName, indexName string) (bool, error) {
+	var count int64
+	err := db.Raw(`
+		SELECT COUNT(*)
+		  FROM information_schema.statistics
+		 WHERE table_schema = DATABASE()
+		   AND table_name = ?
+		   AND index_name = ?`,
+		tableName, indexName,
+	).Scan(&count).Error
+	return count > 0, err
 }
 
 func tableColumnExists(db *gorm.DB, tableName, columnName string) (bool, error) {
