@@ -68,6 +68,11 @@ import (
 	"gorm.io/plugin/dbresolver"
 )
 
+// maxCommentReplyDepth 는 댓글 계층 문자열(wr_comment_reply)의 최대 길이로,
+// g5_write_* 의 varchar(10) 컬럼 폭과 일치해야 한다(migration.WidenCommentReplyColumns).
+// 이 깊이에 도달한 부모에 답글을 달면 확장 대신 같은 계층(형제)으로 저장한다.
+const maxCommentReplyDepth = 10
+
 // @title           Angple Backend API
 // @version         2.0
 // @description     Angple Community Platform - Open Source Backend API
@@ -3312,26 +3317,35 @@ func main() {
 					wrComment = parentComment.WrComment
 
 					parentReply := parentComment.WrCommentReply
-					replyLen := len(parentReply) + 1
-					depth = replyLen
-
-					var lastReply string
-					tx.Table(tableName).
-						Select("wr_comment_reply").
-						Where("wr_parent = ? AND wr_is_comment = 1 AND wr_comment = ? AND LENGTH(wr_comment_reply) = ? AND wr_comment_reply LIKE ?",
-							postID, wrComment, replyLen, parentReply+"%").
-						Order("wr_comment_reply DESC").
-						Limit(1).
-						Scan(&lastReply)
-
-					if lastReply == "" {
-						wrCommentReply = parentReply + "A"
+					if len(parentReply) >= maxCommentReplyDepth {
+						// 계층 문자열 상한(varchar(10)) 도달: 확장하지 않고 부모와 같은
+						// 계층(형제)으로 저장한다. 과거 varchar(5) 시절 초과분이 sql_mode
+						// 비엄격 truncate 로 조용히 형제 강등되던 것(economy/77128 사례)을
+						// 명시적 동작으로 대체 — 잘림에 의존하지 않는다.
+						wrCommentReply = parentReply
+						depth = len(parentReply)
 					} else {
-						lastChar := lastReply[len(lastReply)-1]
-						if lastChar < 'Z' {
-							wrCommentReply = parentReply + string(lastChar+1)
+						replyLen := len(parentReply) + 1
+						depth = replyLen
+
+						var lastReply string
+						tx.Table(tableName).
+							Select("wr_comment_reply").
+							Where("wr_parent = ? AND wr_is_comment = 1 AND wr_comment = ? AND LENGTH(wr_comment_reply) = ? AND wr_comment_reply LIKE ?",
+								postID, wrComment, replyLen, parentReply+"%").
+							Order("wr_comment_reply DESC").
+							Limit(1).
+							Scan(&lastReply)
+
+						if lastReply == "" {
+							wrCommentReply = parentReply + "A"
 						} else {
-							return fmt.Errorf("REPLY_LIMIT")
+							lastChar := lastReply[len(lastReply)-1]
+							if lastChar < 'Z' {
+								wrCommentReply = parentReply + string(lastChar+1)
+							} else {
+								return fmt.Errorf("REPLY_LIMIT")
+							}
 						}
 					}
 				} else {
