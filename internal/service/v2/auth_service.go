@@ -228,8 +228,11 @@ func (s *V2AuthService) AppExchangeLogin(code string) (*V2LoginResponse, error) 
 		}
 		// Auto-provision: member exists in g5_member (web verified) but not in v2_users.
 		level := claims.Level
-		if level <= 0 {
+		if level < 1 {
 			level = 1
+		}
+		if level > 255 {
+			level = 255
 		}
 		nickname := claims.Nickname
 		if nickname == "" {
@@ -239,7 +242,7 @@ func (s *V2AuthService) AppExchangeLogin(code string) (*V2LoginResponse, error) 
 			Username: mbID,
 			Nickname: nickname,
 			Email:    claims.Email,
-			Level:    uint8(min(level, 255)), //nolint:gosec
+			Level:    uint8(level), // #nosec G115 -- level clamped to [1,255] above
 			Status:   "active",
 		}
 		if createErr := s.userRepo.Create(user); createErr != nil {
