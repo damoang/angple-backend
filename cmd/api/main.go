@@ -3747,6 +3747,14 @@ func main() {
 			// 작성자 또는 관리자 확인
 			userID := middleware.GetUserID(c)
 			userLevel := middleware.GetUserLevel(c)
+			// #12918 방어: 인증 신원(userID) 또는 댓글 작성자(comment.MbID)를 확정할 수 없으면
+			// 소유권을 "없음"으로 단정하지 않는다. 인증/조회가 순간적으로 저하되면 본인 댓글인데도
+			// comment.MbID != userID 가 참이 되어 "수정 권한이 없습니다"로 오인 차단될 수 있으므로,
+			// 이 경우 403 대신 재시도 가능한 503 을 반환한다.
+			if userID == "" || comment.MbID == "" {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "일시적인 오류로 수정 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요."})
+				return
+			}
 			if comment.MbID != userID && userLevel < 10 {
 				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "수정 권한이 없습니다"})
 				return
@@ -4249,6 +4257,12 @@ func main() {
 			// 작성자 또는 관리자 확인
 			userID := middleware.GetUserID(c)
 			userLevel := middleware.GetUserLevel(c)
+			// #12918 방어: 인증 신원 또는 댓글 작성자를 확정할 수 없으면 소유권을 "없음"으로
+			// 단정하지 않고(본인 댓글 오인 차단 방지) 재시도 가능한 503 을 반환한다.
+			if userID == "" || comment.MbID == "" {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "일시적인 오류로 삭제 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요."})
+				return
+			}
 			if comment.MbID != userID && userLevel < 10 {
 				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "삭제 권한이 없습니다"})
 				return
