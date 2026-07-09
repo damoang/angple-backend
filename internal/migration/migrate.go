@@ -14,6 +14,16 @@ func Run(db *gorm.DB) error {
 		return err
 	}
 
+	// #12916: block_scope 컬럼 도입 후 기존 차단 레코드를 전체 차단("all")로 백필(idempotent).
+	// AutoMigrate 가 기존 행 default 를 채우지 못하는 MySQL 버전 대비.
+	if db.Migrator().HasColumn(&domain.MemberBlock{}, "block_scope") {
+		if err := db.Model(&domain.MemberBlock{}).
+			Where("block_scope IS NULL OR block_scope = ''").
+			Update("block_scope", domain.BlockScopeAll).Error; err != nil {
+			return err
+		}
+	}
+
 	var count int64
 	db.Model(&domain.Menu{}).Count(&count)
 	if count == 0 {

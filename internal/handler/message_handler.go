@@ -220,7 +220,7 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 	// blockRepo.Exists(blocker, blocked): 수신자(blocker)의 차단 목록에 발신자(blocked)가 있는지 확인.
 	// 차단 사실을 직접 노출하지 않도록 중립적 메시지로 응답.
 	if h.blockRepo != nil {
-		if blocked, berr := h.blockRepo.Exists(req.ReceiverID, mbID); berr == nil && blocked {
+		if blocked, berr := h.blockRepo.IsMessageBlocked(req.ReceiverID, mbID); berr == nil && blocked {
 			common.V2ErrorResponse(c, http.StatusForbidden, "쪽지를 보낼 수 없는 대상입니다", nil)
 			return
 		}
