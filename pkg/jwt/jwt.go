@@ -19,6 +19,7 @@ type Claims struct {
 	Username string `json:"username,omitempty"`
 	Nickname string `json:"nickname"`
 	Level    int    `json:"level"`
+	Email    string `json:"email,omitempty"`
 }
 
 // Manager JWT token manager

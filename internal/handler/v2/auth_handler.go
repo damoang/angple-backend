@@ -32,6 +32,9 @@ type v2LoginRequest struct {
 	Username string `json:"username"`
 	UserID   string `json:"user_id"`
 	Password string `json:"password" binding:"required"`
+	// Platform "mobile" 이면 refresh_token 을 응답 body 에도 포함한다
+	// (네이티브 앱은 httpOnly 쿠키 대신 SecureStore 에 저장).
+	Platform string `json:"platform"`
 }
 
 func (r *v2LoginRequest) GetUsername() string {
@@ -212,15 +215,20 @@ func (h *V2AuthHandler) Login(c *gin.Context) {
 	// Set refresh token as httpOnly cookie (domain shared across subdomains)
 	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(c.Request.Host), isSecureCookie(), true)
 
-	common.V2Success(c, gin.H{
+	data := gin.H{
 		"access_token": resp.AccessToken,
 		"user":         resp.User,
-	})
+	}
+	if req.Platform == "mobile" {
+		data["refresh_token"] = resp.RefreshToken
+	}
+	common.V2Success(c, data)
 }
 
 // RefreshToken handles POST /api/v2/auth/refresh
 func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 	// Try cookie first, then JSON body
+	fromBody := false
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil || refreshToken == "" {
 		var req v2RefreshRequest
@@ -229,6 +237,7 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 			return
 		}
 		refreshToken = req.RefreshToken
+		fromBody = true
 	}
 
 	resp, err := h.authService.RefreshToken(refreshToken)
@@ -260,9 +269,42 @@ func (h *V2AuthHandler) RefreshToken(c *gin.Context) {
 
 	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(c.Request.Host), isSecureCookie(), true)
 
-	common.V2Success(c, gin.H{
+	data := gin.H{
 		"access_token": resp.AccessToken,
 		"user":         resp.User,
+	}
+	if fromBody {
+		// 네이티브 앱(쿠키 미사용) → 회전된 refresh_token 을 body 로 전달
+		data["refresh_token"] = resp.RefreshToken
+	}
+	common.V2Success(c, data)
+}
+
+// AppExchange handles POST /api/v2/auth/app-exchange
+//
+// damoang.net 웹에서 소셜 OAuth 로그인 완료 후 발급한 단명(60초) app-login
+// 코드를 v2 토큰쌍으로 교환한다. 네이티브 앱 전용 — refresh_token 을 body 로 반환.
+func (h *V2AuthHandler) AppExchange(c *gin.Context) {
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청입니다", err)
+		return
+	}
+
+	resp, err := h.authService.AppExchangeLogin(req.Code)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "앱 로그인 코드가 유효하지 않습니다", err)
+		return
+	}
+
+	c.SetCookie("refresh_token", resp.RefreshToken, 7*24*3600, "/", cookieDomain(c.Request.Host), isSecureCookie(), true)
+
+	common.V2Success(c, gin.H{
+		"access_token":  resp.AccessToken,
+		"refresh_token": resp.RefreshToken,
+		"user":          resp.User,
 	})
 }
 
