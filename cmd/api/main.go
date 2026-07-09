@@ -1866,7 +1866,8 @@ func main() {
 					return ids
 				}
 			}
-			ids, err := blockRepo.GetBlockedUserIDs(userID)
+			// 글/댓글 숨김용이므로 "쪽지만 차단"은 제외한 콘텐츠 스코프만 사용 (#12916).
+			ids, err := blockRepo.GetContentBlockedUserIDs(userID)
 			if err != nil {
 				return nil
 			}
@@ -1907,23 +1908,42 @@ func main() {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "자기 자신을 차단할 수 없습니다"})
 				return
 			}
+			// 차단 범위(#12916). 본문 미전송/미지정 시 기존과 동일한 전체 차단("all").
+			var body struct {
+				Scope string `json:"scope"`
+			}
+			_ = c.ShouldBindJSON(&body)
+			scope := body.Scope
+			switch scope {
+			case domain.BlockScopeAll, domain.BlockScopeMessage, domain.BlockScopeContent:
+			default:
+				scope = domain.BlockScopeAll
+			}
 			exists, err := blockRepo.Exists(userID, targetID)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "차단 확인 실패"})
 				return
 			}
 			if exists {
-				c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 차단한 회원입니다"})
+				// 이미 차단된 회원이면 범위만 갱신(재차단 없이 "쪽지만↔전체" 전환 허용).
+				if err := blockRepo.UpdateScope(userID, targetID, scope); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "차단 범위 변경 실패"})
+					return
+				}
+				if cacheService != nil {
+					_ = cacheService.Delete(c.Request.Context(), "block:"+userID)
+				}
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "차단 범위가 변경되었습니다", "scope": scope})
 				return
 			}
-			if _, err := blockRepo.Create(userID, targetID); err != nil {
+			if _, err := blockRepo.Create(userID, targetID, scope); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "차단 실패"})
 				return
 			}
 			if cacheService != nil {
 				_ = cacheService.Delete(c.Request.Context(), "block:"+userID)
 			}
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "차단 완료"})
+			c.JSON(http.StatusOK, gin.H{"success": true, "message": "차단 완료", "scope": scope})
 		})
 		v1Members.DELETE("/:id/block", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), func(c *gin.Context) {
 			userID := middleware.GetUserID(c)
@@ -1939,10 +1959,29 @@ func main() {
 		})
 		router.GET("/api/v1/my/blocked", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
 			userID := middleware.GetUserID(c)
-			ids, err := blockRepo.GetBlockedUserIDs(userID)
-			if err != nil || len(ids) == 0 {
+			// 차단 대상 + 스코프를 함께 조회 (#12916: 목록에 "쪽지만 차단" 등 범위 표시).
+			type blockRow struct {
+				BlockedMbID string `gorm:"column:blocked_mb_id"`
+				Scope       string `gorm:"column:block_scope"`
+			}
+			var rows []blockRow
+			if err := db.Table("g5_member_block").
+				Select("blocked_mb_id, block_scope").
+				Where("mb_id = ?", userID).
+				Order("id DESC").
+				Find(&rows).Error; err != nil || len(rows) == 0 {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
 				return
+			}
+			ids := make([]string, len(rows))
+			scopeMap := make(map[string]string, len(rows))
+			for i, r := range rows {
+				ids[i] = r.BlockedMbID
+				scope := r.Scope
+				if scope == "" {
+					scope = domain.BlockScopeAll
+				}
+				scopeMap[r.BlockedMbID] = scope
 			}
 			// Batch query for all blocked user nicks (N+1 → 1 query)
 			type memberNick struct {
@@ -1960,10 +1999,11 @@ func main() {
 				MbID      string `json:"mb_id"`
 				MbName    string `json:"mb_name"`
 				BlockedAt string `json:"blocked_at"`
+				Scope     string `json:"scope"`
 			}
 			items := make([]blockedItem, 0, len(ids))
 			for _, id := range ids {
-				items = append(items, blockedItem{MbID: id, MbName: nickMap[id]})
+				items = append(items, blockedItem{MbID: id, MbName: nickMap[id], Scope: scopeMap[id]})
 			}
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
 		})

@@ -120,7 +120,7 @@ func (h *V2Handler) getBlockedUserIDs(mbID string) []uint64 {
 	if h.blockRepo == nil || mbID == "" || h.gnuDB == nil {
 		return nil
 	}
-	blockedMbIDs, err := h.blockRepo.GetBlockedUserIDs(mbID)
+	blockedMbIDs, err := h.blockRepo.GetContentBlockedUserIDs(mbID)
 	if err != nil || len(blockedMbIDs) == 0 {
 		return nil
 	}
@@ -1165,7 +1165,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 				// 수신자가 발신자를 차단했는지 확인
 				isBlockedByParent := false
 				if h.blockRepo != nil {
-					if blockedIDs, err := h.blockRepo.GetBlockedUserIDs(parentAuthorMbID); err == nil {
+					if blockedIDs, err := h.blockRepo.GetContentBlockedUserIDs(parentAuthorMbID); err == nil {
 						isBlockedByParent = slices.Contains(blockedIDs, commenterMbID)
 					}
 				}
@@ -1205,7 +1205,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 
 	// 게시글 작성자가 댓글 작성자를 차단한 경우 알림 생략
 	if h.blockRepo != nil {
-		if blockedIDs, err := h.blockRepo.GetBlockedUserIDs(postAuthorMbID); err == nil && slices.Contains(blockedIDs, commenterMbID) {
+		if blockedIDs, err := h.blockRepo.GetContentBlockedUserIDs(postAuthorMbID); err == nil && slices.Contains(blockedIDs, commenterMbID) {
 			return
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/damoang/angple-backend/internal/common"
+	"github.com/damoang/angple-backend/internal/domain"
 	"github.com/damoang/angple-backend/internal/middleware"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
@@ -51,7 +52,19 @@ func (h *BlockHandler) BlockMember(c *gin.Context) {
 		return
 	}
 
-	block, err := h.blockRepo.Create(userID, targetID)
+	// 차단 범위(#12916). 본문 미지정 시 전체 차단("all").
+	var body struct {
+		Scope string `json:"scope"`
+	}
+	_ = c.ShouldBindJSON(&body)
+	scope := body.Scope
+	switch scope {
+	case domain.BlockScopeAll, domain.BlockScopeMessage, domain.BlockScopeContent:
+	default:
+		scope = domain.BlockScopeAll
+	}
+
+	block, err := h.blockRepo.Create(userID, targetID, scope)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "차단 실패", err)
 		return
