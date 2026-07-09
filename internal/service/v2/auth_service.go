@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"time"
 
@@ -194,6 +195,81 @@ func (s *V2AuthService) grantLoginXP(username string) {
 	if err := s.expRepo.IncrementLoginDays(username); err != nil {
 		log.Printf("[v2-auth] login days increment failed for user %s: %v", username, err)
 	}
+}
+
+// AppLoginAudience is the audience claim of one-time app-login codes minted by
+// the damoang.net web frontend after a social OAuth login (shared JWT_SECRET).
+const AppLoginAudience = "app-login"
+
+// AppExchangeLogin exchanges a short-lived app-login code for a v2 token pair.
+// The code is an HS256 JWT minted by the web (same JWT_SECRET) with
+// aud="app-login", sub=<g5 mb_id> and nickname/email/level claims.
+// If the member has no v2_users row yet, one is auto-provisioned from claims.
+func (s *V2AuthService) AppExchangeLogin(code string) (*V2LoginResponse, error) {
+	claims, err := s.jwtManager.VerifyToken(code)
+	if err != nil {
+		return nil, common.ErrUnauthorized
+	}
+
+	// Only accept dedicated app-login codes (not access/refresh tokens).
+	if !slices.Contains(claims.Audience, AppLoginAudience) {
+		return nil, common.ErrUnauthorized
+	}
+
+	mbID := claims.Subject
+	if mbID == "" {
+		return nil, common.ErrUnauthorized
+	}
+
+	user, err := s.userRepo.FindByUsername(mbID)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("find user %s: %w", mbID, err)
+		}
+		// Auto-provision: member exists in g5_member (web verified) but not in v2_users.
+		level := claims.Level
+		if level <= 0 {
+			level = 1
+		}
+		nickname := claims.Nickname
+		if nickname == "" {
+			nickname = mbID
+		}
+		user = &v2domain.V2User{
+			Username: mbID,
+			Nickname: nickname,
+			Email:    claims.Email,
+			Level:    uint8(min(level, 255)), //nolint:gosec
+			Status:   "active",
+		}
+		if createErr := s.userRepo.Create(user); createErr != nil {
+			return nil, fmt.Errorf("provision user %s: %w", mbID, createErr)
+		}
+	}
+
+	if user.Status == "inactive" || user.Status == "banned" {
+		return nil, common.ErrUnauthorized
+	}
+
+	if s.expRepo != nil {
+		s.grantLoginXP(user.Username)
+	}
+
+	userIDStr := strconv.FormatUint(user.ID, 10)
+	accessToken, err := s.jwtManager.GenerateAccessToken(userIDStr, user.Username, user.Nickname, int(user.Level))
+	if err != nil {
+		return nil, fmt.Errorf("generate access token: %w", err)
+	}
+	refreshToken, err := s.jwtManager.GenerateRefreshToken(userIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	return &V2LoginResponse{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }
 
 // RefreshToken validates a refresh token and issues new token pair

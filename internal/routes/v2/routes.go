@@ -20,6 +20,10 @@ func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.M
 	authGroup.GET("/profile", middleware.JWTAuth(jwtManager), h.GetMe) // alias for /me
 	// TODO: v2 마이그레이션 - exchange는 레거시 SSO용, 향후 세션 기반으로 전환
 	authGroup.POST("/exchange", h.ExchangeToken)
+	// 네이티브 앱: 웹 소셜 로그인 후 발급된 단명 코드 → v2 토큰쌍 교환
+	// (loginRateLimit 재사용 시 append aliasing 방지를 위해 새 슬라이스로 복사)
+	appExchangeHandlers := append(append([]gin.HandlerFunc{}, loginRateLimit...), h.AppExchange)
+	authGroup.POST("/app-exchange", appExchangeHandlers...)
 
 	// v1 미러
 	v1Auth := router.Group("/api/v1/auth")
