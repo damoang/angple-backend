@@ -39,13 +39,13 @@ func NewPostRepository(db *gorm.DB) PostRepository {
 
 func (r *postRepository) FindByID(id uint64) (*v2.V2Post, error) {
 	var post v2.V2Post
-	err := r.db.Where("id = ? AND status != 'deleted'", id).First(&post).Error
+	err := r.db.Preload("Author").Where("id = ? AND status != 'deleted'", id).First(&post).Error
 	return &post, err
 }
 
 func (r *postRepository) FindByIDIncludeDeleted(id uint64) (*v2.V2Post, error) {
 	var post v2.V2Post
-	err := r.db.Where("id = ?", id).First(&post).Error
+	err := r.db.Preload("Author").Where("id = ?", id).First(&post).Error
 	return &post, err
 }
 
@@ -93,7 +93,7 @@ func (r *postRepository) FindByBoard(boardID uint64, page, limit int) ([]*v2.V2P
 		return nil, 0, err
 	}
 	offset := (page - 1) * limit
-	if err := query.Order("is_notice DESC, id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+	if err := query.Preload("Author").Order("is_notice DESC, id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}
 	return posts, total, nil
@@ -111,7 +111,7 @@ func (r *postRepository) FindByBoardFiltered(boardID uint64, page, limit int, ex
 		return nil, 0, err
 	}
 	offset := (page - 1) * limit
-	if err := query.Order("is_notice DESC, id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+	if err := query.Preload("Author").Order("is_notice DESC, id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}
 	return posts, total, nil
@@ -142,7 +142,7 @@ func (r *postRepository) SearchByBoardFiltered(boardID uint64, field, keyword st
 		return nil, 0, err
 	}
 	offset := (page - 1) * limit
-	if err := query.Order("id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+	if err := query.Preload("Author").Order("id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}
 	return posts, total, nil
@@ -173,7 +173,7 @@ func (r *postRepository) SearchByBoard(boardID uint64, field, keyword string, pa
 		return nil, 0, err
 	}
 	offset := (page - 1) * limit
-	if err := query.Order("id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+	if err := query.Preload("Author").Order("id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}
 	return posts, total, nil
