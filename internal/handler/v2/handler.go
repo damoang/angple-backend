@@ -330,35 +330,6 @@ func (h *V2Handler) GetBoard(c *gin.Context) {
 // === Posts ===
 
 // ListPosts handles GET /api/v1/boards/:slug/posts
-// anonymousBoardSlugs — 익명 게시판: 작성자 정보를 응답에서 마스킹한다.
-// (g5 원본 보드 설정과 동기화 전까지 슬러그 하드코딩. TODO: v2_boards 익명 플래그化)
-var anonymousBoardSlugs = map[string]bool{
-	"angtt":     true,
-	"angreport": true,
-}
-
-// maskAnonymousPostAuthors removes author identity from posts of anonymous boards.
-func maskAnonymousPostAuthors(slug string, posts []*v2domain.V2Post) {
-	if !anonymousBoardSlugs[slug] {
-		return
-	}
-	for _, p := range posts {
-		p.Author = nil
-		p.UserID = 0
-	}
-}
-
-// maskAnonymousCommentAuthors removes author identity from comments of anonymous boards.
-func maskAnonymousCommentAuthors(slug string, comments []*v2domain.V2Comment) {
-	if !anonymousBoardSlugs[slug] {
-		return
-	}
-	for _, cm := range comments {
-		cm.Author = nil
-		cm.UserID = 0
-	}
-}
-
 func (h *V2Handler) ListPosts(c *gin.Context) {
 	slug := c.Param("slug")
 	board, err := h.boardRepo.FindBySlug(slug)
@@ -388,7 +359,6 @@ func (h *V2Handler) ListPosts(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 목록 조회 실패", err)
 		return
 	}
-	maskAnonymousPostAuthors(slug, posts)
 	common.V2SuccessWithMeta(c, posts, common.NewV2Meta(page, perPage, total))
 }
 
@@ -405,8 +375,6 @@ func (h *V2Handler) GetPost(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
 		return
 	}
-
-	maskAnonymousPostAuthors(c.Param("slug"), []*v2domain.V2Post{post})
 
 	// 조회수는 프론트엔드 /api/viewcount 에서 쿠키 기반 중복방지로 처리
 	// 백엔드에서 매 요청마다 증가시키면 새로고침할 때마다 무한 증가 (버그)
@@ -857,7 +825,6 @@ func (h *V2Handler) ListComments(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "댓글 목록 조회 실패", err)
 		return
 	}
-	maskAnonymousCommentAuthors(c.Param("slug"), comments)
 	common.V2SuccessWithMeta(c, comments, common.NewV2Meta(page, perPage, total))
 }
 
