@@ -271,16 +271,44 @@ type boardWithPermissions struct {
 //
 // Caching: 비인증 사용자에 한해 Redis 5분 캐시. 인증 사용자는 per-user
 // permissions 가 결과에 포함되므로 캐시 bypass.
+// hiddenBoardSlugs — 목록/색인에서 항상 제외하는 운영·시스템 게시판.
+// list_level 로 걸러지지 않는 관리/테스트/기록용 보드를 명시적으로 숨긴다.
+var hiddenBoardSlugs = map[string]bool{
+	"adm":           true, // 관리자
+	"archive":       true, // 보관용
+	"banners":       true, // 광고 배너 소스
+	"disciplinelog": true, // 이용제한 기록관
+	"governance":    true, // 운영관리
+	"claim":         true, // 소명
+	"bug":           true, // 유지관리
+	"maintenance":   true,
+	"growth":        true,
+	"logo":          true,
+	"image":         true, // 이미지 테스트
+	"laboratory":    true, // 낙서/연습장
+}
+
+func filterHiddenBoards(boards []*v2domain.V2Board) []*v2domain.V2Board {
+	out := boards[:0]
+	for _, b := range boards {
+		if !hiddenBoardSlugs[b.Slug] {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 func (h *V2Handler) ListBoards(c *gin.Context) {
 	memberLevel := middleware.GetUserLevel(c)
 
-	// 인증 사용자: per-user permissions 포함, 캐시 bypass
+	// 인증 사용자: 회원 레벨로 볼 수 있는 게시판만 + per-user permissions, 캐시 bypass
 	if memberLevel > 0 && h.permChecker != nil {
-		boards, err := h.boardRepo.FindAll()
+		boards, err := h.boardRepo.FindVisible(memberLevel)
 		if err != nil {
 			common.V2ErrorResponse(c, http.StatusInternalServerError, "게시판 목록 조회 실패", err)
 			return
 		}
+		boards = filterHiddenBoards(boards)
 		result := make([]boardWithPermissions, len(boards))
 		for i, board := range boards {
 			perms, _ := h.permChecker.GetAllPermissions(board.Slug, memberLevel)
@@ -290,14 +318,18 @@ func (h *V2Handler) ListBoards(c *gin.Context) {
 		return
 	}
 
-	// 비인증: Redis 5분 캐시 (cache nil 이면 자동 fallthrough)
+	// 비인증: 완전 공개(list_level 0) 게시판만, Redis 5분 캐시
 	boards, err := pkgredis.GetOrSet(
 		c.Request.Context(),
 		h.cache,
-		"v2:boards:active:v1",
+		"v2:boards:visible:guest:v2",
 		5*time.Minute,
 		func() ([]*v2domain.V2Board, error) {
-			return h.boardRepo.FindAll()
+			bs, e := h.boardRepo.FindVisible(0)
+			if e != nil {
+				return nil, e
+			}
+			return filterHiddenBoards(bs), nil
 		},
 	)
 	if err != nil {

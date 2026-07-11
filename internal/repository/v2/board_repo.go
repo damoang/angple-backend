@@ -10,6 +10,7 @@ type BoardRepository interface {
 	FindByID(id uint64) (*v2.V2Board, error)
 	FindBySlug(slug string) (*v2.V2Board, error)
 	FindAll() ([]*v2.V2Board, error)
+	FindVisible(memberLevel int) ([]*v2.V2Board, error)
 	FindAllIncludingInactive() ([]*v2.V2Board, error)
 	Create(board *v2.V2Board) error
 	Update(board *v2.V2Board) error
@@ -40,6 +41,16 @@ func (r *boardRepository) FindBySlug(slug string) (*v2.V2Board, error) {
 func (r *boardRepository) FindAll() ([]*v2.V2Board, error) {
 	var boards []*v2.V2Board
 	err := r.db.Where("is_active = ?", true).Order("order_num ASC").Find(&boards).Error
+	return boards, err
+}
+
+// FindVisible returns active boards a member of the given level may LIST.
+// list_level 이 회원 레벨보다 높은 게시판(관리/비공개)은 목록에서 제외한다.
+// memberLevel 0(비회원)이면 list_level 0 인 완전 공개 게시판만 반환.
+func (r *boardRepository) FindVisible(memberLevel int) ([]*v2.V2Board, error) {
+	var boards []*v2.V2Board
+	err := r.db.Where("is_active = ? AND list_level <= ?", true, memberLevel).
+		Order("order_num ASC").Find(&boards).Error
 	return boards, err
 }
 
