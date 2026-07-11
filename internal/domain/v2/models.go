@@ -69,39 +69,53 @@ func (V2Point) TableName() string { return "v2_points" }
 
 func (V2Board) TableName() string { return "v2_boards" }
 
+// PostAuthor is a public-safe author summary joined from v2_users.
+// 목록·상세 응답의 작성자 표시용 — 이메일 등 민감 필드는 포함하지 않는다.
+type PostAuthor struct {
+	ID        uint64  `gorm:"column:id;primaryKey" json:"id"`
+	Nickname  string  `gorm:"column:nickname" json:"nickname"`
+	Level     uint8   `gorm:"column:level" json:"level"`
+	AvatarURL *string `gorm:"column:avatar_url" json:"avatar_url,omitempty"`
+}
+
+// TableName maps PostAuthor to the v2_users table
+func (PostAuthor) TableName() string { return "v2_users" }
+
 // V2Post represents a post in the v2 schema
 type V2Post struct {
-	ID           uint64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	BoardID      uint64     `gorm:"column:board_id;index" json:"board_id"`
-	UserID       uint64     `gorm:"column:user_id;index" json:"user_id"`
-	Title        string     `gorm:"column:title;type:varchar(255)" json:"title"`
-	Content      string     `gorm:"column:content;type:mediumtext" json:"content"`
-	Status       string     `gorm:"column:status;type:enum('draft','published','deleted');default:'published'" json:"status"`
-	ViewCount    uint       `gorm:"column:view_count;default:0" json:"view_count"`
-	CommentCount uint       `gorm:"column:comment_count;default:0" json:"comment_count"`
-	IsNotice     bool       `gorm:"column:is_notice;default:false" json:"is_notice"`
-	IsSecret     bool       `gorm:"column:is_secret;default:false" json:"is_secret"`
-	DeletedAt    *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
-	DeletedBy    *uint64    `gorm:"column:deleted_by" json:"deleted_by,omitempty"`
-	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt    time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID           uint64      `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	BoardID      uint64      `gorm:"column:board_id;index" json:"board_id"`
+	UserID       uint64      `gorm:"column:user_id;index" json:"user_id"`
+	Author       *PostAuthor `gorm:"foreignKey:UserID;references:ID" json:"user,omitempty"`
+	Title        string      `gorm:"column:title;type:varchar(255)" json:"title"`
+	Content      string      `gorm:"column:content;type:mediumtext" json:"content"`
+	Status       string      `gorm:"column:status;type:enum('draft','published','deleted');default:'published'" json:"status"`
+	ViewCount    uint        `gorm:"column:view_count;default:0" json:"view_count"`
+	CommentCount uint        `gorm:"column:comment_count;default:0" json:"comment_count"`
+	IsNotice     bool        `gorm:"column:is_notice;default:false" json:"is_notice"`
+	IsSecret     bool        `gorm:"column:is_secret;default:false" json:"is_secret"`
+	DeletedAt    *time.Time  `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
+	DeletedBy    *uint64     `gorm:"column:deleted_by" json:"deleted_by,omitempty"`
+	CreatedAt    time.Time   `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time   `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (V2Post) TableName() string { return "v2_posts" }
 
 // V2Comment represents a comment in the v2 schema
 type V2Comment struct {
-	ID        uint64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	PostID    uint64     `gorm:"column:post_id;index" json:"post_id"`
-	UserID    uint64     `gorm:"column:user_id;index" json:"user_id"`
-	ParentID  *uint64    `gorm:"column:parent_id" json:"parent_id,omitempty"`
-	Content   string     `gorm:"column:content;type:text" json:"content"`
-	Depth     uint8      `gorm:"column:depth;default:0" json:"depth"`
-	Status    string     `gorm:"column:status;type:enum('active','deleted');default:'active'" json:"status"`
-	DeletedAt *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
-	DeletedBy *uint64    `gorm:"column:deleted_by" json:"deleted_by,omitempty"`
-	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID        uint64      `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	PostID    uint64      `gorm:"column:post_id;index" json:"post_id"`
+	UserID    uint64      `gorm:"column:user_id;index" json:"user_id"`
+	Author    *PostAuthor `gorm:"foreignKey:UserID;references:ID" json:"user,omitempty"`
+	ParentID  *uint64     `gorm:"column:parent_id" json:"parent_id,omitempty"`
+	Content   string      `gorm:"column:content;type:text" json:"content"`
+	Depth     uint8       `gorm:"column:depth;default:0" json:"depth"`
+	Status    string      `gorm:"column:status;type:enum('active','deleted');default:'active'" json:"status"`
+	DeletedAt *time.Time  `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
+	DeletedBy *uint64     `gorm:"column:deleted_by" json:"deleted_by,omitempty"`
+	CreatedAt time.Time   `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time   `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (V2Comment) TableName() string { return "v2_comments" }

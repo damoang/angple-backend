@@ -31,7 +31,7 @@ func NewCommentRepository(db *gorm.DB) CommentRepository {
 
 func (r *commentRepository) FindByID(id uint64) (*v2.V2Comment, error) {
 	var comment v2.V2Comment
-	err := r.db.Where("id = ? AND status = 'active'", id).First(&comment).Error
+	err := r.db.Preload("Author").Where("id = ? AND status = 'active'", id).First(&comment).Error
 	return &comment, err
 }
 
@@ -44,7 +44,7 @@ func (r *commentRepository) FindByPost(postID uint64, page, limit int) ([]*v2.V2
 		return nil, 0, err
 	}
 	offset := (page - 1) * limit
-	if err := query.Order("id ASC").Offset(offset).Limit(limit).Find(&comments).Error; err != nil {
+	if err := query.Preload("Author").Order("id ASC").Offset(offset).Limit(limit).Find(&comments).Error; err != nil {
 		return nil, 0, err
 	}
 	return comments, total, nil
@@ -62,7 +62,7 @@ func (r *commentRepository) FindByPostFiltered(postID uint64, page, limit int, e
 		return nil, 0, err
 	}
 	offset := (page - 1) * limit
-	if err := query.Order("id ASC").Offset(offset).Limit(limit).Find(&comments).Error; err != nil {
+	if err := query.Preload("Author").Order("id ASC").Offset(offset).Limit(limit).Find(&comments).Error; err != nil {
 		return nil, 0, err
 	}
 	return comments, total, nil
