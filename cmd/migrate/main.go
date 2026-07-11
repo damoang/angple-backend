@@ -167,23 +167,49 @@ func migrateUsers(db *gorm.DB, _ int) error {
 }
 
 func migrateBoards(db *gorm.DB) error {
-	sql := `
-		INSERT IGNORE INTO v2_boards (slug, name, description, is_active, order_num, created_at, updated_at)
+	// INSERT: 신규 보드 (권한 컬럼 포함)
+	insertSQL := `
+		INSERT IGNORE INTO v2_boards
+			(slug, name, description, is_active, order_num,
+			 list_level, read_level, write_level, reply_level, comment_level,
+			 upload_level, download_level, created_at, updated_at)
 		SELECT
 			bo_table,
 			bo_subject,
 			NULLIF(bo_content_head, ''),
 			TRUE,
 			bo_order,
+			bo_list_level, bo_read_level, bo_write_level, bo_reply_level, bo_comment_level,
+			bo_upload_level, bo_download_level,
 			NOW(),
 			NOW()
 		FROM g5_board
 	`
-	result := db.Exec(sql)
-	if result.Error != nil {
+	if result := db.Exec(insertSQL); result.Error != nil {
 		return result.Error
+	} else {
+		log.Printf("[migrate:boards] Inserted %d new rows", result.RowsAffected)
 	}
-	log.Printf("[migrate:boards] Migrated %d rows", result.RowsAffected)
+
+	// UPDATE: 기존 보드의 권한 컬럼 재동기화 (초기 마이그레이션이 권한을
+	// 누락해 전부 0(공개)으로 들어간 것을 g5_board 원본 값으로 교정).
+	updateSQL := `
+		UPDATE v2_boards v
+		JOIN g5_board g ON g.bo_table = v.slug
+		SET v.list_level     = g.bo_list_level,
+		    v.read_level      = g.bo_read_level,
+		    v.write_level     = g.bo_write_level,
+		    v.reply_level     = g.bo_reply_level,
+		    v.comment_level   = g.bo_comment_level,
+		    v.upload_level    = g.bo_upload_level,
+		    v.download_level  = g.bo_download_level,
+		    v.updated_at      = NOW()
+	`
+	if result := db.Exec(updateSQL); result.Error != nil {
+		return result.Error
+	} else {
+		log.Printf("[migrate:boards] Re-synced permissions on %d rows", result.RowsAffected)
+	}
 	return nil
 }
 
