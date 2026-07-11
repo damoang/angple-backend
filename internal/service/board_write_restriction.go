@@ -32,6 +32,20 @@ type ExtendedSettingsJSON struct {
 	Writing *WritingSettings `json:"writing,omitempty"`
 }
 
+// 가입인사(hello) 게시판 1인 1글 제한 — 코드 레벨 하드 가드.
+//
+// 운영 정책(2026-07 확정): 가입인사는 아이디당 1글만 허용한다.
+// 같은 회원이 인사글을 여러 개 작성하는 사례가 반복되었고,
+// 글쓰기 포인트 지급(1,000P) 파밍 여지도 있어 backend에서 차단한다.
+// v2_board_extended_settings(maxPostsTotal)와 별개로, 설정 유실/오류 시에도
+// 항상 동작하도록 코드에 고정한다. 추후 대상 게시판이 늘어나면 slice/설정으로 확장.
+const (
+	// helloOnePostBoardSlug is the board that allows only one post per member.
+	helloOnePostBoardSlug = "hello"
+	// helloOnePostReason is returned to the client with HTTP 403.
+	helloOnePostReason = "가입인사는 한 번만 남길 수 있어요. 먼저 남긴 인사 글에서 댓글로 소통해 보세요 💛"
+)
+
 // WriteRestrictionResult is returned by Check to indicate whether a member can write.
 type WriteRestrictionResult struct {
 	CanWrite   bool   `json:"can_write"`
@@ -65,6 +79,25 @@ func NewBoardWriteRestrictionService(db *gorm.DB, repo v2repo.BoardExtendedSetti
 
 // Check verifies whether the given member can write to the specified board.
 func (s *BoardWriteRestrictionService) Check(boardSlug, memberID string, memberLevel int) (*WriteRestrictionResult, error) {
+	// 가입인사(hello) 1인 1글 하드 가드 — extended settings 조회 전에 먼저 평가하여
+	// 설정 상태와 무관하게 항상 적용한다. 최고관리자(레벨 10 이상)는 예외.
+	// 신규 글 작성에만 관여하며 수정(update)·댓글에는 영향 없음(호출 지점이 글 작성 경로에 한정).
+	if boardSlug == helloOnePostBoardSlug && memberLevel < 10 {
+		totalCount, err := s.countTotalPosts(boardSlug, memberID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to count hello posts: %w", err)
+		}
+		if totalCount >= 1 {
+			return &WriteRestrictionResult{
+				CanWrite:   false,
+				Remaining:  0,
+				TotalLimit: 1,
+				TotalCount: totalCount,
+				Reason:     helloOnePostReason,
+			}, nil
+		}
+	}
+
 	settings, err := s.extendedSettingsRepo.FindByBoardSlug(boardSlug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load extended settings for board %s: %w", boardSlug, err)
