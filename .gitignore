@@ -69,3 +69,6 @@ __pycache__/
 .claude/
 CLAUDE.md
 main
+
+# migrate 바이너리 (로컬 빌드)
+/migrate
