@@ -5733,6 +5733,14 @@ func main() {
 			adminSearch.POST("/index", searchHandler.BulkIndex)
 			adminSearch.POST("/index-post", searchHandler.IndexPost)
 			adminSearch.DELETE("/index/:board_id/:post_id", searchHandler.DeletePostIndex)
+		} else {
+			// Elasticsearch 미가용: DB 폴백 검색 (앱/웹 통합 검색이 항상 동작하도록).
+			// 응답 형태는 게시글 목록과 동일(V2Post[] + meta).
+			searchFallback := router.Group("/api/v2/search", middleware.OptionalJWTAuth(jwtManager))
+			searchFallback.GET("", v2Handler.SearchPosts)
+			searchFallbackV1 := router.Group("/api/v1/search", middleware.OptionalJWTAuth(jwtManager))
+			searchFallbackV1.GET("", v2Handler.SearchPosts)
+			pkglogger.Info("Search: Elasticsearch unavailable, using DB fallback search")
 		}
 
 		// Media Pipeline (S3 storage, optional)

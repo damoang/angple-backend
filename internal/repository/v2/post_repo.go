@@ -15,6 +15,7 @@ type PostRepository interface {
 	FindByBoardFiltered(boardID uint64, page, limit int, excludeUserIDs []uint64) ([]*v2.V2Post, int64, error)
 	SearchByBoard(boardID uint64, field, query string, page, limit int) ([]*v2.V2Post, int64, error)
 	SearchByBoardFiltered(boardID uint64, field, query string, page, limit int, excludeUserIDs []uint64) ([]*v2.V2Post, int64, error)
+	SearchAllPublished(keyword string, maxListLevel int, page, limit int) ([]*v2.V2Post, int64, error)
 	FindDeleted(page, limit int) ([]*v2.V2Post, int64, error)
 	Create(post *v2.V2Post) error
 	Update(post *v2.V2Post) error
@@ -174,6 +175,30 @@ func (r *postRepository) SearchByBoard(boardID uint64, field, keyword string, pa
 	}
 	offset := (page - 1) * limit
 	if err := query.Preload("Author").Order("id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+		return nil, 0, err
+	}
+	return posts, total, nil
+}
+
+// SearchAllPublished searches published posts across all boards a member of the
+// given level may list (board.list_level <= maxListLevel), by title/content LIKE.
+// Elasticsearch 미가용 환경의 DB 폴백 검색. 작성자(Author) preload 포함.
+func (r *postRepository) SearchAllPublished(keyword string, maxListLevel int, page, limit int) ([]*v2.V2Post, int64, error) {
+	var posts []*v2.V2Post
+	var total int64
+
+	like := "%" + keyword + "%"
+	base := r.db.Model(&v2.V2Post{}).
+		Joins("JOIN v2_boards b ON b.id = v2_posts.board_id").
+		Where("v2_posts.status = 'published' AND b.is_active = 1 AND b.list_level <= ?", maxListLevel).
+		Where("v2_posts.title LIKE ? OR v2_posts.content LIKE ?", like, like)
+
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * limit
+	if err := base.Preload("Author").
+		Order("v2_posts.id DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
 		return nil, 0, err
 	}
 	return posts, total, nil

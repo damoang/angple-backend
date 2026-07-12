@@ -298,6 +298,44 @@ func filterHiddenBoards(boards []*v2domain.V2Board) []*v2domain.V2Board {
 	return out
 }
 
+// SearchPosts handles GET /api/v2/search (DB fallback, Elasticsearch 미가용 시)
+//
+// 앱/웹 호환 응답: data = V2Post[] , meta = {page, per_page, total, total_pages}.
+// 회원 레벨로 볼 수 있는 게시판(list_level<=level) + 숨김 보드 제외.
+func (h *V2Handler) SearchPosts(c *gin.Context) {
+	keyword := strings.TrimSpace(c.Query("q"))
+	if keyword == "" {
+		keyword = strings.TrimSpace(c.Query("stx"))
+	}
+	if len([]rune(keyword)) < 2 {
+		common.V2SuccessWithMeta(c, []*v2domain.V2Post{}, common.NewV2Meta(1, 20, 0))
+		return
+	}
+
+	page, perPage := parsePagination(c)
+	memberLevel := middleware.GetUserLevel(c)
+
+	posts, total, err := h.postRepo.SearchAllPublished(keyword, memberLevel, page, perPage)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "검색에 실패했습니다", err)
+		return
+	}
+
+	// 숨김(운영/시스템) 보드 글 제외 — board_id → slug 매핑으로 필터
+	if len(posts) > 0 && len(hiddenBoardSlugs) > 0 {
+		filtered := posts[:0]
+		for _, p := range posts {
+			if b, e := h.boardRepo.FindByID(p.BoardID); e == nil && hiddenBoardSlugs[b.Slug] {
+				continue
+			}
+			filtered = append(filtered, p)
+		}
+		posts = filtered
+	}
+
+	common.V2SuccessWithMeta(c, posts, common.NewV2Meta(page, perPage, total))
+}
+
 func (h *V2Handler) ListBoards(c *gin.Context) {
 	memberLevel := middleware.GetUserLevel(c)
 
