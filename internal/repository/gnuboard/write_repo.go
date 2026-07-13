@@ -79,6 +79,11 @@ type WriteRepository interface {
 	FindMessagePostsByPeriod(period string, today time.Time, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsAfterSummary(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
+	// FindPostsFromDate(Summary) resolves a date to the archive position and returns the first
+	// page from that point (newest-at-or-before the date, then older), for depth-independent
+	// date navigation (#12975). Subsequent pages reuse the exclusive cursor (FindPostsAfter).
+	FindPostsFromDate(boardID string, limit int, beforeDate string) ([]*gnuboard.G5Write, int64, error)
+	FindPostsFromDateSummary(boardID string, limit int, beforeDate string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFiltered(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsFilteredSummary(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, int64, error)
 	SearchPosts(boardID string, searchField, searchQuery string, page, limit int, sortBy ...string) ([]*gnuboard.G5Write, int64, error)
@@ -536,6 +541,66 @@ func (r *writeRepository) findPostsAfter(boardID string, limit int, cursorWrNum 
 			Order(orderClause).
 			Limit(limit).
 			Find(&posts).Error
+	}
+
+	return posts, total, err
+}
+
+// FindPostsFromDate returns the first archive page at-or-before beforeDate (newest first, then older).
+func (r *writeRepository) FindPostsFromDate(boardID string, limit int, beforeDate string) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsFromDate(boardID, limit, beforeDate, true)
+}
+
+// FindPostsFromDateSummary is FindPostsFromDate without content columns (list view).
+func (r *writeRepository) FindPostsFromDateSummary(boardID string, limit int, beforeDate string) ([]*gnuboard.G5Write, int64, error) {
+	return r.findPostsFromDate(boardID, limit, beforeDate, false)
+}
+
+// findPostsFromDate resolves beforeDate to an archive position via the wr_datetime index and returns
+// the first page from there. wr_num is chronological-monotonic (newest = smallest), so the boundary
+// post (newest at-or-before the date) has the smallest wr_num among older posts; `wr_num >= boundary`
+// yields that post and everything older, in list order. Depth-independent (no OFFSET) → fast at any age.
+// Subsequent pages use the existing exclusive cursor (FindPostsAfter) via next_cursor. #12975.
+func (r *writeRepository) findPostsFromDate(boardID string, limit int, beforeDate string, includeContent bool) ([]*gnuboard.G5Write, int64, error) {
+	var posts []*gnuboard.G5Write
+	var total int64
+	table := tableName(boardID)
+
+	total = r.getCachedPostCount(boardID)
+	if total == 0 {
+		countQuery := r.db.Table(table).Where("wr_is_comment = 0")
+		if err := countQuery.Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		r.setCachedPostCount(boardID, total)
+	}
+
+	orderClause := r.getSortField(boardID)
+	if orderClause != "wr_num, wr_reply" {
+		// Non-standard ordering boards fall back to page 1 (date nav is a free/hello feature).
+		return r.findPosts(boardID, 1, limit, includeContent)
+	}
+
+	// boundary = newest root post at-or-before the date (uses ix_wr_datetime).
+	boundarySub := fmt.Sprintf(
+		"SELECT wr_num FROM `%s` WHERE wr_is_comment = 0 AND wr_datetime <= ? ORDER BY wr_datetime DESC LIMIT 1",
+		table,
+	)
+	err := r.db.Raw(
+		fmt.Sprintf(
+			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND wr_num >= (%s) ORDER BY wr_num, wr_reply LIMIT ?",
+			postSelectColumnsForList(boardID, "", includeContent), table, boundarySub,
+		),
+		beforeDate, limit,
+	).Scan(&posts).Error
+	if err != nil && strings.Contains(err.Error(), "idx_list_page") {
+		err = r.db.Raw(
+			fmt.Sprintf(
+				"SELECT %s FROM `%s` WHERE wr_is_comment = 0 AND wr_num >= (%s) ORDER BY wr_num, wr_reply LIMIT ?",
+				postSelectColumnsForList(boardID, "", includeContent), table, boundarySub,
+			),
+			beforeDate, limit,
+		).Scan(&posts).Error
 	}
 
 	return posts, total, err
