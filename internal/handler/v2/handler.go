@@ -326,6 +326,22 @@ func filterHiddenBoards(boards []*v2domain.V2Board) []*v2domain.V2Board {
 	return out
 }
 
+// blockGuestOnHiddenBoard 는 운영/관리/광고/테스트 게시판(hiddenBoardSlugs)에
+// 대한 비로그인(게스트) 직접 접근을 404 로 차단한다. 로그인 회원(레벨>0)은
+// 통과시켜 웹(광고주 등 회원) 동작을 깨지 않는다.
+// 완전한 등급 기반 접근제어는 read_level 복원 후 별도 처리.
+// slug 가 차단 대상이고 게스트면 true(응답 이미 작성) 반환.
+func (h *V2Handler) blockGuestOnHiddenBoard(c *gin.Context, slug string) bool {
+	if !hiddenBoardSlugs[slug] {
+		return false
+	}
+	if middleware.GetUserLevel(c) > 0 {
+		return false
+	}
+	common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", nil)
+	return true
+}
+
 // SearchPosts handles GET /api/v2/search (DB fallback, Elasticsearch 미가용 시)
 //
 // 앱/웹 호환 응답: data = V2Post[] , meta = {page, per_page, total, total_pages}.
@@ -408,6 +424,9 @@ func (h *V2Handler) ListBoards(c *gin.Context) {
 // GetBoard handles GET /api/v1/boards/:slug
 func (h *V2Handler) GetBoard(c *gin.Context) {
 	slug := c.Param("slug")
+	if h.blockGuestOnHiddenBoard(c, slug) {
+		return
+	}
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
@@ -430,6 +449,9 @@ func (h *V2Handler) GetBoard(c *gin.Context) {
 // ListPosts handles GET /api/v1/boards/:slug/posts
 func (h *V2Handler) ListPosts(c *gin.Context) {
 	slug := c.Param("slug")
+	if h.blockGuestOnHiddenBoard(c, slug) {
+		return
+	}
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
@@ -462,6 +484,9 @@ func (h *V2Handler) ListPosts(c *gin.Context) {
 
 // GetPost handles GET /api/v1/boards/:slug/posts/:id
 func (h *V2Handler) GetPost(c *gin.Context) {
+	if h.blockGuestOnHiddenBoard(c, c.Param("slug")) {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
@@ -910,6 +935,9 @@ func (h *V2Handler) RestoreRevision(c *gin.Context) {
 
 // ListComments handles GET /api/v1/boards/:slug/posts/:id/comments
 func (h *V2Handler) ListComments(c *gin.Context) {
+	if h.blockGuestOnHiddenBoard(c, c.Param("slug")) {
+		return
+	}
 	postID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
