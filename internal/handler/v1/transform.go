@@ -222,9 +222,13 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 		"updated_at":           parseWrLast(w.WrLast, w.WrDatetime),
 	}
 
-	// Add deleted_at if post is soft deleted
+	// Add deleted_at/deleted_by if post is soft deleted.
+	// deleted_by(삭제 실행자)는 프론트에서 자진삭제(작성자 본인) 여부 판정에 쓰인다(#12965).
 	if w.WrDeletedAt != nil {
 		result["deleted_at"] = w.WrDeletedAt.Format(time.RFC3339)
+	}
+	if w.WrDeletedBy != nil {
+		result["deleted_by"] = *w.WrDeletedBy
 	}
 
 	// Add thumbnail: priority is wr_10 > first <img> in content
