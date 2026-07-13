@@ -271,21 +271,49 @@ type boardWithPermissions struct {
 //
 // Caching: 비인증 사용자에 한해 Redis 5분 캐시. 인증 사용자는 per-user
 // permissions 가 결과에 포함되므로 캐시 bypass.
-// hiddenBoardSlugs — 목록/색인에서 항상 제외하는 운영·시스템 게시판.
-// list_level 로 걸러지지 않는 관리/테스트/기록용 보드를 명시적으로 숨긴다.
+// hiddenBoardSlugs — 앱/웹 게시판 목록에서 항상 제외하는 운영·관리·광고·테스트 게시판.
+// list_level 로 걸러지지 않는(0으로 들어간) 비공개성 보드를 명시적으로 숨긴다.
+// 취미·소모임·커뮤니티 게시판은 여기 없으므로 정상 노출된다.
 var hiddenBoardSlugs = map[string]bool{
+	// 관리자·운영
 	"adm":           true, // 관리자
+	"admin":         true,
 	"archive":       true, // 보관용
-	"banners":       true, // 광고 배너 소스
 	"disciplinelog": true, // 이용제한 기록관
 	"governance":    true, // 운영관리
 	"claim":         true, // 소명
-	"bug":           true, // 유지관리
-	"maintenance":   true,
-	"growth":        true,
-	"logo":          true,
-	"image":         true, // 이미지 테스트
-	"laboratory":    true, // 낙서/연습장
+	"report":        true, // 앙리포트(운영)
+	"angreport":     true, // 신고 게시판
+	"release":       true, // 릴리즈 노트
+	"meet":          true, // 회의록
+	"makeang":       true, // 다모앙 만들기(메타)
+	"message":       true, // 축하 메시지(시스템)
+	"verification":  true, // 실명인증(유틸)
+	"vote20250603":  true, // 일회성 투표
+	"discord":       true, // 개발지원 신청(유틸)
+	// 광고·수익
+	"advertiser":        true, // 광고주 전용
+	"banners":           true, // 광고 배너 소스
+	"nope":              true, // 광고 앙대앙
+	"referral":          true, // 수익링크
+	"promotion_archive": true, // 직접홍보 아카이브
+	"promotion_my":      true, // 내 광고글 관리
+	// 유지보수·오류·테스트
+	"bug":         true, // 유지관리
+	"maintenance": true,
+	"growth":      true,
+	"logo":        true,
+	"main":        true, // 로고 변경용
+	"image":       true, // 이미지 테스트
+	"laboratory":  true, // 낙서/연습장
+	"editor":      true, // 에디터(툴)
+	"good":        true, // 테스트
+	"mine":        true, // 테스트
+	"nerv":        true, // 내부
+	"monitoring":  true,
+	"temp":        true, // 임시 보관소
+	"test":        true, // [운영용] 바이럴/성인물 휴지통
+	"milkdown":    true, // 자유게시판 복사본(테스트)
 }
 
 func filterHiddenBoards(boards []*v2domain.V2Board) []*v2domain.V2Board {
@@ -296,6 +324,22 @@ func filterHiddenBoards(boards []*v2domain.V2Board) []*v2domain.V2Board {
 		}
 	}
 	return out
+}
+
+// blockGuestOnHiddenBoard 는 운영/관리/광고/테스트 게시판(hiddenBoardSlugs)에
+// 대한 비로그인(게스트) 직접 접근을 404 로 차단한다. 로그인 회원(레벨>0)은
+// 통과시켜 웹(광고주 등 회원) 동작을 깨지 않는다.
+// 완전한 등급 기반 접근제어는 read_level 복원 후 별도 처리.
+// slug 가 차단 대상이고 게스트면 true(응답 이미 작성) 반환.
+func (h *V2Handler) blockGuestOnHiddenBoard(c *gin.Context, slug string) bool {
+	if !hiddenBoardSlugs[slug] {
+		return false
+	}
+	if middleware.GetUserLevel(c) > 0 {
+		return false
+	}
+	common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", nil)
+	return true
 }
 
 // SearchPosts handles GET /api/v2/search (DB fallback, Elasticsearch 미가용 시)
@@ -360,7 +404,7 @@ func (h *V2Handler) ListBoards(c *gin.Context) {
 	boards, err := pkgredis.GetOrSet(
 		c.Request.Context(),
 		h.cache,
-		"v2:boards:visible:guest:v2",
+		"v2:boards:visible:guest:v3",
 		5*time.Minute,
 		func() ([]*v2domain.V2Board, error) {
 			bs, e := h.boardRepo.FindVisible(0)
@@ -380,6 +424,9 @@ func (h *V2Handler) ListBoards(c *gin.Context) {
 // GetBoard handles GET /api/v1/boards/:slug
 func (h *V2Handler) GetBoard(c *gin.Context) {
 	slug := c.Param("slug")
+	if h.blockGuestOnHiddenBoard(c, slug) {
+		return
+	}
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
@@ -402,6 +449,9 @@ func (h *V2Handler) GetBoard(c *gin.Context) {
 // ListPosts handles GET /api/v1/boards/:slug/posts
 func (h *V2Handler) ListPosts(c *gin.Context) {
 	slug := c.Param("slug")
+	if h.blockGuestOnHiddenBoard(c, slug) {
+		return
+	}
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
@@ -434,6 +484,9 @@ func (h *V2Handler) ListPosts(c *gin.Context) {
 
 // GetPost handles GET /api/v1/boards/:slug/posts/:id
 func (h *V2Handler) GetPost(c *gin.Context) {
+	if h.blockGuestOnHiddenBoard(c, c.Param("slug")) {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
@@ -882,6 +935,9 @@ func (h *V2Handler) RestoreRevision(c *gin.Context) {
 
 // ListComments handles GET /api/v1/boards/:slug/posts/:id/comments
 func (h *V2Handler) ListComments(c *gin.Context) {
+	if h.blockGuestOnHiddenBoard(c, c.Param("slug")) {
+		return
+	}
 	postID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
