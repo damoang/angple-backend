@@ -2281,9 +2281,20 @@ func main() {
 			items = enrichWithDisciplineRelated(db, slug, items, true)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
+			// #12975: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은 목록이
+			// 반복 노출된다(예: 2011·2012·2013 페이지 동일). 실제 접근 가능한 마지막
+			// 페이지를 넘어서면 페이지네이션을 종료해, 프론트가 깨진(중복) 페이지를
+			// 제공하지 않게 한다. (커서 경로는 offset 을 쓰지 않으므로 예외)
+			maxAccessiblePage := gnurepo.MaxPostOffset/limit + 1
 			if useHasNextPagination {
+				if !useCursor && page >= maxAccessiblePage {
+					hasNext = false
+				}
 				meta["has_next"] = hasNext
 			} else {
+				if capTotal := int64(gnurepo.MaxPostOffset + limit); !useCursor && total > capTotal {
+					total = capTotal
+				}
 				meta["total"] = total
 			}
 			if useCursor && len(posts) > 0 {
