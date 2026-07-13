@@ -2072,7 +2072,25 @@ func main() {
 			}
 			cursorWrNum, cursorNumErr := strconv.Atoi(c.Query("cursor_wr_num"))
 			cursorWrReply := c.Query("cursor_wr_reply")
-			useCursor := cursorNumErr == nil && cursorWrReply != ""
+			// 커서 활성화는 cursor_wr_num 파라미터 존재 여부로 판단한다. 루트 글의
+			// wr_reply 는 빈 문자열이라, 예전처럼 cursorWrReply!="" 를 요구하면 날짜
+			// 이동의 '다음'(대부분 루트 글 커서)이 동작하지 않는다(#12975).
+			_, hasCursorNum := c.GetQuery("cursor_wr_num")
+			useCursor := hasCursorNum && cursorNumErr == nil
+			// #12975: 날짜 기반 아카이브 이동. before_date(YYYY-MM 또는 YYYY-MM-DD)를
+			// 검증·정규화(월/일 말미 포함)해 그 시점 첫 페이지를 커서 방식으로 반환한다.
+			// 이후 '다음'은 응답의 next_cursor 로 기존 커서 경로를 재사용(깊이 무관·고속).
+			beforeDate := strings.TrimSpace(c.Query("before_date"))
+			if beforeDate != "" {
+				if t, e := time.ParseInLocation("2006-01-02", beforeDate, time.Local); e == nil {
+					beforeDate = t.Format("2006-01-02") + " 23:59:59"
+				} else if t, e := time.ParseInLocation("2006-01", beforeDate, time.Local); e == nil {
+					beforeDate = t.AddDate(0, 1, 0).Add(-time.Second).Format("2006-01-02 15:04:05")
+				} else {
+					beforeDate = "" // 형식 불일치 → 무시
+				}
+			}
+			useDateJump := beforeDate != "" && !useCursor
 
 			// Search parameters
 			sfl := c.Query("sfl")           // search field: title, content, title_content, author
@@ -2105,7 +2123,7 @@ func main() {
 			}
 
 			currentUserIDForMemo := middleware.GetUserID(c)
-			if !summaryMode && !isSearching && !useCursor && category == "" && celebrationPeriod == "" {
+			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
@@ -2175,7 +2193,7 @@ func main() {
 			var posts []*gnuboard.G5Write
 			var total int64
 			var hasNext bool
-			useHasNextPagination := !isSearching && !useCursor && (slug == "free" || slug == "hello")
+			useHasNextPagination := !isSearching && !useCursor && !useDateJump && (slug == "free" || slug == "hello")
 			if isSearching && category != "" {
 				posts, total, err = gnuWriteRepo.SearchPostsByCategory(slug, sfl, stx, category, page, limit)
 			} else if isSearching && sortBy == "relevance" {
@@ -2187,6 +2205,10 @@ func main() {
 				now := time.Now().In(kst)
 				today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, kst)
 				posts, total, err = gnuWriteRepo.FindMessagePostsByPeriod(celebrationPeriod, today, page, limit)
+			} else if summaryMode && useDateJump {
+				posts, total, err = gnuWriteRepo.FindPostsFromDateSummary(slug, limit, beforeDate)
+			} else if useDateJump {
+				posts, total, err = gnuWriteRepo.FindPostsFromDate(slug, limit, beforeDate)
 			} else if summaryMode && useCursor {
 				posts, total, err = gnuWriteRepo.FindPostsAfterSummary(slug, limit, cursorWrNum, cursorWrReply)
 			} else if summaryMode && useHasNextPagination && category != "" && len(blockedIDs) > 0 {
@@ -2281,12 +2303,16 @@ func main() {
 			items = enrichWithDisciplineRelated(db, slug, items, true)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
-			if useHasNextPagination {
+			if useDateJump {
+				// 날짜 점프는 커서 방식 — 총페이지 대신 다음 존재 여부만.
+				meta["has_next"] = len(posts) == limit
+				meta["before_date"] = beforeDate
+			} else if useHasNextPagination {
 				meta["has_next"] = hasNext
 			} else {
 				meta["total"] = total
 			}
-			if useCursor && len(posts) > 0 {
+			if (useCursor || useDateJump) && len(posts) > 0 {
 				last := posts[len(posts)-1]
 				meta["next_cursor_wr_num"] = last.WrNum
 				meta["next_cursor_wr_reply"] = last.WrReply
@@ -2298,7 +2324,7 @@ func main() {
 			}
 
 			// Store in both caches (only for non-search, non-category requests, unfiltered data)
-			if !summaryMode && !isSearching && !useCursor && category == "" && celebrationPeriod == "" {
+			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
