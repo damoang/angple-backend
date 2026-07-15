@@ -2422,6 +2422,26 @@ func main() {
 
 			postDetail := v1handler.TransformToV1PostDetail(post, isNotice, slug)
 
+			// 수정 추적: 실제 수정 횟수(change_type='update') + 최근 수정 시각.
+			// 게시글 수정 핸들러는 wr_last 를 갱신하지 않으므로(댓글만 갱신), 프론트 배지는
+			// wr_last 기반 updated_at 대신 이 리비전 기반 값을 사용한다. 인덱스 idx_board_wr,
+			// 상세 응답은 캐시되어 캐시 미스 시에만 실행.
+			{
+				var postEditCount int64
+				db.Table("g5_write_revisions").
+					Where("board_id = ? AND wr_id = ? AND change_type = ?", slug, id, "update").
+					Count(&postEditCount)
+				postDetail["edit_count"] = postEditCount
+				if postEditCount > 0 {
+					var lastEdited time.Time
+					db.Table("g5_write_revisions").
+						Select("MAX(edited_at)").
+						Where("board_id = ? AND wr_id = ? AND change_type = ?", slug, id, "update").
+						Scan(&lastEdited)
+					postDetail["last_edited_at"] = lastEdited
+				}
+			}
+
 			// 태그 조회
 			if tags, err := gnuTagRepo.GetPostTags(slug, id); err == nil && len(tags) > 0 {
 				postDetail["tags"] = tags
@@ -2578,7 +2598,8 @@ func main() {
 				var counts []EditCount
 				db.Table("g5_write_revisions").
 					Select("wr_id, COUNT(*) as cnt").
-					Where("board_id = ? AND wr_id IN ?", slug, commentIDs).
+					// change_type='update' 만 = 실제 수정 횟수. create(생성 리비전)·soft_delete 제외.
+					Where("board_id = ? AND wr_id IN ? AND change_type = ?", slug, commentIDs, "update").
 					Group("wr_id").
 					Find(&counts)
 				for _, ec := range counts {
@@ -2832,10 +2853,11 @@ func main() {
 				return
 			}
 
-			// 일반 사용자: count + last_edited_at만 반환
+			// 일반 사용자: count + last_edited_at만 반환.
+			// change_type='update' 만 집계 = 실제 수정 횟수(create 생성 리비전·soft_delete 제외).
 			var editCount int64
 			db.Table("g5_write_revisions").
-				Where("board_id = ? AND wr_id = ?", slug, postID).
+				Where("board_id = ? AND wr_id = ? AND change_type = ?", slug, postID, "update").
 				Count(&editCount)
 
 			var lastEditedAt *time.Time
@@ -2843,7 +2865,7 @@ func main() {
 				var t time.Time
 				db.Table("g5_write_revisions").
 					Select("MAX(edited_at)").
-					Where("board_id = ? AND wr_id = ?", slug, postID).
+					Where("board_id = ? AND wr_id = ? AND change_type = ?", slug, postID, "update").
 					Scan(&t)
 				lastEditedAt = &t
 			}
