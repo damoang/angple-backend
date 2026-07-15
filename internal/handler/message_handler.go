@@ -231,7 +231,10 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "보내는 회원 정보를 찾을 수 없습니다", err)
 		return
 	}
-	if sender.MbCertify == "" {
+	// 쪽지는 실명인증(mb_certify) 필요. 단 mb_level 5+(유료 광고주 등급·관리자)는 예외.
+	// mb_level(등급, XP as_level 아님)=5 는 "돈 낸 기간"에만 부여 → 결제 종료로 강등 시 권한 자동 소멸.
+	// 쪽지 경로 한정 예외. 글쓰기·댓글 등 다른 실명 게이트는 종전대로 유지.
+	if sender.MbCertify == "" && sender.MbLevel < 5 {
 		common.V2ErrorResponse(c, http.StatusForbidden, "실명인증이 필요합니다", nil)
 		return
 	}
