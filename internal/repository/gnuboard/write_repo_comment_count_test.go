@@ -46,7 +46,9 @@ func TestWriteRepositorySoftDeleteAndRestoreCommentAdjustsParentCount(t *testing
 		wr_9 TEXT,
 		wr_10 TEXT,
 		wr_deleted_at DATETIME NULL,
-		wr_deleted_by TEXT NULL
+		wr_deleted_by TEXT NULL,
+		wr_edit_count INTEGER NOT NULL DEFAULT 0,
+		wr_last_edited_at DATETIME NULL
 	)`).Error; err != nil {
 		t.Fatalf("create g5_write_free: %v", err)
 	}
@@ -151,7 +153,9 @@ func TestWriteRepositoryCreateCommentAdjustsParentCount(t *testing.T) {
 		wr_9 TEXT,
 		wr_10 TEXT,
 		wr_deleted_at DATETIME NULL,
-		wr_deleted_by TEXT NULL
+		wr_deleted_by TEXT NULL,
+		wr_edit_count INTEGER NOT NULL DEFAULT 0,
+		wr_last_edited_at DATETIME NULL
 	)`).Error; err != nil {
 		t.Fatalf("create g5_write_free: %v", err)
 	}
