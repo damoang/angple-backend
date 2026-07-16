@@ -2422,24 +2422,13 @@ func main() {
 
 			postDetail := v1handler.TransformToV1PostDetail(post, isNotice, slug)
 
-			// 수정 추적: 실제 수정 횟수(change_type='update') + 최근 수정 시각.
-			// 게시글 수정 핸들러는 wr_last 를 갱신하지 않으므로(댓글만 갱신), 프론트 배지는
-			// wr_last 기반 updated_at 대신 이 리비전 기반 값을 사용한다. 인덱스 idx_board_wr,
-			// 상세 응답은 캐시되어 캐시 미스 시에만 실행.
-			{
-				var postEditCount int64
-				db.Table("g5_write_revisions").
-					Where("board_id = ? AND wr_id = ? AND change_type = ?", slug, id, "update").
-					Count(&postEditCount)
-				postDetail["edit_count"] = postEditCount
-				if postEditCount > 0 {
-					var lastEdited time.Time
-					db.Table("g5_write_revisions").
-						Select("MAX(edited_at)").
-						Where("board_id = ? AND wr_id = ? AND change_type = ?", slug, id, "update").
-						Scan(&lastEdited)
-					postDetail["last_edited_at"] = lastEdited
-				}
+			// 수정 추적: 비정규화 컬럼(wr_edit_count·wr_last_edited_at) 사용 — 읽기 쿼리 0.
+			// 수정 핸들러가 리비전 기록과 원자적으로 행에 누적, 상세 캐시(SetPost)가 그 값을
+			// 그대로 실어 나른다(수정 시 write-after worker 가 InvalidatePost 로 캐시 무효화 →
+			// 다음 조회가 갱신된 행 로드). wr_last 기반 updated_at 대신 이 값을 배지에 사용.
+			postDetail["edit_count"] = post.WrEditCount
+			if post.WrLastEditedAt != nil {
+				postDetail["last_edited_at"] = *post.WrLastEditedAt
 			}
 
 			// 태그 조회
@@ -2584,37 +2573,16 @@ func main() {
 				return
 			}
 
-			// 댓글별 수정 횟수 배치 조회
-			commentIDs := make([]int, len(comments))
-			for i, cm := range comments {
-				commentIDs[i] = cm.WrID
-			}
-			editCountMap := map[int]int{}
-			if len(commentIDs) > 0 {
-				type EditCount struct {
-					WrID  int `gorm:"column:wr_id"`
-					Count int `gorm:"column:cnt"`
-				}
-				var counts []EditCount
-				db.Table("g5_write_revisions").
-					Select("wr_id, COUNT(*) as cnt").
-					// change_type='update' 만 = 실제 수정 횟수. create(생성 리비전)·soft_delete 제외.
-					Where("board_id = ? AND wr_id IN ? AND change_type = ?", slug, commentIDs, "update").
-					Group("wr_id").
-					Find(&counts)
-				for _, ec := range counts {
-					editCountMap[ec.WrID] = ec.Count
-				}
-			}
-
+			// 댓글별 수정 횟수: 비정규화 컬럼(wr_edit_count) 사용 — 배치 COUNT 제거(읽기 쿼리 0).
+			// 댓글 수정 핸들러가 wr_last 와 함께 wr_edit_count 를 누적, 댓글 목록 캐시가 실어 나름.
 			transformed := v1handler.TransformToV1Comments(comments)
 			// Admin sees full (unmasked) IP
 			if isAdmin {
 				v1handler.OverrideIPForAdmin(transformed, comments)
 			}
 			for i, comment := range comments {
-				if cnt, ok := editCountMap[comment.WrID]; ok && cnt > 0 {
-					transformed[i]["edit_count"] = cnt
+				if comment.WrEditCount > 0 {
+					transformed[i]["edit_count"] = comment.WrEditCount
 				}
 			}
 
@@ -3718,6 +3686,12 @@ func main() {
 				return
 			}
 
+			// 수정 추적 비정규화: 실제 수정 1회 → wr_edit_count +1, 최근 수정 시각 갱신.
+			// 위 리비전 change_type='update' 기록과 같은 UPDATE 에 실려 정합 유지(백필=update 리비전 COUNT).
+			// wr_last(게시글 정렬키)는 미갱신 — 수정 시 목록 bump 방지(별도 last_edited_at 사용).
+			updates["wr_edit_count"] = gorm.Expr("wr_edit_count + 1")
+			updates["wr_last_edited_at"] = time.Now()
+
 			idempotencyBaseKey := getIdempotencyBaseKey(c, userID)
 			switch state, cached := beginIdempotentWrite(c.Request.Context(), redisClient, idempotencyBaseKey); state {
 			case "cached":
@@ -3984,6 +3958,9 @@ func main() {
 				if err := tx.Table(tableName).Where("wr_id = ?", commentID).Updates(map[string]interface{}{
 					"wr_content": req.Content,
 					"wr_last":    now,
+					// 수정 추적 비정규화: 매 조회 배치 COUNT 대체(리비전 update 기록과 원자적).
+					"wr_edit_count":     gorm.Expr("wr_edit_count + 1"),
+					"wr_last_edited_at": time.Now(),
 				}).Error; err != nil {
 					return err
 				}

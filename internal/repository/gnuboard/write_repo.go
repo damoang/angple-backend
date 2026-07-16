@@ -59,6 +59,7 @@ var coreColumns = []string{
 	"wr_9",                           // 리포트 통계 JSON 등
 	"wr_10",                          // 이미지 URL (갤러리/메시지 썸네일)
 	"wr_deleted_at", "wr_deleted_by", // Soft delete columns (마이그레이션된 테이블만)
+	"wr_edit_count", "wr_last_edited_at", // 수정 추적 비정규화 (마이그레이션된 테이블만)
 }
 
 // WriteRepository provides access to g5_write_* dynamic tables

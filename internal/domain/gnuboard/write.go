@@ -43,6 +43,10 @@ type G5Write struct {
 	// Soft delete columns
 	WrDeletedAt *time.Time `gorm:"column:wr_deleted_at" json:"deleted_at,omitempty"`
 	WrDeletedBy *string    `gorm:"column:wr_deleted_by" json:"deleted_by,omitempty"`
+	// 수정 추적 비정규화 (마이그레이션된 테이블만) — 매 조회 g5_write_revisions COUNT 대체.
+	// 수정 핸들러가 리비전 기록과 함께 누적, wr_comment 비정규화와 동형.
+	WrEditCount    int        `gorm:"column:wr_edit_count" json:"wr_edit_count"`
+	WrLastEditedAt *time.Time `gorm:"column:wr_last_edited_at" json:"wr_last_edited_at,omitempty"`
 }
 
 // ScheduledDeleteInfo describes a pending hard-delete schedule for a post.
