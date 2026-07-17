@@ -290,13 +290,16 @@ func (s *V2AuthService) refreshWebIssuedToken(refreshToken, mbID string) (*v2dom
 	sum := sha256.Sum256([]byte(refreshToken))
 	tokenHash := hex.EncodeToString(sum[:])
 
+	// 저장소 대조: 미폐기·미만료 + sub 일치. 만료 비교는 UTC_TIMESTAMP() 로 한다 —
+	// 컬럼은 UTC 로 저장되는데 DSN loc=Asia/Seoul 이라 time.Now() 를 바인딩하면 드라이버가
+	// KST 벽시계로 보내 저장값과 9시간 어긋난다(토큰이 9시간 일찍 만료 판정). DB 자체 UTC 로 비교.
 	var row struct {
 		MbID string
 	}
 	err := s.db.Raw(
 		`SELECT mb_id FROM angple_refresh_tokens
-		 WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?
-		 LIMIT 1`, tokenHash, time.Now(),
+		 WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()
+		 LIMIT 1`, tokenHash,
 	).Scan(&row).Error
 	if err != nil {
 		log.Printf("[WARN] 웹 발급 refresh 토큰 저장소 조회 실패: %v", err)
@@ -304,6 +307,23 @@ func (s *V2AuthService) refreshWebIssuedToken(refreshToken, mbID string) (*v2dom
 	}
 	// 미등록·폐기·만료 토큰은 거부. sub 위조 대비로 저장소의 mb_id 와 일치도 요구한다.
 	if row.MbID == "" || row.MbID != mbID {
+		return nil, common.ErrUnauthorized
+	}
+
+	// 단일 사용: 소비 즉시 폐기한다(원자적 claim). revoked_at IS NULL 조건이 동시 재생·재사용을
+	// 한 번만 통과시킨다(RowsAffected 로 판정). 폐기하지 않으면 이 토큰이 만료까지 재생 가능하고,
+	// 첫 갱신 후 쿠키가 Go 네이티브 토큰(저장소 밖)으로 교체돼 로그아웃(웹 저장소 폐기)이 이
+	// 토큰에 닿지 못한다 — 로그아웃한 세션의 refresh 토큰이 7일간 살아있는 회귀가 된다.
+	res := s.db.Exec(
+		`UPDATE angple_refresh_tokens SET revoked_at = UTC_TIMESTAMP()
+		 WHERE token_hash = ? AND revoked_at IS NULL`, tokenHash,
+	)
+	if res.Error != nil {
+		log.Printf("[WARN] 웹 발급 refresh 토큰 폐기 실패: %v", res.Error)
+		return nil, common.ErrUnauthorized
+	}
+	if res.RowsAffected == 0 {
+		// 동시 요청이 먼저 소비(재사용 탐지) — 거부.
 		return nil, common.ErrUnauthorized
 	}
 

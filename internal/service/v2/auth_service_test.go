@@ -2,6 +2,7 @@ package v2
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	jwtlib "github.com/golang-jwt/jwt/v5"
+	sqlite3 "github.com/mattn/go-sqlite3"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -193,8 +195,24 @@ func TestRefreshTokenWithdrawalGate(t *testing.T) {
 // 웹(damoang.net)이 발급한 refresh 토큰(sub=mb_id, user_id 없음) 수용 경로 검증.
 // 서명만으로 통과시키면 로그아웃·로테이션으로 폐기된 토큰까지 살아나므로,
 // angple_refresh_tokens 저장소 대조가 반드시 걸려야 한다.
+// utcSqliteDriverOnce 는 refresh 만료 비교(UTC_TIMESTAMP())를 sqlite 에서 재현하기 위해
+// MySQL 의 UTC_TIMESTAMP() 함수를 등록한 커스텀 드라이버를 1회만 등록한다.
+var utcSqliteDriverRegistered = registerUTCSqliteDriver()
+
+func registerUTCSqliteDriver() bool {
+	sql.Register("sqlite3_utcfn", &sqlite3.SQLiteDriver{
+		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+			return conn.RegisterFunc("UTC_TIMESTAMP", func() string {
+				return time.Now().UTC().Format("2006-01-02 15:04:05")
+			}, true)
+		},
+	})
+	return true
+}
+
 func TestRefreshTokenWebIssued(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=private"), &gorm.Config{})
+	_ = utcSqliteDriverRegistered
+	db, err := gorm.Open(sqlite.Dialector{DriverName: "sqlite3_utcfn", DSN: "file::memory:?cache=private"}, &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -236,16 +254,19 @@ func TestRefreshTokenWebIssued(t *testing.T) {
 		}
 		return signed
 	}
+	// expires_at 은 UTC 문자열로 저장한다 — 프로덕션은 UTC 저장이고, 쿼리도 UTC_TIMESTAMP() 로
+	// 비교하므로 테스트도 UTC 기준으로 맞춰 time.Time 마샬링의 tz 편차를 제거한다.
 	store := func(tok, mbID string, expires time.Time, revoked bool) {
 		sum := sha256.Sum256([]byte(tok))
 		h := hex.EncodeToString(sum[:])
+		exp := expires.UTC().Format("2006-01-02 15:04:05")
 		if revoked {
 			db.Exec(`INSERT INTO angple_refresh_tokens (token_hash, mb_id, expires_at, revoked_at) VALUES (?,?,?,?)`,
-				h, mbID, expires, time.Now())
+				h, mbID, exp, "2000-01-01 00:00:00")
 			return
 		}
 		db.Exec(`INSERT INTO angple_refresh_tokens (token_hash, mb_id, expires_at, revoked_at) VALUES (?,?,?,NULL)`,
-			h, mbID, expires)
+			h, mbID, exp)
 	}
 
 	// 1) 저장소에 있고 미폐기·미만료 → 성공
@@ -257,6 +278,11 @@ func TestRefreshTokenWebIssued(t *testing.T) {
 	}
 	if resp.User.Username != "google_98050930" || resp.AccessToken == "" {
 		t.Fatalf("unexpected refresh response: %+v", resp.User)
+	}
+
+	// 1-b) 단일 사용: 방금 성공한 토큰의 재사용은 거부돼야 한다(소비 시 폐기 → 재생 방지).
+	if _, err := svc.RefreshToken(valid); err == nil {
+		t.Fatal("consumed web token must be single-use (replay must be rejected)")
 	}
 
 	// 2) 로그아웃(폐기)된 토큰 → 거부  ← 저장소 대조가 없으면 여기서 통과해버린다
