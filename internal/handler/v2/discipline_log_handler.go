@@ -30,13 +30,14 @@ func NewDisciplineLogHandler(writeRepo gnurepo.WriteRepository, db *gorm.DB) *Di
 
 // DisciplineLogContent represents the JSON structure in wr_content
 type DisciplineLogContent struct {
-	PenaltyMbID     string         `json:"penalty_mb_id"`
-	PenaltyPeriod   int            `json:"penalty_period"` // -1: permanent, 0: warning, >0: days
-	PenaltyDateFrom string         `json:"penalty_date_from"`
-	SgTypes         []int          `json:"sg_types"`
-	ReportedItems   []ReportedItem `json:"reported_items,omitempty"`
-	Content         string         `json:"content,omitempty"`
-	MemberReason    string         `json:"member_reason,omitempty"` // 회원 공개 사유 (운영자 입력 시 상세에 노출)
+	PenaltyMbID       string         `json:"penalty_mb_id"`
+	PenaltyPeriod     int            `json:"penalty_period"` // -1: permanent, 0: warning, >0: days
+	PenaltyDateFrom   string         `json:"penalty_date_from"`
+	SgTypes           []int          `json:"sg_types"`
+	ReportedItems     []ReportedItem `json:"reported_items,omitempty"`
+	Content           string         `json:"content,omitempty"`
+	MemberReason      string         `json:"member_reason,omitempty"`      // 회원 공개 사유 (운영자 입력 시 상세에 노출)
+	PublicDescription string         `json:"public_description,omitempty"` // 외부 공개용 안내문 (운영자 입력 시 상세에 노출, 기타 사유와 별개)
 }
 
 // ReportedItem represents a reported post or comment.
@@ -136,19 +137,20 @@ type DisciplineLogListItem struct {
 
 // DisciplineLogDetail represents detailed discipline log
 type DisciplineLogDetail struct {
-	ID              int             `json:"id"`
-	MemberID        string          `json:"member_id"`
-	MemberNickname  string          `json:"member_nickname"`
-	PenaltyPeriod   int             `json:"penalty_period"`
-	PenaltyDateFrom string          `json:"penalty_date_from"`
-	PenaltyDateTo   *string         `json:"penalty_date_to,omitempty"`
-	ViolationTypes  []ViolationType `json:"violation_types"`
-	ReportedItems   []ReportedItem  `json:"reported_items,omitempty"`
-	Memo            string          `json:"memo,omitempty"`
-	MemberReason    string          `json:"member_reason,omitempty"` // 회원 공개 사유 (운영자 입력 시에만 노출)
-	CreatedBy       string          `json:"created_by"`
-	CreatedAt       string          `json:"created_at"`
-	ClaimPostID     *int            `json:"claim_post_id,omitempty"`
+	ID                int             `json:"id"`
+	MemberID          string          `json:"member_id"`
+	MemberNickname    string          `json:"member_nickname"`
+	PenaltyPeriod     int             `json:"penalty_period"`
+	PenaltyDateFrom   string          `json:"penalty_date_from"`
+	PenaltyDateTo     *string         `json:"penalty_date_to,omitempty"`
+	ViolationTypes    []ViolationType `json:"violation_types"`
+	ReportedItems     []ReportedItem  `json:"reported_items,omitempty"`
+	Memo              string          `json:"memo,omitempty"`
+	MemberReason      string          `json:"member_reason,omitempty"`      // 회원 공개 사유 (운영자 입력 시에만 노출)
+	PublicDescription string          `json:"public_description,omitempty"` // 외부 공개용 안내문 (운영자 입력 시에만 노출)
+	CreatedBy         string          `json:"created_by"`
+	CreatedAt         string          `json:"created_at"`
+	ClaimPostID       *int            `json:"claim_post_id,omitempty"`
 }
 
 // parseContentJSON parses the wr_content JSON or extracts from HTML
@@ -452,17 +454,18 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 	}
 
 	detail := DisciplineLogDetail{
-		ID:              post.WrID,
-		MemberID:        data.PenaltyMbID,
-		MemberNickname:  getMemberNickFromTitle(post.WrSubject),
-		PenaltyPeriod:   data.PenaltyPeriod,
-		PenaltyDateFrom: data.PenaltyDateFrom,
-		PenaltyDateTo:   penaltyDateTo,
-		ViolationTypes:  violations,
-		ReportedItems:   reportedItems,
-		MemberReason:    data.MemberReason,
-		CreatedBy:       post.MbID,
-		CreatedAt:       post.WrDatetime.Format("2006-01-02 15:04:05"),
+		ID:                post.WrID,
+		MemberID:          data.PenaltyMbID,
+		MemberNickname:    getMemberNickFromTitle(post.WrSubject),
+		PenaltyPeriod:     data.PenaltyPeriod,
+		PenaltyDateFrom:   data.PenaltyDateFrom,
+		PenaltyDateTo:     penaltyDateTo,
+		ViolationTypes:    violations,
+		ReportedItems:     reportedItems,
+		MemberReason:      data.MemberReason,
+		PublicDescription: data.PublicDescription,
+		CreatedBy:         post.MbID,
+		CreatedAt:         post.WrDatetime.Format("2006-01-02 15:04:05"),
 	}
 
 	// 소명글 존재 여부 조회 (claim 게시판에서 wr_link1 또는 wr_content 매칭)
