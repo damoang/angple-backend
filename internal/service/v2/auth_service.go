@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -275,6 +277,43 @@ func (s *V2AuthService) AppExchangeLogin(code string) (*V2LoginResponse, error) 
 	}, nil
 }
 
+// refreshWebIssuedToken validates a refresh token minted by the damoang.net web frontend.
+//
+// 웹 토큰은 sub=<g5 mb_id> 만 담고 user_id 클레임이 없다. 서명(shared JWT_SECRET)만으로
+// 수용하면 로그아웃·로테이션으로 폐기된 토큰까지 통과하므로, 웹이 관리하는 저장소
+// (angple_refresh_tokens: sha256(token) 해시, revoked_at, expires_at)를 반드시 대조한다.
+func (s *V2AuthService) refreshWebIssuedToken(refreshToken, mbID string) (*v2domain.V2User, error) {
+	if mbID == "" || s.db == nil {
+		return nil, common.ErrUnauthorized
+	}
+
+	sum := sha256.Sum256([]byte(refreshToken))
+	tokenHash := hex.EncodeToString(sum[:])
+
+	var row struct {
+		MbID string
+	}
+	err := s.db.Raw(
+		`SELECT mb_id FROM angple_refresh_tokens
+		 WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?
+		 LIMIT 1`, tokenHash, time.Now(),
+	).Scan(&row).Error
+	if err != nil {
+		log.Printf("[WARN] 웹 발급 refresh 토큰 저장소 조회 실패: %v", err)
+		return nil, common.ErrUnauthorized
+	}
+	// 미등록·폐기·만료 토큰은 거부. sub 위조 대비로 저장소의 mb_id 와 일치도 요구한다.
+	if row.MbID == "" || row.MbID != mbID {
+		return nil, common.ErrUnauthorized
+	}
+
+	user, err := s.userRepo.FindByUsername(mbID)
+	if err != nil {
+		return nil, common.ErrUnauthorized
+	}
+	return user, nil
+}
+
 // RefreshToken validates a refresh token and issues new token pair
 func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, error) {
 	claims, err := s.jwtManager.VerifyToken(refreshToken)
@@ -282,14 +321,20 @@ func (s *V2AuthService) RefreshToken(refreshToken string) (*V2LoginResponse, err
 		return nil, common.ErrUnauthorized
 	}
 
-	userID, err := strconv.ParseUint(claims.UserID, 10, 64)
-	if err != nil {
-		return nil, common.ErrUnauthorized
-	}
-
-	user, err := s.userRepo.FindByID(userID)
-	if err != nil {
-		return nil, common.ErrUnauthorized
+	var user *v2domain.V2User
+	if userID, parseErr := strconv.ParseUint(claims.UserID, 10, 64); parseErr == nil {
+		user, err = s.userRepo.FindByID(userID)
+		if err != nil {
+			return nil, common.ErrUnauthorized
+		}
+	} else {
+		// 웹(damoang.net) 로그인이 발급한 refresh 토큰은 user_id 없이 sub=<g5 mb_id> 만 담는다
+		// (shared JWT_SECRET, AppExchangeLogin 과 같은 신뢰 도메인). 이 규격을 받아주지 않으면
+		// 웹 세션은 자동 갱신이 영구 실패한다.
+		user, err = s.refreshWebIssuedToken(refreshToken, claims.Subject)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 탈퇴 게이트(세션 유지 경로): 확정 계정은 refresh 로도 무한 우회할 수 없도록 차단한다.

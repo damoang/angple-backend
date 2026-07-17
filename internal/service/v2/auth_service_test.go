@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strconv"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/damoang/angple-backend/pkg/jwt"
+	jwtlib "github.com/golang-jwt/jwt/v5"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -184,5 +187,102 @@ func TestRefreshTokenWithdrawalGate(t *testing.T) {
 	}
 	if resp2.WithdrawalGrace != nil {
 		t.Error("active account should not carry WithdrawalGrace")
+	}
+}
+
+// 웹(damoang.net)이 발급한 refresh 토큰(sub=mb_id, user_id 없음) 수용 경로 검증.
+// 서명만으로 통과시키면 로그아웃·로테이션으로 폐기된 토큰까지 살아나므로,
+// angple_refresh_tokens 저장소 대조가 반드시 걸려야 한다.
+func TestRefreshTokenWebIssued(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=private"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE v2_users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT, email TEXT, password TEXT, nickname TEXT, level INTEGER, status TEXT
+	)`).Error; err != nil {
+		t.Fatalf("create v2_users: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE g5_member (mb_id TEXT PRIMARY KEY, mb_leave_date TEXT)`).Error; err != nil {
+		t.Fatalf("create g5_member: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE angple_refresh_tokens (
+		token_hash TEXT, mb_id TEXT, expires_at DATETIME, revoked_at DATETIME
+	)`).Error; err != nil {
+		t.Fatalf("create angple_refresh_tokens: %v", err)
+	}
+	db.Exec(`INSERT INTO v2_users (id, username, nickname, level, status) VALUES (1, 'google_98050930', '앙', 2, 'active')`)
+
+	jwtManager := jwt.NewManager("test-secret", 15, 7)
+	svc := NewV2AuthService(v2repo.NewUserRepository(db), jwtManager, nil)
+	svc.SetPromotionDeps(db, nil)
+
+	// 웹 토큰 모사: user_id 없이 sub=mb_id 만. (웹은 SignJWT({sub: mbId}) 로 발급)
+	// jti 로 토큰마다 고유화 (같은 초에 발급하면 클레임이 같아 동일 문자열이 된다)
+	mintSeq := 0
+	mint := func(sub string) string {
+		mintSeq++
+		tok := jwtlib.NewWithClaims(jwtlib.SigningMethodHS256, jwtlib.RegisteredClaims{
+			Subject:   sub,
+			Issuer:    "angple",
+			ID:        strconv.Itoa(mintSeq),
+			IssuedAt:  jwtlib.NewNumericDate(time.Now()),
+			ExpiresAt: jwtlib.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+		})
+		signed, mintErr := tok.SignedString([]byte("test-secret"))
+		if mintErr != nil {
+			t.Fatalf("mint: %v", mintErr)
+		}
+		return signed
+	}
+	store := func(tok, mbID string, expires time.Time, revoked bool) {
+		sum := sha256.Sum256([]byte(tok))
+		h := hex.EncodeToString(sum[:])
+		if revoked {
+			db.Exec(`INSERT INTO angple_refresh_tokens (token_hash, mb_id, expires_at, revoked_at) VALUES (?,?,?,?)`,
+				h, mbID, expires, time.Now())
+			return
+		}
+		db.Exec(`INSERT INTO angple_refresh_tokens (token_hash, mb_id, expires_at, revoked_at) VALUES (?,?,?,NULL)`,
+			h, mbID, expires)
+	}
+
+	// 1) 저장소에 있고 미폐기·미만료 → 성공
+	valid := mint("google_98050930")
+	store(valid, "google_98050930", time.Now().Add(24*time.Hour), false)
+	resp, err := svc.RefreshToken(valid)
+	if err != nil {
+		t.Fatalf("valid web token should refresh, got %v", err)
+	}
+	if resp.User.Username != "google_98050930" || resp.AccessToken == "" {
+		t.Fatalf("unexpected refresh response: %+v", resp.User)
+	}
+
+	// 2) 로그아웃(폐기)된 토큰 → 거부  ← 저장소 대조가 없으면 여기서 통과해버린다
+	revoked := mint("google_98050930")
+	store(revoked, "google_98050930", time.Now().Add(24*time.Hour), true)
+	if _, err := svc.RefreshToken(revoked); err == nil {
+		t.Fatal("revoked web token must be rejected")
+	}
+
+	// 3) 만료된 저장소 행 → 거부
+	expired := mint("google_98050930")
+	store(expired, "google_98050930", time.Now().Add(-1*time.Hour), false)
+	if _, err := svc.RefreshToken(expired); err == nil {
+		t.Fatal("expired web token must be rejected")
+	}
+
+	// 4) 서명은 유효하나 저장소에 없음(app-login 코드·위조 등) → 거부
+	unstored := mint("google_98050930")
+	if _, err := svc.RefreshToken(unstored); err == nil {
+		t.Fatal("web token absent from store must be rejected")
+	}
+
+	// 5) sub 와 저장소 mb_id 불일치 → 거부
+	mismatch := mint("google_98050930")
+	store(mismatch, "other_member", time.Now().Add(24*time.Hour), false)
+	if _, err := svc.RefreshToken(mismatch); err == nil {
+		t.Fatal("sub/store mb_id mismatch must be rejected")
 	}
 }
