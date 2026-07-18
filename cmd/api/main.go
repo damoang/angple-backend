@@ -2024,6 +2024,14 @@ func main() {
 		v2ExtendedSettingsRepo := v2repo.NewBoardExtendedSettingsRepository(db)
 		writeRestrictionSvc := service.NewBoardWriteRestrictionService(db, v2ExtendedSettingsRepo)
 
+		// 게시글 별점 (★1~5, features.rating 보드 — 앙티티).
+		// ⛔ prod 는 수동 DDL 선행 원칙 — migration/012_post_ratings.up.sql
+		postRatingRepo := repository.NewPostRatingRepository(db)
+		if err := postRatingRepo.AutoMigrate(); err != nil {
+			log.Printf("post rating AutoMigrate error: %v", err)
+		}
+		postRatingSvc := service.NewPostRatingService(postRatingRepo, v2ExtendedSettingsRepo)
+
 		// GET /api/v1/boards/:slug - Get board info from g5_board
 		v1Boards.GET("/:slug", func(c *gin.Context) {
 			slug := c.Param("slug")
@@ -2436,6 +2444,14 @@ func main() {
 				postDetail["tags"] = tags
 			}
 
+			// 별점 집계 동봉 (features.rating 보드만) — 추가 왕복 방지.
+			// my 는 로그인 회원(mb_id)의 내 별점, 비로그인은 0. 목록(summary)은 미포함(MVP).
+			if postRatingSvc.Enabled(slug) {
+				if ratingSummary, rErr := postRatingSvc.Summary(slug, id, middleware.GetUsername(c)); rErr == nil {
+					postDetail["rating"] = ratingSummary
+				}
+			}
+
 			// Admin sees full (unmasked) IP
 			if middleware.GetUserLevel(c) >= 10 {
 				v1handler.OverrideIPForAdminSingle(postDetail, post)
@@ -2777,6 +2793,72 @@ func main() {
 					redisClient.Set(ctx, cacheKey, raw, 15*time.Second) //nolint:errcheck
 				}
 			}
+		})
+
+		// PUT /api/v1/boards/:slug/posts/:id/rating - 별점 투표 (★1~5, 재투표=갱신)
+		// features.rating 보드 전용 · mb_level >= 3 (앙님, 공감과 동일 게이트)
+		v1Boards.PUT("/:slug/posts/:id/rating", middleware.JWTAuth(jwtManager), banCheck, func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			var req struct {
+				Rating int `json:"rating"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid request body"})
+				return
+			}
+
+			mbID := middleware.GetUsername(c)
+			if mbID == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "Authentication required"})
+				return
+			}
+
+			// 글 존재 확인 (없는 wr_id 에 대한 유령 투표 방지)
+			if _, err := gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID); err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
+				return
+			}
+
+			summary, err := postRatingSvc.Rate(slug, postID, mbID, middleware.GetUserLevel(c), req.Rating)
+			switch {
+			case errors.Is(err, service.ErrRatingOutOfRange):
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+				return
+			case errors.Is(err, service.ErrRatingDisabled), errors.Is(err, service.ErrRatingLevelTooLow):
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": err.Error()})
+				return
+			case err != nil:
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to save rating"})
+				return
+			}
+
+			// frontend 계약: {"avg", "count", "my"} 그대로 반환 (wrapper 없음)
+			c.JSON(http.StatusOK, summary)
+		})
+
+		// GET /api/v1/boards/:slug/posts/:id/rating - 별점 집계 조회 (공개, 비로그인 my=0)
+		v1Boards.GET("/:slug/posts/:id/rating", func(c *gin.Context) {
+			slug := c.Param("slug")
+			postID, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+
+			summary, err := postRatingSvc.Summary(slug, postID, middleware.GetUsername(c))
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to load rating"})
+				return
+			}
+
+			// frontend 계약: {"avg", "count", "my"} 그대로 반환 (wrapper 없음)
+			c.JSON(http.StatusOK, summary)
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/revisions - Get post revision history
