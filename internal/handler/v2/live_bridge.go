@@ -191,6 +191,14 @@ func (h *V2Handler) toV2Comment(w *gnuboard.G5Write, authors map[string]liveAuth
 
 // listPostsLive 는 GET /api/v2/boards/:slug/posts 를 라이브 g5_ 로 서빙한다.
 func (h *V2Handler) listPostsLive(c *gin.Context, slug string) {
+	// 가상 보드 "all"(태그 전체검색, /tags/*)은 g5_write_all 테이블이 없어 1146 을
+	// 낸다. 크로스보드 태그 검색이 구현될 때까지 빈 목록으로 응답한다(기존 v2
+	// 경로도 v2_boards 에 all 이 없어 404 였음 — 여기서 500 을 만들지 않는다).
+	if slug == "all" {
+		page, perPage := parsePagination(c)
+		common.V2SuccessWithMeta(c, []map[string]any{}, common.NewV2Meta(page, perPage, 0))
+		return
+	}
 	// board 메타: fresh 한 v2_boards 우선, 없으면 gnu board 로 이름 보강.
 	var boardID uint64
 	var boardName string
