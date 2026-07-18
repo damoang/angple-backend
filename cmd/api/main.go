@@ -1067,6 +1067,8 @@ func main() {
 		v2Handler.SetGnuDB(db)
 		v2Handler.SetBlockRepository(v2repo.NewBlockRepository(db))
 		v2Handler.SetTagRepository(gnurepo.NewTagRepository(db))
+		// 라이브 브리지: v2 게시글/댓글 읽기를 현세대 g5_ 라이브 스토어로 서빙 (v2_posts 죽은 스냅샷 대체)
+		v2Handler.SetLiveReadRepos(gnuWriteRepo, gnuBoardRepo)
 
 		// XP: DI into V2Handler (set after expRepo is created below)
 
