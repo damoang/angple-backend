@@ -38,6 +38,9 @@ type V2Handler struct {
 	blockRepo         v2repo.BlockRepository
 	tagRepo           gnurepo.TagRepository
 	cache             *pkgredis.Cache // 비인증 GET 응답 캐시 (nil-safe — 미주입 시 fallthrough)
+	// 라이브 브리지: 현세대 g5_ 스토어 읽기 리포 (nil-safe — 주입 시 게시글/댓글 읽기를 라이브로 서빙)
+	gnuWriteRepo gnurepo.WriteRepository
+	gnuBoardRepo gnurepo.BoardRepository
 }
 
 const claimBoardSlug = "claim"
@@ -452,6 +455,11 @@ func (h *V2Handler) ListPosts(c *gin.Context) {
 	if h.blockGuestOnHiddenBoard(c, slug) {
 		return
 	}
+	// 라이브 브리지: 현세대 g5_ 라이브 데이터로 서빙 (주입 시)
+	if h.gnuWriteRepo != nil {
+		h.listPostsLive(c, slug)
+		return
+	}
 	board, err := h.boardRepo.FindBySlug(slug)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시판을 찾을 수 없습니다", err)
@@ -485,6 +493,11 @@ func (h *V2Handler) ListPosts(c *gin.Context) {
 // GetPost handles GET /api/v1/boards/:slug/posts/:id
 func (h *V2Handler) GetPost(c *gin.Context) {
 	if h.blockGuestOnHiddenBoard(c, c.Param("slug")) {
+		return
+	}
+	// 라이브 브리지: 현세대 g5_ 라이브 데이터로 서빙 (주입 시)
+	if h.gnuWriteRepo != nil {
+		h.getPostLive(c, c.Param("slug"))
 		return
 	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -936,6 +949,11 @@ func (h *V2Handler) RestoreRevision(c *gin.Context) {
 // ListComments handles GET /api/v1/boards/:slug/posts/:id/comments
 func (h *V2Handler) ListComments(c *gin.Context) {
 	if h.blockGuestOnHiddenBoard(c, c.Param("slug")) {
+		return
+	}
+	// 라이브 브리지: 현세대 g5_ 라이브 데이터로 서빙 (주입 시)
+	if h.gnuWriteRepo != nil {
+		h.listCommentsLive(c, c.Param("slug"))
 		return
 	}
 	postID, err := strconv.ParseUint(c.Param("id"), 10, 64)
