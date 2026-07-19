@@ -89,9 +89,10 @@ type RedisConfig struct {
 
 // JWTConfig JWT 설정
 type JWTConfig struct {
-	Secret    string `yaml:"secret"`
-	ExpiresIn int    `yaml:"expires_in"`
-	RefreshIn int    `yaml:"refresh_in"`
+	Secret     string `yaml:"secret"`
+	SecretNext string `yaml:"secret_next"` // 키 롤오버용 보조 검증키(선택). 서명엔 미사용.
+	ExpiresIn  int    `yaml:"expires_in"`
+	RefreshIn  int    `yaml:"refresh_in"`
 }
 
 // CORSConfig CORS 설정
@@ -158,6 +159,9 @@ func overrideFromEnv(cfg *Config) {
 	// JWT 설정
 	if secret := os.Getenv("JWT_SECRET"); secret != "" {
 		cfg.JWT.Secret = secret
+	}
+	if next := os.Getenv("JWT_SECRET_NEXT"); next != "" {
+		cfg.JWT.SecretNext = next
 	}
 	// 서버 설정
 	if port := os.Getenv("API_PORT"); port != "" {
