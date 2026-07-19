@@ -219,3 +219,18 @@ func GetNickname(c *gin.Context) string {
 	}
 	return ""
 }
+
+// RemapUserIDToMbID 는 Bearer(v2) 토큰 경로에서 컨텍스트 "userID"(=v2_users.id 숫자)를
+// "username"(=g5_member.mb_id)으로 덮어써, GetUserID(c) 가 mb_id 를 반환하게 한다.
+// gnuboard g5_write_* 쓰기 핸들러(mb_id 기준으로 작성자·포인트·권한 처리)를 v2 앱 라우트에서
+// 그대로 재사용하기 위한 어댑터. JWTAuth 이후에 배치해야 한다.
+func RemapUserIDToMbID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if username, exists := c.Get("username"); exists {
+			if s, ok := username.(string); ok && s != "" {
+				c.Set("userID", s)
+			}
+		}
+		c.Next()
+	}
+}
