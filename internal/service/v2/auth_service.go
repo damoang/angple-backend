@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/damoang/angple-backend/pkg/jwt"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -30,6 +32,7 @@ type V2AuthService struct {
 	expRepo    v2repo.ExpRepository
 	notiRepo   gnurepo.NotiRepository
 	db         *gorm.DB
+	redis      *redis.Client
 }
 
 // NewV2AuthService creates a new V2AuthService
@@ -45,6 +48,11 @@ func NewV2AuthService(userRepo v2repo.UserRepository, jwtManager *jwt.Manager, e
 func (s *V2AuthService) SetPromotionDeps(db *gorm.DB, notiRepo gnurepo.NotiRepository) {
 	s.db = db
 	s.notiRepo = notiRepo
+}
+
+// SetRedis sets the Redis client used for one-time (jti) app-login code replay protection.
+func (s *V2AuthService) SetRedis(rc *redis.Client) {
+	s.redis = rc
 }
 
 // V2LoginResponse represents v2 login response
@@ -216,6 +224,16 @@ func (s *V2AuthService) AppExchangeLogin(code string) (*V2LoginResponse, error) 
 	// Only accept dedicated app-login codes (not access/refresh tokens).
 	if !slices.Contains(claims.Audience, AppLoginAudience) {
 		return nil, common.ErrUnauthorized
+	}
+
+	// One-time use: reject replay of the same code within its lifetime (jti).
+	// SetNX succeeds on first use; redis.Nil means the jti was already consumed → reject.
+	// Fail-open on other Redis errors — replay protection is defense-in-depth, login availability wins.
+	if jti := claims.ID; jti != "" && s.redis != nil {
+		if _, err := s.redis.SetArgs(context.Background(), "applogin:jti:"+jti, "1",
+			redis.SetArgs{Mode: "NX", TTL: 90 * time.Second}).Result(); errors.Is(err, redis.Nil) {
+			return nil, common.ErrUnauthorized
+		}
 	}
 
 	mbID := claims.Subject
