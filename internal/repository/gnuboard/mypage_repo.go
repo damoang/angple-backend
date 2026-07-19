@@ -26,6 +26,9 @@ type MyPageRepository interface {
 	// referenced as discipline evidence in g5_na_singo. 글·댓글 공용 (#12751/#12908).
 	FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error)
 	GetSearchableBoards() ([]searchableBoard, error)
+	// FindRecentAcrossBoards 는 검색가능 게시판들의 최신글을 시간순으로 병합한 크로스보드 타임라인.
+	// cursor 는 보드slug→wr_id 워터마크(그 값보다 작은 wr_id만). excludeMbIDs 는 차단 사용자.
+	FindRecentAcrossBoards(limit int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error)
 }
 
 type searchableBoard struct {
@@ -518,6 +521,48 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 	searchableBoardsCache.Unlock()
 
 	return result, nil
+}
+
+// FindRecentAcrossBoards returns a chronological cross-board timeline of recent posts.
+// UNION ALL per searchable board with a PK (wr_id) range scan — no wr_datetime ORDER BY /
+// OFFSET inside subqueries, so the 670만-row free 보드도 안전(PK range). 병합만 wr_datetime DESC.
+func (r *myPageRepository) FindRecentAcrossBoards(limit int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error) {
+	if limit <= 0 || limit > 30 {
+		limit = 20
+	}
+	boards, err := r.GetSearchableBoards()
+	if err != nil || len(boards) == 0 {
+		return nil, err
+	}
+
+	var unions []string
+	var args []interface{}
+	for _, b := range boards {
+		table := fmt.Sprintf("g5_write_%s", b.BoTable)
+		// mypage 의 검증된 WHERE(secret/lock) + 삭제 제외(제로데이트 호환).
+		where := "wr_is_comment = 0 AND (wr_option NOT LIKE '%secret%' OR wr_option IS NULL)" +
+			" AND (wr_7 IS NULL OR wr_7 != 'lock')" +
+			" AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')"
+		if wm, ok := cursor[b.BoTable]; ok && wm > 0 {
+			where += fmt.Sprintf(" AND wr_id < %d", wm)
+		}
+		if len(excludeMbIDs) > 0 {
+			where += " AND mb_id NOT IN ?"
+			args = append(args, excludeMbIDs)
+		}
+		unions = append(unions, fmt.Sprintf(
+			"(SELECT wr_id, wr_subject, wr_content, wr_datetime, wr_10, wr_hit, wr_good, wr_comment, mb_id, wr_name, wr_option, '%s' AS board_id FROM `%s` WHERE %s ORDER BY wr_id DESC LIMIT %d)",
+			b.BoTable, table, where, limit))
+	}
+
+	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_datetime DESC LIMIT %d",
+		strings.Join(unions, " UNION ALL "), limit)
+
+	var rows []gnuboard.FeedPost
+	if err := r.db.Raw(sql, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // FindPublicPostsByMember returns recent public posts by a member.

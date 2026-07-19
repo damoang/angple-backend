@@ -49,6 +49,13 @@ type G5Write struct {
 	WrLastEditedAt *time.Time `gorm:"column:wr_last_edited_at" json:"wr_last_edited_at,omitempty"`
 }
 
+// FeedPost is a G5Write row plus its source board slug, used by cross-board feed
+// queries (UNION ALL across g5_write_*). board_id 는 게시판 slug(bo_table)이다.
+type FeedPost struct {
+	G5Write
+	BoardID string `gorm:"column:board_id" json:"board_id"`
+}
+
 // ScheduledDeleteInfo describes a pending hard-delete schedule for a post.
 // Embedded in PostResponse so the SvelteKit SSR avoids a separate /delete-status fetch.
 type ScheduledDeleteInfo struct {
