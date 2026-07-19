@@ -397,17 +397,45 @@ func (h *V2Handler) ListRecentFeed(c *gin.Context) {
 	cursor := decodeFeedCursor(c.Query("cursor"))
 	blockedMbIDs := h.getBlockedMbIDs(middleware.GetUserID(c))
 
-	rows, err := h.feedRepo.FindRecentAcrossBoards(limit, cursor, blockedMbIDs)
+	// 보드별 최신 후보 풀(각 8개)을 가져와, 한 보드가 피드를 독점하지 않도록 페이지당 캡 후 인터리브.
+	rows, err := h.feedRepo.FindRecentAcrossBoards(8, cursor, blockedMbIDs)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "피드 조회 실패", err)
 		return
 	}
 
-	// 게시판 이름 맵(고유 slug만) — gnuBoardRepo 60s 캐시 활용
-	boardNames := map[string]string{}
-	mbIDs := make([]string, 0, len(rows))
+	// 보드별 캡(다양성). 캡 이내 우선 emit(시간순), 못 채우면 초과분으로 채움.
+	perBoardCap := limit / 6
+	if perBoardCap < 2 {
+		perBoardCap = 2
+	}
+	boardCount := map[string]int{}
+	emitted := make([]*gnuboard.FeedPost, 0, limit)
+	var overflow []*gnuboard.FeedPost
 	for i := range rows {
+		if len(emitted) >= limit {
+			break
+		}
 		slug := rows[i].BoardID
+		if boardCount[slug] < perBoardCap {
+			emitted = append(emitted, &rows[i])
+			boardCount[slug]++
+		} else {
+			overflow = append(overflow, &rows[i])
+		}
+	}
+	for _, fp := range overflow {
+		if len(emitted) >= limit {
+			break
+		}
+		emitted = append(emitted, fp)
+	}
+
+	// 게시판 이름 + 작성자 (emit된 것만)
+	boardNames := map[string]string{}
+	mbIDs := make([]string, 0, len(emitted))
+	for _, fp := range emitted {
+		slug := fp.BoardID
 		if _, ok := boardNames[slug]; !ok {
 			boardNames[slug] = slug
 			if h.gnuBoardRepo != nil {
@@ -416,7 +444,7 @@ func (h *V2Handler) ListRecentFeed(c *gin.Context) {
 				}
 			}
 		}
-		mbIDs = append(mbIDs, rows[i].MbID)
+		mbIDs = append(mbIDs, fp.MbID)
 	}
 	authors := h.resolveLiveAuthors(mbIDs)
 
@@ -425,17 +453,16 @@ func (h *V2Handler) ListRecentFeed(c *gin.Context) {
 	for k, v := range cursor {
 		next[k] = v
 	}
-	items := make([]map[string]any, len(rows))
-	for i := range rows {
-		w := &rows[i].G5Write
-		slug := rows[i].BoardID
-		items[i] = h.toV2Post(w, 0, slug, boardNames[slug], false, authors, false)
-		if cur, ok := next[slug]; !ok || w.WrID < cur {
-			next[slug] = w.WrID
+	items := make([]map[string]any, len(emitted))
+	for i, fp := range emitted {
+		slug := fp.BoardID
+		items[i] = h.toV2Post(&fp.G5Write, 0, slug, boardNames[slug], false, authors, false)
+		if cur, ok := next[slug]; !ok || fp.WrID < cur {
+			next[slug] = fp.WrID
 		}
 	}
 
-	hasMore := len(rows) == limit
+	hasMore := len(emitted) == limit
 	nextCursor := ""
 	if hasMore {
 		nextCursor = encodeFeedCursor(next)
