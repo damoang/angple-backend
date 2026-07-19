@@ -870,6 +870,7 @@ func main() {
 		cfg.JWT.ExpiresIn,
 		cfg.JWT.RefreshIn,
 	)
+	jwtManager.SetNextKey(cfg.JWT.SecretNext) // 무중단 키 롤오버: 보조키(설정 시)를 검증에 추가 수용
 
 	// IP Protection
 	ipProtectCfg := middleware.LoadIPProtectionConfig()
