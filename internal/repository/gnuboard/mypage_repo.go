@@ -534,6 +534,7 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		   FROM member_activity_feed
 		  WHERE member_id = ?
 		    AND activity_type = 1
+		    AND is_public = 1
 		  ORDER BY source_created_at DESC, id DESC
 		  LIMIT ?`,
 		mbID, limit,
@@ -580,6 +581,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		   FROM member_activity_feed
 		  WHERE member_id = ?
 		    AND activity_type = 2
+		    AND is_public = 1
 		  ORDER BY source_created_at DESC, id DESC
 		  LIMIT ?`,
 		mbID, limit,
