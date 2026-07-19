@@ -1124,6 +1124,8 @@ func main() {
 		// v2 Auth (with ExpRepo for daily login XP + auto-promotion on login)
 		v2AuthSvc := v2svc.NewV2AuthService(v2UserRepo, jwtManager, v2ExpRepo)
 		v2AuthSvc.SetPromotionDeps(db, gnurepo.NewNotiRepository(db))
+		v2AuthSvc.SetRedis(redisClient) // app-login 코드 1회용(jti) replay 차단
+
 		v2AuthHandler := v2handler.NewV2AuthHandler(v2AuthSvc)
 		// auth_domain_groups DB-backed cookie domain cache (5min TTL).
 		// 새 도메인 추가 시 SQL/admin UI 만으로 적용 (코드 변경 X) — multi-tenant SaaS 확장.
