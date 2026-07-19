@@ -11,8 +11,12 @@ package v2
 // 재사용하므로, 앱 동작이 damoang.net 사이트와 동일해진다(삭제글/공지/정렬 처리 포함).
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -28,6 +32,29 @@ import (
 func (h *V2Handler) SetLiveReadRepos(w gnurepo.WriteRepository, b gnurepo.BoardRepository) {
 	h.gnuWriteRepo = w
 	h.gnuBoardRepo = b
+}
+
+// SetLiveFeedRepo 는 크로스보드 통합 피드 리포를 주입한다(GET /api/v2/feed).
+func (h *V2Handler) SetLiveFeedRepo(repo gnurepo.MyPageRepository) {
+	h.feedRepo = repo
+}
+
+var feedTagStrip = regexp.MustCompile(`<[^>]+>`)
+var feedWhitespace = regexp.MustCompile(`\s+`)
+
+// makeExcerpt 는 HTML 본문에서 태그를 제거해 카드용 짧은 발췌(최대 rune 140)를 만든다.
+func makeExcerpt(html string) string {
+	text := feedTagStrip.ReplaceAllString(html, " ")
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.TrimSpace(feedWhitespace.ReplaceAllString(text, " "))
+	r := []rune(text)
+	if len(r) > 140 {
+		return string(r[:140]) + "…"
+	}
+	return text
 }
 
 // liveAuthor 는 mb_id → v2_users 요약(정체성) 매핑 결과.
@@ -151,6 +178,7 @@ func (h *V2Handler) toV2Post(w *gnuboard.G5Write, boardID uint64, boardSlug, boa
 		"good_count":    w.WrGood,
 		"reactions":     map[string]int{"👍": w.WrGood},
 		"board":         map[string]any{"slug": boardSlug, "name": boardName},
+		"excerpt":       makeExcerpt(w.WrContent),
 	}
 	if withContent {
 		if cv, ok := m["content"].(string); ok {
@@ -326,4 +354,95 @@ func (h *V2Handler) listCommentsLive(c *gin.Context, slug string) {
 		items[i] = h.toV2Comment(cm, authors)
 	}
 	common.V2SuccessWithMeta(c, items, common.NewV2Meta(page, perPage, total))
+}
+
+// --- 크로스보드 통합 피드 (GET /api/v2/feed) ---
+
+// 커서 = 보드slug→wr_id 워터마크 맵. base64url(JSON) 로 인코딩.
+func encodeFeedCursor(m map[string]int) string {
+	if len(m) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func decodeFeedCursor(s string) map[string]int {
+	out := map[string]int{}
+	if s == "" {
+		return out
+	}
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return out
+	}
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+// ListRecentFeed handles GET /api/v2/feed — 크로스보드 최신 타임라인(무한스크롤, 커서 기반).
+// 응답 아이템은 board 목록과 동일 V2Post 형태(+excerpt). 차단 사용자 글은 SQL 에서 제외.
+func (h *V2Handler) ListRecentFeed(c *gin.Context) {
+	if h.feedRepo == nil {
+		common.V2ErrorResponse(c, http.StatusNotFound, "피드를 사용할 수 없습니다", nil)
+		return
+	}
+	limit := 20
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 && v <= 30 {
+		limit = v
+	}
+	cursor := decodeFeedCursor(c.Query("cursor"))
+	blockedMbIDs := h.getBlockedMbIDs(middleware.GetUserID(c))
+
+	rows, err := h.feedRepo.FindRecentAcrossBoards(limit, cursor, blockedMbIDs)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "피드 조회 실패", err)
+		return
+	}
+
+	// 게시판 이름 맵(고유 slug만) — gnuBoardRepo 60s 캐시 활용
+	boardNames := map[string]string{}
+	mbIDs := make([]string, 0, len(rows))
+	for i := range rows {
+		slug := rows[i].BoardID
+		if _, ok := boardNames[slug]; !ok {
+			boardNames[slug] = slug
+			if h.gnuBoardRepo != nil {
+				if gb, e := h.gnuBoardRepo.FindByID(slug); e == nil {
+					boardNames[slug] = gb.BoSubject
+				}
+			}
+		}
+		mbIDs = append(mbIDs, rows[i].MbID)
+	}
+	authors := h.resolveLiveAuthors(mbIDs)
+
+	// 다음 커서 = 보드별 이번 페이지에서 emit된 최소 wr_id (미기여 보드는 이전 워터마크 유지)
+	next := make(map[string]int, len(cursor))
+	for k, v := range cursor {
+		next[k] = v
+	}
+	items := make([]map[string]any, len(rows))
+	for i := range rows {
+		w := &rows[i].G5Write
+		slug := rows[i].BoardID
+		items[i] = h.toV2Post(w, 0, slug, boardNames[slug], false, authors, false)
+		if cur, ok := next[slug]; !ok || w.WrID < cur {
+			next[slug] = w.WrID
+		}
+	}
+
+	hasMore := len(rows) == limit
+	nextCursor := ""
+	if hasMore {
+		nextCursor = encodeFeedCursor(next)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    items,
+		"meta":    gin.H{"next_cursor": nextCursor, "has_more": hasMore},
+	})
 }

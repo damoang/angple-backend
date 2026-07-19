@@ -36,6 +36,9 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	auth := middleware.JWTAuth(jwtManager)
 	banCheck := middleware.BanCheck(gnuDB)
 
+	// Cross-board 통합 피드 (SNS 홈 타임라인) — OptionalJWTAuth 로 차단 사용자 필터 지원
+	api.GET("/feed", middleware.OptionalJWTAuth(jwtManager), h.ListRecentFeed)
+
 	// Users
 	users := api.Group("/users")
 	users.GET("", h.ListUsers)

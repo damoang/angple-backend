@@ -1096,6 +1096,8 @@ func main() {
 		// Inject expRepo into V2Handler for write/comment XP
 		v2Handler.SetExpRepository(v2ExpRepo)
 		myPageRepo := gnurepo.NewMyPageRepository(db, gnuBoardRepo)
+		// 크로스보드 통합 피드(GET /api/v2/feed) 리포 주입
+		v2Handler.SetLiveFeedRepo(myPageRepo)
 		myPageHandler := handler.NewMyPageHandler(myPageRepo)
 		if redisClient != nil {
 			myPageHandler.SetRedisClient(redisClient)

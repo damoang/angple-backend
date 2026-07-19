@@ -41,6 +41,8 @@ type V2Handler struct {
 	// 라이브 브리지: 현세대 g5_ 스토어 읽기 리포 (nil-safe — 주입 시 게시글/댓글 읽기를 라이브로 서빙)
 	gnuWriteRepo gnurepo.WriteRepository
 	gnuBoardRepo gnurepo.BoardRepository
+	// 크로스보드 통합 피드용 (nil-safe — 주입 시 GET /api/v2/feed 활성)
+	feedRepo gnurepo.MyPageRepository
 }
 
 const claimBoardSlug = "claim"
