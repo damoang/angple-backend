@@ -26,9 +26,9 @@ type MyPageRepository interface {
 	// referenced as discipline evidence in g5_na_singo. 글·댓글 공용 (#12751/#12908).
 	FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error)
 	GetSearchableBoards() ([]searchableBoard, error)
-	// FindRecentAcrossBoards 는 검색가능 게시판들의 최신글을 시간순으로 병합한 크로스보드 타임라인.
-	// cursor 는 보드slug→wr_id 워터마크(그 값보다 작은 wr_id만). excludeMbIDs 는 차단 사용자.
-	FindRecentAcrossBoards(limit int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error)
+	// FindRecentAcrossBoards 는 검색가능 게시판별 최신 perBoard개를 모은 시간순 후보 풀을 반환한다.
+	// 보드별 캡·인터리브(다양성)는 핸들러에서 적용. cursor 는 보드slug→wr_id 워터마크. excludeMbIDs 는 차단.
+	FindRecentAcrossBoards(perBoard int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error)
 }
 
 type searchableBoard struct {
@@ -526,9 +526,9 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 // FindRecentAcrossBoards returns a chronological cross-board timeline of recent posts.
 // UNION ALL per searchable board with a PK (wr_id) range scan — no wr_datetime ORDER BY /
 // OFFSET inside subqueries, so the 670만-row free 보드도 안전(PK range). 병합만 wr_datetime DESC.
-func (r *myPageRepository) FindRecentAcrossBoards(limit int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error) {
-	if limit <= 0 || limit > 30 {
-		limit = 20
+func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error) {
+	if perBoard <= 0 || perBoard > 20 {
+		perBoard = 8
 	}
 	boards, err := r.GetSearchableBoards()
 	if err != nil || len(boards) == 0 {
@@ -550,13 +550,15 @@ func (r *myPageRepository) FindRecentAcrossBoards(limit int, cursor map[string]i
 			where += " AND mb_id NOT IN ?"
 			args = append(args, excludeMbIDs)
 		}
+		// 보드별 최신 perBoard개. LEFT(wr_content,1000) 로 전송량 제한(발췌 140자엔 충분).
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT wr_id, wr_subject, wr_content, wr_datetime, wr_10, wr_hit, wr_good, wr_comment, mb_id, wr_name, wr_option, '%s' AS board_id FROM `%s` WHERE %s ORDER BY wr_id DESC LIMIT %d)",
-			b.BoTable, table, where, limit))
+			"(SELECT wr_id, wr_subject, LEFT(wr_content, 1000) AS wr_content, wr_datetime, wr_10, wr_hit, wr_good, wr_comment, mb_id, wr_name, wr_option, '%s' AS board_id FROM `%s` WHERE %s ORDER BY wr_id DESC LIMIT %d)",
+			b.BoTable, table, where, perBoard))
 	}
 
-	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_datetime DESC LIMIT %d",
-		strings.Join(unions, " UNION ALL "), limit)
+	// 각 보드의 최신 perBoard개를 모아 시간순 후보 풀로 반환(안전 상한 600). 보드별 캡·인터리브는 핸들러에서.
+	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_datetime DESC LIMIT 600",
+		strings.Join(unions, " UNION ALL "))
 
 	var rows []gnuboard.FeedPost
 	if err := r.db.Raw(sql, args...).Scan(&rows).Error; err != nil {
