@@ -247,8 +247,11 @@ func (h *V2Handler) getPostLive(c *gin.Context, slug string) {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
 		return
 	}
-	w, err := h.gnuWriteRepo.FindPostByID(slug, wrID)
-	if err != nil || w == nil {
+	// 비마이그레이션 보드(free 등)는 삭제 안 된 글이 wr_deleted_at='0000-00-00 00:00:00'(NULL 아님)이라
+	// FindPostByID 의 `wr_deleted_at IS NULL` 필터가 전부 매칭 실패 → 모든 글이 NOT_FOUND 가 됨.
+	// v1 GetPost 와 동일하게 IncludeDeleted 로 조회하고 삭제 여부는 Go 에서 판정한다(제로데이트→nil).
+	w, err := h.gnuWriteRepo.FindPostByIDIncludeDeleted(slug, wrID)
+	if err != nil || w == nil || w.WrID == 0 {
 		common.V2ErrorResponse(c, http.StatusNotFound, "게시글을 찾을 수 없습니다", err)
 		return
 	}
