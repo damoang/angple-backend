@@ -53,7 +53,8 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	// Posts (nested under boards)
 	boardPosts := boards.Group("/:slug/posts")
 	boardPosts.GET("", h.ListPosts)
-	boardPosts.POST("", auth, banCheck, middleware.RequireWrite(boardPermChecker), h.CreatePost)
+	// POST(작성)은 main.go 에서 검증된 v1 핸들러(현세대 g5_write_*) + RemapUserIDToMbID 어댑터로
+	// 서빙한다(라이브 브리지). 여기서 등록하면 중복 라우트로 panic 이므로 등록하지 않는다.
 	boardPosts.GET("/:id", h.GetPost)
 	boardPosts.PUT("/:id", auth, banCheck, h.UpdatePost)
 	boardPosts.DELETE("/:id", auth, banCheck, h.DeletePost)
@@ -66,7 +67,7 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	// Comments (nested under posts)
 	comments := boardPosts.Group("/:id/comments")
 	comments.GET("", h.ListComments)
-	comments.POST("", auth, banCheck, middleware.RequireComment(boardPermChecker), h.CreateComment)
+	// POST(댓글 작성)도 main.go 에서 v1 핸들러 + 어댑터로 서빙(라이브 브리지). 중복 방지로 미등록.
 	comments.PUT("/:comment_id", auth, banCheck, h.UpdateComment)
 	comments.DELETE("/:comment_id", auth, banCheck, h.DeleteComment)
 }

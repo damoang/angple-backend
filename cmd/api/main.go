@@ -2931,7 +2931,8 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts - Create post in g5_write_{slug}
-		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
+		// createPostFn: 게시글 작성 핸들러(현세대 g5_write_*). v1 라우트 + v2 앱 라우트(어댑터 경유)가 공유.
+		createPostFn := func(c *gin.Context) {
 			startedAt := time.Now()
 			phaseStart := startedAt
 			phaseDurations := map[string]time.Duration{}
@@ -3288,10 +3289,12 @@ func main() {
 			phaseDurations["after_write"] = time.Since(phaseStart)
 			logWritePhase(c, "create_post", slug, post.WrID, startedAt, phaseDurations)
 			c.JSON(http.StatusCreated, payload)
-		})
+		}
+		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), createPostFn)
 
 		// POST /api/v1/boards/:slug/posts/:id/comments - Create comment in g5_write_{slug}
-		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
+		// createCommentFn: 댓글 작성 핸들러. v1 + v2 앱 라우트(어댑터 경유) 공유.
+		createCommentFn := func(c *gin.Context) {
 			startedAt := time.Now()
 			phaseStart := startedAt
 			phaseDurations := map[string]time.Duration{}
@@ -3606,7 +3609,21 @@ func main() {
 			phaseDurations["after_write"] = time.Since(phaseStart)
 			logWritePhase(c, "create_comment", slug, comment.WrID, startedAt, phaseDurations)
 			c.JSON(http.StatusCreated, payload)
-		})
+		}
+		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), createCommentFn)
+
+		// 네이티브 앱(v2) 쓰기 브리지: 앱이 호출하는 /api/v2/boards/:slug/posts[/comments] 를
+		// 검증된 v1 핸들러(현세대 g5_write_*)로 서빙한다. RemapUserIDToMbID 어댑터로 v2 토큰의
+		// userID(v2_users.id) → mb_id 로 교체해 작성자·포인트·권한이 올바르게 처리된다.
+		// (routes.go 의 v2 CreatePost/CreateComment 등록은 제거됨 — 중복 라우트 방지)
+		v2WriteBoards := router.Group("/api/v2/boards")
+		v2WriteBoards.Use(middleware.ValidateBoardSlug())
+		v2WriteBoards.POST("/:slug/posts",
+			middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID(), banCheck, middleware.IPProtection(ipProtectCfg),
+			createPostFn)
+		v2WriteBoards.POST("/:slug/posts/:id/comments",
+			middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID(), banCheck, middleware.IPProtection(ipProtectCfg),
+			createCommentFn)
 
 		// PUT /api/v1/boards/:slug/posts/:id - Update post
 		v1Boards.PUT("/:slug/posts/:id", middleware.JWTAuth(jwtManager), banCheck, func(c *gin.Context) {
