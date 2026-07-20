@@ -3967,6 +3967,10 @@ func main() {
 				if err := db.Table(tbl).
 					Where("wr_parent = ?", comment.WrParent).
 					Where("wr_is_comment = 1").
+					// ⛔ wr_comment(댓글 그룹) 필터 필수. 이게 없으면 최상위 댓글(parentReply="")에서
+					// LIKE "%" 가 **글 안의 모든 대댓글**을 잡아, 내 댓글에 답글이 없어도
+					// 유료로 오판정된다(2026-05-25~07-20 사이 632건 / 379명 오과금).
+					Where("wr_comment = ?", comment.WrComment).
 					Where("wr_comment_reply LIKE ?", parentReply+"%").
 					Where("LENGTH(wr_comment_reply) > ?", len(parentReply)).
 					Count(&childCount).Error; err == nil && childCount > 0 {
@@ -4461,6 +4465,9 @@ func main() {
 				if err := db.Table(tbl).
 					Where("wr_parent = ?", comment.WrParent).
 					Where("wr_is_comment = 1").
+					// ⛔ 수정 경로와 동일한 누락이 여기에도 있었다. wr_comment 필터가 없으면
+					// **남의 댓글에 달린 답글** 때문에 내 댓글(답글 0개)의 삭제까지 차단된다.
+					Where("wr_comment = ?", comment.WrComment).
 					Where("wr_comment_reply LIKE ?", parentReply+"%").
 					Where("LENGTH(wr_comment_reply) > ?", len(parentReply)).
 					Count(&childCount).Error; err == nil && childCount > 0 {
