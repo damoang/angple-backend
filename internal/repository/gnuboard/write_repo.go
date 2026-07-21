@@ -244,6 +244,12 @@ func (r *writeRepository) getSortField(boardID string) string {
 // Beyond this offset, the deferred JOIN subquery still scans too many index rows.
 const maxPostOffset = 30000
 
+// MaxPostOffset exposes maxPostOffset so handlers can bound the advertised
+// pagination range to what is actually reachable. Past this offset the query
+// returns the capped (duplicate) page, so callers must stop paginating there
+// instead of advertising pages that all show identical content (#12975).
+const MaxPostOffset = maxPostOffset
+
 func trimHasNextPosts(posts []*gnuboard.G5Write, limit int) ([]*gnuboard.G5Write, bool) {
 	if len(posts) > limit {
 		return posts[:limit], true
