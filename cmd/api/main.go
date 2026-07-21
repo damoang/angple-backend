@@ -2318,13 +2318,26 @@ func main() {
 			items = enrichWithDisciplineRelated(db, slug, items, true)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
+			// #12975 ①: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은
+			// 목록이 반복 노출된다(예: 2011·2012·2013 페이지 동일). 실제 도달 가능한
+			// 마지막 페이지를 넘어서면 페이지네이션을 종료해, 프론트가 깨진(중복)
+			// 페이지를 제공하지 않게 한다.
+			// 커서·날짜점프 경로는 OFFSET 을 쓰지 않으므로 캡 대상이 아니다
+			// (날짜점프는 아래 if 체인 첫 분기라 구조적으로 제외됨).
+			maxAccessiblePage := gnurepo.MaxPostOffset/limit + 1
 			if useDateJump {
 				// 날짜 점프는 커서 방식 — 총페이지 대신 다음 존재 여부만.
 				meta["has_next"] = len(posts) == limit
 				meta["before_date"] = beforeDate
 			} else if useHasNextPagination {
+				if !useCursor && page >= maxAccessiblePage {
+					hasNext = false
+				}
 				meta["has_next"] = hasNext
 			} else {
+				if capTotal := int64(gnurepo.MaxPostOffset + limit); !useCursor && total > capTotal {
+					total = capTotal
+				}
 				meta["total"] = total
 			}
 			if (useCursor || useDateJump) && len(posts) > 0 {
