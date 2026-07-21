@@ -3344,6 +3344,22 @@ func main() {
 				}
 			}
 
+			// 신고 누적으로 잠긴 글(wr_7='lock')이면 댓글 작성 차단. admin (level>=10) 만 예외.
+			// 잠금은 본문 블러·수정 차단까지는 있었으나 댓글 작성에는 강제가 없어,
+			// 잠긴 글에 댓글이 계속 달렸다. 글 수정 차단(#12420)과 동일한 패턴을 쓴다.
+			// wr_7 컬럼 없는 게시판에서는 Scan 실패하나 값이 "" 유지 → 차단 없이 통과 (defensive).
+			if middleware.GetUserLevel(c) < 10 {
+				var parentWrLock string
+				_ = db.Table("g5_write_"+slug).
+					Select("COALESCE(wr_7, '')").
+					Where("wr_id = ? AND wr_is_comment = 0", postID).
+					Scan(&parentWrLock).Error
+				if parentWrLock == "lock" {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "신고 누적으로 잠긴 게시물에는 댓글을 작성할 수 없습니다."})
+					return
+				}
+			}
+
 			// 요청 바디 파싱
 			var req struct {
 				Content  string `json:"content" binding:"required"`
