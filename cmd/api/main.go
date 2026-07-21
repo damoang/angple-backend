@@ -5130,6 +5130,9 @@ func main() {
 				})
 			}
 
+			// 신고 누적 자동 잠금 판정. 임계 미달이거나 실패해도 신고 접수는 성공 처리한다.
+			service.ApplyReportAutoLock(db, slug, postID, postID)
+
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "신고가 접수되었습니다"})
 		})
 
@@ -5220,6 +5223,9 @@ func main() {
 					"target_content": comment.WrContent,
 				})
 			}
+
+			// 신고 누적 자동 잠금 판정 (댓글 단위). 부모 글에는 합산하지 않는다.
+			service.ApplyReportAutoLock(db, slug, commentID, postID)
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "신고가 접수되었습니다"})
 		})
