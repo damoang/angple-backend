@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -24,6 +26,11 @@ import (
 
 // boardTablePattern 은 동적 테이블명에 쓸 수 있는 보드 slug 형식이다.
 var boardTablePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// reportWindowDays 는 자동 잠금 집계에 포함할 신고의 기간이다.
+// 기간 제한이 없으면 오래 전 신고가 계속 누적되어, 시간이 지나기만 해도
+// 임계에 도달하는 한 방향 래칫이 된다.
+const reportWindowDays = 7
 
 // ReportLockThreshold 는 자동 잠금 임계값(고유 신고자 수)을 반환한다.
 // 값이 없거나 0 이하이면 0 을 반환하며, 이 경우 자동 잠금은 수행하지 않는다.
@@ -80,12 +87,13 @@ func ApplyReportAutoLock(db *gorm.DB, boTable string, sgID, sgParent int) {
 		return
 	}
 
-	// 고유 신고자 수. 취소된 신고(sg_flag != 0)는 제외한다.
+	// 고유 신고자 수. 취소된 신고(sg_flag != 0)와 기간 밖 신고는 제외한다.
 	var reporters int64
 	if err := db.Raw(`
 		SELECT COUNT(DISTINCT mb_id) FROM g5_na_singo
 		 WHERE sg_table = ? AND sg_id = ? AND sg_parent = ? AND sg_flag = 0
-	`, boTable, sgID, sgParent).Scan(&reporters).Error; err != nil {
+		   AND sg_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
+	`, boTable, sgID, sgParent, reportWindowDays).Scan(&reporters).Error; err != nil {
 		log.Printf("[autolock] 신고자 집계 실패 (%s/%d): %v", boTable, sgID, err)
 		return
 	}
@@ -117,4 +125,94 @@ func ApplyReportAutoLock(db *gorm.DB, boTable string, sgID, sgParent int) {
 	}
 	log.Printf("[autolock] locked %s %s/%d (reporters: %d >= threshold: %d)",
 		kind, boTable, sgID, reporters, threshold)
+
+	// 잠긴 글을 진실의 방에서 볼 수 있게 참조글을 만든다.
+	// 참조글이 없으면 잠금 안내에서 진실의 방으로 가는 링크가 생성되지 않는다.
+	if !isComment {
+		createTruthroomReference(db, boTable, sgID)
+	}
+}
+
+// htmlTagPattern 은 미리보기 생성 시 태그를 제거하기 위한 패턴이다.
+var htmlTagPattern = regexp.MustCompile(`<[^>]*>`)
+
+// createTruthroomReference 는 잠긴 글에 대한 진실의 방 참조글을 만든다.
+//
+// 원본은 옮기지 않고 제자리에 둔다. 참조만 만들기 때문에 되돌리기가 단순하고,
+// 신고 레코드(g5_na_singo)의 대상 보드도 바뀌지 않는다.
+//
+// 프론트는 wr_1(보드), wr_2(글 ID), wr_3(빈 값) 으로 참조글을 찾으므로
+// 이 세 필드를 규약대로 채운다.
+func createTruthroomReference(db *gorm.DB, boTable string, postID int) {
+	postIDStr := strconv.Itoa(postID)
+
+	var existing int64
+	if err := db.Raw(`
+		SELECT COUNT(*) FROM g5_write_truthroom
+		 WHERE wr_1 = ? AND wr_2 = ? AND wr_is_comment = 0
+	`, boTable, postIDStr).Scan(&existing).Error; err != nil {
+		log.Printf("[autolock] 진실의 방 중복 확인 실패 (%s/%d): %v", boTable, postID, err)
+		return
+	}
+	if existing > 0 {
+		return
+	}
+
+	writeTable := fmt.Sprintf("g5_write_%s", boTable)
+	var original struct {
+		WrSubject string `gorm:"column:wr_subject"`
+		WrContent string `gorm:"column:wr_content"`
+		MbID      string `gorm:"column:mb_id"`
+		WrName    string `gorm:"column:wr_name"`
+	}
+	if err := db.Table(writeTable).
+		Select("wr_subject, wr_content, mb_id, wr_name").
+		Where("wr_id = ? AND wr_is_comment = 0", postID).
+		First(&original).Error; err != nil {
+		log.Printf("[autolock] 원본 조회 실패 (%s/%d): %v", boTable, postID, err)
+		return
+	}
+
+	authorName := original.WrName
+	if authorName == "" {
+		authorName = original.MbID
+	}
+
+	preview := strings.TrimSpace(htmlTagPattern.ReplaceAllString(original.WrContent, " "))
+	preview = strings.Join(strings.Fields(preview), " ")
+	if runes := []rune(preview); len(runes) > 200 {
+		preview = string(runes[:200]) + "…"
+	}
+
+	subject := fmt.Sprintf("[신고잠금] %s", original.WrSubject)
+	content := fmt.Sprintf(
+		`<div class="truthroom-preview"><p class="preview-text">%s</p>`+
+			`<p class="preview-source">출처: <a href="/%s/%d">%s #%d</a></p></div>`,
+		preview, boTable, postID, boTable, postID)
+	link := fmt.Sprintf("https://damoang.net/%s/%d", boTable, postID)
+
+	if err := db.Exec(`
+		INSERT INTO g5_write_truthroom
+		SET wr_id = (SELECT COALESCE(MAX(wr_id), 0) + 1 FROM g5_write_truthroom tmp),
+			wr_num = (SELECT COALESCE(MIN(wr_num), 0) - 1 FROM g5_write_truthroom tmp2),
+			wr_reply = '', wr_parent = 0, wr_is_comment = 0, wr_comment = 0,
+			wr_comment_reply = '', ca_name = '게시글', wr_option = 'html1',
+			wr_subject = ?, wr_content = ?, wr_link1 = ?, wr_link2 = '',
+			wr_link1_hit = 0, wr_link2_hit = 0, wr_hit = 0, wr_good = 0, wr_nogood = 0,
+			mb_id = ?, wr_password = '', wr_name = ?, wr_email = '', wr_homepage = '',
+			wr_datetime = NOW(), wr_file = 0, wr_last = NOW(), wr_ip = '127.0.0.1',
+			wr_1 = ?, wr_2 = ?,
+			wr_3 = '', wr_4 = '', wr_5 = '',
+			wr_6 = '', wr_7 = '', wr_8 = '', wr_9 = '', wr_10 = ''
+	`, subject, content, link, original.MbID, authorName, boTable, postIDStr).Error; err != nil {
+		log.Printf("[autolock] 진실의 방 참조글 생성 실패 (%s/%d): %v", boTable, postID, err)
+		return
+	}
+
+	// wr_parent 는 자기 자신을 가리켜야 한다.
+	db.Exec(`UPDATE g5_write_truthroom SET wr_parent = wr_id WHERE wr_parent = 0 AND wr_1 = ? AND wr_2 = ?`,
+		boTable, postIDStr)
+	db.Exec("UPDATE g5_board SET bo_count_write = bo_count_write + 1 WHERE bo_table = 'truthroom'")
+
+	log.Printf("[autolock] created truthroom reference for %s/%d", boTable, postID)
 }
