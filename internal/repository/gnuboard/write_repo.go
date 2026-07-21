@@ -562,6 +562,64 @@ func (r *writeRepository) FindPostsFromDateSummary(boardID string, limit int, be
 // post (newest at-or-before the date) has the smallest wr_num among older posts; `wr_num >= boundary`
 // yields that post and everything older, in list order. Depth-independent (no OFFSET) → fast at any age.
 // Subsequent pages use the existing exclusive cursor (FindPostsAfter) via next_cursor. #12975.
+// 날짜 경계 탐색 창. ⛔ 이 값을 키우지 말 것 — 30일을 넘기면 옵티마이저가
+// ix_wr_datetime 시크를 포기하고 최신부터 역방향 스캔으로 전환해 11초가 걸린다.
+// (2026-07-21 g5_write_free 실측: 7일 70ms · 30일 62ms · 180일 11,357ms · 730일 11,112ms)
+// 빈 구간은 창을 넓히는 대신 창을 뒤로 옮겨 해결한다.
+const (
+	dateBoundaryWindowDays = 30
+	dateBoundaryMaxSteps   = 24 // 30일 × 24 = 약 2년
+)
+
+// resolveDateBoundaryWrNum 는 beforeDate 이전의 가장 최근 원글 wr_num 을 찾는다.
+//
+// 원래 구현은 `wr_datetime <= ?` 만으로 경계를 잡았는데, g5_write_free 는 댓글이
+// 89%(590만/666만)라 하한이 없으면 MySQL 이 최신부터 역방향으로 훑으며 댓글을
+// 걸러낸다. 날짜가 과거일수록 느려져(2026-07 919ms → 2025-06 11,060ms) 웹 프록시
+// 타임아웃 4초를 넘겼다. 실제로 /free?before_date=2025-06 이 8초에 목록 누락으로
+// 깨져 있었다(#12975 ② 회귀).
+//
+// 30일 창을 뒤로 이동하며 찾고, 끝까지 못 찾으면 게시판 최초 글로 폴백한다.
+func (r *writeRepository) resolveDateBoundaryWrNum(table, beforeDate string) (int, bool, error) {
+	type boundaryRow struct{ WrNum int }
+
+	query := fmt.Sprintf(
+		"SELECT wr_num FROM `%s` WHERE wr_is_comment = 0 "+
+			"AND wr_datetime <= DATE_SUB(?, INTERVAL ? DAY) "+
+			"AND wr_datetime >= DATE_SUB(?, INTERVAL ? DAY) "+
+			"ORDER BY wr_datetime DESC LIMIT 1",
+		table,
+	)
+
+	for step := 0; step < dateBoundaryMaxSteps; step++ {
+		var row boundaryRow
+		res := r.db.Raw(
+			query,
+			beforeDate, step*dateBoundaryWindowDays,
+			beforeDate, (step+1)*dateBoundaryWindowDays,
+		).Scan(&row)
+		if res.Error != nil {
+			return 0, false, res.Error
+		}
+		if res.RowsAffected > 0 {
+			return row.WrNum, true, nil
+		}
+	}
+
+	// 2년을 거슬러도 없으면 게시판 최초 글(정방향 스캔이라 빠르다).
+	var oldest boundaryRow
+	res := r.db.Raw(
+		fmt.Sprintf(
+			"SELECT wr_num FROM `%s` WHERE wr_is_comment = 0 ORDER BY wr_datetime ASC LIMIT 1",
+			table,
+		),
+	).Scan(&oldest)
+	if res.Error != nil {
+		return 0, false, res.Error
+	}
+	return oldest.WrNum, res.RowsAffected > 0, nil
+}
+
 func (r *writeRepository) findPostsFromDate(boardID string, limit int, beforeDate string, includeContent bool) ([]*gnuboard.G5Write, int64, error) {
 	var posts []*gnuboard.G5Write
 	var total int64
@@ -582,25 +640,31 @@ func (r *writeRepository) findPostsFromDate(boardID string, limit int, beforeDat
 		return r.findPosts(boardID, 1, limit, includeContent)
 	}
 
-	// boundary = newest root post at-or-before the date (uses ix_wr_datetime).
-	boundarySub := fmt.Sprintf(
-		"SELECT wr_num FROM `%s` WHERE wr_is_comment = 0 AND wr_datetime <= ? ORDER BY wr_datetime DESC LIMIT 1",
-		table,
-	)
-	err := r.db.Raw(
+	// boundary = newest root post at-or-before the date.
+	// 상수로 미리 해석한다 — 서브쿼리로 두면 아래 목록 쿼리가 매번 느린 경계를 다시 푼다.
+	boundaryWrNum, found, err := r.resolveDateBoundaryWrNum(table, beforeDate)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !found {
+		// 해당 날짜 이전에 글이 없다(게시판 최초 글보다 과거) → 첫 페이지.
+		return r.findPosts(boardID, 1, limit, includeContent)
+	}
+
+	err = r.db.Raw(
 		fmt.Sprintf(
-			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND wr_num >= (%s) ORDER BY wr_num, wr_reply LIMIT ?",
-			postSelectColumnsForList(boardID, "", includeContent), table, boundarySub,
+			"SELECT %s FROM `%s` FORCE INDEX (idx_list_page) WHERE wr_is_comment = 0 AND wr_num >= ? ORDER BY wr_num, wr_reply LIMIT ?",
+			postSelectColumnsForList(boardID, "", includeContent), table,
 		),
-		beforeDate, limit,
+		boundaryWrNum, limit,
 	).Scan(&posts).Error
 	if err != nil && strings.Contains(err.Error(), "idx_list_page") {
 		err = r.db.Raw(
 			fmt.Sprintf(
-				"SELECT %s FROM `%s` WHERE wr_is_comment = 0 AND wr_num >= (%s) ORDER BY wr_num, wr_reply LIMIT ?",
-				postSelectColumnsForList(boardID, "", includeContent), table, boundarySub,
+				"SELECT %s FROM `%s` WHERE wr_is_comment = 0 AND wr_num >= ? ORDER BY wr_num, wr_reply LIMIT ?",
+				postSelectColumnsForList(boardID, "", includeContent), table,
 			),
-			beforeDate, limit,
+			boundaryWrNum, limit,
 		).Scan(&posts).Error
 	}
 
