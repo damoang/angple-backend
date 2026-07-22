@@ -2956,6 +2956,19 @@ func main() {
 			phaseDurations := map[string]time.Duration{}
 			slug := c.Param("slug")
 
+			// 냉각(임시 제한) 강제 — 신고 누적 잠금 시 발행된다. admin(level>=10) 예외.
+			// ⛔제재가 아니라 냉각이므로 만료되면 자동 해제된다(별도 배치 불필요).
+			if middleware.GetUserLevel(c) < 10 {
+				if until := service.FrozenUntil(db, middleware.GetUserID(c)); !until.IsZero() {
+					c.JSON(http.StatusForbidden, gin.H{
+						"success": false,
+						"error": fmt.Sprintf("신고 누적으로 %s까지 글 작성이 일시 제한되었습니다.",
+							until.Format("2006-01-02 15:04")),
+					})
+					return
+				}
+			}
+
 			// 게시판 설정 조회
 			board, err := gnuBoardRepo.FindByID(slug)
 			if err != nil {
@@ -3356,6 +3369,19 @@ func main() {
 					Scan(&parentWrLock).Error
 				if parentWrLock == "lock" {
 					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "신고 누적으로 잠긴 게시물에는 댓글을 작성할 수 없습니다."})
+					return
+				}
+			}
+
+			// 냉각(임시 제한) 강제 — 신고 누적 잠금 시 발행된다. admin(level>=10) 예외.
+			// ⛔제재가 아니라 냉각이므로 만료되면 자동 해제된다(별도 배치 불필요).
+			if middleware.GetUserLevel(c) < 10 {
+				if until := service.FrozenUntil(db, middleware.GetUserID(c)); !until.IsZero() {
+					c.JSON(http.StatusForbidden, gin.H{
+						"success": false,
+						"error": fmt.Sprintf("신고 누적으로 %s까지 댓글 작성이 일시 제한되었습니다.",
+							until.Format("2006-01-02 15:04")),
+					})
 					return
 				}
 			}

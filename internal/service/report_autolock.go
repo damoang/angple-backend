@@ -126,6 +126,19 @@ func ApplyReportAutoLock(db *gorm.DB, boTable string, sgID, sgParent int) {
 	log.Printf("[autolock] locked %s %s/%d (reporters: %d >= threshold: %d)",
 		kind, boTable, sgID, reporters, threshold)
 
+	// 작성자 냉각(임시 제한) 발행. 격해진 순간에 이어 쓰는 것을 잠시 막는다.
+	// ⛔제재가 아니므로 징계 기록·사다리에 올리지 않으며, 만료 시각으로 자동 해제된다.
+	// 설정이 비활성(0분)이면 아무 일도 하지 않는다.
+	var author string
+	if err := db.Raw(
+		fmt.Sprintf("SELECT mb_id FROM `%s` WHERE wr_id = ? AND wr_is_comment = ?", writeTable),
+		sgID, commentFlag,
+	).Scan(&author).Error; err != nil {
+		log.Printf("[autolock] 작성자 조회 실패 (%s/%d): %v", boTable, sgID, err)
+	} else {
+		ApplyReportFreeze(db, author, fmt.Sprintf("신고 누적 잠금 %s/%d", boTable, sgID))
+	}
+
 	// 잠긴 글을 진실의 방에서 볼 수 있게 참조글을 만든다.
 	// 참조글이 없으면 잠금 안내에서 진실의 방으로 가는 링크가 생성되지 않는다.
 	if !isComment {
