@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,15 +21,26 @@ import (
 // 나머지(50%)는 소각된다. 레거시 giving_bid_ajax.php 의 고정 50% 정책 이식.
 const givingHostFeePercent = 50
 
-// givingSeedSecret returns the server secret used to derive commit-reveal seeds.
-func givingSeedSecret() string {
+// givingSeedSecret returns the server secret used to derive commit-reveal seeds
+// and whether one is configured. Fail-closed: no hardcoded fallback — if neither
+// GIVING_SEED_SECRET nor JWT_SECRET is set, ok is false and predictable-seed
+// draws (random/ladder) must be refused rather than run with a guessable seed.
+func givingSeedSecret() (string, bool) {
 	if s := os.Getenv("GIVING_SEED_SECRET"); s != "" {
-		return s
+		return s, true
 	}
 	if s := os.Getenv("JWT_SECRET"); s != "" {
-		return s
+		return s, true
 	}
-	return "giving-default-seed-secret"
+	return "", false
+}
+
+// givingIntPtrEqual reports whether two optional int settings are equal.
+func givingIntPtrEqual(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // givingPostRow holds the giving post columns needed for bid/draw logic.
@@ -162,16 +174,39 @@ func (h *GivingHandler) Config(c *gin.Context) {
 		return
 	}
 
-	seedHash := givingdomain.SeedHash(givingdomain.DeriveSeed(givingSeedSecret(), givingBoardSlug, wrID))
+	// 이미 응모(돈 낸 참가자)가 있는 게임은 규칙을 사후 변경할 수 없다:
+	// method/number_max 변경 거부 + status 강제 리셋(open) 방지.
+	statusVal := "open"
+	var bidCount int64
+	h.db.Table("g5_giving_bid").
+		Where("bo_table = ? AND wr_id = ?", givingBoardSlug, wrID).
+		Count(&bidCount)
+	if bidCount > 0 {
+		prev := h.loadGivingMeta(wrID)
+		if prev.Method != req.Method {
+			givingErr(c, http.StatusConflict, "이미 응모가 있어 나눔 방식을 변경할 수 없습니다.")
+			return
+		}
+		if !givingIntPtrEqual(prev.NumberMax, req.NumberMax) {
+			givingErr(c, http.StatusConflict, "이미 응모가 있어 번호 상한을 변경할 수 없습니다.")
+			return
+		}
+		if prev.Status != "" {
+			statusVal = prev.Status
+		}
+	}
+
+	secret, _ := givingSeedSecret()
+	seedHash := givingdomain.SeedHash(givingdomain.DeriveSeed(secret, givingBoardSlug, wrID))
 	now := time.Now()
 
 	// Preserve created_at on update; PK is wr_id.
 	err = h.db.Exec(`
 		INSERT INTO g5_giving_meta (wr_id, method, capacity, number_max, seed_hash, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'open', ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE method=VALUES(method), capacity=VALUES(capacity),
-			number_max=VALUES(number_max), seed_hash=VALUES(seed_hash), status='open', updated_at=VALUES(updated_at)`,
-		wrID, req.Method, req.Capacity, req.NumberMax, seedHash, now, now).Error
+			number_max=VALUES(number_max), seed_hash=VALUES(seed_hash), status=VALUES(status), updated_at=VALUES(updated_at)`,
+		wrID, req.Method, req.Capacity, req.NumberMax, seedHash, statusVal, now, now).Error
 	if err != nil {
 		givingErr(c, http.StatusInternalServerError, "설정 저장에 실패했습니다.")
 		return
@@ -185,7 +220,7 @@ func (h *GivingHandler) Config(c *gin.Context) {
 
 // Detail returns method meta, live stats, the caller's own participation, and
 // the persisted draw result when present. Public (optional auth).
-func (h *GivingHandler) Detail(c *gin.Context) {
+func (h *GivingHandler) Detail(c *gin.Context) { //nolint:gocyclo // 응답 조립 로직 응집 — 분해 시 통계/노출 경계 위험
 	wrID, err := strconv.Atoi(c.Param("id"))
 	if err != nil || wrID <= 0 {
 		givingErr(c, http.StatusBadRequest, "잘못된 글 번호입니다.")
@@ -338,7 +373,7 @@ func (h *GivingHandler) Bid(c *gin.Context) {
 	}
 
 	if givingdomain.IsPaid(meta.Method) {
-		h.bidLowestUnique(c, post, mbID)
+		h.bidLowestUnique(c, post, meta, mbID)
 		return
 	}
 	h.bidFreeEntry(c, wrID, mbID, meta.Method)
@@ -368,10 +403,17 @@ func (h *GivingHandler) bidFreeEntry(c *gin.Context, wrID int, mbID, method stri
 // bidLowestUnique parses numbers, blocks duplicates, and settles points
 // atomically: full deduction from the bidder + 50% credit to the host, both in
 // one transaction with the bid insert (근본적 원자화 — 레거시 fix_missing_points 재발 방지).
-func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, mbID string) {
+func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, meta givingMetaRow, mbID string) { //nolint:gocyclo // 응모 정산 로직 응집 — 분해 시 트랜잭션 경계 위험
 	var req givingBidRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		givingErr(c, http.StatusBadRequest, "응모 번호를 입력해주세요.")
+		return
+	}
+	// 단가 미설정(<=0) 나눔은 lowest_unique 유료 응모 대상이 아니다.
+	// 파싱보다 먼저 거부해 무료 대역응모("1-100000") 로 인한 재파싱 CPU DoS 를 차단.
+	unitPrice, _ := strconv.Atoi(post.Wr2)
+	if unitPrice <= 0 {
+		givingErr(c, http.StatusBadRequest, "단가가 설정되지 않은 나눔입니다.")
 		return
 	}
 	parsed := givingdomain.ParseBidNumbers(req.Numbers)
@@ -379,9 +421,18 @@ func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, mbI
 		givingErr(c, http.StatusBadRequest, "올바른 응모 번호를 입력해주세요.")
 		return
 	}
-	unitPrice, _ := strconv.Atoi(post.Wr2)
-	if unitPrice < 0 {
-		unitPrice = 0
+	// number_max 상한 집행: 규칙에 정한 최대 번호를 초과한 응모 거부.
+	if meta.NumberMax != nil && *meta.NumberMax > 0 {
+		over := make([]int, 0)
+		for _, n := range parsed {
+			if n > *meta.NumberMax {
+				over = append(over, n)
+			}
+		}
+		if len(over) > 0 {
+			givingErr(c, http.StatusBadRequest, fmt.Sprintf("최대 번호(%d)를 초과했습니다: %s", *meta.NumberMax, givingdomain.FormatNumbers(over)))
+			return
+		}
 	}
 	cost := len(parsed) * unitPrice
 	hostFee := cost * givingHostFeePercent / 100
@@ -449,7 +500,7 @@ func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, mbI
 		}
 		return nil
 	})
-	if err == errInsufficientPoints {
+	if errors.Is(err, errInsufficientPoints) {
 		givingErr(c, http.StatusPaymentRequired, "보유 포인트가 부족합니다.")
 		return
 	}
@@ -584,7 +635,8 @@ func (h *GivingHandler) Draw(c *gin.Context) {
 	meta := h.loadGivingMeta(wrID)
 	drawnBy := middleware.GetUsername(c)
 	if err := h.runDraw(wrID, post, meta, req, drawnBy); err != nil {
-		if de, ok := err.(givingDrawError); ok {
+		var de givingDrawError
+		if errors.As(err, &de) {
 			givingErr(c, de.status, de.msg)
 			return
 		}
@@ -615,7 +667,7 @@ type givingDrawError struct {
 func (e givingDrawError) Error() string { return e.msg }
 
 // runDraw computes the winner(s) per method and persists one g5_giving_draw row.
-func (h *GivingHandler) runDraw(wrID int, post *givingPostRow, meta givingMetaRow, req givingDrawRequest, drawnBy string) error {
+func (h *GivingHandler) runDraw(wrID int, post *givingPostRow, meta givingMetaRow, req givingDrawRequest, drawnBy string) error { //nolint:gocyclo // 개표 로직 응집 — 분해 시 트랜잭션/방식 경계 위험
 	bids, err := h.activeBids(wrID)
 	if err != nil {
 		return err
@@ -633,7 +685,12 @@ func (h *GivingHandler) runDraw(wrID int, post *givingPostRow, meta givingMetaRo
 	sortStrings(participants)
 
 	method := meta.Method
-	seed := givingdomain.DeriveSeed(givingSeedSecret(), givingBoardSlug, wrID)
+	secret, secretOK := givingSeedSecret()
+	// random/ladder 는 예측 불가능한 서버 시드가 필수 — 시드 미설정 시 개표 거부(fail-closed).
+	if (method == givingdomain.MethodRandom || method == givingdomain.MethodLadder) && !secretOK {
+		return givingDrawError{http.StatusInternalServerError, "개표 시드가 설정되지 않았습니다."}
+	}
+	seed := givingdomain.DeriveSeed(secret, givingBoardSlug, wrID)
 	seedHash := givingdomain.SeedHash(seed)
 	inputHash := givingdomain.InputHash(participants)
 	capacity := 1

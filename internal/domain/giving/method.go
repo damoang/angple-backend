@@ -65,7 +65,7 @@ func IsAutoDraw(m string) bool {
 // deduplicated slice of positive integers. Ported from the legacy PHP
 // parseAndValidateBidNumbers: comma separated, "-"/"~" ranges, all-zero and
 // decimal tokens skipped. Total count is capped at maxParsedNumbers.
-func ParseBidNumbers(s string) []int {
+func ParseBidNumbers(s string) []int { //nolint:gocyclo // CSV/범위 파싱 응집 — 분해 시 상한/중복 경계 위험
 	seen := make(map[int]struct{})
 	add := func(n int) bool {
 		if n <= 0 {
@@ -204,7 +204,7 @@ func prngUint64(seed string, counter int) uint64 {
 // deterministicShuffle applies a seeded Fisher-Yates shuffle in place.
 func deterministicShuffle(seed string, items []string) {
 	for i := len(items) - 1; i > 0; i-- {
-		j := int(prngUint64(seed, i) % uint64(i+1))
+		j := int(prngUint64(seed, i) % uint64(i+1)) //nolint:gosec // G115: 모듈로 (i+1) 로 범위 제한, 오버플로 불가
 		items[i], items[j] = items[j], items[i]
 	}
 }
@@ -241,7 +241,7 @@ type LadderResult struct {
 // participant's descent (server authority), and marks those landing in the
 // first winSlots destination columns as winners. The returned rung layout, when
 // replayed by the client, reproduces exactly the same destinations.
-func BuildLadder(seed string, participants []string, winSlots int) LadderResult {
+func BuildLadder(seed string, participants []string, winSlots int) LadderResult { //nolint:gocyclo // 사다리 생성·강하 시뮬레이션 응집 — 분해 시 결정성 경계 위험
 	cols := len(participants)
 	if cols == 0 {
 		return LadderResult{Winners: []string{}}
