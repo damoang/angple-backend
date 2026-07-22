@@ -10,6 +10,7 @@ import (
 
 	givingdomain "github.com/damoang/angple-backend/internal/domain/giving"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
+	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -25,18 +26,22 @@ var givingImgRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
 
 // GivingHandler handles giving plugin API endpoints
 type GivingHandler struct {
-	db       *gorm.DB
-	fileRepo *gnurepo.FileRepository
-	cdnURL   string
+	db              *gorm.DB
+	fileRepo        *gnurepo.FileRepository
+	cdnURL          string
+	pointConfigRepo v2repo.PointConfigRepository
 }
 
 // NewGivingHandler creates a new GivingHandler.
 // fileRepo + cdnURL 는 thumbnail enrich (g5_board_file → CDN URL) 에 사용.
-func NewGivingHandler(db *gorm.DB, fileRepo *gnurepo.FileRepository, cdnURL string) *GivingHandler {
+// pointConfigRepo 는 유료 응모(lowest_unique) 수수료 지급 시 포인트 만료일 산정에 사용
+// (nil 이면 만료 없는 기본값으로 처리).
+func NewGivingHandler(db *gorm.DB, fileRepo *gnurepo.FileRepository, cdnURL string, pointConfigRepo v2repo.PointConfigRepository) *GivingHandler {
 	return &GivingHandler{
-		db:       db,
-		fileRepo: fileRepo,
-		cdnURL:   strings.TrimRight(cdnURL, "/"),
+		db:              db,
+		fileRepo:        fileRepo,
+		cdnURL:          strings.TrimRight(cdnURL, "/"),
+		pointConfigRepo: pointConfigRepo,
 	}
 }
 

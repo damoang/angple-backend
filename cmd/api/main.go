@@ -6303,10 +6303,18 @@ func main() {
 		pkglogger.Info("Plugin Store & Marketplace initialized")
 
 		// Giving plugin API
-		givingHandler := handler.NewGivingHandler(db, gnuFileRepo, cfg.Storage.CDNURL)
+		givingHandler := handler.NewGivingHandler(db, gnuFileRepo, cfg.Storage.CDNURL, pointConfigRepo)
 		givingGroup := router.Group("/api/plugins/giving")
 		{
 			givingGroup.GET("/list", givingHandler.List)
+			// 상세는 비회원도 조회 가능 (내 참가/주최자 여부는 토큰 있으면 반영)
+			givingGroup.GET("/detail/:id", middleware.OptionalJWTAuth(jwtManager), givingHandler.Detail)
+
+			givingAuthed := givingGroup.Group("", middleware.JWTAuth(jwtManager))
+			givingAuthed.POST("/config/:id", givingHandler.Config)             // 주최자 방식 설정
+			givingAuthed.POST("/bid/:id", givingHandler.Bid)                   // 방식별 참가
+			givingAuthed.POST("/draw/:id", givingHandler.Draw)                 // 개표
+			givingAuthed.POST("/admin/:id/:action", givingHandler.AdminAction) // pause/resume/force-stop
 		}
 
 		// Internal cron endpoints (curl-based cron jobs, localhost only)
