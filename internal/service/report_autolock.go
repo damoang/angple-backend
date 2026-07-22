@@ -130,10 +130,6 @@ func ApplyReportAutoLock(db *gorm.DB, boTable string, sgID, sgParent int) {
 	// ⛔제재가 아니므로 징계 기록·사다리에 올리지 않으며, 만료 시각으로 자동 해제된다.
 	// 설정이 비활성(0분)이면 아무 일도 하지 않는다.
 	var author string
-	commentFlag := 0
-	if isComment {
-		commentFlag = 1
-	}
 	if err := db.Raw(
 		fmt.Sprintf("SELECT mb_id FROM `%s` WHERE wr_id = ? AND wr_is_comment = ?", writeTable),
 		sgID, commentFlag,
