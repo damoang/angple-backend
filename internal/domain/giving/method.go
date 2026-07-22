@@ -204,7 +204,8 @@ func prngUint64(seed string, counter int) uint64 {
 // deterministicShuffle applies a seeded Fisher-Yates shuffle in place.
 func deterministicShuffle(seed string, items []string) {
 	for i := len(items) - 1; i > 0; i-- {
-		j := int(prngUint64(seed, i) % uint64(i+1)) //nolint:gosec // G115: 모듈로 (i+1) 로 범위 제한, 오버플로 불가
+		//nolint:gosec // G115: 모듈로 (i+1) 로 범위 제한, 오버플로 불가
+		j := int(prngUint64(seed, i) % uint64(i+1)) // #nosec G115 -- 모듈로 (i+1) 로 0<=j<=i 보장
 		items[i], items[j] = items[j], items[i]
 	}
 }

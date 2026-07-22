@@ -451,7 +451,7 @@ func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, met
 				owned[n] = struct{}{}
 			}
 		}
-		existingBids.Close()
+		_ = existingBids.Close()
 	}
 	dups := make([]int, 0)
 	for _, n := range parsed {
@@ -667,7 +667,7 @@ type givingDrawError struct {
 func (e givingDrawError) Error() string { return e.msg }
 
 // runDraw computes the winner(s) per method and persists one g5_giving_draw row.
-func (h *GivingHandler) runDraw(wrID int, post *givingPostRow, meta givingMetaRow, req givingDrawRequest, drawnBy string) error { //nolint:gocyclo // 개표 로직 응집 — 분해 시 트랜잭션/방식 경계 위험
+func (h *GivingHandler) runDraw(wrID int, _ *givingPostRow, meta givingMetaRow, req givingDrawRequest, drawnBy string) error { //nolint:gocyclo // 개표 로직 응집 — 분해 시 트랜잭션/방식 경계 위험
 	bids, err := h.activeBids(wrID)
 	if err != nil {
 		return err
