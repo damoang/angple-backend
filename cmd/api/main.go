@@ -3011,12 +3011,8 @@ func main() {
 				Extra1             *string  `json:"extra_1"`
 				Extra2             *string  `json:"extra_2"`
 				Extra3             *string  `json:"extra_3"`
-				// extra_4/5 는 나눔(giving)의 시작·마감 일시가 쓴다. 프론트는 계속
-				// 보내고 있었으나 여기 바인딩이 없어 조용히 버려졌다 — 그래서 나눔 글이
-				// 일정 없이 저장되고 status=no_giving 이 되어 참가 버튼이 안 떴다.
-				// (giving/2397 보노보노님 제보, 2026-07-24)
-				Extra4             *string  `json:"extra_4"`
-				Extra5             *string  `json:"extra_5"`
+				Extra4             *string  `json:"extra_4"` // 나눔 시작일시 (wr_4)
+				Extra5             *string  `json:"extra_5"` // 나눔 마감일시 (wr_5)
 				Tags               []string `json:"tags"`
 				Files              []struct {
 					Key      string `json:"key"`
@@ -3276,6 +3272,10 @@ func main() {
 			if req.Extra3 != nil {
 				extras["wr_3"] = *req.Extra3
 			}
+			// extra_4/5 는 나눔(giving)의 시작·마감 일시다. 프론트는 계속 보내고 있었으나
+			// 요청 바인딩이 extra_3 까지만 있어 조용히 버려졌다 — 그 결과 나눔 글이 일정
+			// 없이 저장되고 status=no_giving 이 되어 참가 버튼이 렌더되지 않았다.
+			// (giving/2397 제보, 2026-07-24). 값을 안 보내는 보드는 nil 이라 무영향.
 			if req.Extra4 != nil {
 				extras["wr_4"] = *req.Extra4
 			}
@@ -3780,10 +3780,8 @@ func main() {
 				Extra1             *string  `json:"extra_1"`
 				Extra2             *string  `json:"extra_2"`
 				Extra3             *string  `json:"extra_3"`
-				// 생성과 동일 — 나눔 시작·마감(wr_4/wr_5). 글 수정으로 일정을 채울 수
-				// 있어야 하므로 여기도 함께 받는다.
-				Extra4             *string  `json:"extra_4"`
-				Extra5             *string  `json:"extra_5"`
+				Extra4             *string  `json:"extra_4"` // 나눔 시작일시 (wr_4)
+				Extra5             *string  `json:"extra_5"` // 나눔 마감일시 (wr_5)
 				Tags               []string `json:"tags"`
 				Files              *[]struct {
 					Key      string `json:"key"`
@@ -3861,6 +3859,8 @@ func main() {
 			if req.Extra3 != nil {
 				updates["wr_3"] = *req.Extra3
 			}
+			// 생성과 동일 — 나눔 시작·마감(wr_4/wr_5).
+			// 이미 일정 없이 올라간 글을 작성자가 수정으로 채울 수 있어야 한다.
 			if req.Extra4 != nil {
 				updates["wr_4"] = *req.Extra4
 			}
