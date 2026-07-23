@@ -96,7 +96,7 @@ type WriteRepository interface {
 	FindDeletedPosts(boardID string, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	CreatePost(boardID string, post *gnuboard.G5Write) error
 	UpdatePost(boardID string, post *gnuboard.G5Write) error
-	DeletePost(boardID string, wrID int) error
+	DeletePost(boardID string, wrID int, deletedBy string) error
 	SoftDeletePost(boardID string, wrID int, deletedBy string) error
 	RestorePost(boardID string, wrID int) error
 	IncrementHit(boardID string, wrID int) error
@@ -1160,10 +1160,54 @@ func (r *writeRepository) UpdatePost(boardID string, post *gnuboard.G5Write) err
 	return r.db.Table(tableName(boardID)).Save(post).Error
 }
 
+// RecordContentHistory 는 g5_da_content_history 에 감사 이력 한 건을 best-effort 로 남긴다.
+// 기록 실패가 본 작업(삭제 등)을 막으면 안 되므로 에러는 로그만 남기고 삼킨다.
+func RecordContentHistory(db *gorm.DB, boTable string, wrID int, wrIsComment int, mbID, wrName, operation, operatedBy string, prevData map[string]interface{}) {
+	payload, err := json.Marshal(prevData)
+	if err != nil {
+		log.Printf("[ContentHistory] Failed to marshal previous data for %s/%d: %v", boTable, wrID, err)
+		return
+	}
+	if err := db.Exec(`INSERT INTO g5_da_content_history
+		(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		boTable, wrID, wrIsComment, mbID, wrName, operation, operatedBy, time.Now(), string(payload),
+	).Error; err != nil {
+		log.Printf("[ContentHistory] Failed to record %s history for %s/%d: %v", operation, boTable, wrID, err)
+	}
+}
+
 // DeletePost permanently deletes a post and its comments from the database
-func (r *writeRepository) DeletePost(boardID string, wrID int) error {
+func (r *writeRepository) DeletePost(boardID string, wrID int, deletedBy string) error {
 	r.invalidatePostCount(boardID)
 	table := tableName(boardID)
+
+	// 영구삭제는 DB 에서 원본이 사라지므로 삭제 전 글·댓글 내용을 이력으로 남긴다 (best-effort)
+	var post struct {
+		WrSubject string `gorm:"column:wr_subject"`
+		WrContent string `gorm:"column:wr_content"`
+		WrName    string `gorm:"column:wr_name"`
+		MbID      string `gorm:"column:mb_id"`
+	}
+	if err := r.db.Table(table).Select("wr_subject, wr_content, wr_name, mb_id").Where("wr_id = ?", wrID).Scan(&post).Error; err == nil {
+		RecordContentHistory(r.db, boardID, wrID, 0, post.MbID, post.WrName, "영구삭제", deletedBy, map[string]interface{}{
+			"wr_subject": post.WrSubject,
+			"wr_content": post.WrContent,
+			"wr_name":    post.WrName,
+			"mb_id":      post.MbID,
+		})
+	}
+	// 함께 지워지는 댓글은 개수 미상이라 INSERT...SELECT 로 한 번에 기록
+	if err := r.db.Exec(`INSERT INTO g5_da_content_history
+		(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
+		SELECT ?, wr_id, 1, mb_id, wr_name, '영구삭제', ?, ?,
+			JSON_OBJECT('wr_content', wr_content, 'wr_name', wr_name, 'mb_id', mb_id)
+		FROM `+table+` WHERE wr_parent = ? AND wr_is_comment = 1`,
+		boardID, deletedBy, time.Now(), wrID,
+	).Error; err != nil {
+		log.Printf("[ContentHistory] Failed to record comment histories for %s/%d: %v", boardID, wrID, err)
+	}
+
 	// Delete comments first
 	if err := r.db.Table(table).Where("wr_parent = ?", wrID).Delete(&gnuboard.G5Write{}).Error; err != nil {
 		return err
