@@ -3011,6 +3011,8 @@ func main() {
 				Extra1             *string  `json:"extra_1"`
 				Extra2             *string  `json:"extra_2"`
 				Extra3             *string  `json:"extra_3"`
+				Extra4             *string  `json:"extra_4"` // 나눔 시작일시 (wr_4)
+				Extra5             *string  `json:"extra_5"` // 나눔 마감일시 (wr_5)
 				Tags               []string `json:"tags"`
 				Files              []struct {
 					Key      string `json:"key"`
@@ -3269,6 +3271,16 @@ func main() {
 			}
 			if req.Extra3 != nil {
 				extras["wr_3"] = *req.Extra3
+			}
+			// extra_4/5 는 나눔(giving)의 시작·마감 일시다. 프론트는 계속 보내고 있었으나
+			// 요청 바인딩이 extra_3 까지만 있어 조용히 버려졌다 — 그 결과 나눔 글이 일정
+			// 없이 저장되고 status=no_giving 이 되어 참가 버튼이 렌더되지 않았다.
+			// (giving/2397 제보, 2026-07-24). 값을 안 보내는 보드는 nil 이라 무영향.
+			if req.Extra4 != nil {
+				extras["wr_4"] = *req.Extra4
+			}
+			if req.Extra5 != nil {
+				extras["wr_5"] = *req.Extra5
 			}
 			if len(extras) > 0 {
 				db.Table(tableName).Where("wr_id = ?", post.WrID).Updates(extras)
@@ -3768,6 +3780,8 @@ func main() {
 				Extra1             *string  `json:"extra_1"`
 				Extra2             *string  `json:"extra_2"`
 				Extra3             *string  `json:"extra_3"`
+				Extra4             *string  `json:"extra_4"` // 나눔 시작일시 (wr_4)
+				Extra5             *string  `json:"extra_5"` // 나눔 마감일시 (wr_5)
 				Tags               []string `json:"tags"`
 				Files              *[]struct {
 					Key      string `json:"key"`
@@ -3844,6 +3858,14 @@ func main() {
 			}
 			if req.Extra3 != nil {
 				updates["wr_3"] = *req.Extra3
+			}
+			// 생성과 동일 — 나눔 시작·마감(wr_4/wr_5).
+			// 이미 일정 없이 올라간 글을 작성자가 수정으로 채울 수 있어야 한다.
+			if req.Extra4 != nil {
+				updates["wr_4"] = *req.Extra4
+			}
+			if req.Extra5 != nil {
+				updates["wr_5"] = *req.Extra5
 			}
 
 			// 댓글 비활성화 토글 (admin only) — 기존 wr_option 의 다른 토큰 (secret 등) 은 보존
