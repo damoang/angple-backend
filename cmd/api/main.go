@@ -1073,7 +1073,7 @@ func main() {
 
 		// XP: DI into V2Handler (set after expRepo is created below)
 
-		v2routes.Setup(router, v2Handler, jwtManager, permChecker, db)
+		v2routes.Setup(router, v2Handler, jwtManager, db)
 		v2routes.SetupAdminPosts(router, v2Handler, jwtManager)
 
 		// 위키 API 라우트
