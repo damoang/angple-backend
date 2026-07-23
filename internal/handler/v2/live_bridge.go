@@ -189,6 +189,14 @@ func (h *V2Handler) toV2Post(w *gnuboard.G5Write, boardID uint64, boardSlug, boa
 	if th, ok := m["thumbnail"]; ok {
 		out["thumbnail"] = th
 	}
+	// 삭제글은 tombstone: 제목/본문/발췌/썸네일을 비워 내용 유출을 막는다(웹 "[삭제된 게시물입니다]" 동일).
+	// 목록·상세 공통 경로라 여기 한 곳에서 처리하면 딥링크 상세 유출까지 차단된다.
+	if status == "deleted" {
+		out["title"] = "삭제된 게시물입니다."
+		out["content"] = ""
+		out["excerpt"] = ""
+		delete(out, "thumbnail")
+	}
 	attachAuthor(out, w.MbID, authors)
 	return out
 }
@@ -397,38 +405,21 @@ func (h *V2Handler) ListRecentFeed(c *gin.Context) {
 	cursor := decodeFeedCursor(c.Query("cursor"))
 	blockedMbIDs := h.getBlockedMbIDs(middleware.GetUserID(c))
 
-	// 보드별 최신 후보 풀(각 8개)을 가져와, 한 보드가 피드를 독점하지 않도록 페이지당 캡 후 인터리브.
-	rows, err := h.feedRepo.FindRecentAcrossBoards(8, cursor, blockedMbIDs)
+	// 순수 최신순: 보드별 최신 후보 풀(각 limit개)을 가져온다. 한 보드가 매우 활발하면 그 보드 글이
+	// 상위를 차지하도록 board별 후보 수를 페이지 크기만큼 확보(리포가 20으로 상한).
+	rows, err := h.feedRepo.FindRecentAcrossBoards(limit, cursor, blockedMbIDs)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "피드 조회 실패", err)
 		return
 	}
 
-	// 보드별 캡(다양성). 캡 이내 우선 emit(시간순), 못 채우면 초과분으로 채움.
-	perBoardCap := limit / 6
-	if perBoardCap < 2 {
-		perBoardCap = 2
-	}
-	boardCount := map[string]int{}
+	// 인터리브 캡 없이 시간순(wr_datetime DESC) 상위 limit개를 그대로 방출 = 신규 작성글이 무조건 위.
 	emitted := make([]*gnuboard.FeedPost, 0, limit)
-	var overflow []*gnuboard.FeedPost
 	for i := range rows {
 		if len(emitted) >= limit {
 			break
 		}
-		slug := rows[i].BoardID
-		if boardCount[slug] < perBoardCap {
-			emitted = append(emitted, &rows[i])
-			boardCount[slug]++
-		} else {
-			overflow = append(overflow, &rows[i])
-		}
-	}
-	for _, fp := range overflow {
-		if len(emitted) >= limit {
-			break
-		}
-		emitted = append(emitted, fp)
+		emitted = append(emitted, &rows[i])
 	}
 
 	// 게시판 이름 + 작성자 (emit된 것만)
