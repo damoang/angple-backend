@@ -1,6 +1,8 @@
 package migration
 
 import (
+	"fmt"
+
 	"github.com/damoang/angple-backend/internal/domain"
 	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
@@ -32,42 +34,32 @@ func Run(db *gorm.DB) error {
 		}
 	}
 
-	// Add soft delete columns to all board tables and create revisions table
-	if err := AddSoftDeleteColumnsToAllBoards(db); err != nil {
-		return err
+	// 이후 단계는 모두 "실행하고 실패하면 중단" 형태라 목록으로 접는다.
+	// 같은 모양의 if 문이 늘어서면 순환복잡도만 올라가고(gocyclo), 정작 어느 단계에서
+	// 실패했는지는 알 수 없었다. 이름을 함께 들고 다니며 에러에 붙인다.
+	//
+	// 순서 의존성이 있으므로 배열 순서를 임의로 바꾸지 말 것.
+	steps := []struct {
+		name string
+		fn   func(*gorm.DB) error
+	}{
+		{"AddSoftDeleteColumnsToAllBoards", AddSoftDeleteColumnsToAllBoards},
+		{"CreateWriteRevisionsTable", CreateWriteRevisionsTable},
+		{"CreateScheduledDeletesTable", CreateScheduledDeletesTable},
+		{"CreateWriteAfterEventsTable", CreateWriteAfterEventsTable},
+		{"CreateAffiliateLinksTable", CreateAffiliateLinksTable},
+		{"CreateAnniversaryDrawEntriesTable", CreateAnniversaryDrawEntriesTable},
+		{"FixListPageIndexes", FixListPageIndexes},
+		{"AddListDeletedIndexes", AddListDeletedIndexes},
+		{"AddDisciplineLogPenaltyMbIDColumn", AddDisciplineLogPenaltyMbIDColumn},
+		{"AddRestrictionScopeColumn", AddRestrictionScopeColumn},
+		{"ExpandSiteLogoRecurringDateColumn", ExpandSiteLogoRecurringDateColumn},
+		{"WidenCommentReplyColumns", WidenCommentReplyColumns},
 	}
-	if err := CreateWriteRevisionsTable(db); err != nil {
-		return err
-	}
-	if err := CreateScheduledDeletesTable(db); err != nil {
-		return err
-	}
-	if err := CreateWriteAfterEventsTable(db); err != nil {
-		return err
-	}
-	if err := CreateAffiliateLinksTable(db); err != nil {
-		return err
-	}
-	if err := CreateAnniversaryDrawEntriesTable(db); err != nil {
-		return err
-	}
-	if err := FixListPageIndexes(db); err != nil {
-		return err
-	}
-	if err := AddListDeletedIndexes(db); err != nil {
-		return err
-	}
-	if err := AddDisciplineLogPenaltyMbIDColumn(db); err != nil {
-		return err
-	}
-	if err := AddRestrictionScopeColumn(db); err != nil {
-		return err
-	}
-	if err := ExpandSiteLogoRecurringDateColumn(db); err != nil {
-		return err
-	}
-	if err := WidenCommentReplyColumns(db); err != nil {
-		return err
+	for _, s := range steps {
+		if err := s.fn(db); err != nil {
+			return fmt.Errorf("migration %s: %w", s.name, err)
+		}
 	}
 	return nil
 }

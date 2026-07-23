@@ -156,7 +156,7 @@ func (h *SiteHandler) UpdateSettings(c *gin.Context) {
 		common.ErrorResponse(c, http.StatusUnauthorized, "Authentication required", nil)
 		return
 	}
-	hasPermission, err := h.service.CheckUserPermission(c.Request.Context(), siteID, userID, "admin")
+	hasPermission, err := h.service.CheckUserPermission(c.Request.Context(), siteID, userID, adminMemberID)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusInternalServerError, "Failed to check permission", err)
 		return

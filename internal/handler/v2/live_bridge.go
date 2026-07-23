@@ -158,7 +158,7 @@ func (h *V2Handler) toV2Post(w *gnuboard.G5Write, boardID uint64, boardSlug, boa
 	}
 	status := "published"
 	if w.WrDeletedAt != nil {
-		status = "deleted"
+		status = postStatusDeleted
 	}
 	createdAt := w.WrDatetime.Format(time.RFC3339)
 	out := map[string]any{
@@ -191,7 +191,7 @@ func (h *V2Handler) toV2Post(w *gnuboard.G5Write, boardID uint64, boardSlug, boa
 	}
 	// 삭제글은 tombstone: 제목/본문/발췌/썸네일을 비워 내용 유출을 막는다(웹 "[삭제된 게시물입니다]" 동일).
 	// 목록·상세 공통 경로라 여기 한 곳에서 처리하면 딥링크 상세 유출까지 차단된다.
-	if status == "deleted" {
+	if status == postStatusDeleted {
 		out["title"] = "삭제된 게시물입니다."
 		out["content"] = ""
 		out["excerpt"] = ""
@@ -206,7 +206,7 @@ func (h *V2Handler) toV2Comment(w *gnuboard.G5Write, authors map[string]liveAuth
 	m := v1handler.TransformToV1Comment(w)
 	status := "active"
 	if w.WrDeletedAt != nil {
-		status = "deleted"
+		status = postStatusDeleted
 	}
 	createdAt := w.WrDatetime.Format(time.RFC3339)
 	out := map[string]any{

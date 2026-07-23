@@ -47,6 +47,9 @@ type V2Handler struct {
 
 const claimBoardSlug = "claim"
 
+// postStatusDeleted 는 v2 게시글의 삭제 상태값. live_bridge 와 공유한다.
+const postStatusDeleted = "deleted"
+
 // NewV2Handler creates a new V2Handler
 func NewV2Handler(
 	userRepo v2repo.UserRepository,
@@ -810,7 +813,7 @@ func (h *V2Handler) RestorePost(c *gin.Context) {
 		return
 	}
 
-	if post.Status != "deleted" {
+	if post.Status != postStatusDeleted {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "삭제된 게시글이 아닙니다", nil)
 		return
 	}
@@ -934,7 +937,7 @@ func (h *V2Handler) RestoreRevision(c *gin.Context) {
 	// 리비전의 내용으로 복원
 	post.Title = revision.Title
 	post.Content = revision.Content
-	if post.Status == "deleted" {
+	if post.Status == postStatusDeleted {
 		post.Status = "published"
 		post.DeletedAt = nil
 		post.DeletedBy = nil

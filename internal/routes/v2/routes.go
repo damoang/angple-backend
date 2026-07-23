@@ -31,7 +31,11 @@ func SetupAuth(router *gin.Engine, h *v2handler.V2AuthHandler, jwtManager *jwt.M
 }
 
 // Setup configures v2 API routes (new DB schema)
-func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, boardPermChecker middleware.BoardPermissionChecker, gnuDB *gorm.DB) {
+//
+// 게시판 권한 검사기(BoardPermissionChecker)는 여기서 받지 않는다 —
+// V2Handler 가 NewV2Handler(..., permChecker) 로 이미 주입받아 보유하므로
+// 라우트 인자로 한 번 더 넘기는 것은 중복이었다(revive unused-parameter).
+func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, gnuDB *gorm.DB) {
 	api := router.Group("/api/v2")
 	auth := middleware.JWTAuth(jwtManager)
 	banCheck := middleware.BanCheck(gnuDB)
