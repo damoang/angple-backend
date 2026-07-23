@@ -4311,6 +4311,12 @@ func main() {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
 				}
+				gnurepo.RecordContentHistory(db, slug, postID, 0, post.MbID, post.WrName, "삭제", userID, map[string]interface{}{
+					"wr_subject": post.WrSubject,
+					"wr_content": post.WrContent,
+					"wr_name":    post.WrName,
+					"mb_id":      post.MbID,
+				})
 				// 직접홍보 게시판: Redis 캐시 무효화
 				if slug == "promotion" && redisClient != nil {
 					redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
@@ -4354,6 +4360,12 @@ func main() {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
 				}
+				gnurepo.RecordContentHistory(db, slug, postID, 0, post.MbID, post.WrName, "삭제", userID, map[string]interface{}{
+					"wr_subject": post.WrSubject,
+					"wr_content": post.WrContent,
+					"wr_name":    post.WrName,
+					"mb_id":      post.MbID,
+				})
 				// 직접홍보 게시판: Redis 캐시 무효화
 				if slug == "promotion" && redisClient != nil {
 					redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
@@ -4494,8 +4506,8 @@ func main() {
 				return
 			}
 
-			// 게시글 영구 삭제
-			if err := gnuWriteRepo.DeletePost(slug, postID); err != nil {
+			// 게시글 영구 삭제 (글·댓글 이력은 repo 내부에서 기록)
+			if err := gnuWriteRepo.DeletePost(slug, postID, middleware.GetUserID(c)); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 영구 삭제 실패"})
 				return
 			}
@@ -4555,6 +4567,7 @@ func main() {
 			// 관리자(level >= 10)는 즉시 삭제
 			postID, _ := strconv.Atoi(c.Param("id"))
 			if userLevel >= 10 {
+				commentDeleted := false
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
 					changed, err := softDeleteCommentAndAdjust(tx, slug, postID, commentID, userID, now)
@@ -4564,6 +4577,7 @@ func main() {
 					if !changed {
 						return nil
 					}
+					commentDeleted = true
 					return createWriteAfterEvent(
 						tx,
 						writeAfterEventRepo,
@@ -4588,6 +4602,13 @@ func main() {
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
+				}
+				if commentDeleted {
+					gnurepo.RecordContentHistory(db, slug, commentID, 1, comment.MbID, comment.WrName, "삭제", userID, map[string]interface{}{
+						"wr_content": comment.WrContent,
+						"wr_name":    comment.WrName,
+						"mb_id":      comment.MbID,
+					})
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
@@ -4604,6 +4625,7 @@ func main() {
 
 			if delayMinutes == 0 {
 				// 답글 없으면 즉시 삭제
+				commentDeleted := false
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
 					changed, err := softDeleteCommentAndAdjust(tx, slug, postID, commentID, userID, now)
@@ -4613,6 +4635,7 @@ func main() {
 					if !changed {
 						return nil
 					}
+					commentDeleted = true
 					return createWriteAfterEvent(
 						tx,
 						writeAfterEventRepo,
@@ -4637,6 +4660,13 @@ func main() {
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
+				}
+				if commentDeleted {
+					gnurepo.RecordContentHistory(db, slug, commentID, 1, comment.MbID, comment.WrName, "삭제", userID, map[string]interface{}{
+						"wr_content": comment.WrContent,
+						"wr_name":    comment.WrName,
+						"mb_id":      comment.MbID,
+					})
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
