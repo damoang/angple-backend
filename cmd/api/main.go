@@ -2059,9 +2059,30 @@ func main() {
 				return
 			}
 
+			data := v1handler.TransformToV1Board(board)
+
+			// board_type (v2_boards) — 특수 게시판의 커스텀 글쓰기 폼·목록 렌더를 고르는 키.
+			//
+			// 지금까지 이 필드는 관리자 API(/api/v1/admin/boards/*)에만 있었다. 웹은 공개
+			// API 를 쓰는데 여기서 안 내려주니 프론트가 항상 'standard' 로 폴백했고,
+			// writeFormRegistry.resolve('standard') → null → 나눔·중고의 커스텀 작성폼이
+			// **한 번도 렌더되지 않았다.**
+			//   실피해: 나눔 #2397 이 일반 폼으로 작성돼 시작·마감(wr_4/wr_5)이 비었고,
+			//   status=no_giving 이 되어 참가 버튼이 안 떴다.
+			//
+			// 조회는 캐시 미스 때만 돌고, 결과는 아래 SetBoard 로 함께 캐시된다.
+			var boardType string
+			if err := db.Table("v2_boards").
+				Select("COALESCE(board_type, 'standard')").
+				Where("slug = ?", slug).
+				Scan(&boardType).Error; err != nil || boardType == "" {
+				boardType = "standard"
+			}
+			data["board_type"] = boardType
+
 			response := gin.H{
 				"success": true,
-				"data":    v1handler.TransformToV1Board(board),
+				"data":    data,
 			}
 
 			// Cache the response
