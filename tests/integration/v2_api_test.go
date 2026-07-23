@@ -131,7 +131,7 @@ func (s *V2APISuite) SetupSuite() {
 	authHandler := v2handler.NewV2AuthHandler(authSvc)
 
 	s.router = gin.New()
-	v2routes.Setup(s.router, v2Handler, s.jwtManager, permChecker, s.db)
+	v2routes.Setup(s.router, v2Handler, s.jwtManager, s.db)
 	v2routes.SetupAuth(s.router, authHandler, s.jwtManager)
 
 	// Seed test data
