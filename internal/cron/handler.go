@@ -253,3 +253,14 @@ func (h *Handler) AutoDismissReports(c *gin.Context) {
 			typed.Enabled, typed.MinOpinions, typed.CandidateCount, typed.DismissedRows, typed.Errors)
 	})
 }
+
+// VerificationGuide assigns a 6-digit 난수 and posts an AI(다모앙) guide comment to new
+// posts on the verification(해외 실명인증) board. Idempotent via wr_1.
+func (h *Handler) VerificationGuide(c *gin.Context) {
+	h.runCronTask(c, "verification-guide", func() (interface{}, error) {
+		return runVerificationGuide(h.db)
+	}, func(result interface{}) {
+		typed := result.(*VerificationGuideResult)
+		log.Printf("[Cron:verification-guide] processed=%d errors=%d", typed.Processed, typed.Errors)
+	})
+}
