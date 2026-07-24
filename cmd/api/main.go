@@ -6440,6 +6440,7 @@ func main() {
 		cronGroup.POST("/noti-cleanup", cronHandler.NotiCleanup)
 		cronGroup.POST("/auto-dismiss-reports", cronHandler.AutoDismissReports)
 		cronGroup.POST("/withdrawal-grace-anonymize", cronHandler.WithdrawalGraceAnonymize)
+		cronGroup.POST("/verification-guide", cronHandler.VerificationGuide)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo, writeAfterEventRepo)
