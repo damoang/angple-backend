@@ -1,9 +1,10 @@
 package cron
 
 import (
+	crand "crypto/rand"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/big"
 	"time"
 
 	"gorm.io/gorm"
@@ -56,7 +57,13 @@ func runVerificationGuide(db *gorm.DB) (*VerificationGuideResult, error) {
 	nowStr := now.Format("2006-01-02 15:04:05")
 
 	for _, t := range targets {
-		nansu := rand.Intn(900000) + 100000 // 6자리 (100000~999999)
+		nBig, rerr := crand.Int(crand.Reader, big.NewInt(900000))
+		if rerr != nil {
+			result.Errors++
+			log.Printf("[Cron:verification-guide] rand error: %v", rerr)
+			continue
+		}
+		nansu := int(nBig.Int64()) + 100000 // 6자리 (100000~999999)
 		content := fmt.Sprintf(
 			`<p>안녕하세요, 다모앙입니다. 🙇 해외 실명인증 신청 감사합니다.</p>`+
 				`<p><b>[인증 난수] %d</b></p>`+
