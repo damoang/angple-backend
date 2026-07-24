@@ -40,7 +40,7 @@ func runVerificationGuide(db *gorm.DB) (*VerificationGuideResult, error) {
 		WrNum int
 	}
 	var targets []target
-	q := db.Table("g5_write_"+verificationBoard).
+	q := db.Table("g5_write_" + verificationBoard).
 		Select("wr_id, wr_num").
 		Where("wr_is_comment = 0").
 		Where("wr_deleted_at IS NULL").
