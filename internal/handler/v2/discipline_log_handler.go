@@ -38,6 +38,11 @@ type DisciplineLogContent struct {
 	Content           string         `json:"content,omitempty"`
 	MemberReason      string         `json:"member_reason,omitempty"`      // 회원 공개 사유 (운영자 입력 시 상세에 노출)
 	PublicDescription string         `json:"public_description,omitempty"` // 외부 공개용 안내문 (운영자 입력 시 상세에 노출, 기타 사유와 별개)
+	// 소명 인용 등으로 이용제한이 회수(revoke)된 경우 RevokeDiscipline(damoang-backend)이 기록.
+	// RevokedAt만 회원에게 공개하고 RevokedBy(운영자ID)·AdminMemo(회수사유)는 비공개(내부용).
+	RevokedAt string `json:"revoked_at,omitempty"`
+	RevokedBy string `json:"revoked_by,omitempty"`
+	AdminMemo string `json:"admin_memo,omitempty"`
 }
 
 // ReportedItem represents a reported post or comment.
@@ -133,6 +138,7 @@ type DisciplineLogListItem struct {
 	ViolationTypes  []int    `json:"violation_types"`
 	ViolationTitles []string `json:"violation_titles"`
 	Memo            string   `json:"memo,omitempty"`
+	Revoked         bool     `json:"revoked,omitempty"` // 소명 인용 등으로 회수된 제재 (목록 배지용)
 }
 
 // DisciplineLogDetail represents detailed discipline log
@@ -151,6 +157,8 @@ type DisciplineLogDetail struct {
 	CreatedBy         string          `json:"created_by"`
 	CreatedAt         string          `json:"created_at"`
 	ClaimPostID       *int            `json:"claim_post_id,omitempty"`
+	// 소명 인용 등으로 회수된 경우 회수 일시만 공개. ⛔ revoked_by(운영자ID)·admin_memo(회수사유)는 비공개.
+	RevokedAt *string `json:"revoked_at,omitempty"`
 }
 
 // parseContentJSON parses the wr_content JSON or extracts from HTML
@@ -317,6 +325,7 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 			PenaltyDateTo:   penaltyDateTo,
 			ViolationTypes:  data.SgTypes,
 			ViolationTitles: titles,
+			Revoked:         data.RevokedAt != "",
 		})
 	}
 
@@ -466,6 +475,11 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 		PublicDescription: data.PublicDescription,
 		CreatedBy:         post.MbID,
 		CreatedAt:         post.WrDatetime.Format("2006-01-02 15:04:05"),
+	}
+
+	// 소명 인용 등으로 회수된 제재는 회수 일시만 공개 (revoked_by·admin_memo는 비공개)
+	if data.RevokedAt != "" {
+		detail.RevokedAt = &data.RevokedAt
 	}
 
 	// 소명글 존재 여부 조회 (claim 게시판에서 wr_link1 또는 wr_content 매칭)
