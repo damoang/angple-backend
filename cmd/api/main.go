@@ -3092,7 +3092,12 @@ func main() {
 
 			// wr_option: 콤마 구분 토큰 — 검증 측은 strings.Contains 로 체크하므로 형식 일치
 			var wrOptionTokens []string
-			if req.IsSecret != nil && *req.IsSecret {
+			// bo_use_secret==2(그누보드 "비밀글 강제")면 클라이언트 요청과 무관하게 secret 강제.
+			// 값 2의 "강제" 시맨틱이 Go 포팅에서 유실돼(불리언 취급) 그동안 강제가 안 걸렸다.
+			// verification(해외 실명인증) 등 PII 보드가 체크 누락 시 공개로 새던 문제를 여기서 차단.
+			// v1 create 가 유일한 작성 경로이므로 API 직접 호출까지 커버된다.
+			forceSecret := board.BoUseSecret == 2
+			if forceSecret || (req.IsSecret != nil && *req.IsSecret) {
 				wrOptionTokens = append(wrOptionTokens, "secret")
 			}
 			// 댓글 비활성화는 admin (mb_level >= 10) 만 설정 가능 (frontend 게이트와 동일)
