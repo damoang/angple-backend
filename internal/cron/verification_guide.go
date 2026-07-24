@@ -54,7 +54,6 @@ func runVerificationGuide(db *gorm.DB) (*VerificationGuideResult, error) {
 	}
 
 	nowStr := now.Format("2006-01-02 15:04:05")
-	table := "g5_write_" + verificationBoard
 
 	for _, t := range targets {
 		nansu := rand.Intn(900000) + 100000 // 6자리 (100000~999999)
@@ -69,7 +68,7 @@ func runVerificationGuide(db *gorm.DB) (*VerificationGuideResult, error) {
 		err := db.Transaction(func(tx *gorm.DB) error {
 			// 1. 난수 저장 — wr_1 이 아직 빈 경우에만 (동시/재실행 중복 가드)
 			res := tx.Exec(
-				fmt.Sprintf("UPDATE %s SET wr_1 = ? WHERE wr_id = ? AND (wr_1 IS NULL OR wr_1 = '')", table),
+				"UPDATE g5_write_verification SET wr_1 = ? WHERE wr_id = ? AND (wr_1 IS NULL OR wr_1 = '')",
 				fmt.Sprintf("%d", nansu), t.WrID,
 			)
 			if res.Error != nil {
@@ -83,24 +82,24 @@ func runVerificationGuide(db *gorm.DB) (*VerificationGuideResult, error) {
 			// 2. 이 원글의 다음 wr_comment 값
 			var nextComment int
 			tx.Raw(
-				fmt.Sprintf("SELECT COALESCE(MAX(wr_comment), -1) + 1 FROM %s WHERE wr_parent = ? AND wr_is_comment = 1", table),
+				"SELECT COALESCE(MAX(wr_comment), -1) + 1 FROM g5_write_verification WHERE wr_parent = ? AND wr_is_comment = 1",
 				t.WrID,
 			).Scan(&nextComment)
 
 			// 3. AI(다모앙) 가이드 댓글 INSERT
-			if err := tx.Exec(fmt.Sprintf(`
-				INSERT INTO %s
+			if err := tx.Exec(`
+				INSERT INTO g5_write_verification
 				(wr_num, wr_reply, wr_parent, wr_is_comment, wr_comment, wr_comment_reply,
 				 wr_subject, wr_content, wr_name, mb_id, wr_password, wr_email, wr_homepage,
 				 wr_link1, wr_link2, wr_hit, wr_good, wr_nogood, wr_option, wr_datetime, wr_last, wr_ip)
-				VALUES (?, '', ?, 1, ?, '', '', ?, '다모앙', 'ai', '', '', '', '', '', 0, 0, 0, 'html1', ?, '', '9.9.9.9')`, table),
+				VALUES (?, '', ?, 1, ?, '', '', ?, '다모앙', 'ai', '', '', '', '', '', 0, 0, 0, 'html1', ?, '', '9.9.9.9')`,
 				t.WrNum, t.WrID, nextComment, content, nowStr,
 			).Error; err != nil {
 				return err
 			}
 
 			// 4. 원글 댓글수 +1
-			return tx.Exec(fmt.Sprintf("UPDATE %s SET wr_comment = wr_comment + 1 WHERE wr_id = ?", table), t.WrID).Error
+			return tx.Exec("UPDATE g5_write_verification SET wr_comment = wr_comment + 1 WHERE wr_id = ?", t.WrID).Error
 		})
 		if err != nil {
 			result.Errors++
