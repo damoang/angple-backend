@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,7 @@ var (
 	errNotWithdrawing   = errors.New("탈퇴 신청 상태가 아닙니다")
 	errGraceElapsed     = errors.New("숙려기간(30일)이 경과하여 탈퇴를 취소할 수 없습니다")
 	errAlreadyAnonymize = errors.New("이미 익명화되어 복구할 수 없습니다")
+	errCancelDisabled   = errors.New("탈퇴 취소 기능이 현재 제공되지 않습니다. 문의가 필요하시면 고객센터로 연락 주세요")
 )
 
 // Leave handles POST /api/v1/members/me/leave
@@ -58,6 +60,12 @@ func (h *MemberLeaveHandler) Leave(c *gin.Context) {
 	var req memberLeaveRequest
 	_ = c.ShouldBindJSON(&req) // reason 은 선택값
 
+	// 감사용 사전 스냅샷 — 신청 시점의 제재 상태를 남겨야 한다.
+	// 이용제한 중 탈퇴는 영구정지 사유이므로, 나중에 제재가 만료·해제돼도
+	// "신청 당시 제재 중이었다"는 사실이 보존되어야 판정할 수 있다.
+	var before gnuboard.G5Member
+	_ = h.db.Table("g5_member").Where("mb_id = ?", mbID).Take(&before).Error
+
 	info, err := applySelfLeave(h.db, mbID, req.Reason, time.Now())
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -67,6 +75,20 @@ func (h *MemberLeaveHandler) Leave(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "탈퇴 신청 처리 실패"})
 		return
 	}
+
+	common.WriteAudit(h.db, c, common.AuditEntry{
+		UserID:     mbID,
+		Action:     common.AuditLeaveRequest,
+		Resource:   "member",
+		ResourceID: mbID,
+		Details: map[string]any{
+			"leave_date":      info.LeaveDate,
+			"leave_reason":    strings.TrimSpace(req.Reason),
+			"intercept_date":  before.MbInterceptDate,
+			"was_disciplined": strings.TrimSpace(before.MbInterceptDate) != "",
+			"mb_level":        before.MbLevel,
+		},
+	})
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
 		"message":    "탈퇴가 신청되었습니다. 숙려기간(30일) 내 재로그인하여 취소할 수 있습니다.",
 		"withdrawal": info,
@@ -83,19 +105,38 @@ func (h *MemberLeaveHandler) CancelLeave(c *gin.Context) {
 		return
 	}
 
+	// 취소 전 스냅샷 — 취소되면 mb_leave_date 가 지워져 "언제 신청했었는지"를 잃는다.
+	var before gnuboard.G5Member
+	_ = h.db.Table("g5_member").Where("mb_id = ?", mbID).Take(&before).Error
+
 	if err := cancelSelfLeave(h.db, mbID, time.Now()); err != nil {
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "회원을 찾을 수 없습니다"})
 		case errors.Is(err, errNotWithdrawing):
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": errNotWithdrawing.Error()})
-		case errors.Is(err, errGraceElapsed), errors.Is(err, errAlreadyAnonymize):
+		case errors.Is(err, errGraceElapsed), errors.Is(err, errAlreadyAnonymize),
+			errors.Is(err, errCancelDisabled):
 			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "탈퇴 취소 처리 실패"})
 		}
 		return
 	}
+	common.WriteAudit(h.db, c, common.AuditEntry{
+		UserID:     mbID,
+		Action:     common.AuditLeaveCancel,
+		Resource:   "member",
+		ResourceID: mbID,
+		Details: map[string]any{
+			"leave_date":      before.MbLeaveDate,
+			"leave_reason":    before.MbLeaveReason,
+			"intercept_date":  before.MbInterceptDate,
+			"was_disciplined": strings.TrimSpace(before.MbInterceptDate) != "",
+			"mb_level":        before.MbLevel,
+		},
+	})
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"message": "탈퇴가 취소되어 계정이 복구되었습니다."}})
 }
 
@@ -151,9 +192,52 @@ func applySelfLeave(db *gorm.DB, mbID, reason string, now time.Time) (withdrawal
 	return buildWithdrawalInfo(member.MbLeaveDate, member.MbNick, now), nil
 }
 
+// isLeaveCancelEnabled 는 탈퇴 취소(복원) 기능의 on/off 를 읽는다.
+//
+// 우선순위: g5_kv_store('system:leave_cancel_enabled') → LEAVE_CANCEL_ENABLED env → 기본 on.
+// 값이 "0"/"false"/"off" 면 비활성. 배포 없이 DB 값만 바꿔 즉시 토글할 수 있다
+// (report_lock_threshold 와 동일한 관례).
+//
+// 기본값을 on 으로 두는 이유: 이미 사용자에게 "숙려기간 내 취소 가능"을 안내하고 있어,
+// 설정 누락으로 조용히 꺼지면 약속을 어기게 된다. 끄려면 명시적으로 꺼야 한다.
+func isLeaveCancelEnabled(db *gorm.DB) bool {
+	off := func(s string) bool {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "0", "false", "off", "no":
+			return true
+		}
+		return false
+	}
+
+	var rows []struct {
+		ValueType string `gorm:"column:value_type"`
+		ValueText string `gorm:"column:value_text"`
+		ValueInt  int    `gorm:"column:value_int"`
+	}
+	if err := db.Raw("SELECT value_type, value_text, value_int FROM g5_kv_store WHERE `key` = 'system:leave_cancel_enabled' LIMIT 1").
+		Scan(&rows).Error; err == nil && len(rows) > 0 {
+		r := rows[0]
+		// 행이 존재할 때만 판정한다(미설정이면 기본 on 유지).
+		if r.ValueType == "INT" {
+			return r.ValueInt != 0
+		}
+		if r.ValueText != "" {
+			return !off(r.ValueText)
+		}
+	}
+
+	if env := os.Getenv("LEAVE_CANCEL_ENABLED"); env != "" && off(env) {
+		return false
+	}
+	return true
+}
+
 // cancelSelfLeave 는 숙려중(그리고 미확정)인 본인 계정의 탈퇴를 취소한다.
 // mb_intercept_date 는 결코 갱신 대상에 포함하지 않는다(제재 유지).
 func cancelSelfLeave(db *gorm.DB, mbID string, now time.Time) error {
+	if !isLeaveCancelEnabled(db) {
+		return errCancelDisabled
+	}
 	var member gnuboard.G5Member
 	if err := db.Table("g5_member").Where("mb_id = ?", mbID).Take(&member).Error; err != nil {
 		return err
