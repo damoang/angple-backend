@@ -274,6 +274,32 @@ func adjustPostCommentCount(tx *gorm.DB, boardID string, postID int, delta int) 
 		Error
 }
 
+// bugBoardID 는 버그·개선 제보 게시판이다.
+const bugBoardID = "bug"
+
+// bugBoardLockCommentCount 는 제보가 잠기는 댓글 수다.
+//
+// 제보가 올라오면 자동 접수 댓글이 1개 달린다. 따라서 2개째 댓글이 곧
+// "사람이 실제로 답변했다"는 신호이고, 그 시점부터 이력을 보존한다.
+const bugBoardLockCommentCount = 2
+
+// isBugBoardHistoryLocked 는 버그게시판 제보가 이력 보존 대상인지 판정한다.
+//
+// 버그게시판은 다음 사람이 같은 증상을 겪을 때 찾아보는 기록이다. 답변이 붙은 뒤
+// 원글이 바뀌거나 사라지면 아래 답변들이 무엇에 대한 것인지 알 수 없게 된다.
+// 실측(2026-07-26): 완료 처리 후 삭제 23건·수정 182건.
+//
+// 운영진(level>=10)은 제외한다 — 개인정보 노출처럼 실제로 지워야 할 일이 있다.
+func isBugBoardHistoryLocked(boardID string, commentCount int, userLevel int) bool {
+	if boardID != bugBoardID {
+		return false
+	}
+	if userLevel >= 10 {
+		return false
+	}
+	return commentCount >= bugBoardLockCommentCount
+}
+
 func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, commentID int, deletedBy string, deletedAt time.Time) (bool, error) {
 	tableName := fmt.Sprintf("g5_write_%s", boardID)
 	result := tx.Table(tableName).
@@ -3848,6 +3874,22 @@ func main() {
 				return
 			}
 
+			// 버그게시판: 답변이 붙은 뒤에는 본문을 바꿀 수 없다. admin(level>=10) 예외.
+			//
+			// 제보 내용이 나중에 바뀌면 아래 답변들이 무엇에 대한 답인지 알 수 없게 되고,
+			// 같은 증상을 겪는 다음 사람이 참고할 이력이 사라진다.
+			// 실측(2026-07-26): 완료 처리된 글 182건이 그 뒤에 수정됐다.
+			//
+			// 기준을 댓글 2개로 둔 이유: 제보 직후 자동 접수 댓글이 1개 달리므로,
+			// 사람이 실제로 답변한 시점이 곧 2개째다.
+			if isBugBoardHistoryLocked(slug, post.WrComment, userLevel) {
+				c.JSON(http.StatusForbidden, gin.H{
+					"success": false,
+					"error":   "답변이 달린 제보는 수정할 수 없습니다. 내용을 덧붙이실 일이 있으면 댓글로 남겨 주세요.",
+				})
+				return
+			}
+
 			// #12420: 신고 누적으로 자동 잠긴 글 수정 차단. admin (level>=10) 만 예외.
 			// G5Write struct 가 wr_7 컬럼을 직접 매핑하지 않으므로 raw select.
 			// wr_7 컬럼 없는 게시판에서는 Scan 실패하나 wrLock 이 "" 유지 → lock 체크 통과 (defensive).
@@ -4390,6 +4432,19 @@ func main() {
 			userLevel := middleware.GetUserLevel(c)
 			if post.MbID != userID && userLevel < 10 {
 				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "삭제 권한이 없습니다"})
+				return
+			}
+
+			// 버그게시판: 답변이 붙은 뒤에는 삭제도 막는다(수정 차단과 같은 이유).
+			// 다만 그냥 막기만 하면 개인정보가 드러난 경우 등 실제 사정이 있는 분이 곤란해지므로,
+			// 익명화라는 대안을 안내한다. 익명화는 운영진이 처리한다(관리자 회원 관리 화면).
+			// 실측(2026-07-26): 완료 처리된 글 23건이 그 뒤에 삭제되어 이력이 사라졌다.
+			if isBugBoardHistoryLocked(slug, post.WrComment, userLevel) {
+				c.JSON(http.StatusForbidden, gin.H{
+					"success": false,
+					"error": "답변이 달린 제보는 삭제할 수 없습니다. " +
+						"닉네임이나 내용이 드러나는 것이 걱정되시면 익명화를 도와드리니 문의해 주세요.",
+				})
 				return
 			}
 
