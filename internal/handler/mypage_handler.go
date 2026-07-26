@@ -129,6 +129,54 @@ var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
 var emoRe = regexp.MustCompile(`\{emo:[^}]+\}`)
 var whitespaceRe = regexp.MustCompile(`\s+`)
 
+// 콘텐츠 종류 상수 — preview 가 비었을 때 "무엇 때문에 비었는지"를 프론트에 알린다.
+// 텍스트 없는 댓글이 전부 "(내용 없음)" 으로 뭉개지던 문제(#13095, #13097) 해소용.
+const (
+	ContentKindText     = "text"
+	ContentKindEmoticon = "emoticon"
+	ContentKindImage    = "image"
+	ContentKindVideo    = "video"
+	ContentKindLink     = "link"
+	ContentKindEmpty    = "empty"
+)
+
+// 다모앙 이모티콘은 두 형식이 공존한다(2026-07-26 전수 실측):
+//
+//	① {emo:파일명} 코드   ② <img src="/emoticons/...">
+//
+// 따라서 둘 다 검사해야 한다. 첨부 이미지(/data/editor/)와는 경로로 구분한다.
+var emoticonImgRe = regexp.MustCompile(`(?i)<img[^>]+src="[^"]*/emoticons/`)
+var imgTagRe = regexp.MustCompile(`(?i)<img\b`)
+var videoTagRe = regexp.MustCompile(`(?i)<(video|iframe)\b`)
+var anchorTagRe = regexp.MustCompile(`(?i)<a\b`)
+
+// classifyContent 는 본문의 종류를 판정한다.
+//
+// ⛔ 반드시 **원본** 문자열을 넘겨야 한다. stripHTMLPreview 는 태그와 {emo:} 를 지운 뒤 반환하므로,
+// 그 결과로 판정하면 이모티콘·이미지를 영영 구분할 수 없다.
+//
+// 판정 순서(전수 실측 기반, 첫 매치 확정):
+//
+//	텍스트 → 이모티콘 → 이미지 → 동영상 → 링크 → 빈 값(최종 폴백)
+//
+// 마지막이 폴백이라 미분류가 남지 않는다.
+func classifyContent(content string) string {
+	if stripHTMLPreview(content, 1) != "" {
+		return ContentKindText
+	}
+	switch {
+	case emoRe.MatchString(content), emoticonImgRe.MatchString(content):
+		return ContentKindEmoticon
+	case imgTagRe.MatchString(content):
+		return ContentKindImage
+	case videoTagRe.MatchString(content):
+		return ContentKindVideo
+	case anchorTagRe.MatchString(content):
+		return ContentKindLink
+	}
+	return ContentKindEmpty
+}
+
 // stripHTMLPreview removes HTML tags, emoji codes, HTML entities and truncates
 func stripHTMLPreview(content string, maxLen int) string {
 	s := htmlTagRe.ReplaceAllString(content, "")
@@ -137,6 +185,9 @@ func stripHTMLPreview(content string, maxLen int) string {
 	s = strings.ReplaceAll(s, "&lt;", "<")
 	s = strings.ReplaceAll(s, "&gt;", ">")
 	s = strings.ReplaceAll(s, "&amp;", "&")
+	// 점자공백(U+2800)은 \s 에 걸리지 않아 그대로 남는다. 빈댓글 기능이 이 문자를 쓰므로
+	// 여기서 제거해야 "텍스트 없음" 으로 올바로 판정된다(실측 1,791건).
+	s = strings.ReplaceAll(s, "\u2800", "")
 	s = whitespaceRe.ReplaceAllString(s, " ")
 	s = strings.TrimSpace(s)
 	runes := []rune(s)
@@ -244,6 +295,7 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 				"wr_id":           cm.WrID,
 				"parent_wr_id":    cm.WrParent,
 				"preview":         stripHTMLPreview(cm.WrContent, 80),
+				"content_kind":    classifyContent(cm.WrContent),
 				"wr_datetime":     cm.WrDatetime.Format("2006-01-02 15:04:05"),
 				"deleted_at":      formatNullableTime(cm.DeletedAt),
 				"post_deleted_at": formatNullableTime(cm.ParentDeletedAt),
