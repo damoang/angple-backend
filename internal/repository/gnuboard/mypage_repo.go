@@ -160,9 +160,9 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 					//
 					// ⛔ 피드가 준 ID 를 그대로 믿지 않는다. mb_id·wr_is_comment 를 정본에서
 					//    다시 확인한다(다른 게시판 경로는 원래 이렇게 한다 — 아래 else 참고).
-					//    피드는 파생 데이터라 정본과 어긋날 수 있고, 실제로 어긋나 있었다:
-					//    남의 댓글이 내 글로 기록된 행이 6개 게시판에 2만 건 있었다(#13109).
-					//    이 조건이 있으면 그런 행은 조회 단계에서 걸러져 화면에 못 나온다.
+					//    피드에는 v2_posts 기반 행이 섞여 있는데(write_table='v2_posts'),
+					//    그 write_id 는 g5_write_* 의 wr_id 와 무관한 번호다. 검증 없이 조회하면
+					//    번호가 우연히 겹치는 남의 글·댓글이 내 글로 나온다(#13109).
 					r.db.Raw(
 						fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id, wr_deleted_at AS deleted_at FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0 ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
 						writeIDs, mbID,
@@ -575,7 +575,8 @@ func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[strin
 }
 
 // 피드 후보를 몇 배로 뽑을지. 오염 행이 걸러져도 limit 을 채우기 위한 여유분이다.
-// 실측(2026-07-26) 최악 게시판의 오염률이 약 46% 라 3배면 충분하다.
+// write_table 조건으로 v2_posts 행을 후보 단계에서 걸러낸 뒤라 남는 오탈락은
+// 삭제·비밀글·잠김 정도로 적다. 여유분 3배면 충분하다.
 const activityCandidateFactor = 3
 
 // 테이블명에 끼워 넣을 슬러그 검증. board_id 는 피드 테이블에서 온 값이라
@@ -603,23 +604,30 @@ func (r *myPageRepository) verifyActivityPosts(
 		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
 	}
 
-	confirmed := make(map[string]map[int]bool, len(byBoard))
+	confirmed := make(map[string]map[int]*time.Time, len(byBoard))
 	for boardID, ids := range byBoard {
 		if !activityBoardSlugRe.MatchString(boardID) {
 			continue
 		}
-		var okIDs []int
+		// 삭제 여부도 정본에서 가져온다. 피드의 is_deleted 는 뒤처질 수 있고,
+		// 실제로 뒤처져 있었다: free 만 641건이 "피드는 살아있음 / 정본은 삭제됨" 이다.
+		// 제보자(#13109)가 바로 이 경우라, 지운 글이 프로필에 살아있는 것처럼 남아 있었다.
+		type verifiedRow struct {
+			WrID        int        `gorm:"column:wr_id"`
+			WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
+		}
+		var okRows []verifiedRow
 		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 		q := fmt.Sprintf(
-			"SELECT wr_id FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
+			"SELECT wr_id, wr_deleted_at FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
 				" AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL)"+
 				" AND (wr_7 IS NULL OR wr_7 != 'lock')", boardID)
-		if err := r.db.Raw(q, ids, mbID).Scan(&okIDs).Error; err != nil {
+		if err := r.db.Raw(q, ids, mbID).Scan(&okRows).Error; err != nil {
 			continue
 		}
-		m := make(map[int]bool, len(okIDs))
-		for _, id := range okIDs {
-			m[id] = true
+		m := make(map[int]*time.Time, len(okRows))
+		for _, row := range okRows {
+			m[row.WrID] = row.WrDeletedAt
 		}
 		confirmed[boardID] = m
 	}
@@ -629,9 +637,17 @@ func (r *myPageRepository) verifyActivityPosts(
 		if len(out) >= limit {
 			break
 		}
-		if m, ok := confirmed[c.BoardID]; ok && m[c.WrID] {
-			out = append(out, c)
+		m, ok := confirmed[c.BoardID]
+		if !ok {
+			continue
 		}
+		deletedAt, found := m[c.WrID]
+		if !found {
+			continue
+		}
+		// 피드 캐시가 아니라 정본의 삭제 시각을 싣는다.
+		c.DeletedAt = deletedAt
+		out = append(out, c)
 	}
 	return out
 }
@@ -656,15 +672,22 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		  WHERE member_id = ?
 		    AND activity_type = 1
 		    AND is_public = 1
+		    AND write_table = CONCAT('g5_write_', board_id)
 		  ORDER BY source_created_at DESC, id DESC
 		  LIMIT ?`,
 		mbID, limit*activityCandidateFactor,
-	).Scan(&candidates).Error; err == nil && len(candidates) > 0 {
+	).Scan(&candidates).Error; err == nil {
+		// ⛔ 후보가 0건이어도 폴백으로 가지 않는다. 글이 하나도 없는 회원이
+		//    61.5%(37,905명)인데, 그들을 121개 서브쿼리 UNION 으로 보내면
+		//    게시글 상세마다 그 쿼리가 돈다(작성자 패널은 최고 트래픽 경로다).
+		if len(candidates) == 0 {
+			return nil, nil
+		}
 		posts = r.verifyActivityPosts(mbID, candidates, limit)
 		if len(posts) > 0 {
 			return posts, nil
 		}
-		// 확인된 게 하나도 없으면 피드가 통째로 어긋난 것이다 → 아래 정본 UNION 으로 떨어진다.
+		// 후보는 있는데 확인된 게 0건일 때만 정본 UNION 으로 떨어진다.
 	}
 
 	boards, err := r.GetSearchableBoards()
@@ -682,7 +705,9 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		args = append(args, mbID)
 	}
 
-	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
+	// ⛔ 보드가 섞이므로 wr_id 로 정렬하면 안 된다. wr_id 는 보드마다 범위가 달라
+	//    (free 최대 681만 vs qa 8만) free 글이 날짜와 무관하게 항상 앞에 온다.
+	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_datetime DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
 	args = append(args, limit)
 
 	if err := r.db.Raw(sql, args...).Scan(&posts).Error; err != nil {
@@ -707,6 +732,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		  WHERE member_id = ?
 		    AND activity_type = 2
 		    AND is_public = 1
+		    AND write_table = CONCAT('g5_write_', board_id)
 		  ORDER BY source_created_at DESC, id DESC
 		  LIMIT ?`,
 		mbID, limit,
@@ -729,7 +755,9 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		args = append(args, mbID)
 	}
 
-	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_id DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
+	// ⛔ 보드가 섞이므로 wr_id 로 정렬하면 안 된다. wr_id 는 보드마다 범위가 달라
+	//    (free 최대 681만 vs qa 8만) free 글이 날짜와 무관하게 항상 앞에 온다.
+	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_datetime DESC LIMIT ?", strings.Join(unions, " UNION ALL "))
 	args = append(args, limit)
 
 	if err := r.db.Raw(sql, args...).Scan(&comments).Error; err != nil {
