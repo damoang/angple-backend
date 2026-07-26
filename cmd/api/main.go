@@ -1438,16 +1438,14 @@ func main() {
 
 			// Parse notice IDs from bo_notice
 			noticeIDs := gnurepo.ParseNoticeIDs(board.BoNotice)
-			if len(noticeIDs) == 0 {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
-				return
-			}
 
-			// Get notice posts from g5_write_{slug}
-			notices, err := gnuWriteRepo.FindNotices(slug, noticeIDs)
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
-				return
+			// 게시판 자체 공지가 없어도 소모임이면 아래에서 전역 공지가 붙을 수 있으므로
+			// 조기 반환하지 않는다 (소모임 91곳 중 55곳은 bo_notice 가 비어 있다).
+			var notices []*gnuboard.G5Write
+			if len(noticeIDs) > 0 {
+				if found, findErr := gnuWriteRepo.FindNotices(slug, noticeIDs); findErr == nil {
+					notices = found
+				}
 			}
 
 			// Transform to v1 format (all are notices)
@@ -1460,6 +1458,35 @@ func main() {
 			// Admin sees full (unmasked) IP
 			if middleware.GetUserLevel(c) >= 10 {
 				v1handler.OverrideIPForAdmin(items, notices)
+			}
+
+			// 소모임(gr_id='group')에는 전 게시판 공통 공지 1건을 맨 앞에 끼워 넣는다.
+			// 글을 91개로 복제하지 않고 원본 하나를 공유해야 댓글(의견)이 한곳에 모인다.
+			//
+			// ⚠️ 반드시 OverrideIPForAdmin 뒤에 넣는다 — items 와 notices 는 인덱스로 짝지어져
+			//    있어서 앞에 끼워 넣으면 관리자 IP 가 엉뚱한 글에 박힌다.
+			// 원본 글이 지워졌거나 설정이 깨져 있으면 조용히 건너뛴다(기존 공지는 그대로 나간다).
+			if board.GrID == "group" {
+				if ggn := service.LoadGroupGlobalNotice(db); ggn != nil && ggn.Board != slug {
+					srcIDs := []int{ggn.WrID}
+					if src, srcErr := gnuWriteRepo.FindNotices(ggn.Board, srcIDs); srcErr == nil && len(src) > 0 {
+						srcMap := v1handler.BuildNoticeIDMap(srcIDs)
+						srcItems := v1handler.TransformToV1Posts(src, srcMap)
+						if summaryMode {
+							srcItems = v1handler.TransformToV1PostsSummary(src, srcMap)
+						}
+						for _, it := range srcItems {
+							it["global_notice"] = true
+							it["source_board"] = ggn.Board
+						}
+						items = append(srcItems, items...)
+					}
+				}
+			}
+
+			// nil 이면 JSON 이 [] 가 아니라 null 로 나가 프론트가 깨진다.
+			if items == nil {
+				items = []map[string]any{}
 			}
 
 			response := gin.H{"success": true, "data": items}
@@ -2643,6 +2670,40 @@ func main() {
 				}
 			}
 
+			// from_board enrich — 전역 공지(소모임 공통 공지) 글에 한해, 각 댓글이 어느 소모임에서
+			// 작성됐는지(wr_1)를 실어 보낸다. 글이 1개뿐이라 이 값이 없으면 소모임 구분이 불가능하다.
+			// ⚠️ 전역 공지 글이 아니면 쿼리 자체를 하지 않는다 — 일반 글의 댓글 조회에 부담 0.
+			// wr_1 에 이미 없어진 게시판 slug 가 남아 있을 수 있어 JOIN 으로 현재 소모임만 인정한다.
+			if len(comments) > 0 {
+				if ggn := service.LoadGroupGlobalNotice(db); ggn != nil && ggn.Board == slug && ggn.WrID == id {
+					commentIDs := make([]int, 0, len(comments))
+					for _, cm := range comments {
+						commentIDs = append(commentIDs, cm.WrID)
+					}
+					type fromRow struct {
+						WrID    int    `gorm:"column:wr_id"`
+						Slug    string `gorm:"column:from_slug"`
+						Subject string `gorm:"column:from_subject"`
+					}
+					var fromRows []fromRow
+					_ = db.Table("g5_write_"+slug+" AS w").
+						Select("w.wr_id AS wr_id, COALESCE(w.wr_1, '') AS from_slug, COALESCE(b.bo_subject, '') AS from_subject").
+						Joins("LEFT JOIN g5_board b ON b.bo_table = w.wr_1 AND b.gr_id = 'group'").
+						Where("w.wr_id IN ?", commentIDs).
+						Scan(&fromRows).Error
+					fromMap := make(map[int]fromRow, len(fromRows))
+					for _, r := range fromRows {
+						fromMap[r.WrID] = r
+					}
+					for i, cm := range comments {
+						if r, ok := fromMap[cm.WrID]; ok && r.Slug != "" && r.Subject != "" {
+							transformed[i]["from_board"] = r.Slug
+							transformed[i]["from_board_name"] = r.Subject
+						}
+					}
+				}
+			}
+
 			// author_memo inline embed (W4-X) — 댓글 작성자별 현재 유저의 메모
 			if currentUserID := middleware.GetUserID(c); currentUserID != "" {
 				transformed = enrichWithAuthorMemo(db, currentUserID, transformed)
@@ -3428,6 +3489,9 @@ func main() {
 			var req struct {
 				Content  string `json:"content" binding:"required"`
 				ParentID *int   `json:"parent_id,omitempty"`
+				// 전역 공지(소모임 공통 공지)에 댓글을 달 때 어느 소모임에서 들어왔는지.
+				// 글이 1개뿐이라 이 값 말고는 소모임을 구분할 방법이 없다.
+				FromBoard *string `json:"from_board,omitempty"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "내용을 입력해주세요"})
@@ -3584,6 +3648,23 @@ func main() {
 
 				if err := tx.Table(tableName).Create(&createdComment).Error; err != nil {
 					return err
+				}
+
+				// 전역 공지(소모임 공통 공지)의 댓글이면 어느 소모임에서 들어와 썼는지 wr_1 에 남긴다.
+				//
+				// ⛔ from_board 는 클라이언트가 URL 로 보내는 값이라 위조 가능 → 소모임 화이트리스트 필수.
+				// ⛔ G5Write 구조체에 wr_1 을 넣지 않는 이유: wr_1 컬럼이 없는 게시판(promotion_my)이
+				//    있어서 구조체에 넣으면 전 게시판 INSERT 에 컬럼이 섞여 그 게시판 글쓰기가 깨진다.
+				//    글 작성부가 extras 를 별도 UPDATE 로 처리하는 것과 같은 이유·같은 방식이다.
+				// 표기용 부가 정보라 실패해도 댓글 작성 자체는 살린다.
+				if req.FromBoard != nil {
+					if ggn := service.LoadGroupGlobalNotice(db); ggn != nil &&
+						ggn.Board == slug && ggn.WrID == postID &&
+						service.IsGroupBoard(db, *req.FromBoard) {
+						_ = tx.Table(tableName).
+							Where("wr_id = ?", createdComment.WrID).
+							Update("wr_1", *req.FromBoard).Error
+					}
 				}
 
 				if err := adjustPostCommentCount(tx, slug, postID, 1); err != nil {
