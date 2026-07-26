@@ -2,6 +2,7 @@ package gnuboard
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -156,9 +157,15 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 				).Scan(&writeIDs)
 				if len(writeIDs) > 0 {
 					// Step 2: Batch PK lookup for full post data
+					//
+					// ⛔ 피드가 준 ID 를 그대로 믿지 않는다. mb_id·wr_is_comment 를 정본에서
+					//    다시 확인한다(다른 게시판 경로는 원래 이렇게 한다 — 아래 else 참고).
+					//    피드는 파생 데이터라 정본과 어긋날 수 있고, 실제로 어긋나 있었다:
+					//    남의 댓글이 내 글로 기록된 행이 6개 게시판에 2만 건 있었다(#13109).
+					//    이 조건이 있으면 그런 행은 조회 단계에서 걸러져 화면에 못 나온다.
 					r.db.Raw(
-						fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id, wr_deleted_at AS deleted_at FROM `g5_write_%s` WHERE wr_id IN ? ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
-						writeIDs,
+						fmt.Sprintf("SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment, wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id, wr_deleted_at AS deleted_at FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0 ORDER BY wr_datetime DESC", largeBoardID, largeBoardID),
+						writeIDs, mbID,
 					).Scan(&rows)
 				}
 			} else {
@@ -567,11 +574,78 @@ func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[strin
 	return rows, nil
 }
 
+// 피드 후보를 몇 배로 뽑을지. 오염 행이 걸러져도 limit 을 채우기 위한 여유분이다.
+// 실측(2026-07-26) 최악 게시판의 오염률이 약 46% 라 3배면 충분하다.
+const activityCandidateFactor = 3
+
+// 테이블명에 끼워 넣을 슬러그 검증. board_id 는 피드 테이블에서 온 값이라
+// 정본(g5_board)을 거치지 않았으므로 그대로 SQL 에 넣지 않는다.
+var activityBoardSlugRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// verifyActivityPosts 는 피드가 준 후보 중 정본에 실재하는 것만 남긴다.
+//
+// 게시판마다 테이블이 다르므로(g5_write_*) 보드별로 묶어 한 번씩 확인한다.
+// 후보가 limit*3 개(기본 15)라 보드 수는 많아야 몇 개이고, 조회는 전부 PK IN 이다.
+//
+// 확인 조건은 정본 UNION 경로(아래 fallback)와 같게 맞춘다:
+//
+//	본인 글이고 · 댓글이 아니고 · 비밀글이 아니고 · 신고로 잠기지 않은 것.
+//
+// 한 보드 조회가 실패해도 그 보드만 건너뛴다(컬럼 구성이 다른 보드가 있다).
+func (r *myPageRepository) verifyActivityPosts(
+	mbID string, candidates []gnuboard.ActivityPost, limit int,
+) []gnuboard.ActivityPost {
+	byBoard := make(map[string][]int)
+	for _, c := range candidates {
+		if c.BoardID == "" {
+			continue
+		}
+		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
+	}
+
+	confirmed := make(map[string]map[int]bool, len(byBoard))
+	for boardID, ids := range byBoard {
+		if !activityBoardSlugRe.MatchString(boardID) {
+			continue
+		}
+		var okIDs []int
+		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
+		q := fmt.Sprintf(
+			"SELECT wr_id FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
+				" AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL)"+
+				" AND (wr_7 IS NULL OR wr_7 != 'lock')", boardID)
+		if err := r.db.Raw(q, ids, mbID).Scan(&okIDs).Error; err != nil {
+			continue
+		}
+		m := make(map[int]bool, len(okIDs))
+		for _, id := range okIDs {
+			m[id] = true
+		}
+		confirmed[boardID] = m
+	}
+
+	out := make([]gnuboard.ActivityPost, 0, limit)
+	for _, c := range candidates {
+		if len(out) >= limit {
+			break
+		}
+		if m, ok := confirmed[c.BoardID]; ok && m[c.WrID] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // FindPublicPostsByMember returns recent public posts by a member.
 // Uses UNION ALL with per-subquery LIMIT for efficiency.
 // Each subquery leverages mb_id index + PK ordering.
 func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gnuboard.ActivityPost, error) {
 	var posts []gnuboard.ActivityPost
+	// 피드는 "후보 목록"이지 정답이 아니다. 제목까지 피드에 캐시돼 있어, 그대로 쓰면
+	// 정본을 한 번도 보지 않고 화면을 그리게 된다. 실제로 그래서 남의 댓글이 내 글로
+	// 떴고, 댓글 번호를 글 주소로 링크해 404 가 났다(#13109).
+	// → 후보를 넉넉히 뽑은 뒤 정본으로 확인된 것만 남긴다.
+	var candidates []gnuboard.ActivityPost
 	if err := r.db.Raw(
 		`SELECT write_id AS wr_id,
 		        COALESCE(title, '') AS wr_subject,
@@ -584,9 +658,13 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		    AND is_public = 1
 		  ORDER BY source_created_at DESC, id DESC
 		  LIMIT ?`,
-		mbID, limit,
-	).Scan(&posts).Error; err == nil {
-		return posts, nil
+		mbID, limit*activityCandidateFactor,
+	).Scan(&candidates).Error; err == nil && len(candidates) > 0 {
+		posts = r.verifyActivityPosts(mbID, candidates, limit)
+		if len(posts) > 0 {
+			return posts, nil
+		}
+		// 확인된 게 하나도 없으면 피드가 통째로 어긋난 것이다 → 아래 정본 UNION 으로 떨어진다.
 	}
 
 	boards, err := r.GetSearchableBoards()
