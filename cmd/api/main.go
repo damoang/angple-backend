@@ -1441,9 +1441,15 @@ func main() {
 
 			// 게시판 자체 공지가 없어도 소모임이면 아래에서 전역 공지가 붙을 수 있으므로
 			// 조기 반환하지 않는다 (소모임 91곳 중 55곳은 bo_notice 가 비어 있다).
+			// 조회 실패 시 degraded 로 표시해 캐시하지 않는다. 캐시해 버리면 일시적 DB 오류
+			// 한 번에 그 게시판 공지가 2분간 통째로 사라진다(기존 코드는 에러 시 캐시 전에 return 했다).
+			degraded := false
 			var notices []*gnuboard.G5Write
 			if len(noticeIDs) > 0 {
-				if found, findErr := gnuWriteRepo.FindNotices(slug, noticeIDs); findErr == nil {
+				found, findErr := gnuWriteRepo.FindNotices(slug, noticeIDs)
+				if findErr != nil {
+					degraded = true
+				} else {
 					notices = found
 				}
 			}
@@ -1492,7 +1498,7 @@ func main() {
 			response := gin.H{"success": true, "data": items}
 
 			// Cache the response
-			if !summaryMode && cacheService != nil {
+			if !summaryMode && cacheService != nil && !degraded {
 				_ = cacheService.SetNotices(ctx, slug, response)
 			}
 
