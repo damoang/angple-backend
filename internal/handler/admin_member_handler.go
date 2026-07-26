@@ -365,11 +365,14 @@ func (h *AdminMemberHandler) BulkUpdateLevel(c *gin.Context) {
 // mb_certify != "" 만 검사하므로, 이 값 하나로 모든 인증 권한이 열린다.
 const certifyManualValue = "abroad"
 
-// 실제 본인확인을 거쳐 들어온 값들. 관리자가 임의로 덮어쓰면 안 된다.
-var verifiedCertifyValues = map[string]bool{
-	"simple": true, // 간편인증 (DI 동반)
-	"ipin":   true, // 아이핀
-	"hp":     true, // 휴대폰
+// 이 화면이 다룰 수 있는 상태는 "미인증" 과 "수동 인증" 둘뿐이다.
+//
+// ⛔ 블랙리스트(simple/ipin/hp 만 차단)로 두면 admin·email 같은 그 밖의 값이 뚫린다.
+//
+//	실제로 DB 에 admin 1명·email 1명이 있어 관리자가 덮어쓸 수 있었다.
+//	허용 목록으로 뒤집어, 모르는 값은 전부 막는다.
+func isManageableCertify(v string) bool {
+	return v == "" || v == certifyManualValue
 }
 
 // CertifyMember handles POST /api/v1/admin/members/:mbId/certify
@@ -385,13 +388,19 @@ func (h *AdminMemberHandler) CertifyMember(c *gin.Context) {
 	mbID := c.Param("mbId")
 
 	var req struct {
-		// true = 인증 부여, false = 인증 해제
-		Certify bool `json:"certify"`
+		// true = 인증 부여, false = 인증 해제.
+		// ⛔ 포인터로 받는다. bool 로 받으면 필드를 빠뜨린 요청이 false 로 해석되어
+		//    의도치 않게 "해제"가 실행된다.
+		Certify *bool `json:"certify"`
 		// 왜 인증했는지. 나중에 "이 사람이 왜 인증됐나"를 추적할 유일한 단서다.
 		Reason string `json:"reason"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+	if req.Certify == nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "certify 값이 필요합니다", nil)
 		return
 	}
 
@@ -402,7 +411,7 @@ func (h *AdminMemberHandler) CertifyMember(c *gin.Context) {
 	}
 
 	var member gnuboard.G5Member
-	if err := h.db.Select("mb_id, mb_nick, mb_certify, mb_leave_date").
+	if err := h.db.Select("mb_id, mb_nick, mb_certify, mb_leave_date, mb_dupinfo").
 		Where("mb_id = ?", mbID).First(&member).Error; err != nil {
 		common.V2ErrorResponse(c, http.StatusNotFound, "회원을 찾을 수 없습니다", err)
 		return
@@ -417,7 +426,7 @@ func (h *AdminMemberHandler) CertifyMember(c *gin.Context) {
 
 	// 실제 본인확인을 거친 값은 관리자가 건드리지 않는다.
 	// 되돌릴 수 없는 정보(DI 동반 인증)를 화면 조작 한 번으로 지우면 안 된다.
-	if verifiedCertifyValues[prev] {
+	if !isManageableCertify(prev) {
 		common.V2ErrorResponse(c, http.StatusConflict,
 			"본인확인을 거친 회원("+prev+")은 이 화면에서 변경할 수 없습니다", nil)
 		return
@@ -425,7 +434,7 @@ func (h *AdminMemberHandler) CertifyMember(c *gin.Context) {
 
 	next := ""
 	action := common.AuditCertifyManualClear
-	if req.Certify {
+	if *req.Certify {
 		next = certifyManualValue
 		action = common.AuditCertifyManualSet
 	}
@@ -444,7 +453,9 @@ func (h *AdminMemberHandler) CertifyMember(c *gin.Context) {
 
 	// 감사 로그는 best-effort — 기록 실패가 인증 처리를 되돌리지 않는다.
 	common.WriteAudit(h.db, c, common.AuditEntry{
-		UserID:     middleware.GetUserID(c),
+		// ⛔ GetUserID 는 Bearer 경로에서 v2_users.id(숫자)를 준다. 기존 감사 로그는
+		//    전부 mb_id 라, 섞이면 행위자 추적이 깨진다. GetUsername 이 두 경로 모두 mb_id.
+		UserID:     middleware.GetUsername(c),
 		Action:     action,
 		Resource:   "member",
 		ResourceID: mbID,
@@ -453,13 +464,14 @@ func (h *AdminMemberHandler) CertifyMember(c *gin.Context) {
 			"from":     prev,
 			"to":       next,
 			"reason":   reason,
-			// 수동 인증은 DI 를 만들지 않는다는 사실을 로그에도 남겨 둔다.
-			"has_dupinfo": false,
+			// 이 회원이 명의 중복 검사(DI)를 이미 갖고 있었는지 — 실제 값을 남긴다.
+			// 미인증 회원 중에도 DI 보유자가 676명 있어 하드코딩하면 사실과 달라진다.
+			"had_dupinfo": strings.TrimSpace(member.MbDupInfo) != "",
 		},
 	})
 
 	msg := "인증 해제 완료"
-	if req.Certify {
+	if *req.Certify {
 		msg = "인증 처리 완료"
 	}
 	common.V2Success(c, gin.H{"message": msg, "mb_certify": next})
