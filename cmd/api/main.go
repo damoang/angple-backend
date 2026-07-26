@@ -1723,6 +1723,8 @@ func main() {
 		adminMemoGroup.PUT("/:mbId", adminMemberHandler.UpdateMember)
 		adminMemoGroup.POST("/:mbId/ban", adminMemberHandler.BanMember)
 		adminMemoGroup.POST("/:mbId/unban", adminMemberHandler.UnbanMember)
+		// 수동 실명인증 — 해외 앙님 등 국내 휴대폰 인증이 불가능한 회원용.
+		adminMemoGroup.POST("/:mbId/certify", adminMemberHandler.CertifyMember)
 		adminMemoGroup.POST("/bulk/level", adminMemberHandler.BulkUpdateLevel)
 
 		// GET /api/v1/admin/members/:mbId/memos — 특정 회원에 대한 메모 목록

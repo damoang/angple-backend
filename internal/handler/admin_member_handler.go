@@ -10,6 +10,7 @@ import (
 
 	"github.com/damoang/angple-backend/internal/common"
 	gnuboard "github.com/damoang/angple-backend/internal/domain/gnuboard"
+	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -40,6 +41,11 @@ type adminMemberResponse struct {
 	MbLeaveDate     *string `json:"mb_leave_date,omitempty"`
 	MbLeaveReason   *string `json:"mb_leave_reason,omitempty"`
 	MbInterceptDate *string `json:"mb_intercept_date,omitempty"`
+	// 실명인증 상태. 빈 문자열이면 미인증. 관리 화면이 인증/해제 버튼을 고르는 근거다.
+	MbCertify string `json:"mb_certify"`
+	// 명의 중복 검사(DI) 보유 여부. ⛔ DI 원본은 절대 내려보내지 않는다 — 존재 여부만.
+	// 수동 인증은 DI 를 만들지 않으므로, 인증돼 있어도 이 값이 false 일 수 있다.
+	HasDupinfo bool `json:"has_dupinfo"`
 }
 
 func toAdminMemberResponse(m *gnuboard.G5Member) adminMemberResponse {
@@ -53,6 +59,8 @@ func toAdminMemberResponse(m *gnuboard.G5Member) adminMemberResponse {
 		MbSignature: m.MbSignature,
 		MbMemo:      m.MbMemo,
 		MbDatetime:  m.MbDatetime.Format(time.RFC3339),
+		MbCertify:   m.MbCertify,
+		HasDupinfo:  strings.TrimSpace(m.MbDupInfo) != "",
 	}
 	if m.MbTodayLogin != "" && m.MbTodayLogin != "0000-00-00" {
 		resp.MbTodayLogin = &m.MbTodayLogin
@@ -348,4 +356,111 @@ func (h *AdminMemberHandler) BulkUpdateLevel(c *gin.Context) {
 		log.Printf("[admin] v2_users level 일괄 동기화 스킵: %v", err)
 	}
 	common.V2Success(c, gin.H{"message": fmt.Sprintf("%d명 레벨 변경 완료", len(req.MemberIDs))})
+}
+
+// 수동 실명인증에서 쓰는 mb_certify 값.
+//
+// 기존 해외인증 회원 195명이 이미 이 값을 쓰고 있어 그대로 따른다(새 값을 만들면
+// 과거 데이터와 통계가 갈린다). 인증 게이트들은 값의 종류를 보지 않고
+// mb_certify != "" 만 검사하므로, 이 값 하나로 모든 인증 권한이 열린다.
+const certifyManualValue = "abroad"
+
+// 실제 본인확인을 거쳐 들어온 값들. 관리자가 임의로 덮어쓰면 안 된다.
+var verifiedCertifyValues = map[string]bool{
+	"simple": true, // 간편인증 (DI 동반)
+	"ipin":   true, // 아이핀
+	"hp":     true, // 휴대폰
+}
+
+// CertifyMember handles POST /api/v1/admin/members/:mbId/certify
+//
+// 해외 앙님처럼 국내 휴대폰 인증이 불가능한 회원을 관리자가 직접 인증 처리한다.
+// 지금까지는 DB 를 직접 고쳐 왔다(이 값을 설정하는 코드가 없었다).
+//
+// ⛔ 수동 인증은 DI(mb_dupinfo)를 만들지 않는다. 명의 중복 검사를 거치지 않은 채
+//
+//	인증 회원 권한(인증필수 게시판 6곳·쪽지 발송·자동 등급 승급)이 부여되므로
+//	사유를 필수로 받고 감사 로그에 남긴다.
+func (h *AdminMemberHandler) CertifyMember(c *gin.Context) {
+	mbID := c.Param("mbId")
+
+	var req struct {
+		// true = 인증 부여, false = 인증 해제
+		Certify bool `json:"certify"`
+		// 왜 인증했는지. 나중에 "이 사람이 왜 인증됐나"를 추적할 유일한 단서다.
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+
+	reason := strings.TrimSpace(req.Reason)
+	if len([]rune(reason)) < 10 {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "사유를 10자 이상 입력해주세요", nil)
+		return
+	}
+
+	var member gnuboard.G5Member
+	if err := h.db.Select("mb_id, mb_nick, mb_certify, mb_leave_date").
+		Where("mb_id = ?", mbID).First(&member).Error; err != nil {
+		common.V2ErrorResponse(c, http.StatusNotFound, "회원을 찾을 수 없습니다", err)
+		return
+	}
+
+	if strings.TrimSpace(member.MbLeaveDate) != "" {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "탈퇴한 회원은 인증 처리할 수 없습니다", nil)
+		return
+	}
+
+	prev := strings.TrimSpace(member.MbCertify)
+
+	// 실제 본인확인을 거친 값은 관리자가 건드리지 않는다.
+	// 되돌릴 수 없는 정보(DI 동반 인증)를 화면 조작 한 번으로 지우면 안 된다.
+	if verifiedCertifyValues[prev] {
+		common.V2ErrorResponse(c, http.StatusConflict,
+			"본인확인을 거친 회원("+prev+")은 이 화면에서 변경할 수 없습니다", nil)
+		return
+	}
+
+	next := ""
+	action := common.AuditCertifyManualClear
+	if req.Certify {
+		next = certifyManualValue
+		action = common.AuditCertifyManualSet
+	}
+
+	if prev == next {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "이미 같은 상태입니다", nil)
+		return
+	}
+
+	if err := h.db.Model(&gnuboard.G5Member{}).
+		Where("mb_id = ?", mbID).
+		Update("mb_certify", next).Error; err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "인증 처리 실패", err)
+		return
+	}
+
+	// 감사 로그는 best-effort — 기록 실패가 인증 처리를 되돌리지 않는다.
+	common.WriteAudit(h.db, c, common.AuditEntry{
+		UserID:     middleware.GetUserID(c),
+		Action:     action,
+		Resource:   "member",
+		ResourceID: mbID,
+		Details: map[string]any{
+			"nickname": member.MbNick,
+			"from":     prev,
+			"to":       next,
+			"reason":   reason,
+			// 수동 인증은 DI 를 만들지 않는다는 사실을 로그에도 남겨 둔다.
+			"has_dupinfo": false,
+		},
+	})
+
+	msg := "인증 해제 완료"
+	if req.Certify {
+		msg = "인증 처리 완료"
+	}
+	common.V2Success(c, gin.H{"message": msg, "mb_certify": next})
 }
