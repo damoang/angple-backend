@@ -17,6 +17,12 @@ const (
 	AuditLeaveCancel     = "member.leave.cancel"      // 본인 탈퇴 취소(숙려 중)
 	AuditLeaveAdminSet   = "member.leave.admin_set"   // 관리자 강제 탈퇴
 	AuditLeaveAdminClear = "member.leave.admin_clear" // 관리자 탈퇴 해제
+
+	// 수동 실명인증 — 해외 앙님처럼 국내 휴대폰 인증이 불가능한 경우 관리자가 직접 처리한다.
+	// ⛔ 수동 인증은 DI(mb_dupinfo)를 만들지 않는다. 즉 명의 중복 검사를 거치지 않은 채
+	//    인증 회원 권한(인증필수 게시판·쪽지·자동승급)이 부여된다. 그래서 사유를 반드시 남긴다.
+	AuditCertifyManualSet   = "member.certify.manual_set"   // 관리자 수동 인증
+	AuditCertifyManualClear = "member.certify.manual_clear" // 관리자 수동 인증 해제
 )
 
 // AuditEntry 는 audit_logs 한 행을 표현한다.
