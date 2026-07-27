@@ -277,27 +277,57 @@ func adjustPostCommentCount(tx *gorm.DB, boardID string, postID int, delta int) 
 // bugBoardID 는 버그·개선 제보 게시판이다.
 const bugBoardID = "bug"
 
-// bugBoardLockCommentCount 는 제보가 잠기는 댓글 수다.
+// bugBoardAIAuthor 는 접수·처리 안내를 자동으로 다는 계정이다.
+const bugBoardAIAuthor = "ai"
+
+// bugBoardLockCommentCount 는 제보가 잠기는 "사람 답변" 수다.
 //
-// 제보가 올라오면 자동 접수 댓글이 1개 달린다. 따라서 2개째 댓글이 곧
-// "사람이 실제로 답변했다"는 신호이고, 그 시점부터 이력을 보존한다.
+// 봇 댓글과 작성자 본인 댓글은 세지 않는다. countBugBoardHumanReplies 참조.
 const bugBoardLockCommentCount = 2
 
-// isBugBoardHistoryLocked 는 버그게시판 제보가 이력 보존 대상인지 판정한다.
+// countBugBoardHumanReplies 는 제보에 달린 사람의 답변 수를 센다.
+//
+// 봇(ai)과 작성자 본인의 댓글은 빼고 센다. 봇은 제보마다 접수 안내와 처리 안내를
+// 다는데, 이걸 같이 세면 아무도 답하지 않은 제보가 저 혼자 잠긴다.
+// 실측(2026-07-27): 최근 30일 제보 86건 중 73건에 봇 댓글이 2개 이상 달렸고,
+// 잠긴 2,087건 중 512건은 댓글이 전부 봇이었다.
+//
+// 셀 수 없으면 0 을 준다(잠그지 않는다). 조회 실패로 잠그면 정당한 수정까지
+// 막히는데, 이력 보존은 그 대가를 치를 만큼 급하지 않다.
+func countBugBoardHumanReplies(db *gorm.DB, boardID string, postID int, authorID string) int {
+	q := db.Table(fmt.Sprintf("g5_write_%s", boardID)).
+		Where("wr_is_comment = 1 AND wr_parent = ?", postID).
+		Where("wr_deleted_at IS NULL").
+		Where("mb_id <> ?", bugBoardAIAuthor)
+	if authorID != "" {
+		q = q.Where("mb_id <> ?", authorID)
+	}
+
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return 0
+	}
+	return int(n)
+}
+
+// isBugBoardHistoryLocked 는 버그게시판 제보가 수정 잠금 대상인지 판정한다.
 //
 // 버그게시판은 다음 사람이 같은 증상을 겪을 때 찾아보는 기록이다. 답변이 붙은 뒤
-// 원글이 바뀌거나 사라지면 아래 답변들이 무엇에 대한 것인지 알 수 없게 된다.
-// 실측(2026-07-26): 완료 처리 후 삭제 23건·수정 182건.
+// 원글이 바뀌면 아래 답변들이 무엇에 대한 것인지 알 수 없게 된다.
+// 실측(2026-07-26): 완료 처리 후 수정 182건.
 //
-// 운영진(level>=10)은 제외한다 — 개인정보 노출처럼 실제로 지워야 할 일이 있다.
-func isBugBoardHistoryLocked(boardID string, commentCount int, userLevel int) bool {
+// 삭제는 막지 않는다 — 소프트 삭제라 이력이 DB 에 남고, 무엇보다 잊혀질 권리가 있다.
+// 삭제 핸들러의 주석 참조.
+//
+// 운영진(level>=10)은 제외한다 — 개인정보 노출처럼 실제로 손대야 할 일이 있다.
+func isBugBoardHistoryLocked(boardID string, humanReplyCount int, userLevel int) bool {
 	if boardID != bugBoardID {
 		return false
 	}
 	if userLevel >= 10 {
 		return false
 	}
-	return commentCount >= bugBoardLockCommentCount
+	return humanReplyCount >= bugBoardLockCommentCount
 }
 
 func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, commentID int, deletedBy string, deletedAt time.Time) (bool, error) {
@@ -3874,15 +3904,15 @@ func main() {
 				return
 			}
 
-			// 버그게시판: 답변이 붙은 뒤에는 본문을 바꿀 수 없다. admin(level>=10) 예외.
+			// 버그게시판: 사람 답변이 붙은 뒤에는 본문을 바꿀 수 없다. admin(level>=10) 예외.
 			//
 			// 제보 내용이 나중에 바뀌면 아래 답변들이 무엇에 대한 답인지 알 수 없게 되고,
 			// 같은 증상을 겪는 다음 사람이 참고할 이력이 사라진다.
 			// 실측(2026-07-26): 완료 처리된 글 182건이 그 뒤에 수정됐다.
 			//
-			// 기준을 댓글 2개로 둔 이유: 제보 직후 자동 접수 댓글이 1개 달리므로,
-			// 사람이 실제로 답변한 시점이 곧 2개째다.
-			if isBugBoardHistoryLocked(slug, post.WrComment, userLevel) {
+			// post.WrComment(전체 댓글 수)를 쓰지 않는다. 그 값에는 봇 댓글이 섞여 있어
+			// 아무도 답하지 않은 제보까지 잠근다. countBugBoardHumanReplies 주석 참조.
+			if isBugBoardHistoryLocked(slug, countBugBoardHumanReplies(db, slug, postID, post.MbID), userLevel) {
 				c.JSON(http.StatusForbidden, gin.H{
 					"success": false,
 					"error":   "답변이 달린 제보는 수정할 수 없습니다. 내용을 덧붙이실 일이 있으면 댓글로 남겨 주세요.",
@@ -4435,18 +4465,21 @@ func main() {
 				return
 			}
 
-			// 버그게시판: 답변이 붙은 뒤에는 삭제도 막는다(수정 차단과 같은 이유).
-			// 다만 그냥 막기만 하면 개인정보가 드러난 경우 등 실제 사정이 있는 분이 곤란해지므로,
-			// 익명화라는 대안을 안내한다. 익명화는 운영진이 처리한다(관리자 회원 관리 화면).
-			// 실측(2026-07-26): 완료 처리된 글 23건이 그 뒤에 삭제되어 이력이 사라졌다.
-			if isBugBoardHistoryLocked(slug, post.WrComment, userLevel) {
-				c.JSON(http.StatusForbidden, gin.H{
-					"success": false,
-					"error": "답변이 달린 제보는 삭제할 수 없습니다. " +
-						"닉네임이나 내용이 드러나는 것이 걱정되시면 익명화를 도와드리니 문의해 주세요.",
-				})
-				return
-			}
+			// 버그게시판도 삭제는 막지 않는다.
+			//
+			// #595 에서 삭제까지 막았으나 되돌린다. 이유는 두 가지다.
+			//
+			// 첫째, 삭제를 막아도 목적을 이루지 못한다. 여기 삭제는 소프트 삭제라
+			// 행이 남고 wr_name 도 작성 시점 스냅샷 그대로다. 게다가 원글만 지워도
+			// 댓글이 남아 내용을 유추할 수 있다. 지우고 싶은 분이 실제로 원하는 것은
+			// 삭제가 아니라 비식별화인데, 그건 삭제를 막는 것과 무관하게 처리한다.
+			//
+			// 둘째, 잊혀질 권리다. 실제로 개인정보보호법을 들어 삭제를 요구한 사례가
+			// 있었고(2026-07-27), 탈퇴하는 분들이 버그 제보도 함께 지우기를 원한다.
+			//
+			// 이력 보존은 수정 잠금이 담당한다. 소프트 삭제는 행이 DB 에 남아
+			// 운영 이력이 보존되지만, 수정은 다음 사람이 볼 내용 자체를 바꿔버린다.
+			// 실측(2026-07-26)도 수정 182건 대 삭제 23건으로 수정이 8배였다.
 
 			// 관리자(level >= 10)는 즉시 삭제
 			if userLevel >= 10 {
