@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -37,6 +39,9 @@ type withdrawalInfo struct {
 	Deadline      string `json:"deadline"`
 	DaysRemaining int    `json:"days_remaining"`
 	Cancelable    bool   `json:"cancelable"`
+	// Cancelable=false 인 이유를 프론트가 그대로 보여줄 수 있게 담는다.
+	// 취소 가능하면 빈 문자열.
+	CancelBlockedReason string `json:"cancel_blocked_reason,omitempty"`
 }
 
 // 셀프 서비스 취소 흐름에서 반환하는 도메인 에러.
@@ -45,7 +50,72 @@ var (
 	errGraceElapsed     = errors.New("숙려기간(30일)이 경과하여 탈퇴를 취소할 수 없습니다")
 	errAlreadyAnonymize = errors.New("이미 익명화되어 복구할 수 없습니다")
 	errCancelDisabled   = errors.New("탈퇴 취소 기능이 현재 제공되지 않습니다. 문의가 필요하시면 고객센터로 연락 주세요")
+	// 이용제한 중 탈퇴한 계정은 숙려기간이 남아 있어도 복원하지 않는다(2026-07-29 운영 결정).
+	// 탈퇴 자체는 막지 않는다 — 나가는 것은 자유이고, 돌아오는 것만 제한한다.
+	errDisciplinedLeave = errors.New("이용제한 중 탈퇴한 계정은 복원할 수 없습니다")
 )
+
+// leaveHistoryTable 은 탈퇴·복원 이력 테이블이다.
+// ⛔ 운영은 AutoMigrate 가 돌지 않는다. DDL 이 선행되어야 한다
+//
+//	(triage/ddl_member_leave_history_step1.sql).
+const leaveHistoryTable = "g5_da_member_leave_history"
+
+// leaveHistoryRow 는 이력 한 행. 이벤트 시점의 g5_member 스냅샷을 박제한다.
+type leaveHistoryRow struct {
+	MbID           string    `gorm:"column:mb_id"`
+	Event          string    `gorm:"column:event"`
+	EventAt        time.Time `gorm:"column:event_at"`
+	LeaveDate      string    `gorm:"column:leave_date"`
+	InterceptDate  string    `gorm:"column:intercept_date"`
+	WasDisciplined int       `gorm:"column:was_disciplined"`
+	MbLevel        int       `gorm:"column:mb_level"`
+	Reason         string    `gorm:"column:reason"`
+	Source         string    `gorm:"column:source"`
+}
+
+// recordLeaveHistory 는 이력을 남긴다. 실패해도 본 흐름을 막지 않는다(best-effort).
+//
+// ⛔ 단, `leave` 이벤트 기록 실패는 나중에 "제한 중 탈퇴였다"는 근거를 잃는 것이므로
+//
+//	호출부에서 로그를 남겨 추적할 수 있게 error 를 그대로 돌려준다.
+func recordLeaveHistory(db *gorm.DB, row leaveHistoryRow) error {
+	// UNIQUE(mb_id, event, event_at) 로 중복이 막히므로 재시도해도 안전하다.
+	return db.Exec(`
+		INSERT IGNORE INTO `+leaveHistoryTable+`
+			(mb_id, event, event_at, leave_date, intercept_date, was_disciplined, mb_level, reason, source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		row.MbID, row.Event, row.EventAt, row.LeaveDate, row.InterceptDate,
+		row.WasDisciplined, row.MbLevel, row.Reason, row.Source).Error
+}
+
+// disciplinedAtLastLeave 는 "가장 최근 탈퇴 신청 시점에 이용제한 중이었는가"를 판정한다.
+//
+// ⛔ 왜 g5_member.mb_intercept_date 를 실시간으로 보면 안 되는가:
+//
+//	internal/cron/discipline_release.go:79 가 제한 만료 시
+//	`UPDATE g5_member SET mb_intercept_date = ''` 를 실행한다(매시간).
+//	따라서 철회 시점에 원본을 보면, 숙려 30일 사이에 제한이 만료된 회원은
+//	"제한 없었음"으로 판정되어 **기다렸다가 복원**하는 우회로가 열린다.
+//	기준은 언제나 **탈퇴를 신청한 그 시점**이고, 그 값은 이력 테이블에만 박제되어 있다.
+//
+// 이력이 없으면 false(허용) 를 돌려준다 — 2026-07-25 이전 탈퇴자는 소스가 없다.
+// 없는 죄를 만들지 않는 방향이며, 백필로 숙려중 대상은 이미 채워두었다.
+func disciplinedAtLastLeave(db *gorm.DB, mbID string) (bool, error) {
+	var flag int
+	err := db.Raw(`
+		SELECT was_disciplined FROM `+leaveHistoryTable+`
+		 WHERE mb_id = ? AND event = 'leave'
+		 ORDER BY event_at DESC LIMIT 1`, mbID).Row().Scan(&flag)
+	if err != nil {
+		// 행이 없으면 sql.ErrNoRows — 제한 이력 없음으로 본다.
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return flag == 1, nil
+}
 
 // Leave handles POST /api/v1/members/me/leave
 // 본인 계정의 mb_leave_date=오늘, mb_leave_reason 저장(탈퇴 신청 = 숙려 시작).
@@ -76,6 +146,28 @@ func (h *MemberLeaveHandler) Leave(c *gin.Context) {
 		return
 	}
 
+	wasDisciplined := strings.TrimSpace(before.MbInterceptDate) != ""
+
+	// 이력 테이블에 박제. audit_logs 와 별도로 남기는 이유는, audit 은 로그 성격이라
+	// 정리·아카이빙 대상이 되기 쉽고 실패가 조용히 넘어가기 때문이다.
+	// 제재 판정의 근거는 로그가 아니라 데이터로 들고 있어야 한다.
+	if err := recordLeaveHistory(h.db, leaveHistoryRow{
+		MbID:           mbID,
+		Event:          "leave",
+		EventAt:        time.Now(),
+		LeaveDate:      info.LeaveDate,
+		InterceptDate:  strings.TrimSpace(before.MbInterceptDate),
+		WasDisciplined: boolToInt(wasDisciplined),
+		MbLevel:        before.MbLevel,
+		Reason:         truncate(strings.TrimSpace(req.Reason), 255),
+		Source:         "app",
+	}); err != nil {
+		// 탈퇴 자체는 이미 성사됐으므로 막지 않는다. 다만 이 실패는
+		// "제한 중 탈퇴였다"는 근거를 잃는 것이라 반드시 남긴다.
+		log.Printf("[leave-history] record leave failed mb_id=%s disciplined=%v: %v",
+			mbID, wasDisciplined, err)
+	}
+
 	common.WriteAudit(h.db, c, common.AuditEntry{
 		UserID:     mbID,
 		Action:     common.AuditLeaveRequest,
@@ -85,7 +177,7 @@ func (h *MemberLeaveHandler) Leave(c *gin.Context) {
 			"leave_date":      info.LeaveDate,
 			"leave_reason":    strings.TrimSpace(req.Reason),
 			"intercept_date":  before.MbInterceptDate,
-			"was_disciplined": strings.TrimSpace(before.MbInterceptDate) != "",
+			"was_disciplined": wasDisciplined,
 			"mb_level":        before.MbLevel,
 		},
 	})
@@ -116,7 +208,7 @@ func (h *MemberLeaveHandler) CancelLeave(c *gin.Context) {
 		case errors.Is(err, errNotWithdrawing):
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": errNotWithdrawing.Error()})
 		case errors.Is(err, errGraceElapsed), errors.Is(err, errAlreadyAnonymize),
-			errors.Is(err, errCancelDisabled):
+			errors.Is(err, errCancelDisabled), errors.Is(err, errDisciplinedLeave):
 			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "탈퇴 취소 처리 실패"})
@@ -189,7 +281,16 @@ func applySelfLeave(db *gorm.DB, mbID, reason string, now time.Time) (withdrawal
 		member.MbLeaveDate = updates["mb_leave_date"].(string)
 	}
 
-	return buildWithdrawalInfo(member.MbLeaveDate, member.MbNick, now), nil
+	info := buildWithdrawalInfo(member.MbLeaveDate, member.MbNick, now)
+	// 이용제한 중 탈퇴면 복원 대상이 아니다 — 화면이 버튼을 감출 수 있게 알려준다.
+	// (실제 차단은 cancelSelfLeave 가 fail-closed 로 처리한다)
+	if info.Cancelable {
+		if blocked, err := disciplinedAtLastLeave(db, mbID); err == nil && blocked {
+			info.Cancelable = false
+			info.CancelBlockedReason = errDisciplinedLeave.Error()
+		}
+	}
+	return info, nil
 }
 
 // isLeaveCancelEnabled 는 탈퇴 취소(복원) 기능의 on/off 를 읽는다.
@@ -255,9 +356,60 @@ func cancelSelfLeave(db *gorm.DB, mbID string, now time.Time) error {
 		return errAlreadyAnonymize
 	}
 
+	// 이용제한 중 탈퇴한 계정은 숙려기간이 남아 있어도 복원하지 않는다(2026-07-29 운영 결정).
+	// ⛔ 판정 근거는 이력 테이블이다. g5_member.mb_intercept_date 를 보면 안 된다 —
+	//    discipline_release 크론이 만료 시 지우므로 "기다렸다가 복원"이 가능해진다.
+	disciplined, err := disciplinedAtLastLeave(db, mbID)
+	if err != nil {
+		// ⛔ 조회 실패 시 통과시키지 않는다. 제재 판정은 fail-closed 여야 한다.
+		//    이력 테이블이 없거나(DDL 미적용) DB 가 흔들리는 상황에서
+		//    막아야 할 복원을 통과시키는 쪽이 훨씬 나쁘다.
+		return err
+	}
+	if disciplined {
+		return errDisciplinedLeave
+	}
+
 	// mb_leave_date / mb_leave_reason 만 초기화. mb_intercept_date 는 절대 포함하지 않는다.
-	return db.Table("g5_member").Where("mb_id = ?", mbID).
-		Updates(map[string]any{"mb_leave_date": "", "mb_leave_reason": ""}).Error
+	if err := db.Table("g5_member").Where("mb_id = ?", mbID).
+		Updates(map[string]any{"mb_leave_date": "", "mb_leave_reason": ""}).Error; err != nil {
+		return err
+	}
+
+	// 복원 이력 기록 — 반복 탈퇴·복원(bug/13133 ②케이스)을 추적하려면 이 행이 필요하다.
+	if err := recordLeaveHistory(db, leaveHistoryRow{
+		MbID:           mbID,
+		Event:          "cancel",
+		EventAt:        now,
+		LeaveDate:      member.MbLeaveDate,
+		InterceptDate:  strings.TrimSpace(member.MbInterceptDate),
+		WasDisciplined: 0, // 여기까지 왔다는 것은 제한 중 탈퇴가 아니었다는 뜻이다
+		MbLevel:        member.MbLevel,
+		Source:         "app",
+	}); err != nil {
+		// 복원 자체는 이미 성사됐다. 이력만 실패한 것이므로 막지 않고 남긴다.
+		log.Printf("[leave-history] record cancel failed mb_id=%s: %v", mbID, err)
+	}
+	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// truncate 는 룬 기준으로 자른다.
+// ⛔ 바이트로 자르면 한글이 중간에서 끊겨 깨진 문자가 저장된다.
+//
+//	DB 컬럼도 VARCHAR(255) = 255 '문자' 라 룬 기준이 맞다.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 func buildWithdrawalInfo(leaveDate, mbNick string, now time.Time) withdrawalInfo {
