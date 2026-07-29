@@ -1580,6 +1580,23 @@ func main() {
 		notiGroup.POST("/group/read", notiHandler.MarkGroupAsRead)
 		notiGroup.DELETE("/:id", notiHandler.Delete)
 		notiGroup.DELETE("/group", notiHandler.DeleteGroup)
+
+		// v2 미러 — 공식 앱은 v2 계약으로 알림을 부르는데(GET /api/v2/notifications/unread-count 등)
+		// 알림 라우트가 v1 에만 있어 전량 404 였다(운영 로그상 앱 요청의 48%). 동일 핸들러를 v2 로 별칭 등록.
+		// RemapUserIDToMbID: 핸들러가 GetUserID(=mb_id 기대)로 g5_na_noti 를 조회하는데 앱 Bearer 토큰의
+		// GetUserID 는 숫자 v2_users.id 라, remap 으로 mb_id 로 맞춰야 알림이 매칭된다(리액션과 동일 패턴).
+		notiGroupV2 := router.Group("/api/v2/notifications", middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID())
+		notiGroupV2.GET("/unread-count", notiHandler.GetUnreadCount)
+		notiGroupV2.GET("", notiHandler.GetNotifications)
+		notiGroupV2.GET("/grouped", notiHandler.GetGroupedNotifications)
+		notiGroupV2.GET("/preferences", notiHandler.GetPreferences)
+		notiGroupV2.PUT("/preferences", notiHandler.UpdatePreferences)
+		notiGroupV2.POST("/:id/read", notiHandler.MarkAsRead)
+		notiGroupV2.POST("/read-all", notiHandler.MarkAllAsRead)
+		notiGroupV2.POST("/group/read", notiHandler.MarkGroupAsRead)
+		notiGroupV2.DELETE("/:id", notiHandler.Delete)
+		notiGroupV2.DELETE("/group", notiHandler.DeleteGroup)
+
 		// v1 members memo — 회원이 다른 회원에 대해 남긴 메모 (g5_member_memo)
 		memberMemoGroup := router.Group("/api/v1/members/:id/memo")
 		memberMemoGroup.Use(middleware.JWTAuth(jwtManager))
