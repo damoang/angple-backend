@@ -111,7 +111,8 @@ type postReactionBody struct {
 
 // PostPostReaction handles POST /api/v2/boards/:slug/posts/:id/reactions
 // 가드: 로그인(라우트 auth) + 이용제한(라우트 banCheck) + 실명인증(checkCertification) +
-//       리액션 sanitize/정규식/길이 + 종류 20개 제한(비관리자). 자기글 방지는 댓글 전용이라 게시글엔 미적용.
+//
+//	리액션 sanitize/정규식/길이 + 종류 20개 제한(비관리자). 자기글 방지는 댓글 전용이라 게시글엔 미적용.
 func (h *V2Handler) PostPostReaction(c *gin.Context) {
 	slug := c.Param("slug")
 	wrID, err := strconv.Atoi(c.Param("id"))
