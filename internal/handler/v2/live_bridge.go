@@ -243,6 +243,22 @@ func (h *V2Handler) listPostsLive(c *gin.Context, slug string) {
 		boardName = b.Name
 	}
 
+	// 존재하지 않는 보드(테이블 없음) 방어: g5_write_{slug} 조회 전에 g5_board 레지스트리로 확인.
+	// empathy 같은 "가상 화면"(웹은 집계로 만드는 것)을 게시판 슬러그로 부르면 g5_write_empathy 가 없어
+	// SQL 에러 → 500 이 나던 것을, 명시적 404 로 바꾼다(앱이 재시도 태우지 않도록). 참고: appapihealth 보고서.
+	var noticeIDs map[int]bool
+	if h.gnuBoardRepo != nil {
+		gb, e := h.gnuBoardRepo.FindByID(slug)
+		if e != nil || gb == nil {
+			common.V2ErrorResponse(c, http.StatusNotFound, "존재하지 않는 게시판입니다", e)
+			return
+		}
+		noticeIDs = liveNoticeIDs(gb)
+		if boardName == "" {
+			boardName = gb.BoSubject
+		}
+	}
+
 	page, perPage := parsePagination(c)
 	searchField := c.Query("sfl")
 	searchQuery := c.Query("stx")
@@ -259,16 +275,6 @@ func (h *V2Handler) listPostsLive(c *gin.Context, slug string) {
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "게시글 목록 조회 실패", err)
 		return
-	}
-
-	var noticeIDs map[int]bool
-	if h.gnuBoardRepo != nil {
-		if gb, e := h.gnuBoardRepo.FindByID(slug); e == nil {
-			noticeIDs = liveNoticeIDs(gb)
-			if boardName == "" {
-				boardName = gb.BoSubject
-			}
-		}
 	}
 
 	mbIDs := make([]string, 0, len(posts))
