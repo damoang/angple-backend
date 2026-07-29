@@ -309,6 +309,8 @@ func (h *V2Handler) getPostLive(c *gin.Context, slug string) {
 	}
 
 	authors := h.resolveLiveAuthors([]string{w.MbID})
+	// 리액션은 상세 응답에 임베드하지 않는다(목록의 reactions:{👍:good} 요약과 타입 충돌 방지).
+	// 앱은 전용 GET /boards/:slug/posts/:id/reactions 로 실제 da_reaction 을 따로 조회한다(웹과 동일 분리).
 	common.V2Success(c, h.toV2Post(w, boardID, slug, boardName, isNotice, authors, true))
 }
 
