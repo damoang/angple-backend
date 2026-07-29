@@ -71,6 +71,13 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	boardPosts.GET("/:id/revisions", auth, h.GetPostRevisions)
 	boardPosts.POST("/:id/revisions/:version/restore", auth, middleware.RequireAdmin(), h.RestoreRevision)
 
+	// 리액션(da_reaction) — GET 공개(비로그인 choose=false), POST 는 로그인+이용제한(banCheck) 게이트.
+	// RemapUserIDToMbID: da_reaction.member_id / banCheck / checkCertification 은 모두 mb_id 기준인데
+	// Bearer(앱) 토큰의 GetUserID 는 숫자 v2_users.id 라 → remap 으로 mb_id 로 맞춰야 웹과 SSOT/가드 일치.
+	// (쓰기 라우트가 main.go 에서 쓰는 검증된 어댑터와 동일 패턴.) JWTAuth 이후에 배치.
+	boardPosts.GET("/:id/reactions", middleware.RemapUserIDToMbID(), h.GetPostReactions)
+	boardPosts.POST("/:id/reactions", auth, middleware.RemapUserIDToMbID(), banCheck, h.PostPostReaction)
+
 	// Comments (nested under posts)
 	comments := boardPosts.Group("/:id/comments")
 	comments.GET("", h.ListComments)
