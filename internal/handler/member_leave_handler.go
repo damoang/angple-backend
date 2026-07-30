@@ -15,6 +15,7 @@ import (
 	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MemberLeaveHandler 는 본인 계정 탈퇴 신청/취소(숙려기간) 셀프 서비스 엔드포인트를 담당한다.
@@ -81,12 +82,14 @@ type leaveHistoryRow struct {
 //	호출부에서 로그를 남겨 추적할 수 있게 error 를 그대로 돌려준다.
 func recordLeaveHistory(db *gorm.DB, row leaveHistoryRow) error {
 	// UNIQUE(mb_id, event, event_at) 로 중복이 막히므로 재시도해도 안전하다.
-	return db.Exec(`
-		INSERT IGNORE INTO `+leaveHistoryTable+`
-			(mb_id, event, event_at, leave_date, intercept_date, was_disciplined, mb_level, reason, source)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		row.MbID, row.Event, row.EventAt, row.LeaveDate, row.InterceptDate,
-		row.WasDisciplined, row.MbLevel, row.Reason, row.Source).Error
+	//
+	// ⛔ 여기에 `INSERT IGNORE` 를 직접 쓰지 말 것 — MySQL 전용 문법이다.
+	//    테스트는 SQLite(gorm.io/driver/sqlite)로 돌아서 `INSERT IGNORE` 가 파싱되지 않는다
+	//    (SQLite 는 `INSERT OR IGNORE`). GORM 의 OnConflict 절에 맡기면
+	//    MySQL 에서는 INSERT IGNORE, SQLite 에서는 ON CONFLICT DO NOTHING 으로 각각 생성된다.
+	return db.Table(leaveHistoryTable).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&row).Error
 }
 
 // disciplinedAtLastLeave 는 "가장 최근 탈퇴 신청 시점에 이용제한 중이었는가"를 판정한다.

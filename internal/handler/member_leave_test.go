@@ -28,6 +28,28 @@ func newLeaveTestDB(t *testing.T) *gorm.DB {
 	)`).Error; err != nil {
 		t.Fatalf("create table: %v", err)
 	}
+	// 이력 테이블. 운영은 수동 DDL(triage/ddl_member_leave_history_step1.sql)이라
+	// AutoMigrate 가 만들어주지 않는다 → 테스트도 직접 만들어야 한다.
+	//
+	// ⛔ UNIQUE(mb_id, event, event_at) 를 빼지 말 것. recordLeaveHistory 의
+	//    중복 무시(OnConflict DoNothing)가 이 제약에 걸려서 동작한다.
+	//    제약이 없으면 재시도 시 이력이 중복 적재되고 테스트는 통과해버린다.
+	if err := db.Exec(`CREATE TABLE g5_da_member_leave_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		mb_id TEXT NOT NULL,
+		event TEXT NOT NULL,
+		event_at DATETIME NOT NULL,
+		leave_date TEXT NOT NULL DEFAULT '',
+		intercept_date TEXT NOT NULL DEFAULT '',
+		was_disciplined INTEGER NOT NULL DEFAULT 0,
+		mb_level INTEGER NOT NULL DEFAULT 0,
+		reason TEXT NOT NULL DEFAULT '',
+		source TEXT NOT NULL DEFAULT 'app',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (mb_id, event, event_at)
+	)`).Error; err != nil {
+		t.Fatalf("create leave history table: %v", err)
+	}
 	return db
 }
 
