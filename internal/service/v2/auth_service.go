@@ -72,6 +72,36 @@ type WithdrawalGraceInfo struct {
 	LeaveDate     string `json:"leave_date"`
 	Deadline      string `json:"deadline"`
 	DaysRemaining int    `json:"days_remaining"`
+	// Cancelable=false 면 프론트는 복원 버튼을 노출하지 않고 아래 사유를 보여준다.
+	// ⛔ 버튼을 숨기는 것만으로는 보호가 되지 않는다(API 직접 호출). 서버측 차단은
+	//    member_leave_handler.go 의 cancelSelfLeave 가 담당한다. 여기는 화면용이다.
+	Cancelable          bool   `json:"cancelable"`
+	CancelBlockedReason string `json:"cancel_blocked_reason,omitempty"`
+}
+
+// disciplinedAtLastLeave 는 "가장 최근 탈퇴 신청 시점에 이용제한 중이었는가"를 본다.
+//
+// ⛔ g5_member.mb_intercept_date 를 실시간으로 보면 안 된다 —
+//
+//	discipline_release 크론이 제한 만료 시 그 값을 지우므로,
+//	숙려 30일 사이에 제한이 만료된 회원이 "제한 없었음"으로 판정된다.
+//	탈퇴 시점 값은 g5_da_member_leave_history 에만 박제되어 있다.
+//
+// 조회 실패·이력 없음은 false(=복원 가능)로 본다. 화면 표시용이며, 실제 차단은
+// cancelSelfLeave 가 fail-closed 로 처리한다.
+func (s *V2AuthService) disciplinedAtLastLeave(mbID string) bool {
+	if s.db == nil || mbID == "" {
+		return false
+	}
+	var flag int
+	err := s.db.Raw(`
+		SELECT was_disciplined FROM g5_da_member_leave_history
+		 WHERE mb_id = ? AND event = 'leave'
+		 ORDER BY event_at DESC LIMIT 1`, mbID).Row().Scan(&flag)
+	if err != nil {
+		return false
+	}
+	return flag == 1
 }
 
 // checkWithdrawal 는 g5_member.mb_leave_date 로 회원 탈퇴 상태를 판정한다.
@@ -125,15 +155,23 @@ func (s *V2AuthService) Login(username, password string) (*V2LoginResponse, erro
 		if days < 0 {
 			days = 0
 		}
+		// 이용제한 중 탈퇴한 계정은 숙려기간이 남아도 복원 대상이 아니다(2026-07-29 결정).
+		// 화면에서 버튼을 감추기 위한 신호이며, 실제 차단은 서버(cancelSelfLeave)가 한다.
+		blocked := s.disciplinedAtLastLeave(user.Username)
+		grace := &WithdrawalGraceInfo{
+			LeaveDate:     deadline.AddDate(0, 0, -common.WithdrawalGraceDays).Format("20060102"),
+			Deadline:      deadline.Format("2006-01-02"),
+			DaysRemaining: days,
+			Cancelable:    !blocked,
+		}
+		if blocked {
+			grace.CancelBlockedReason = "이용제한 중 탈퇴한 계정은 복원할 수 없습니다"
+		}
 		return &V2LoginResponse{
-			User:         user,
-			AccessToken:  accessToken,
-			RefreshToken: refreshToken,
-			WithdrawalGrace: &WithdrawalGraceInfo{
-				LeaveDate:     deadline.AddDate(0, 0, -common.WithdrawalGraceDays).Format("20060102"),
-				Deadline:      deadline.Format("2006-01-02"),
-				DaysRemaining: days,
-			},
+			User:            user,
+			AccessToken:     accessToken,
+			RefreshToken:    refreshToken,
+			WithdrawalGrace: grace,
 		}, nil
 	}
 
