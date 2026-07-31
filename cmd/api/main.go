@@ -2761,7 +2761,8 @@ func main() {
 				v1handler.OverrideIPForAdmin(transformed, comments)
 			}
 			for i, comment := range comments {
-				if comment.WrEditCount > 0 {
+				// 삭제 댓글 tombstone 에는 부가 메타를 얹지 않는다 (#13174 후속)
+				if comment.WrEditCount > 0 && comment.WrDeletedAt == nil {
 					transformed[i]["edit_count"] = comment.WrEditCount
 				}
 			}
