@@ -185,22 +185,63 @@ func MaskIP(ip string) string {
 	return ip
 }
 
-// OverrideIPForAdmin replaces masked author_ip with full IP when requester is admin
+// OverrideIPForAdmin replaces masked author_ip with full IP when requester is admin.
+// ⛔ 삭제글은 건너뛴다(#13174) — 목록 핸들러가 이 override 를 **공유 캐시 저장 전에**
+// 실행하므로, 가드 없이는 관리자 요청이 tombstone 에 IP 를 실어 캐시에 심고
+// 그 캐시가 전 사용자에게 나간다.
 func OverrideIPForAdmin(items []map[string]any, posts []*gnuboard.G5Write) {
 	for i, item := range items {
 		if i < len(posts) {
+			if posts[i].WrDeletedAt != nil {
+				continue
+			}
 			item["author_ip"] = posts[i].WrIP
 		}
 	}
 }
 
-// OverrideIPForAdminSingle replaces masked author_ip with full IP for a single item
+// OverrideIPForAdminSingle replaces masked author_ip with full IP for a single item.
+// 삭제글 스킵 사유는 OverrideIPForAdmin 과 동일.
 func OverrideIPForAdminSingle(item map[string]any, w *gnuboard.G5Write) {
+	if w.WrDeletedAt != nil {
+		return
+	}
 	item["author_ip"] = w.WrIP
 }
 
-// TransformToV1Post converts G5Write to v1 API response format
+// TransformToV1Post converts G5Write to v1 API response format.
+//
+// #13174: 삭제글은 tombstone 만 내려간다. 종전엔 원제·작성자·조회수가 응답에
+// 그대로 실리고 화면에서만 가려져(클라이언트 마스킹) DevTools 로 열람 가능했다.
+// 민감 필드는 서버가 drop 한다 — 목록은 공유 캐시(Redis/mem)라 요청자별 예외를
+// 둘 수 없고, 관리자용 원본은 상세 경로의 TransformToV1PostDetailUnmasked 가 담당.
 func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
+	if w.WrDeletedAt != nil {
+		return maskedDeletedV1Post(w, isNotice)
+	}
+	return transformToV1PostUnmasked(w, isNotice)
+}
+
+// maskedDeletedV1Post 는 삭제글의 목록/상세 공용 tombstone 이다.
+//
+// 유지하는 필드와 이유:
+//   - comments_count: 자진삭제 글은 댓글 스레드를 유지하므로(#12965) 헤더 카운트에 필요
+//   - created_at: 목록 정렬·커서의 키. tombstone 의 위치 자체가 이미 시각을 함의한다
+//   - self_deleted: 자진삭제 판정 **결과**만 전달 — deleted_by(실행자 mb_id)를 내리면
+//     자진삭제면 작성자, 관리자삭제면 관리자 신원이 새므로 원값은 drop 한다
+func maskedDeletedV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
+	return map[string]any{
+		"id":             w.WrID,
+		"title":          "",
+		"is_notice":      isNotice,
+		"comments_count": w.WrComment,
+		"created_at":     w.WrDatetime.Format(time.RFC3339),
+		"deleted_at":     w.WrDeletedAt.Format(time.RFC3339),
+		"self_deleted":   w.WrDeletedBy != nil && *w.WrDeletedBy == w.MbID,
+	}
+}
+
+func transformToV1PostUnmasked(w *gnuboard.G5Write, isNotice bool) map[string]any {
 	result := map[string]any{
 		"id":                   w.WrID,
 		"title":                w.WrSubject,
@@ -222,10 +263,11 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 		"updated_at":           parseWrLast(w.WrLast, w.WrDatetime),
 	}
 
-	// Add deleted_at/deleted_by if post is soft deleted.
+	// unmasked 경로에도 실릴 수 있는 삭제 메타(관리자 상세 등).
 	// deleted_by(삭제 실행자)는 프론트에서 자진삭제(작성자 본인) 여부 판정에 쓰인다(#12965).
 	if w.WrDeletedAt != nil {
 		result["deleted_at"] = w.WrDeletedAt.Format(time.RFC3339)
+		result["self_deleted"] = w.WrDeletedBy != nil && *w.WrDeletedBy == w.MbID
 	}
 	if w.WrDeletedBy != nil {
 		result["deleted_by"] = *w.WrDeletedBy
@@ -245,9 +287,24 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 	return result
 }
 
-// TransformToV1PostDetail converts G5Write to detailed v1 API response format
+// TransformToV1PostDetail converts G5Write to detailed v1 API response format.
+// 삭제글이면 tombstone(본문 없음)이 된다 — 관리자 화면은 Unmasked 판을 쓸 것.
 func TransformToV1PostDetail(w *gnuboard.G5Write, isNotice bool, boardID ...string) map[string]any {
 	result := TransformToV1Post(w, isNotice)
+	if w.WrDeletedAt != nil {
+		return result
+	}
+	result["content"] = normalizeMediaContent(w.WrContent, boardID...)
+	if w.Wr9 != "" {
+		result["extra_9"] = w.Wr9
+	}
+	return result
+}
+
+// TransformToV1PostDetailUnmasked 는 삭제글도 원본 그대로 담는 관리자 전용 상세다.
+// ⛔ 공유 캐시에 넣거나 비관리자 응답에 쓰지 말 것 (#13174).
+func TransformToV1PostDetailUnmasked(w *gnuboard.G5Write, isNotice bool, boardID ...string) map[string]any {
+	result := transformToV1PostUnmasked(w, isNotice)
 	result["content"] = normalizeMediaContent(w.WrContent, boardID...)
 	if w.Wr9 != "" {
 		result["extra_9"] = w.Wr9
@@ -271,8 +328,12 @@ func TransformToV1PostsSummary(posts []*gnuboard.G5Write, noticeIDs map[int]bool
 	for i, p := range posts {
 		isNotice := noticeIDs[p.WrID]
 		item := TransformToV1Post(p, isNotice)
-		item["has_video"] = p.Wr9 != ""
-		item["has_image"] = item["has_file"] == true || p.Wr10 != ""
+		// #13174: tombstone 에는 has_image/has_video 를 주입하지 않는다
+		// (삭제글의 그림·영상 존재 여부도 정보다). delete 들은 masked map 에 no-op.
+		if p.WrDeletedAt == nil {
+			item["has_video"] = p.Wr9 != ""
+			item["has_image"] = item["has_file"] == true || p.Wr10 != ""
+		}
 		delete(item, "dislikes")
 		delete(item, "link1")
 		delete(item, "link2")
