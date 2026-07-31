@@ -2577,7 +2577,16 @@ func main() {
 				}
 			}
 
-			postDetail := v1handler.TransformToV1PostDetail(post, isNotice, slug)
+			// #13174: 삭제글은 transform 이 tombstone 만 내린다(서버 drop).
+			// 관리자는 검수를 위해 원본이 필요하므로 Unmasked 판을 쓴다 — 상세 캐시는
+			// raw G5Write 행을 저장하고 transform 은 요청별이라 캐시 오염이 없다.
+			isAdminViewer := middleware.GetUserLevel(c) >= 10
+			var postDetail map[string]any
+			if post.WrDeletedAt != nil && isAdminViewer {
+				postDetail = v1handler.TransformToV1PostDetailUnmasked(post, isNotice, slug)
+			} else {
+				postDetail = v1handler.TransformToV1PostDetail(post, isNotice, slug)
+			}
 
 			// 수정 추적: 비정규화 컬럼(wr_edit_count·wr_last_edited_at) 사용 — 읽기 쿼리 0.
 			// 수정 핸들러가 리비전 기록과 원자적으로 행에 누적, 상세 캐시(SetPost)가 그 값을
@@ -2588,33 +2597,39 @@ func main() {
 				postDetail["last_edited_at"] = *post.WrLastEditedAt
 			}
 
-			// 태그 조회
-			if tags, err := gnuTagRepo.GetPostTags(slug, id); err == nil && len(tags) > 0 {
-				postDetail["tags"] = tags
-			}
+			// 태그·별점: 삭제글은 비관리자에게 붙이지 않는다(#13174 — 주제·평점도 정보다).
+			if post.WrDeletedAt == nil || isAdminViewer {
+				// 태그 조회
+				if tags, err := gnuTagRepo.GetPostTags(slug, id); err == nil && len(tags) > 0 {
+					postDetail["tags"] = tags
+				}
 
-			// 별점 집계 동봉 (features.rating 보드만) — 추가 왕복 방지.
-			// my 는 로그인 회원(mb_id)의 내 별점, 비로그인은 0. 목록(summary)은 미포함(MVP).
-			if postRatingSvc.Enabled(slug) {
-				if ratingSummary, rErr := postRatingSvc.Summary(slug, id, middleware.GetUsername(c)); rErr == nil {
-					postDetail["rating"] = ratingSummary
+				// 별점 집계 동봉 (features.rating 보드만) — 추가 왕복 방지.
+				// my 는 로그인 회원(mb_id)의 내 별점, 비로그인은 0. 목록(summary)은 미포함(MVP).
+				if postRatingSvc.Enabled(slug) {
+					if ratingSummary, rErr := postRatingSvc.Summary(slug, id, middleware.GetUsername(c)); rErr == nil {
+						postDetail["rating"] = ratingSummary
+					}
 				}
 			}
 
-			// Admin sees full (unmasked) IP
-			if middleware.GetUserLevel(c) >= 10 {
+			// Admin sees full (unmasked) IP (삭제글은 Unmasked 판이라 WrIP 원값 필요)
+			if isAdminViewer {
 				v1handler.OverrideIPForAdminSingle(postDetail, post)
+				if post.WrDeletedAt != nil {
+					postDetail["author_ip"] = post.WrIP
+				}
 			}
 
-			// 삭제된 글: 일반 유저는 본문 숨김, 관리자는 본문 + 리비전 이력 표시
+			// 삭제된 글: 일반 유저는 tombstone(transform 이 이미 drop), 관리자는 원본 + 리비전
 			if post.WrDeletedAt != nil {
-				if middleware.GetUserLevel(c) >= 10 {
+				if isAdminViewer {
 					// 관리자: 리비전 이력 조회
 					var revisions []map[string]any
 					db.Raw("SELECT id, version, change_type, title, content, edited_by, edited_by_name, edited_at, metadata FROM g5_write_revisions WHERE board_id = ? AND wr_id = ? ORDER BY version DESC", slug, id).Scan(&revisions)
 					postDetail["revisions"] = revisions
 				} else {
-					// 일반 유저: 본문 숨김
+					// 일반 유저: 프론트 <title>/SEO 호환용 자리표시자 문구 + 빈 본문 키 유지
 					postDetail["content"] = ""
 					postDetail["title"] = "[삭제된 게시물입니다]"
 				}

@@ -583,6 +583,23 @@ const activityCandidateFactor = 3
 // 정본(g5_board)을 거치지 않았으므로 그대로 SQL 에 넣지 않는다.
 var activityBoardSlugRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
+// searchableBoardSet 은 bo_use_search=1 보드의 슬러그 집합을 돌려준다.
+// 피드 후보의 board_id 는 정본(g5_board)을 거치지 않은 값이라, 비검색 보드가
+// 후보에 섞여도 여기서 걸러진다 (#13174 — is_public 완화로 새로 열린 경로 차단).
+// 조회 실패 시 nil 을 돌려주고 호출부는 필터를 생략한다(기존 동작 유지 — fail-open 이
+// 아니라 "종전과 동일" 이다. 이 함수 도입 전에는 이 필터 자체가 없었다).
+func (r *myPageRepository) searchableBoardSet() map[string]bool {
+	boards, err := r.GetSearchableBoards()
+	if err != nil || len(boards) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(boards))
+	for _, b := range boards {
+		set[b.BoTable] = true
+	}
+	return set
+}
+
 // verifyActivityPosts 는 피드가 준 후보 중 정본에 실재하는 것만 남긴다.
 //
 // 게시판마다 테이블이 다르므로(g5_write_*) 보드별로 묶어 한 번씩 확인한다.
@@ -592,13 +609,20 @@ var activityBoardSlugRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 //
 //	본인 글이고 · 댓글이 아니고 · 비밀글이 아니고 · 신고로 잠기지 않은 것.
 //
+// 삭제글은 걸러내지 않는다 — 자리표시자([삭제된 게시물])로 표시된다 (#13174).
+// 비밀글은 삭제 여부와 무관하게 제외한다(존재 자체 비노출).
+//
 // 한 보드 조회가 실패해도 그 보드만 건너뛴다(컬럼 구성이 다른 보드가 있다).
 func (r *myPageRepository) verifyActivityPosts(
 	mbID string, candidates []gnuboard.ActivityPost, limit int,
 ) []gnuboard.ActivityPost {
+	searchable := r.searchableBoardSet()
 	byBoard := make(map[string][]int)
 	for _, c := range candidates {
 		if c.BoardID == "" {
+			continue
+		}
+		if searchable != nil && !searchable[c.BoardID] {
 			continue
 		}
 		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
@@ -647,6 +671,90 @@ func (r *myPageRepository) verifyActivityPosts(
 		}
 		// 피드 캐시가 아니라 정본의 삭제 시각을 싣는다.
 		c.DeletedAt = deletedAt
+		// #13174: 삭제글 제목은 서버에서 비운다. 피드에 원제가 캐시돼 있어
+		// 여기서 지우지 않으면 자리표시자 옆으로 원제가 새어 나간다.
+		if deletedAt != nil {
+			c.WrSubject = ""
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// verifyActivityComments 는 verifyActivityPosts 의 댓글판이다 (#13174).
+//
+// 피드의 is_public 은 자체삭제·부모삭제·부모비밀글·비검색보드가 한 비트로 뭉개져
+// 있어(멤버 activity sync 의 cascade), 후보 완화 후의 판정은 전적으로 정본이 한다:
+//
+//	본인 댓글이고 · 부모가 비밀글이 아니고 · 부모가 신고로 잠기지 않은 것.
+//
+// 삭제된 댓글([삭제된 댓글])과 부모가 삭제된 생존 댓글([삭제된 게시물] 배지)은
+// 남긴다 — 13103 확정 정책("글이 삭제돼도 댓글 스레드는 유지")의 활동 피드판.
+// 비밀글 부모의 댓글은 삭제 여부와 무관하게 제외된다(존재 자체 비노출).
+func (r *myPageRepository) verifyActivityComments(
+	mbID string, candidates []gnuboard.ActivityComment, limit int,
+) []gnuboard.ActivityComment {
+	searchable := r.searchableBoardSet()
+	byBoard := make(map[string][]int)
+	for _, c := range candidates {
+		if c.BoardID == "" {
+			continue
+		}
+		if searchable != nil && !searchable[c.BoardID] {
+			continue
+		}
+		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
+	}
+
+	type verifiedComment struct {
+		WrID            int        `gorm:"column:wr_id"`
+		WrDeletedAt     *time.Time `gorm:"column:wr_deleted_at"`
+		ParentDeletedAt *time.Time `gorm:"column:parent_deleted_at"`
+	}
+	confirmed := make(map[string]map[int]verifiedComment, len(byBoard))
+	for boardID, ids := range byBoard {
+		if !activityBoardSlugRe.MatchString(boardID) {
+			continue
+		}
+		var okRows []verifiedComment
+		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
+		q := fmt.Sprintf(
+			"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at"+
+				" FROM `g5_write_%s` c INNER JOIN `g5_write_%s` p"+
+				" ON p.wr_id = c.wr_parent AND p.wr_is_comment = 0"+
+				" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1"+
+				" AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL)"+
+				" AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')", boardID, boardID)
+		if err := r.db.Raw(q, ids, mbID).Scan(&okRows).Error; err != nil {
+			continue
+		}
+		m := make(map[int]verifiedComment, len(okRows))
+		for _, row := range okRows {
+			m[row.WrID] = row
+		}
+		confirmed[boardID] = m
+	}
+
+	out := make([]gnuboard.ActivityComment, 0, limit)
+	for _, c := range candidates {
+		if len(out) >= limit {
+			break
+		}
+		m, ok := confirmed[c.BoardID]
+		if !ok {
+			continue
+		}
+		row, found := m[c.WrID]
+		if !found {
+			continue
+		}
+		// 피드 캐시가 아니라 정본의 삭제 시각을 싣는다.
+		c.DeletedAt = row.WrDeletedAt
+		c.ParentDeletedAt = row.ParentDeletedAt
+		// #13174: 삭제 댓글 원문은 서버에서 비운다(피드에 미리보기가 캐시돼 있다).
+		if row.WrDeletedAt != nil {
+			c.WrContent = ""
+		}
 		out = append(out, c)
 	}
 	return out
@@ -661,21 +769,46 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 	// 정본을 한 번도 보지 않고 화면을 그리게 된다. 실제로 그래서 남의 댓글이 내 글로
 	// 떴고, 댓글 번호를 글 주소로 링크해 404 가 났다(#13109).
 	// → 후보를 넉넉히 뽑은 뒤 정본으로 확인된 것만 남긴다.
+	// #13174: 삭제된 글도 자리표시자([삭제된 게시물])로 나가야 하므로 후보에 포함한다.
+	// 삭제 행은 is_public=0 이라, 공개 분기와 삭제 분기를 UNION ALL 로 나눠 뽑는다.
+	// ⛔ 단일 쿼리 `(is_public=1 OR is_deleted=1)` 로 풀지 말 것 — OR 는 인덱스
+	//    등호 프리픽스를 깨서 다작 회원(수만 행)에서 filesort 가 난다. 분기별로는
+	//    기존 인덱스의 등호 연속이 유지된다.
+	// 삭제 시각·비밀글 제외는 후보 단계가 아니라 정본 검증(verifyActivityPosts)이 정답이다.
 	var candidates []gnuboard.ActivityPost
 	if err := r.db.Raw(
-		`SELECT write_id AS wr_id,
-		        COALESCE(title, '') AS wr_subject,
-		        source_created_at AS wr_datetime,
-		        board_id,
-		        CASE WHEN is_deleted = 1 THEN source_updated_at ELSE NULL END AS deleted_at
-		   FROM member_activity_feed
-		  WHERE member_id = ?
-		    AND activity_type = 1
-		    AND is_public = 1
-		    AND write_table = CONCAT('g5_write_', board_id)
-		  ORDER BY source_created_at DESC, id DESC
-		  LIMIT ?`,
+		`SELECT * FROM (
+		    (SELECT write_id AS wr_id,
+		            COALESCE(title, '') AS wr_subject,
+		            source_created_at AS wr_datetime,
+		            board_id,
+		            id AS feed_id
+		       FROM member_activity_feed
+		      WHERE member_id = ?
+		        AND activity_type = 1
+		        AND is_public = 1
+		        AND write_table = CONCAT('g5_write_', board_id)
+		      ORDER BY source_created_at DESC, id DESC
+		      LIMIT ?)
+		    UNION ALL
+		    (SELECT write_id AS wr_id,
+		            COALESCE(title, '') AS wr_subject,
+		            source_created_at AS wr_datetime,
+		            board_id,
+		            id AS feed_id
+		       FROM member_activity_feed
+		      WHERE member_id = ?
+		        AND activity_type = 1
+		        AND is_deleted = 1
+		        AND write_table = CONCAT('g5_write_', board_id)
+		      ORDER BY source_created_at DESC, id DESC
+		      LIMIT ?)
+		 ) AS t
+		 ORDER BY wr_datetime DESC, feed_id DESC
+		 LIMIT ?`,
 		mbID, limit*activityCandidateFactor,
+		mbID, limit*activityCandidateFactor,
+		limit*activityCandidateFactor,
 	).Scan(&candidates).Error; err == nil {
 		// ⛔ 후보가 0건이어도 폴백으로 가지 않는다. 글이 하나도 없는 회원이
 		//    61.5%(37,905명)인데, 그들을 121개 서브쿼리 UNION 으로 보내면
@@ -713,31 +846,73 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 	if err := r.db.Raw(sql, args...).Scan(&posts).Error; err != nil {
 		return nil, err
 	}
+	// #13174: 삭제글 원제는 어느 경로에서도 나가면 안 된다 (verify 경로와 동일).
+	for i := range posts {
+		if posts[i].DeletedAt != nil {
+			posts[i].WrSubject = ""
+		}
+	}
 	return posts, nil
 }
 
 // FindPublicCommentsByMember returns recent public comments by a member.
 // Uses UNION ALL + INNER JOIN to filter out comments on secret/locked/deleted parent posts.
 func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error) {
+	// #13174: 종전엔 is_public=1 로 좁혀 삭제 댓글은 물론, **삭제된 글에 달린 살아있는
+	// 댓글**까지 통째로 빠졌다(부모글 sync 가 산하 댓글 is_public 을 cascade 로 내림).
+	// 후보를 두 분기로 완화한다:
+	//   ① is_deleted=0 — is_public 무조건. 부모삭제 생존 댓글이 여기 들어온다.
+	//      부모 비밀글·비검색 보드 댓글도 섞이지만, 판정은 정본 검증이 한다
+	//      (verifyActivityComments — 피드의 is_public 은 원인 구분이 안 되는 비트다).
+	//   ② is_deleted=1 — 삭제된 댓글([삭제된 댓글] 자리표시자).
+	// ⛔ 단일 OR 금지(인덱스 프리픽스 파괴) — 글 후보 쿼리와 같은 이유.
 	var comments []gnuboard.ActivityComment
+	var candidates []gnuboard.ActivityComment
 	if err := r.db.Raw(
-		`SELECT write_id AS wr_id,
-		        COALESCE(content_preview, '') AS wr_content,
-		        COALESCE(parent_write_id, 0) AS wr_parent,
-		        source_created_at AS wr_datetime,
-		        board_id,
-		        CASE WHEN is_deleted = 1 THEN source_updated_at ELSE NULL END AS deleted_at,
-		        NULL AS parent_deleted_at
-		   FROM member_activity_feed
-		  WHERE member_id = ?
-		    AND activity_type = 2
-		    AND is_public = 1
-		    AND write_table = CONCAT('g5_write_', board_id)
-		  ORDER BY source_created_at DESC, id DESC
-		  LIMIT ?`,
-		mbID, limit,
-	).Scan(&comments).Error; err == nil {
-		return comments, nil
+		`SELECT * FROM (
+		    (SELECT write_id AS wr_id,
+		            COALESCE(content_preview, '') AS wr_content,
+		            COALESCE(parent_write_id, 0) AS wr_parent,
+		            source_created_at AS wr_datetime,
+		            board_id,
+		            id AS feed_id
+		       FROM member_activity_feed
+		      WHERE member_id = ?
+		        AND activity_type = 2
+		        AND is_deleted = 0
+		        AND write_table = CONCAT('g5_write_', board_id)
+		      ORDER BY source_created_at DESC, id DESC
+		      LIMIT ?)
+		    UNION ALL
+		    (SELECT write_id AS wr_id,
+		            COALESCE(content_preview, '') AS wr_content,
+		            COALESCE(parent_write_id, 0) AS wr_parent,
+		            source_created_at AS wr_datetime,
+		            board_id,
+		            id AS feed_id
+		       FROM member_activity_feed
+		      WHERE member_id = ?
+		        AND activity_type = 2
+		        AND is_deleted = 1
+		        AND write_table = CONCAT('g5_write_', board_id)
+		      ORDER BY source_created_at DESC, id DESC
+		      LIMIT ?)
+		 ) AS t
+		 ORDER BY wr_datetime DESC, feed_id DESC
+		 LIMIT ?`,
+		mbID, limit*activityCandidateFactor,
+		mbID, limit*activityCandidateFactor,
+		limit*activityCandidateFactor,
+	).Scan(&candidates).Error; err == nil {
+		// 글 경로(:683)와 같은 이유로 후보 0건이면 폴백으로 가지 않는다.
+		if len(candidates) == 0 {
+			return nil, nil
+		}
+		comments = r.verifyActivityComments(mbID, candidates, limit)
+		if len(comments) > 0 {
+			return comments, nil
+		}
+		// 후보는 있는데 확인된 게 0건일 때만 정본 UNION 으로 떨어진다.
 	}
 
 	boards, err := r.GetSearchableBoards()
@@ -762,6 +937,12 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 
 	if err := r.db.Raw(sql, args...).Scan(&comments).Error; err != nil {
 		return nil, err
+	}
+	// #13174: 삭제 댓글 원문은 어느 경로에서도 나가면 안 된다 (verify 경로와 동일).
+	for i := range comments {
+		if comments[i].DeletedAt != nil {
+			comments[i].WrContent = ""
+		}
 	}
 	return comments, nil
 }
