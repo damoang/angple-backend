@@ -232,12 +232,38 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 func maskedDeletedV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 	return map[string]any{
 		"id":             w.WrID,
-		"title":          "",
 		"is_notice":      isNotice,
 		"comments_count": w.WrComment,
 		"created_at":     w.WrDatetime.Format(time.RFC3339),
 		"deleted_at":     w.WrDeletedAt.Format(time.RFC3339),
 		"self_deleted":   w.WrDeletedBy != nil && *w.WrDeletedBy == w.MbID,
+
+		// ⛔ 아래는 **키를 지우지 않고 값만 중립화**한다.
+		//
+		// 키를 통째로 없앴더니 소비자가 죽었다(2026-07-31 실장애): 글 상세 화면이
+		// `post.views.toLocaleString()` 를 무가드로 부르고 있어 삭제글 열람마다 500 이
+		// 났다. 목록 레이아웃은 deleted_at 분기가 있어 안전했지만 상세는 메타 줄에
+		// 분기가 없었고, 검증도 목록만 훑어 놓쳤다.
+		//
+		// 보안 요구는 "실제 값을 내보내지 말 것"이지 "키를 없앨 것"이 아니다.
+		// 응답 **모양을 유지**하면 프론트·앱·외부 소비자 어느 쪽도 깨지지 않으면서
+		// 유출도 막힌다. 새 필드를 추가할 때도 여기 중립값을 함께 넣을 것.
+		"title":                "",
+		"author":               "",
+		"author_id":            "",
+		"category":             "",
+		"views":                0,
+		"likes":                0,
+		"dislikes":             0,
+		"has_file":             false,
+		"is_secret":            false,
+		"is_comments_disabled": false,
+		"link1":                "",
+		"link2":                "",
+		"author_ip":            "",
+		"updated_at":           w.WrDatetime.Format(time.RFC3339),
+		"thumbnail":            "",
+		"thumbnail_raw":        "",
 	}
 }
 
@@ -354,6 +380,8 @@ func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 	// 클라이언트 가림과 무관하게 유출이다. 글(maskedDeletedV1Post)과 동일 원칙.
 	// depth·post_id·created_at 은 스레드 구조 유지에 필요해 남긴다.
 	if w.WrDeletedAt != nil {
+		// ⛔ 글 tombstone 과 같은 이유로 **키를 지우지 않고 값만 중립화**한다.
+		//    (댓글 렌더도 comment.author.charAt(0) 를 무가드로 부른다)
 		return map[string]any{
 			"id":           w.WrID,
 			"post_id":      w.WrParent,
@@ -362,6 +390,13 @@ func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 			"created_at":   w.WrDatetime.Format(time.RFC3339),
 			"deleted_at":   w.WrDeletedAt.Format(time.RFC3339),
 			"self_deleted": w.WrDeletedBy != nil && *w.WrDeletedBy == w.MbID,
+			"author":       "",
+			"author_id":    "",
+			"likes":        0,
+			"dislikes":     0,
+			"author_ip":    "",
+			"updated_at":   w.WrDatetime.Format(time.RFC3339),
+			"is_secret":    false,
 		}
 	}
 	result := map[string]any{
