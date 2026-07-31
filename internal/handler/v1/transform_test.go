@@ -178,19 +178,28 @@ func TestTransformToV1PostDeletedTombstone(t *testing.T) {
 
 	result := TransformToV1Post(post, false)
 
-	// 유지 키 집합이 정확히 이 7개여야 한다 — 늘어나면 유출, 줄어들면 프론트 파손.
-	want := map[string]bool{
-		"id": true, "title": true, "is_notice": true, "comments_count": true,
-		"created_at": true, "deleted_at": true, "self_deleted": true,
-	}
-	for k := range result {
-		if !want[k] {
-			t.Errorf("tombstone 에 예상 밖 키 %q 가 실렸다 (값 %v)", k, result[k])
+	// ⛔ 키를 지우지 않는다 — 응답 **모양**은 살아있는 글과 같아야 한다.
+	//    키를 없앴더니 프론트가 post.views.toLocaleString() 에서 죽었다(실장애).
+	//    대신 값이 중립화됐는지를 본다.
+	live := TransformToV1Post(&gnuboard.G5Write{
+		WrID: 1, WrSubject: "x", WrName: "n", MbID: "m", WrDatetime: time.Now(),
+	}, false)
+	for k := range live {
+		if _, ok := result[k]; !ok {
+			t.Errorf("tombstone 에 키 %q 가 없다 — 소비자가 undefined 로 죽는다", k)
 		}
 	}
-	for k := range want {
-		if _, ok := result[k]; !ok {
-			t.Errorf("tombstone 에 필수 키 %q 가 없다", k)
+
+	// 값은 실제 데이터를 담으면 안 된다
+	neutral := map[string]any{
+		"title": "", "author": "", "author_id": "", "category": "",
+		"views": 0, "likes": 0, "dislikes": 0, "author_ip": "",
+		"link1": "", "link2": "", "thumbnail": "", "thumbnail_raw": "",
+		"has_file": false, "is_secret": false, "is_comments_disabled": false,
+	}
+	for k, want := range neutral {
+		if got, ok := result[k]; !ok || got != want {
+			t.Errorf("tombstone %q = %v, 중립값 %v 이어야 한다", k, got, want)
 		}
 	}
 	if result["title"] != "" {
@@ -251,14 +260,14 @@ func TestOverrideIPForAdminSkipsDeleted(t *testing.T) {
 	if items[0]["author_ip"] != "10.0.0.1" {
 		t.Errorf("생존 글 IP override 실패: %v", items[0]["author_ip"])
 	}
-	if _, ok := items[1]["author_ip"]; ok {
-		t.Error("tombstone 에 author_ip 가 실렸다")
+	if items[1]["author_ip"] != "" {
+		t.Errorf("tombstone 에 author_ip 값이 실렸다: %v", items[1]["author_ip"])
 	}
 
 	single := TransformToV1Post(dead, false)
 	OverrideIPForAdminSingle(single, dead)
-	if _, ok := single["author_ip"]; ok {
-		t.Error("OverrideIPForAdminSingle 이 tombstone 에 IP 를 실었다")
+	if single["author_ip"] != "" {
+		t.Errorf("OverrideIPForAdminSingle 이 tombstone 에 IP 값을 실었다: %v", single["author_ip"])
 	}
 }
 
@@ -283,10 +292,10 @@ func TestTransformToV1PostDetailUnmaskedKeepsOriginal(t *testing.T) {
 	if result["self_deleted"] != false {
 		t.Errorf("관리자 삭제인데 self_deleted=%v", result["self_deleted"])
 	}
-	// 일반 상세는 tombstone 이어야 한다
+	// 일반 상세는 tombstone 이어야 한다 — 키는 있되 값이 비어 있어야 한다
 	masked := TransformToV1PostDetail(post, false)
-	if _, ok := masked["author"]; ok {
-		t.Error("일반 상세 tombstone 에 author 가 실렸다")
+	if masked["author"] != "" {
+		t.Errorf("일반 상세 tombstone 에 author 값이 실렸다: %v", masked["author"])
 	}
 	if _, ok := masked["content"]; ok {
 		t.Error("일반 상세 tombstone 에 content 가 실렸다")
@@ -303,13 +312,17 @@ func TestTransformToV1CommentDeletedTombstone(t *testing.T) {
 		WrDeletedAt: &deletedAt, WrDeletedBy: &author,
 	}
 	result := TransformToV1Comment(c)
-	want := map[string]bool{
-		"id": true, "post_id": true, "content": true, "depth": true,
-		"created_at": true, "deleted_at": true, "self_deleted": true,
+	live := TransformToV1Comment(&gnuboard.G5Write{
+		WrID: 1, WrParent: 2, WrContent: "c", WrName: "n", MbID: "m", WrDatetime: time.Now(),
+	})
+	for k := range live {
+		if _, ok := result[k]; !ok {
+			t.Errorf("삭제 댓글 tombstone 에 키 %q 가 없다 — 소비자가 죽는다", k)
+		}
 	}
-	for k := range result {
-		if !want[k] {
-			t.Errorf("삭제 댓글 tombstone 에 예상 밖 키 %q (값 %v)", k, result[k])
+	for k, want := range map[string]any{"content": "", "author": "", "author_id": "", "likes": 0} {
+		if got, ok := result[k]; !ok || got != want {
+			t.Errorf("댓글 tombstone %q = %v, 중립값 %v 이어야 한다", k, got, want)
 		}
 	}
 	if result["content"] != "" {
