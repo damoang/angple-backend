@@ -350,6 +350,20 @@ func TransformToV1PostsSummary(posts []*gnuboard.G5Write, noticeIDs map[int]bool
 // TransformToV1Comment converts G5Write (comment) to v1 API response format
 func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 	depth := len(w.WrCommentReply)
+	// #13174 후속: 삭제 댓글은 tombstone 만 — 원문·작성자·IP 가 응답에 실리면
+	// 클라이언트 가림과 무관하게 유출이다. 글(maskedDeletedV1Post)과 동일 원칙.
+	// depth·post_id·created_at 은 스레드 구조 유지에 필요해 남긴다.
+	if w.WrDeletedAt != nil {
+		return map[string]any{
+			"id":           w.WrID,
+			"post_id":      w.WrParent,
+			"content":      "",
+			"depth":        depth,
+			"created_at":   w.WrDatetime.Format(time.RFC3339),
+			"deleted_at":   w.WrDeletedAt.Format(time.RFC3339),
+			"self_deleted": w.WrDeletedBy != nil && *w.WrDeletedBy == w.MbID,
+		}
+	}
 	result := map[string]any{
 		"id":         w.WrID,
 		"post_id":    w.WrParent,
@@ -363,9 +377,6 @@ func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 		"created_at": w.WrDatetime.Format(time.RFC3339),
 		"updated_at": parseWrLast(w.WrLast, w.WrDatetime),
 		"is_secret":  strings.Contains(w.WrOption, "secret"),
-	}
-	if w.WrDeletedAt != nil {
-		result["deleted_at"] = w.WrDeletedAt.Format(time.RFC3339)
 	}
 	if w.WrDeletedBy != nil {
 		result["deleted_by"] = *w.WrDeletedBy

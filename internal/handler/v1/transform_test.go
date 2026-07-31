@@ -292,3 +292,30 @@ func TestTransformToV1PostDetailUnmaskedKeepsOriginal(t *testing.T) {
 		t.Error("일반 상세 tombstone 에 content 가 실렸다")
 	}
 }
+
+// #13174 후속: 삭제 댓글 tombstone — 원문·작성자·IP 서버 drop
+func TestTransformToV1CommentDeletedTombstone(t *testing.T) {
+	deletedAt := time.Now()
+	author := "writer"
+	c := &gnuboard.G5Write{
+		WrID: 3, WrParent: 100, WrContent: "원문", WrName: "닉", MbID: author,
+		WrIP: "1.2.3.4", WrDatetime: time.Now(),
+		WrDeletedAt: &deletedAt, WrDeletedBy: &author,
+	}
+	result := TransformToV1Comment(c)
+	want := map[string]bool{
+		"id": true, "post_id": true, "content": true, "depth": true,
+		"created_at": true, "deleted_at": true, "self_deleted": true,
+	}
+	for k := range result {
+		if !want[k] {
+			t.Errorf("삭제 댓글 tombstone 에 예상 밖 키 %q (값 %v)", k, result[k])
+		}
+	}
+	if result["content"] != "" {
+		t.Errorf("삭제 댓글 원문이 남았다: %v", result["content"])
+	}
+	if result["self_deleted"] != true {
+		t.Errorf("자진삭제인데 self_deleted=%v", result["self_deleted"])
+	}
+}
