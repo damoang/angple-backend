@@ -3957,6 +3957,7 @@ func main() {
 				Title              *string  `json:"title"`
 				Content            *string  `json:"content"`
 				Category           *string  `json:"category"`
+				IsSecret           *bool    `json:"is_secret"`
 				IsCommentsDisabled *bool    `json:"is_comments_disabled"`
 				Link1              *string  `json:"link1"`
 				Link2              *string  `json:"link2"`
@@ -4051,18 +4052,45 @@ func main() {
 				updates["wr_5"] = *req.Extra5
 			}
 
-			// 댓글 비활성화 토글 (admin only) — 기존 wr_option 의 다른 토큰 (secret 등) 은 보존
-			if req.IsCommentsDisabled != nil && userLevel >= 10 {
+			// 비밀글(작성자·admin)·댓글 비활성화(admin only) 토글 — 기존 wr_option 의
+			// 다른 토큰 (html1 등) 은 보존한다.
+			// ⛔ 두 토글을 별도 블록으로 두면 서로 updates["wr_option"] 을 덮어쓴다 — 반드시 한 블록.
+			// 비밀글은 그동안 작성 시에만 설정 가능하고 수정으로는 해제/설정이 안 됐다. (#13161)
+			applyCommentsDisabled := req.IsCommentsDisabled != nil && userLevel >= 10 // frontend 게이트와 동일
+			if req.IsSecret != nil || applyCommentsDisabled {
 				existing := strings.Split(post.WrOption, ",")
 				kept := existing[:0]
+				secret, commentsDisabled := false, false
 				for _, tok := range existing {
 					tok = strings.TrimSpace(tok)
-					if tok == "" || tok == "comments_disabled" {
-						continue
+					switch tok {
+					case "":
+					case "secret":
+						secret = true
+					case "comments_disabled":
+						commentsDisabled = true
+					default:
+						kept = append(kept, tok)
 					}
-					kept = append(kept, tok)
 				}
-				if *req.IsCommentsDisabled {
+				if req.IsSecret != nil {
+					// bo_use_secret==2 = 비밀글 강제 보드 — 해제 불가. create 경로의 forceSecret
+					// 와 동일 시맨틱 (verification 등 PII 보드가 수정으로 공개 전환되는 구멍 차단).
+					var boUseSecret int
+					db.Table("g5_board").Select("bo_use_secret").Where("bo_table = ?", slug).Scan(&boUseSecret)
+					if boUseSecret == 2 {
+						secret = true
+					} else {
+						secret = *req.IsSecret
+					}
+				}
+				if applyCommentsDisabled {
+					commentsDisabled = *req.IsCommentsDisabled
+				}
+				if secret {
+					kept = append(kept, "secret")
+				}
+				if commentsDisabled {
 					kept = append(kept, "comments_disabled")
 				}
 				updates["wr_option"] = strings.Join(kept, ",")
