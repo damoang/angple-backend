@@ -694,6 +694,83 @@ func enrichWithAuthorImage(db *gorm.DB, items []map[string]any) []map[string]any
 // 인증 분기 strip 을 별도로 적용한다.
 //
 // Mirrors enrichWithAuthorImage pattern (cache safety: shallow-copy on mutation).
+// enrichGivingExtras attaches wr_2/4/5/7 as extra_* for the giving board only.
+// 나눔 목록·상세의 상태 배지(진행중/대기/일시정지/종료)는 프론트가 extra_4(시작)·
+// extra_5(종료)·extra_7(상태)·extra_2(응모)를 읽어 계산하는데, v1 변환은 extras 를
+// 내리지 않아 전 글이 "일반글" 로 보였다(2026-08-01 신고).
+//
+// ⛔ 전 게시판에 extras 를 일괄 노출하면 안 된다 — 예: verification 의 wr_1 은 인증
+// 난수다. 그래서 보드 화이트리스트(giving)로만 붙인다. 삭제글(tombstone)은 값을
+// 중립("")으로 두어 모양은 유지하되 유출은 없게 한다(#604 원칙).
+// enrichWithAuthorImage 처럼 캐시 저장 전에 호출되어 cache hit 에도 자동 포함된다.
+func enrichGivingExtras(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
+	if slug != "giving" || len(items) == 0 {
+		return items
+	}
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		var id int
+		switch v := item["id"].(type) {
+		case int:
+			id = v
+		case int64:
+			id = int(v)
+		case float64:
+			id = int(v)
+		default:
+			continue
+		}
+		if id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return items
+	}
+	type givingExtraRow struct {
+		WrID int    `gorm:"column:wr_id"`
+		Wr2  string `gorm:"column:wr_2"`
+		Wr4  string `gorm:"column:wr_4"`
+		Wr5  string `gorm:"column:wr_5"`
+		Wr7  string `gorm:"column:wr_7"`
+	}
+	var rows []givingExtraRow
+	if err := db.Table("g5_write_giving").
+		Select("wr_id, wr_2, wr_4, wr_5, wr_7").
+		Where("wr_id IN ? AND wr_is_comment = 0", ids).
+		Find(&rows).Error; err != nil {
+		// 보강 실패는 배지만 못 그릴 뿐 — 목록 자체를 막지 않는다.
+		return items
+	}
+	byID := make(map[int]givingExtraRow, len(rows))
+	for _, r := range rows {
+		byID[r.WrID] = r
+	}
+	for _, item := range items {
+		var id int
+		switch v := item["id"].(type) {
+		case int:
+			id = v
+		case int64:
+			id = int(v)
+		case float64:
+			id = int(v)
+		}
+		r, ok := byID[id]
+		deleted := item["deleted_at"] != nil
+		if !ok || deleted {
+			// 모양 유지 + 값 중립화 (#604): 삭제글·미조회 글은 빈 값.
+			item["extra_2"], item["extra_4"], item["extra_5"], item["extra_7"] = "", "", "", ""
+			continue
+		}
+		item["extra_2"] = r.Wr2
+		item["extra_4"] = r.Wr4
+		item["extra_5"] = r.Wr5
+		item["extra_7"] = r.Wr7
+	}
+	return items
+}
+
 func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]any, maskContent bool) []map[string]any {
 	if len(items) == 0 || slug == "" {
 		return items
@@ -2446,6 +2523,9 @@ func main() {
 			// g5_na_singo.discipline_log_id IS NOT NULL 매칭. cache 저장 전 적용 → cache 자동 포함.
 			items = enrichWithDisciplineRelated(db, slug, items, true)
 
+			// 나눔(giving) 상태 배지 재료 — 캐시 저장 전 적용 (cache hit 자동 포함).
+			items = enrichGivingExtras(db, slug, items)
+
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			// #12975 ①: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은
 			// 목록이 반복 노출된다(예: 2011·2012·2013 페이지 동일). 실제 도달 가능한
@@ -2592,6 +2672,10 @@ func main() {
 			// 수정 핸들러가 리비전 기록과 원자적으로 행에 누적, 상세 캐시(SetPost)가 그 값을
 			// 그대로 실어 나른다(수정 시 write-after worker 가 InvalidatePost 로 캐시 무효화 →
 			// 다음 조회가 갱신된 행 로드). wr_last 기반 updated_at 대신 이 값을 배지에 사용.
+			// 나눔(giving) 상세 상태 배지 재료 — 목록과 동일 화이트리스트 보강.
+			single := []map[string]any{postDetail}
+			enrichGivingExtras(db, slug, single)
+
 			postDetail["edit_count"] = post.WrEditCount
 			if post.WrLastEditedAt != nil {
 				postDetail["last_edited_at"] = *post.WrLastEditedAt
