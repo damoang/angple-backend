@@ -268,6 +268,11 @@ type groupedNotificationResponse struct {
 	HasUnread     bool     `json:"has_unread"`
 	LatestAt      string   `json:"latest_at"`
 	FromCase      string   `json:"from_case"`
+	// 병합 모드(merge=target) 전용 — 기본 모드 응답에는 실리지 않는다
+	TargetKey    string `json:"target_key,omitempty"`
+	GoodCount    int    `json:"good_count,omitempty"`
+	CommentCount int    `json:"comment_count,omitempty"`
+	ReplyCount   int    `json:"reply_count,omitempty"`
 }
 
 // groupedNotificationListResponse is the paginated response for grouped notifications
@@ -312,6 +317,33 @@ func generateGroupTitle(fromCase, latestSender string, senderCount int) string {
 	return fmt.Sprintf("%s님이 %s", latestSender, action)
 }
 
+// generateMergedTitle — 대상 항목 단위 통합 묶음 한 줄 제목.
+// "OO님 외 N명이 회원님의 글에 댓글 5 · 좋아요 3" 형태(free/6875994 Java 님 제안).
+func generateMergedTitle(targetKey, latestSender string, senderCount, good, cmt, reply int) string {
+	target := "글"
+	if strings.HasPrefix(targetKey, "cg:") || strings.HasPrefix(targetKey, "r:") {
+		target = "댓글"
+	}
+	parts := make([]string, 0, 3)
+	if cmt > 0 {
+		parts = append(parts, fmt.Sprintf("댓글 %d", cmt))
+	}
+	if reply > 0 {
+		parts = append(parts, fmt.Sprintf("답글 %d", reply))
+	}
+	if good > 0 {
+		parts = append(parts, fmt.Sprintf("좋아요 %d", good))
+	}
+	if len(parts) == 0 {
+		return generateGroupTitle("", latestSender, senderCount)
+	}
+	who := latestSender + "님"
+	if senderCount > 1 {
+		who = fmt.Sprintf("%s님 외 %d명", latestSender, senderCount-1)
+	}
+	return fmt.Sprintf("%s이 회원님의 %s에 %s", who, target, strings.Join(parts, " · "))
+}
+
 // GetGroupedNotifications handles GET /api/v1/notifications/grouped
 func (h *NotiHandler) GetGroupedNotifications(c *gin.Context) {
 	mbID := middleware.GetUserID(c)
@@ -329,6 +361,13 @@ func (h *NotiHandler) GetGroupedNotifications(c *gin.Context) {
 		limit = 20
 	}
 	filterType := c.DefaultQuery("type", "") // "", "comment", "like", "mention", "system"
+
+	// merge=target: 같은 글의 좋아요·댓글을 한 줄로 합친 대상 단위 묶음.
+	// 파라미터 없으면 기존 유형별 묶음 그대로 — 구 클라이언트가 깨지지 않는다.
+	if c.Query("merge") == "target" {
+		h.getMergedNotifications(c, mbID, page, limit, filterType)
+		return
+	}
 
 	groups, totalGroups, unreadCount, err := h.repo.GetGroupedNotifications(mbID, page, limit, filterType)
 	if err != nil {
@@ -378,6 +417,55 @@ func (h *NotiHandler) GetGroupedNotifications(c *gin.Context) {
 }
 
 // MarkGroupAsRead handles POST /api/v1/notifications/group/read
+// getMergedNotifications — merge=target 모드 응답 조립.
+func (h *NotiHandler) getMergedNotifications(c *gin.Context, mbID string, page, limit int, filterType string) {
+	groups, totalGroups, unreadCount, err := h.repo.GetMergedNotifications(mbID, page, limit, filterType)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "알림 목록 조회 실패", err)
+		return
+	}
+
+	items := make([]groupedNotificationResponse, 0, len(groups))
+	for _, g := range groups {
+		senders := make([]string, 0, 5)
+		for _, nick := range strings.Split(g.Senders, ",") {
+			if nick != "" {
+				senders = append(senders, nick)
+			}
+		}
+		items = append(items, groupedNotificationResponse{
+			Type:          "merged",
+			BoTable:       g.BoTable,
+			WrID:          g.WrID,
+			Title:         generateMergedTitle(g.TargetKey, g.LatestSender, g.SenderCount, g.GoodCount, g.CommentCount, g.ReplyCount),
+			URL:           convertLegacyURL(g.RelURL),
+			ParentSubject: g.ParentSubject,
+			Content:       g.RelMsg,
+			LatestSender:  g.LatestSender,
+			Senders:       senders,
+			SenderCount:   g.SenderCount,
+			UnreadCount:   g.UnreadCount,
+			HasUnread:     g.UnreadCount > 0,
+			LatestAt:      g.LatestAt.Format(time.RFC3339),
+			FromCase:      "merged",
+			TargetKey:     g.TargetKey,
+			GoodCount:     g.GoodCount,
+			CommentCount:  g.CommentCount,
+			ReplyCount:    g.ReplyCount,
+		})
+	}
+
+	totalPages := int64(math.Ceil(float64(totalGroups) / float64(limit)))
+	common.V2Success(c, groupedNotificationListResponse{
+		Items:       items,
+		Total:       totalGroups,
+		UnreadCount: unreadCount,
+		Page:        page,
+		Limit:       limit,
+		TotalPages:  totalPages,
+	})
+}
+
 func (h *NotiHandler) MarkGroupAsRead(c *gin.Context) {
 	mbID := middleware.GetUserID(c)
 	if mbID == "" {
@@ -386,12 +474,24 @@ func (h *NotiHandler) MarkGroupAsRead(c *gin.Context) {
 	}
 
 	var req struct {
-		BoTable  string `json:"bo_table"`
-		WrID     int    `json:"wr_id"`
-		FromCase string `json:"from_case"`
+		BoTable   string `json:"bo_table"`
+		WrID      int    `json:"wr_id"`
+		FromCase  string `json:"from_case"`
+		TargetKey string `json:"target_key"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+
+	// 병합 묶음은 목록과 같은 파생 키 식으로 읽음 처리한다 — 식이 갈라지면
+	// 한 줄을 읽어도 일부 행이 안읽음으로 남는다.
+	if req.TargetKey != "" {
+		if err := h.repo.MarkMergedGroupAsRead(mbID, req.BoTable, req.TargetKey); err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "그룹 읽음 처리 실패", err)
+			return
+		}
+		common.V2Success(c, gin.H{"message": "그룹 읽음 처리 완료"})
 		return
 	}
 
@@ -514,6 +614,16 @@ func (h *NotiHandler) DeleteGroup(c *gin.Context) {
 	boTable := c.Query("bo_table")
 	wrID, _ := strconv.Atoi(c.Query("wr_id"))
 	fromCase := c.Query("from_case")
+
+	// 병합 묶음 삭제 — 목록·읽음과 같은 파생 키 식. 없으면 기존 유형별 경로.
+	if targetKey := c.Query("target_key"); targetKey != "" {
+		if err := h.repo.DeleteMergedGroup(mbID, boTable, targetKey); err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "그룹 삭제 실패", err)
+			return
+		}
+		common.V2Success(c, gin.H{"message": "그룹 삭제 완료"})
+		return
+	}
 
 	if boTable == "" || fromCase == "" {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "필수 파라미터 누락", nil)
