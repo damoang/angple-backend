@@ -366,12 +366,13 @@ type MergedNotification struct {
 	UnreadCount  int    `gorm:"column:unread_count"`
 	Senders      string `gorm:"column:senders"`
 	// 아래는 최신 행(pass 2)에서 채운다
-	LatestAt      time.Time `gorm:"-"`
-	LatestSender  string    `gorm:"-"`
-	RelURL        string    `gorm:"-"`
-	ParentSubject string    `gorm:"-"`
-	RelMsg        string    `gorm:"-"`
-	WrID          int       `gorm:"-"`
+	LatestAt       time.Time `gorm:"-"`
+	LatestSender   string    `gorm:"-"`
+	LatestFromCase string    `gorm:"-"`
+	RelURL         string    `gorm:"-"`
+	ParentSubject  string    `gorm:"-"`
+	RelMsg         string    `gorm:"-"`
+	WrID           int       `gorm:"-"`
 }
 
 // GetMergedNotifications — GetGroupedNotifications 와 같은 2-pass 구조에 키만 대상 단위다.
@@ -454,6 +455,7 @@ func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, fi
 		if latest, ok := latestMap[groups[i].LatestPhID]; ok {
 			groups[i].LatestAt = latest.PhDatetime
 			groups[i].LatestSender = latest.RelMbNick
+			groups[i].LatestFromCase = latest.PhFromCase
 			groups[i].RelURL = latest.RelURL
 			groups[i].ParentSubject = latest.ParentSubject
 			groups[i].RelMsg = latest.RelMsg

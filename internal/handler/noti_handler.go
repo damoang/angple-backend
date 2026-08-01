@@ -433,11 +433,22 @@ func (h *NotiHandler) getMergedNotifications(c *gin.Context, mbID string, page, 
 				senders = append(senders, nick)
 			}
 		}
+		// s:(비묶음 — 구독 새글·팔로우·쪽지·멘션)는 병합 대상이 아니다. 유형·제목을
+		// 원래대로 유지해야 한다 — 'merged' 로 뭉개면 제목이 "새 알림이 있습니다"가
+		// 되어 닉네임이 사라지고(bug/13199) 아이콘도 전부 Info 로 죽는다.
+		itemType := "merged"
+		fromCase := "merged"
+		title := generateMergedTitle(g.TargetKey, g.LatestSender, g.SenderCount, g.GoodCount, g.CommentCount, g.ReplyCount)
+		if strings.HasPrefix(g.TargetKey, "s:") {
+			itemType = mapFromCase(g.LatestFromCase)
+			fromCase = g.LatestFromCase
+			title = generateGroupTitle(g.LatestFromCase, g.LatestSender, g.SenderCount)
+		}
 		items = append(items, groupedNotificationResponse{
-			Type:          "merged",
+			Type:          itemType,
 			BoTable:       g.BoTable,
 			WrID:          g.WrID,
-			Title:         generateMergedTitle(g.TargetKey, g.LatestSender, g.SenderCount, g.GoodCount, g.CommentCount, g.ReplyCount),
+			Title:         title,
 			URL:           convertLegacyURL(g.RelURL),
 			ParentSubject: g.ParentSubject,
 			Content:       g.RelMsg,
@@ -447,7 +458,7 @@ func (h *NotiHandler) getMergedNotifications(c *gin.Context, mbID string, page, 
 			UnreadCount:   g.UnreadCount,
 			HasUnread:     g.UnreadCount > 0,
 			LatestAt:      g.LatestAt.Format(time.RFC3339),
-			FromCase:      "merged",
+			FromCase:      fromCase,
 			TargetKey:     g.TargetKey,
 			GoodCount:     g.GoodCount,
 			CommentCount:  g.CommentCount,
