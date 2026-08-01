@@ -58,6 +58,10 @@ type NotiRepository interface {
 	MarkAsRead(mbID string, phID int) error
 	MarkAllAsRead(mbID string) error
 	MarkGroupAsRead(mbID, boTable string, wrID int, fromCase string) error
+	// 대상 항목(글/댓글) 단위 통합 묶음 — 같은 글의 좋아요·댓글이 한 줄이 된다
+	GetMergedNotifications(mbID string, page, limit int, filterType string) ([]MergedNotification, int64, int64, error)
+	MarkMergedGroupAsRead(mbID, boTable, targetKey string) error
+	DeleteMergedGroup(mbID, boTable, targetKey string) error
 	Delete(mbID string, phID int) error
 	DeleteGroup(mbID, boTable string, wrID int, fromCase string) error
 	Create(noti *Notification) error
@@ -330,4 +334,148 @@ func (r *notiRepository) MarkGroupAsRead(mbID, boTable string, wrID int, fromCas
 func (r *notiRepository) DeleteGroup(mbID, boTable string, wrID int, fromCase string) error {
 	return r.db.Where("mb_id = ? AND bo_table = ? AND wr_id = ? AND ph_from_case = ?", mbID, boTable, wrID, fromCase).
 		Delete(&Notification{}).Error
+}
+
+// targetKeyExpr — 알림을 "대상 항목" 단위로 묶는 파생 키.
+//
+// 왜 파생인가: 스키마의 wr_id 는 유형마다 의미가 다르다(good=받은 항목, comment=**새 댓글의 id**).
+// 같은 글의 댓글 알림들이 wr_id 로는 전부 다른 키가 되어 영영 안 묶인다(30일 실측 압축 1.0×).
+// 원글 id 는 rel_url(/{bo}/{post}[#c_{cmt}]) 경로에만 있으므로 거기서 뽑는다.
+//
+//	p:{post}  내 글 묶음   — good(앵커 없음) + comment(새 댓글)
+//	cg:{cmt}  내 댓글 좋아요 — good 인데 rel_url 에 #c_ 앵커(이때 wr_id = 내 댓글)
+//	r:{post}  내 댓글 답글  — ph_to_case='comment_reply'. ⚠️글 단위다: 스키마 어디에도
+//	          "내 댓글 id"가 없어(wr_id·앵커 모두 새 답글) 댓글 단위 키를 만들 수 없다
+//	s:{ph_id} 비묶음(write/memo/mention/digest 등) — 행 그대로 한 줄
+const targetKeyExpr = `CASE
+	WHEN ph_to_case = 'comment_reply' THEN CONCAT('r:', SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(rel_url,'#',1),'?',1),'/',-1))
+	WHEN ph_from_case = 'good' AND LOCATE('#c_', rel_url) > 0 THEN CONCAT('cg:', wr_id)
+	WHEN ph_from_case IN ('good','comment','board','reply') THEN CONCAT('p:', SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(rel_url,'#',1),'?',1),'/',-1))
+	ELSE CONCAT('s:', ph_id)
+END`
+
+// MergedNotification 은 대상 항목 단위 묶음 한 줄이다.
+type MergedNotification struct {
+	BoTable      string `gorm:"column:bo_table"`
+	TargetKey    string `gorm:"column:tkey"`
+	LatestPhID   int    `gorm:"column:latest_ph_id"`
+	SenderCount  int    `gorm:"column:sender_count"`
+	GoodCount    int    `gorm:"column:good_count"`
+	CommentCount int    `gorm:"column:comment_count"`
+	ReplyCount   int    `gorm:"column:reply_count"`
+	UnreadCount  int    `gorm:"column:unread_count"`
+	Senders      string `gorm:"column:senders"`
+	// 아래는 최신 행(pass 2)에서 채운다
+	LatestAt      time.Time `gorm:"-"`
+	LatestSender  string    `gorm:"-"`
+	RelURL        string    `gorm:"-"`
+	ParentSubject string    `gorm:"-"`
+	RelMsg        string    `gorm:"-"`
+	WrID          int       `gorm:"-"`
+}
+
+// GetMergedNotifications — GetGroupedNotifications 와 같은 2-pass 구조에 키만 대상 단위다.
+// 기존 메서드는 손대지 않는다(구 소비자 보존). merge=target 파라미터로만 이 경로에 들어온다.
+func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, filterType string) ([]MergedNotification, int64, int64, error) {
+	fromCaseFilter := "AND ph_from_case != 'reaction'"
+	switch filterType {
+	case "comment":
+		fromCaseFilter = "AND ph_from_case IN ('board', 'comment', 'reply')"
+	case "like":
+		fromCaseFilter = "AND ph_from_case = 'good'"
+	case "mention":
+		fromCaseFilter = "AND ph_from_case = 'mention'"
+	case "memo":
+		fromCaseFilter = "AND ph_from_case = 'memo'"
+	case "system":
+		fromCaseFilter = "AND ph_from_case IN ('write', 'inquire', 'answer')"
+	}
+
+	var unreadCount int64
+	if err := r.db.Model(&Notification{}).
+		Where("mb_id = ? AND ph_readed = 'N'", mbID).
+		Count(&unreadCount).Error; err != nil {
+		return nil, 0, 0, err
+	}
+
+	offset := (page - 1) * limit
+	// senders 는 최신순 닉 5명까지만 — GROUP_CONCAT 전량은 좋아요 폭주 글에서 수백 명이 된다
+	topSQL := `SELECT
+		bo_table, ` + targetKeyExpr + ` AS tkey,
+		MAX(ph_id) AS latest_ph_id,
+		COUNT(*) AS sender_count,
+		SUM(ph_from_case = 'good') AS good_count,
+		SUM(ph_from_case IN ('comment','board','reply') AND ph_to_case != 'comment_reply') AS comment_count,
+		SUM(ph_to_case = 'comment_reply') AS reply_count,
+		SUM(ph_readed = 'N') AS unread_count,
+		SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT rel_mb_nick ORDER BY ph_id DESC SEPARATOR ','), ',', 5) AS senders
+	FROM g5_na_noti
+	WHERE mb_id = ? ` + fromCaseFilter + `
+	GROUP BY bo_table, tkey
+	ORDER BY latest_ph_id DESC
+	LIMIT ? OFFSET ?`
+
+	var groups []MergedNotification
+	if err := r.db.Raw(topSQL, mbID, limit, offset).Scan(&groups).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	if len(groups) == 0 {
+		return []MergedNotification{}, 0, unreadCount, nil
+	}
+
+	var totalGroups int64
+	if page == 1 && len(groups) < limit {
+		totalGroups = int64(len(groups))
+	} else {
+		countSQL := `SELECT COUNT(*) FROM (
+			SELECT 1 FROM g5_na_noti
+			WHERE mb_id = ? ` + fromCaseFilter + `
+			GROUP BY bo_table, ` + targetKeyExpr + `
+		) t`
+		if err := r.db.Raw(countSQL, mbID).Scan(&totalGroups).Error; err != nil {
+			return nil, 0, 0, err
+		}
+	}
+
+	// pass 2: 최신 행에서 표시 재료(URL·제목 스냅샷·최신 닉)를 채운다
+	phIDs := make([]int, len(groups))
+	for i, g := range groups {
+		phIDs[i] = g.LatestPhID
+	}
+	var latestRows []Notification
+	if err := r.db.Where("ph_id IN ?", phIDs).Find(&latestRows).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	latestMap := make(map[int]Notification, len(latestRows))
+	for _, row := range latestRows {
+		latestMap[row.PhID] = row
+	}
+	for i := range groups {
+		if latest, ok := latestMap[groups[i].LatestPhID]; ok {
+			groups[i].LatestAt = latest.PhDatetime
+			groups[i].LatestSender = latest.RelMbNick
+			groups[i].RelURL = latest.RelURL
+			groups[i].ParentSubject = latest.ParentSubject
+			groups[i].RelMsg = latest.RelMsg
+			groups[i].WrID = latest.WrID
+		}
+	}
+	return groups, totalGroups, unreadCount, nil
+}
+
+// mergedGroupWhere — 읽음/삭제가 목록과 **같은 키 식**을 쓴다. 식이 갈라지면
+// "한 줄을 읽었는데 일부 행이 안읽음으로 남는" 미스매치가 생긴다.
+func (r *notiRepository) mergedGroupWhere(mbID, boTable, targetKey string) *gorm.DB {
+	return r.db.Model(&Notification{}).
+		Where("mb_id = ? AND bo_table = ? AND "+targetKeyExpr+" = ?", mbID, boTable, targetKey)
+}
+
+func (r *notiRepository) MarkMergedGroupAsRead(mbID, boTable, targetKey string) error {
+	return r.mergedGroupWhere(mbID, boTable, targetKey).
+		Where("ph_readed = 'N'").
+		Update("ph_readed", "Y").Error
+}
+
+func (r *notiRepository) DeleteMergedGroup(mbID, boTable, targetKey string) error {
+	return r.mergedGroupWhere(mbID, boTable, targetKey).Delete(&Notification{}).Error
 }
