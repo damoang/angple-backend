@@ -615,6 +615,16 @@ func (h *NotiHandler) DeleteGroup(c *gin.Context) {
 	wrID, _ := strconv.Atoi(c.Query("wr_id"))
 	fromCase := c.Query("from_case")
 
+	// 병합 묶음 삭제 — 목록·읽음과 같은 파생 키 식. 없으면 기존 유형별 경로.
+	if targetKey := c.Query("target_key"); targetKey != "" {
+		if err := h.repo.DeleteMergedGroup(mbID, boTable, targetKey); err != nil {
+			common.V2ErrorResponse(c, http.StatusInternalServerError, "그룹 삭제 실패", err)
+			return
+		}
+		common.V2Success(c, gin.H{"message": "그룹 삭제 완료"})
+		return
+	}
+
 	if boTable == "" || fromCase == "" {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "필수 파라미터 누락", nil)
 		return
