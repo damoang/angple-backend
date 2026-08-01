@@ -746,6 +746,25 @@ func enrichGivingExtras(db *gorm.DB, slug string, items []map[string]any) []map[
 	for _, r := range rows {
 		byID[r.WrID] = r
 	}
+	// 응모 수는 wr_2(구 필드)가 아니라 응모 테이블에서 직접 센다 — 새 응모
+	// 시스템(g5_giving_bid)은 wr_2 를 갱신하지 않아 실제 응모자가 있어도
+	// 전 글이 "0건 응모" 로 보였다(2026-08-01 신고). 조회 실패나 0건이면
+	// wr_2 폴백(구 시스템 데이터 호환).
+	type givingBidCountRow struct {
+		WrID   int `gorm:"column:wr_id"`
+		People int `gorm:"column:people"`
+	}
+	peopleByID := make(map[int]int, len(ids))
+	var bidCounts []givingBidCountRow
+	if err := db.Table("g5_giving_bid").
+		Select("wr_id, COUNT(DISTINCT mb_id) AS people").
+		Where("wr_id IN ?", ids).
+		Group("wr_id").
+		Find(&bidCounts).Error; err == nil {
+		for _, b := range bidCounts {
+			peopleByID[b.WrID] = b.People
+		}
+	}
 	for _, item := range items {
 		var id int
 		switch v := item["id"].(type) {
@@ -763,7 +782,11 @@ func enrichGivingExtras(db *gorm.DB, slug string, items []map[string]any) []map[
 			item["extra_2"], item["extra_4"], item["extra_5"], item["extra_7"] = "", "", "", ""
 			continue
 		}
-		item["extra_2"] = r.Wr2
+		entries := r.Wr2
+		if n := peopleByID[id]; n > 0 {
+			entries = strconv.Itoa(n)
+		}
+		item["extra_2"] = entries
 		item["extra_4"] = r.Wr4
 		item["extra_5"] = r.Wr5
 		item["extra_7"] = r.Wr7
