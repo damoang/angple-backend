@@ -93,6 +93,53 @@ func givingOK(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
 
+// givingDrawNicknames resolves winner mb_ids to nicknames for display.
+// 당첨자(winner_mb_id + result_json.winners)만 대상 — 조회 실패 시 nil 을
+// 반환해 프론트가 mb_id 폴백으로 그리게 한다.
+func (h *GivingHandler) givingDrawNicknames(draw givingDrawRow) map[string]string {
+	idSet := make(map[string]struct{}, 4)
+	if draw.WinnerMbID != "" {
+		idSet[draw.WinnerMbID] = struct{}{}
+	}
+	if len(draw.ResultJSON) > 0 {
+		var res struct {
+			Winners []string `json:"winners"`
+		}
+		if json.Unmarshal(draw.ResultJSON, &res) == nil {
+			for _, w := range res.Winners {
+				if w != "" {
+					idSet[w] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(idSet) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	type memberNickRow struct {
+		MbID string `gorm:"column:mb_id"`
+		Nick string `gorm:"column:mb_nick"`
+	}
+	var rows []memberNickRow
+	if err := h.db.Table("g5_member").
+		Select("mb_id, mb_nick").
+		Where("mb_id IN ?", ids).
+		Find(&rows).Error; err != nil {
+		return nil
+	}
+	nicknames := make(map[string]string, len(rows))
+	for _, r := range rows {
+		if r.Nick != "" {
+			nicknames[r.MbID] = r.Nick
+		}
+	}
+	return nicknames
+}
+
 func givingErr(c *gin.Context, status int, msg string) {
 	c.JSON(status, gin.H{"success": false, "error": msg})
 }
@@ -336,6 +383,9 @@ func (h *GivingHandler) Detail(c *gin.Context) { //nolint:gocyclo // 응답 조�
 			"drawn_by":       draw.DrawnBy,
 			"drawn_at":       draw.DrawnAt,
 			"result":         draw.ResultJSON,
+			// 표시용 닉네임 맵. 저장 데이터는 mb_id 정본 유지(닉변 추적 가능),
+			// 프론트는 이 맵으로 그리고 없으면 mb_id 폴백.
+			"nicknames": h.givingDrawNicknames(draw),
 		}
 	} else if norm.Status == givingdomain.StatusEnded && meta.Method == givingdomain.MethodLowestUnique {
 		// 종료됐지만 미개표: 전량 공개로 재계산 검증 가능하게 응모 스냅샷 제공.
