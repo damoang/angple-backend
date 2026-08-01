@@ -97,6 +97,44 @@ func shouldKeep(meta givingdomain.Normalized, tab string) bool {
 	return true
 }
 
+// givingUrgentRank orders statuses for the "urgent" sort:
+// 진행중(0) → 대기중/일시정지(1) → 일정미정·기타(2).
+func givingUrgentRank(status string) int {
+	switch givingdomain.Status(status) {
+	case givingdomain.StatusActive:
+		return 0
+	case givingdomain.StatusWaiting, givingdomain.StatusPaused:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// givingListLess is the list ordering. Extracted for unit tests.
+//
+// ⛔ 종전 "urgent" 는 GivingEnd 문자열 오름차순뿐이었다. 일정이 없는 글은 GivingEnd="" 라
+// 항상 맨 앞으로 와서, 진짜 진행중 글이 limit 밖으로 밀렸다 — 위젯 "나눔" 에 몇 년 전
+// "(마감)" 글만 보이던 원인. 상태 서열을 먼저 두고, 같은 서열 안에서만 시각으로 비교한다.
+func givingListLess(a, b GivingListItem, sortBy string) bool {
+	switch sortBy {
+	case "newest":
+		return a.ID > b.ID
+	default: // "urgent"
+		ra, rb := givingUrgentRank(a.GivingStatus), givingUrgentRank(b.GivingStatus)
+		if ra != rb {
+			return ra < rb
+		}
+		switch ra {
+		case 0: // 진행중: 종료 임박순
+			return a.GivingEnd < b.GivingEnd
+		case 1: // 대기중·일시정지: 시작 임박순
+			return a.GivingStart < b.GivingStart
+		default: // 일정미정·기타: 최신 글 우선
+			return a.ID > b.ID
+		}
+	}
+}
+
 // enrichThumbnails fills Thumbnail when Extra10 is empty.
 // Priority: extra_10 (already set) > 본문 첫 <img> > g5_board_file 첫 이미지.
 func (h *GivingHandler) enrichThumbnails(items []GivingListItem, contentByID map[int]string) {
@@ -198,14 +236,7 @@ func (h *GivingHandler) List(c *gin.Context) {
 	}
 
 	sort.SliceStable(items, func(i, j int) bool {
-		switch sortBy {
-		case "newest":
-			return items[i].ID > items[j].ID
-		case "urgent":
-			fallthrough
-		default:
-			return items[i].GivingEnd < items[j].GivingEnd
-		}
+		return givingListLess(items[i], items[j], sortBy)
 	})
 	if len(items) > limit {
 		items = items[:limit]
