@@ -472,11 +472,20 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 		return
 	}
 
+	// 답글 알림을 이미 받은 사람에게 글 알림을 또 보내지 않기 위한 표식.
+	// ⛔ 원글 작성자가 자기 글에 댓글을 달고 거기 답글이 달리면, 한 번의 사건으로
+	//    답글 알림 + 댓글 알림이 **같은 사람에게 두 개** 간다(bug/13206, 하루 200~300건).
+	//    레거시 PHP 에는 이 가드가 있었는데(hook.lib.php:1186) Go 이식 때 빠졌다.
+	repliedToPostAuthor := false
+
 	if job.ParentID != nil && *job.ParentID > 0 {
 		var parentAuthorMbID string
 		if err := w.db.Table(tableName).Select("mb_id").Where("wr_id = ?", *job.ParentID).Scan(&parentAuthorMbID).Error; err == nil && parentAuthorMbID != "" && parentAuthorMbID != job.MemberID {
 			if !w.isBlocked(parentAuthorMbID, job.MemberID) {
 				if pref, ok := w.mustGetNotiPreference(parentAuthorMbID); ok && pref.NotiReply {
+					if parentAuthorMbID == postAuthor.MbID {
+						repliedToPostAuthor = true
+					}
 					w.createNotification(&gnurepo.Notification{
 						PhToCase:      "comment_reply",
 						PhFromCase:    "comment",
@@ -497,6 +506,10 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 		}
 	}
 
+	// 같은 사건으로 답글 알림을 이미 보냈으면 글 알림은 생략한다 — 더 구체적인 쪽(답글)이 남는다.
+	if repliedToPostAuthor {
+		return
+	}
 	if postAuthor.MbID == job.MemberID || w.isBlocked(postAuthor.MbID, job.MemberID) {
 		return
 	}
