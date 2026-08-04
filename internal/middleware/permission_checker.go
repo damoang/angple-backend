@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/common"
 	v2 "github.com/damoang/angple-backend/internal/domain/v2"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 )
@@ -87,6 +88,9 @@ func (c *DBBoardPermissionChecker) CanWrite(boardSlug string, memberLevel int) (
 	if err != nil {
 		return false, err
 	}
+	if common.IsBoardWriteBlockedByLevel(memberLevel, boardSlug) {
+		return false, nil
+	}
 	return memberLevel >= int(board.WriteLevel), nil
 }
 
@@ -95,6 +99,9 @@ func (c *DBBoardPermissionChecker) CanReply(boardSlug string, memberLevel int) (
 	if err != nil {
 		return false, err
 	}
+	if common.IsBoardWriteBlockedByLevel(memberLevel, boardSlug) {
+		return false, nil
+	}
 	return memberLevel >= int(board.ReplyLevel), nil
 }
 
@@ -102,6 +109,9 @@ func (c *DBBoardPermissionChecker) CanComment(boardSlug string, memberLevel int)
 	board, err := c.getBoard(boardSlug)
 	if err != nil {
 		return false, err
+	}
+	if common.IsBoardWriteBlockedByLevel(memberLevel, boardSlug) {
+		return false, nil
 	}
 	return memberLevel >= int(board.CommentLevel), nil
 }
@@ -152,13 +162,17 @@ func (c *DBBoardPermissionChecker) GetAllPermissions(boardSlug string, memberLev
 	if err != nil {
 		return nil, err
 	}
+	// 등급별 게시판 제한 (광고앙 = 직접홍보 전용).
+	// ⛔ 읽기·목록·다운로드는 막지 않는다. 쓰기 계열(글·답글·댓글·첨부)만 막는다 —
+	//    광고앙도 커뮤니티를 볼 수는 있어야 한다.
+	blocked := common.IsBoardWriteBlockedByLevel(memberLevel, boardSlug)
 	return &BoardPermissions{
 		CanList:     memberLevel >= int(board.ListLevel),
 		CanRead:     memberLevel >= int(board.ReadLevel),
-		CanWrite:    memberLevel >= int(board.WriteLevel),
-		CanReply:    memberLevel >= int(board.ReplyLevel),
-		CanComment:  memberLevel >= int(board.CommentLevel),
-		CanUpload:   memberLevel >= int(board.UploadLevel),
+		CanWrite:    !blocked && memberLevel >= int(board.WriteLevel),
+		CanReply:    !blocked && memberLevel >= int(board.ReplyLevel),
+		CanComment:  !blocked && memberLevel >= int(board.CommentLevel),
+		CanUpload:   !blocked && memberLevel >= int(board.UploadLevel),
 		CanDownload: memberLevel >= int(board.DownloadLevel),
 	}, nil
 }
