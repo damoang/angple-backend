@@ -3308,6 +3308,14 @@ func main() {
 				return
 			}
 
+			// 등급별 게시판 제한 (광고앙 = 직접홍보 전용).
+			// ⛔ 바로 위 사다리 검사로는 못 막는다. 광고앙(5)은 write_level 이 5 미만인
+			//    게시판을 전부 통과한다. 여기가 웹·앱이 공유하는 실제 작성 경로다.
+			if common.IsBoardWriteBlockedByLevel(userLevel, slug) {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": common.LevelBoardBlockedMessage})
+				return
+			}
+
 			// 중고거래 게시판: as_level 30 이상 필요
 			if slug == "trade" {
 				var asLevel int
@@ -3714,6 +3722,14 @@ func main() {
 			// 레벨 체크
 			if userLevel < board.BoCommentLevel {
 				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "댓글 작성 권한이 없습니다. 레벨 " + strconv.Itoa(board.BoCommentLevel) + " 이상이 필요합니다."})
+				return
+			}
+
+			// 등급별 게시판 제한 (광고앙 = 직접홍보 전용).
+			// ⛔ 글과 댓글은 경로가 다르다. 여기를 빼면 댓글로 그대로 들어온다 —
+			//    제보된 가입인사 건도 글이 아니라 댓글이었다.
+			if common.IsBoardWriteBlockedByLevel(userLevel, slug) {
+				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": common.LevelBoardBlockedMessage})
 				return
 			}
 

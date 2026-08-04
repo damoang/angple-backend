@@ -121,6 +121,11 @@ func (c *DBBoardPermissionChecker) CanUpload(boardSlug string, memberLevel int) 
 	if err != nil {
 		return false, err
 	}
+	// GetAllPermissions 의 CanUpload 와 답이 달라지면 안 된다. 같은 질문에 두 API 가
+	// 다른 답을 내면 어느 쪽이 맞는지 아무도 모르게 된다.
+	if common.IsBoardWriteBlockedByLevel(memberLevel, boardSlug) {
+		return false, nil
+	}
 	return memberLevel >= int(board.UploadLevel), nil
 }
 

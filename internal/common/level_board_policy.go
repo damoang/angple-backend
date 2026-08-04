@@ -22,10 +22,19 @@ package common
 //
 // # 적용 지점
 //
-// ⛔ 이 규칙은 **세 곳 모두**에 걸어야 한다. 한 곳만 고치면 다른 경로로 그대로 들어온다.
-//   1. handler/v2 CreatePost   — 실제 글 작성 차단
-//   2. handler/v2 CreateComment — 실제 댓글 작성 차단
-//   3. middleware/permission_checker — 권한 API 응답(=UI 의 글쓰기 버튼 노출)
+// ⛔ **실제 차단은 cmd/api/main.go 의 인라인 핸들러에서 일어난다.**
+//
+//	createPostFn    (main.go, v1 웹 + v2 앱 라우트가 공유)  — 글 차단
+//	createCommentFn (main.go, 동일)                        — 댓글 차단
+//
+// ⛔ handler/v2 의 CreatePost·CreateComment 에도 같은 검사가 있지만 **그 핸들러는
+//    어떤 라우트에도 등록돼 있지 않다**(routes/v2/routes.go 가 중복 등록 panic 때문에
+//    작성 라우트를 빼두었다). 거기만 고치면 아무것도 안 막힌다 — 2026-08-04 실제로
+//    거기만 고쳐 놓고 "막았다"고 판단할 뻔했다. 죽은 핸들러는 회귀 방지용으로 남겨둔다.
+//
+// middleware/permission_checker 는 **차단이 아니라 표시**를 담당한다.
+// 권한 API 응답이 UI 의 글쓰기 버튼 노출을 정하므로 여기도 같이 맞춰야 하지만,
+// ⛔ 여기만 고치면 버튼만 사라지고 API 는 계속 받는다 — 차단이 아니라 위장이다.
 
 // AdvertiserLevel 은 광고앙(유료 광고 계정) 등급이다.
 //
