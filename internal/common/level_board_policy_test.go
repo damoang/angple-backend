@@ -67,6 +67,29 @@ func TestBlockedMessageIsActionable(t *testing.T) {
 	}
 }
 
+func TestAdvertiserLevelIsNotManuallyGrantable(t *testing.T) {
+	// 광고앙 등급의 정본은 promotions 테이블(ads.damoang.net 직접홍보 메뉴)이고
+	// 크론이 계약 기간에 맞춰 관리한다. 손으로 주면 회수 장치가 없다.
+	if IsAdvertiserLevelManuallyGrantable(AdvertiserLevel) {
+		t.Error("등급 5 를 관리자가 손으로 줄 수 있으면 안 된다 — 크론이 회수하지 못한다")
+	}
+	// 나머지 등급은 관리자가 자유롭게 조정할 수 있어야 한다
+	for _, lv := range []int{1, 2, 3, 4, 6, 7, 8, 9, 10} {
+		if !IsAdvertiserLevelManuallyGrantable(lv) {
+			t.Errorf("등급 %d 는 관리자가 지정할 수 있어야 한다", lv)
+		}
+	}
+}
+
+func TestRevokedLevelMatchesCronExpiry(t *testing.T) {
+	// cron/member_levels.go 의 determineMemberLevel 이 계약 만료 시 돌려주는 값과 같아야 한다.
+	// 어긋나면 같은 상황에서 경로에 따라 회원 등급이 달라진다.
+	if AdvertiserLevelRevokedLevel != 2 {
+		t.Errorf("회수 등급이 %d 다 — 크론 만료값(2)과 어긋나면 경로마다 결과가 달라진다",
+			AdvertiserLevelRevokedLevel)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

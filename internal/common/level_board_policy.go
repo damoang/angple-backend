@@ -63,3 +63,31 @@ func IsBoardWriteBlockedByLevel(memberLevel int, boardSlug string) bool {
 //
 // 등급 이름과 게시판 이름을 그대로 적어, 왜 막혔고 어디에 쓰면 되는지 한 줄로 알 수 있게 한다.
 const LevelBoardBlockedMessage = "광고앙 등급은 직접홍보 게시판에서만 글과 댓글을 작성하실 수 있습니다."
+
+// AdvertiserLevelManualGrantMessage 는 관리자가 광고앙 등급을 손으로 주려 할 때의 거부 문구다.
+const AdvertiserLevelManualGrantMessage = "광고앙(등급 5)은 손으로 부여할 수 없습니다. " +
+	"ads.damoang.net 의 직접홍보 메뉴에서 광고 계약을 등록하면 계약 기간에 맞춰 자동 부여됩니다."
+
+// AdvertiserLevelRevokedLevel 은 광고 계약이 없는데 광고앙 등급이 붙어 있을 때 되돌릴 등급이다.
+//
+// 크론(cron/member_levels.go determineMemberLevel)이 계약 만료 시 쓰는 값과 같아야 한다.
+// 두 값이 어긋나면 같은 상황에서 회원 등급이 경로에 따라 달라진다.
+const AdvertiserLevelRevokedLevel = 2
+
+// IsAdvertiserLevelManuallyGrantable 은 관리자가 이 등급을 직접 지정해도 되는지 판정한다.
+//
+// # 왜 막는가 (2026-08-04 실측)
+//
+// 광고앙 등급의 정본은 `promotions` 테이블이고, ads.damoang.net 직접홍보 메뉴가 그걸 쓴다.
+// 크론이 계약 기간에 따라 `5 ↔ 2` 로 자동 관리한다. 이 경로는 정상 동작 중이다 —
+// 만료 계약 72건이 모두 등급 2 로 내려가 있고 누락은 0건이었다.
+//
+// 문제는 **`promotions` 에 없는데 등급 5인 계정이 13명** 있었다는 것이다.
+// 크론은 `promotions` 를 순회하므로 거기 없는 계정은 **쳐다보지도 않는다.**
+// 즉 손으로 준 등급 5 는 회수 장치가 없어 영구히 남는다.
+// 그중 7명은 직접홍보 글이 0건, 3명은 그 상태로 오늘도 활동 중이었다.
+//
+// 그래서 등급 5 는 **크론만** 부여한다. 관리자 화면에서는 거부한다.
+func IsAdvertiserLevelManuallyGrantable(level int) bool {
+	return level != AdvertiserLevel
+}
