@@ -245,6 +245,12 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 			common.V2ErrorResponse(c, http.StatusBadRequest, "레벨은 1~10 범위여야 합니다", nil)
 			return
 		}
+		// ⛔ 광고앙(5)은 promotions 테이블 + 크론이 정본이다. 손으로 주면 회수 장치가 없어
+		//    영구히 남는다(2026-08-04 기준 그렇게 남은 계정 13명).
+		if !common.IsAdvertiserLevelManuallyGrantable(*req.MbLevel) {
+			common.V2ErrorResponse(c, http.StatusBadRequest, common.AdvertiserLevelManualGrantMessage, nil)
+			return
+		}
 		updates["mb_level"] = *req.MbLevel
 	}
 	if req.MbPoint != nil {
@@ -344,6 +350,11 @@ func (h *AdminMemberHandler) BulkUpdateLevel(c *gin.Context) {
 	}
 	if len(req.MemberIDs) > 100 {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "최대 100명까지 일괄 변경 가능합니다", nil)
+		return
+	}
+	// ⛔ 일괄 변경으로도 광고앙(5)을 줄 수 없다. 개별 변경만 막으면 이쪽으로 그대로 들어온다.
+	if !common.IsAdvertiserLevelManuallyGrantable(req.Level) {
+		common.V2ErrorResponse(c, http.StatusBadRequest, common.AdvertiserLevelManualGrantMessage, nil)
 		return
 	}
 	if err := h.db.Model(&gnuboard.G5Member{}).Where("mb_id IN ?", req.MemberIDs).Update("mb_level", req.Level).Error; err != nil {

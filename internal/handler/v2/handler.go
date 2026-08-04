@@ -561,6 +561,13 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		return
 	}
 
+	// 등급별 게시판 제한 (광고앙 = 직접홍보 전용).
+	// ⛔ 위 사다리 검사로는 못 막는다. 광고앙(5)은 write_level 이 5 미만인 게시판을 전부 통과한다.
+	if common.IsBoardWriteBlockedByLevel(userLevel, slug) {
+		common.V2ErrorResponse(c, http.StatusForbidden, common.LevelBoardBlockedMessage, nil)
+		return
+	}
+
 	// 실명인증 체크
 	if certMsg := h.checkCertification(c, slug); certMsg != "" {
 		common.V2ErrorResponse(c, http.StatusForbidden, certMsg, nil)
@@ -1052,6 +1059,14 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 
 	if userLevel < int(board.CommentLevel) {
 		common.V2ErrorResponse(c, http.StatusForbidden, "댓글 작성 권한이 없습니다. 레벨 "+strconv.Itoa(int(board.CommentLevel))+" 이상이 필요합니다.", nil)
+		return
+	}
+
+	// 등급별 게시판 제한 (광고앙 = 직접홍보 전용).
+	// ⛔ 글과 댓글은 경로가 다르다. 여기를 빼면 댓글로 그대로 들어온다 —
+	//    실제로 제보된 가입인사 건도 글이 아니라 댓글이었다.
+	if common.IsBoardWriteBlockedByLevel(userLevel, slug) {
+		common.V2ErrorResponse(c, http.StatusForbidden, common.LevelBoardBlockedMessage, nil)
 		return
 	}
 

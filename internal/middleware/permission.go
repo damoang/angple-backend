@@ -109,7 +109,21 @@ func BoardPermission(checker BoardPermissionChecker, action PermissionAction) gi
 		}
 
 		if !canAccess {
-			common.ErrorResponse(c, http.StatusForbidden, formatPermissionError(action, requiredLevel, memberLevel), nil)
+			// 등급별 게시판 제한으로 막힌 경우에는 사다리 문구를 쓰면 안 된다.
+			// ⛔ 광고앙(5)은 자유게시판 write_level(3)을 이미 충족한다. 그런데도
+			//    "레벨 3 이상이 필요합니다" 가 나가면 회원은 왜 막혔는지 알 수 없다.
+			//    이 미들웨어가 핸들러보다 먼저 끊으므로, 여기서 안내하지 않으면
+			//    핸들러에 넣은 문구는 영영 보이지 않는다.
+			// ⛔ 쓰기 계열에만 적용한다. 읽기·목록이 막힌 경우까지 이 문구가 나가면
+			//    "직접홍보에 쓰라"는 엉뚱한 안내가 된다.
+			msg := formatPermissionError(action, requiredLevel, memberLevel)
+			switch action {
+			case ActionWrite, ActionReply, ActionComment, ActionUpload:
+				if common.IsBoardWriteBlockedByLevel(memberLevel, boardID) {
+					msg = common.LevelBoardBlockedMessage
+				}
+			}
+			common.ErrorResponse(c, http.StatusForbidden, msg, nil)
 			c.Abort()
 			return
 		}
