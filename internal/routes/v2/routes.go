@@ -75,7 +75,8 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	// RemapUserIDToMbID: da_reaction.member_id / banCheck / checkCertification 은 모두 mb_id 기준인데
 	// Bearer(앱) 토큰의 GetUserID 는 숫자 v2_users.id 라 → remap 으로 mb_id 로 맞춰야 웹과 SSOT/가드 일치.
 	// (쓰기 라우트가 main.go 에서 쓰는 검증된 어댑터와 동일 패턴.) JWTAuth 이후에 배치.
-	boardPosts.GET("/:id/reactions", middleware.RemapUserIDToMbID(), h.GetPostReactions)
+	// GET 은 ?scope=thread 면 글+모든 댓글 리액션을 1쿼리 배치(N+1 방지), 아니면 단건(하위호환).
+	boardPosts.GET("/:id/reactions", middleware.RemapUserIDToMbID(), h.GetPostOrThreadReactions)
 	boardPosts.POST("/:id/reactions", auth, middleware.RemapUserIDToMbID(), banCheck, h.PostPostReaction)
 
 	// Comments (nested under posts)
@@ -84,6 +85,9 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	// POST(댓글 작성)도 main.go 에서 v1 핸들러 + 어댑터로 서빙(라이브 브리지). 중복 방지로 미등록.
 	comments.PUT("/:comment_id", auth, banCheck, h.UpdateComment)
 	comments.DELETE("/:comment_id", auth, banCheck, h.DeleteComment)
+	// 댓글 리액션(Phase2) — 게시글과 동일 패턴 + 자기 댓글 방지(핸들러 내부).
+	comments.GET("/:comment_id/reactions", middleware.RemapUserIDToMbID(), h.GetCommentReactions)
+	comments.POST("/:comment_id/reactions", auth, middleware.RemapUserIDToMbID(), banCheck, h.PostCommentReaction)
 }
 
 // SetupAdminPosts configures v2 admin post routes (deleted posts)
