@@ -195,13 +195,20 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 	}
 
 	// Pass 1: Identify top N groups by MAX(ph_id) — lightweight, no GROUP_CONCAT
+	// 후보는 최근 notiGroupWindow 행으로 좁힌다(상수 주석 참조). 인덱스(mb_id, ph_id)
+	// 역순 스캔 + LIMIT 라 무거운 계정에서도 상한이 잡힌다.
 	offset := (page - 1) * limit
 	topGroupsSQL := `SELECT
 		bo_table, wr_id, ph_from_case,
 		MAX(ph_id) as latest_ph_id,
 		COUNT(*) as sender_count
-	FROM g5_na_noti
-	WHERE mb_id = ? ` + fromCaseFilter + `
+	FROM (
+		SELECT ph_id, bo_table, wr_id, ph_from_case
+		FROM g5_na_noti FORCE INDEX (idx_mb_phid)
+		WHERE mb_id = ? ` + fromCaseFilter + `
+		ORDER BY ph_id DESC
+		LIMIT ?
+	) w
 	GROUP BY bo_table, wr_id, ph_from_case
 	ORDER BY latest_ph_id DESC
 	LIMIT ? OFFSET ?`
@@ -214,7 +221,7 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 		SenderCount int    `gorm:"column:sender_count"`
 	}
 	var tops []topGroup
-	if err := r.db.Raw(topGroupsSQL, mbID, limit, offset).Scan(&tops).Error; err != nil {
+	if err := r.db.Raw(topGroupsSQL, mbID, notiGroupWindow, limit, offset).Scan(&tops).Error; err != nil {
 		return nil, 0, 0, err
 	}
 
@@ -227,13 +234,25 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 	if page == 1 && len(tops) < limit {
 		totalGroups = int64(len(tops))
 	} else {
+		// ⛔ 창 없이 세면 이 COUNT 가 다시 전체 행 GROUP BY 가 되어(무거운 계정 수백 ms)
+		//    Pass 1 을 좁힌 의미가 없어진다. 같은 창 기준으로 센다.
 		countSQL := `SELECT COUNT(*) FROM (
-			SELECT 1 FROM g5_na_noti
-			WHERE mb_id = ? ` + fromCaseFilter + `
+			SELECT 1 FROM (
+				SELECT bo_table, wr_id, ph_from_case
+				FROM g5_na_noti FORCE INDEX (idx_mb_phid)
+				WHERE mb_id = ? ` + fromCaseFilter + `
+				ORDER BY ph_id DESC
+				LIMIT ?
+			) w
 			GROUP BY bo_table, wr_id, ph_from_case
 		) t`
-		if err := r.db.Raw(countSQL, mbID).Scan(&totalGroups).Error; err != nil {
+		if err := r.db.Raw(countSQL, mbID, notiGroupWindow).Scan(&totalGroups).Error; err != nil {
 			return nil, 0, 0, err
+		}
+		// 창이 페이지 요청을 다 못 덮었는데 이번 페이지가 꽉 찼다면, 다음 페이지가
+		// 존재하도록 보정한다(정확한 총수보다 "더보기가 끊기지 않는 것"이 중요).
+		if len(tops) == limit && totalGroups < int64(offset+len(tops)+1) {
+			totalGroups = int64(offset + len(tops) + 1)
 		}
 	}
 
@@ -379,6 +398,28 @@ func (r *notiRepository) DeleteGroup(mbID, boTable string, wrID int, fromCase st
 //	r:{post}  내 댓글 답글  — ph_to_case='comment_reply'. ⚠️글 단위다: 스키마 어디에도
 //	          "내 댓글 id"가 없어(wr_id·앵커 모두 새 답글) 댓글 단위 키를 만들 수 없다
 //	s:{ph_id} 비묶음(write/memo/mention/digest 등) — 행 그대로 한 줄
+//
+// notiGroupWindow — 묶음 계산이 훑는 최근 행 수의 상한 (알림 속도 개선, 2026-08-06).
+//
+// 묶음 쿼리(grouped·merged)는 회원의 **전체** 알림을 GROUP BY 했다. 대부분의 회원은
+// 수백 행이라 p95 39ms 였지만, 최다 수신 계정(87,430행·안읽음 87,429)은 **678ms** 다.
+// 테이블 전체로도 345만 행 중 안읽음이 239만(69%)이라, 안 읽는 계정의 행은 계속 쌓인다.
+//
+// 화면은 최신순 한 페이지(20묶음)만 보여주므로, 후보를 **최근 N행**으로 좁혀도
+// 표시 결과는 같다 — N이 회원의 전체 행 수보다 크면 문자 그대로 동일하고,
+// 초과하는 무거운 계정만 "최근 3,000건 안에서의 묶음"이 된다.
+//
+// 트레이드오프(의도된 것):
+//   - 아주 오래된 행까지 걸친 묶음의 개수 합계("외 N명", 좋아요 n)가 창 안 기준으로
+//     집계된다. 표시용 근사치라 화면상 차이는 미미하다.
+//   - 전체 묶음 수(totalGroups)도 창 안 기준이 된다. 창이 꽉 찼으면 다음 페이지가
+//     항상 있도록 보정한다 — 87k 계정도 창 3,000이면 수백 묶음 = 수십 페이지로,
+//     알림함을 그 이상 넘겨 보는 사용은 사실상 없다.
+//   - 안읽음 배지(unreadCount)는 별도 인덱스 카운트라 **정확값 그대로**다.
+//
+// ⛔ 읽음 처리·삭제는 이 창과 무관하다 — 같은 그룹 키로 전체 행에 동작한다.
+const notiGroupWindow = 3000
+
 const targetKeyExpr = `CASE
 	WHEN ph_to_case = 'comment_reply' THEN CONCAT('r:', SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(rel_url,'#',1),'?',1),'/',-1))
 	WHEN ph_from_case = 'good' AND LOCATE('#c_', rel_url) > 0 THEN CONCAT('cg:', wr_id)
@@ -436,6 +477,7 @@ func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, fi
 
 	offset := (page - 1) * limit
 	// senders 는 최신순 닉 5명까지만 — GROUP_CONCAT 전량은 좋아요 폭주 글에서 수백 명이 된다
+	// 후보는 최근 notiGroupWindow 행으로 좁힌다(상수 주석 참조).
 	topSQL := `SELECT
 		bo_table, ` + targetKeyExpr + ` AS tkey,
 		MAX(ph_id) AS latest_ph_id,
@@ -445,14 +487,19 @@ func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, fi
 		SUM(ph_to_case = 'comment_reply') AS reply_count,
 		SUM(ph_readed = 'N') AS unread_count,
 		SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT rel_mb_nick ORDER BY ph_id DESC SEPARATOR ','), ',', 5) AS senders
-	FROM g5_na_noti
-	WHERE mb_id = ? ` + fromCaseFilter + `
+	FROM (
+		SELECT ph_id, bo_table, wr_id, ph_from_case, ph_to_case, ph_readed, rel_mb_nick, rel_url
+		FROM g5_na_noti FORCE INDEX (idx_mb_phid)
+		WHERE mb_id = ? ` + fromCaseFilter + `
+		ORDER BY ph_id DESC
+		LIMIT ?
+	) w
 	GROUP BY bo_table, tkey
 	ORDER BY latest_ph_id DESC
 	LIMIT ? OFFSET ?`
 
 	var groups []MergedNotification
-	if err := r.db.Raw(topSQL, mbID, limit, offset).Scan(&groups).Error; err != nil {
+	if err := r.db.Raw(topSQL, mbID, notiGroupWindow, limit, offset).Scan(&groups).Error; err != nil {
 		return nil, 0, 0, err
 	}
 	if len(groups) == 0 {
@@ -463,13 +510,22 @@ func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, fi
 	if page == 1 && len(groups) < limit {
 		totalGroups = int64(len(groups))
 	} else {
+		// ⛔ 창 없이 세면 전체 행 GROUP BY 로 되돌아간다 — grouped 쪽과 같은 창 기준.
 		countSQL := `SELECT COUNT(*) FROM (
-			SELECT 1 FROM g5_na_noti
-			WHERE mb_id = ? ` + fromCaseFilter + `
+			SELECT 1 FROM (
+				SELECT ph_id, bo_table, wr_id, ph_from_case, ph_to_case, rel_url
+				FROM g5_na_noti FORCE INDEX (idx_mb_phid)
+				WHERE mb_id = ? ` + fromCaseFilter + `
+				ORDER BY ph_id DESC
+				LIMIT ?
+			) w
 			GROUP BY bo_table, ` + targetKeyExpr + `
 		) t`
-		if err := r.db.Raw(countSQL, mbID).Scan(&totalGroups).Error; err != nil {
+		if err := r.db.Raw(countSQL, mbID, notiGroupWindow).Scan(&totalGroups).Error; err != nil {
 			return nil, 0, 0, err
+		}
+		if len(groups) == limit && totalGroups < int64(offset+len(groups)+1) {
+			totalGroups = int64(offset + len(groups) + 1)
 		}
 	}
 
