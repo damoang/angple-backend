@@ -377,9 +377,60 @@ func generateGroupTitle(fromCase, toCase, latestSender string, senderCount, wrID
 
 // generateMergedTitle — 대상 항목 단위 통합 묶음 한 줄 제목.
 // "OO님 외 N명이 회원님의 글에 댓글 5 · 좋아요 3" 형태(free/6875994 Java 님 제안).
+// isCommentTarget 은 묶음의 대상이 댓글인지 판정한다.
+// tkey 접두 규약: cg:·r: = 댓글, s: = 비묶음, 그 외 = 글.
+func isCommentTarget(targetKey string) bool {
+	return strings.HasPrefix(targetKey, "cg:") || strings.HasPrefix(targetKey, "r:")
+}
+
+// mergedItemType 은 묶음 알림의 표시 종류를 정한다 (bug/13332).
+//
+// ⛔ 예전에는 묶음이면 무조건 "merged" 를 내려보냈고, 프론트 아이콘 매핑에 그 케이스가
+// 없어 **default(Info) 회색 느낌표**로 떨어졌다. 「알림 묶어 보기」가 기본 켬이라
+// 사실상 모든 알림이 같은 회색 아이콘이 됐다:
+//
+//	"보시는 것처럼 댓글과 답글 구분이 어려워서 확인하기 번거롭습니다" (bug/13332)
+//
+// 제목은 이미 "회원님의 글에 댓글 2 · 좋아요 3" 처럼 종류를 말하고 있었다. 아이콘만
+// 죽어 있었던 것이라, 개수에서 종류를 되살린다.
+//
+// 한 종류뿐이면 그 종류로 정확히 표시하고, 섞였을 때만 묶음 표시를 쓴다. 이때도
+// **대상(글/댓글)은 알려준다** — 섞였다고 회색으로 뭉개면 예전과 같아진다.
+//
+// ⛔ 섞였을 때 "가장 많은 종류" 로 대표시키지 않는다. 좋아요 5·댓글 1 을 좋아요로만
+// 보여주면 댓글이 달린 사실이 화면에서 사라진다.
+func mergedItemType(targetKey string, good, cmt, reply int) string {
+	kinds := 0
+	for _, n := range []int{good, cmt, reply} {
+		if n > 0 {
+			kinds++
+		}
+	}
+	onComment := isCommentTarget(targetKey)
+
+	if kinds == 1 {
+		switch {
+		case good > 0:
+			if onComment {
+				return "like_comment"
+			}
+			return "like"
+		case reply > 0:
+			return "reply"
+		default:
+			return "comment"
+		}
+	}
+	// 0종(폴백) 또는 2종 이상 — 대상만이라도 구분해 준다.
+	if onComment {
+		return "merged_comment"
+	}
+	return "merged_post"
+}
+
 func generateMergedTitle(targetKey, latestSender string, senderCount, good, cmt, reply int) string {
 	target := "글"
-	if strings.HasPrefix(targetKey, "cg:") || strings.HasPrefix(targetKey, "r:") {
+	if isCommentTarget(targetKey) {
 		target = "댓글"
 	}
 	parts := make([]string, 0, 3)
@@ -495,7 +546,7 @@ func (h *NotiHandler) getMergedNotifications(c *gin.Context, mbID string, page, 
 		// s:(비묶음 — 구독 새글·팔로우·쪽지·멘션)는 병합 대상이 아니다. 유형·제목을
 		// 원래대로 유지해야 한다 — 'merged' 로 뭉개면 제목이 "새 알림이 있습니다"가
 		// 되어 닉네임이 사라지고(bug/13199) 아이콘도 전부 Info 로 죽는다.
-		itemType := "merged"
+		itemType := mergedItemType(g.TargetKey, g.GoodCount, g.CommentCount, g.ReplyCount)
 		fromCase := "merged"
 		title := generateMergedTitle(g.TargetKey, g.LatestSender, g.SenderCount, g.GoodCount, g.CommentCount, g.ReplyCount)
 		if strings.HasPrefix(g.TargetKey, "s:") {
