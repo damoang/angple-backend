@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
+	"github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"github.com/damoang/angple-backend/internal/middleware"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	"github.com/gin-gonic/gin"
@@ -46,7 +47,19 @@ func (h *MyPageHandler) GetMyPosts(c *gin.Context) {
 
 	page, limit := parseMyPagePagination(c)
 
-	posts, total, err := h.myPageRepo.FindPostsByMember(mbID, page, limit)
+	// ⛔ mbID 는 항상 토큰에서 온다. 쿼리파라미터로 회원을 받으면 남의 글을 검색하는 통로가 된다.
+	q := gnurepo.NormalizeSearchQuery(c.Query("q"))
+
+	var (
+		posts []gnuboard.MyPost
+		total int64
+		err   error
+	)
+	if q != "" {
+		posts, total, err = h.myPageRepo.SearchPostsByMember(mbID, q, page, limit)
+	} else {
+		posts, total, err = h.myPageRepo.FindPostsByMember(mbID, page, limit)
+	}
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "내 글 조회에 실패했습니다", err)
 		return
@@ -70,7 +83,18 @@ func (h *MyPageHandler) GetMyComments(c *gin.Context) {
 
 	page, limit := parseMyPagePagination(c)
 
-	comments, total, err := h.myPageRepo.FindCommentsByMember(mbID, page, limit)
+	q := gnurepo.NormalizeSearchQuery(c.Query("q"))
+
+	var (
+		comments []gnuboard.MyCommentRow
+		total    int64
+		err      error
+	)
+	if q != "" {
+		comments, total, err = h.myPageRepo.SearchCommentsByMember(mbID, q, page, limit)
+	} else {
+		comments, total, err = h.myPageRepo.FindCommentsByMember(mbID, page, limit)
+	}
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "내 댓글 조회에 실패했습니다", err)
 		return
