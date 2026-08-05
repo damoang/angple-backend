@@ -36,9 +36,37 @@ func (Notification) TableName() string { return "g5_na_noti" }
 
 // GroupedNotification represents a group of notifications for the same post+type
 type GroupedNotification struct {
-	BoTable       string    `gorm:"column:bo_table"`
-	WrID          int       `gorm:"column:wr_id"`
-	PhFromCase    string    `gorm:"column:ph_from_case"`
+	BoTable    string `gorm:"column:bo_table"`
+	WrID       int    `gorm:"column:wr_id"`
+	PhFromCase string `gorm:"column:ph_from_case"`
+	// PhToCase·WrParent 는 **표시 전용** 세부 종류다(bug#13242).
+	//
+	// ph_from_case 만으로는 구분이 안 되는 조합이 있다 — 30일 실측:
+	//   write + subscribe      914,410건  구독 게시판 새 글
+	//   write + follow          97,405건  팔로우한 분의 새 글
+	//   comment + comment      131,461건  내 글에 달린 댓글
+	//   comment + comment_reply 32,904건  내 댓글에 달린 답글
+	//
+	// write 계열 101만건(전체의 52%)이 한 덩어리로 묶여 회색 기본 아이콘으로 표시됐다.
+	//
+	// 공감은 ph_to_case 도 똑같이 'good' 이라 갈리지 않는다. 대신 wr_parent 로 가른다 —
+	// 3일 실측에서 완전히 분리된다:
+	//   wr_parent == wr_id  106,236건 전부 "회원님의 글을 추천했습니다"
+	//   wr_parent != wr_id   68,127건 전부 "회원님의 댓글을 추천했습니다"
+	// 같은 집합을 rel_url LIKE '%#c_%' 로 세도 정확히 일치한다(독립 신호 2개 합치).
+	//
+	// ⛔ **그룹 키에는 넣지 않는다.** 그룹 키는 (bo_table, wr_id, ph_from_case) 이고
+	//    읽음 처리·삭제가 같은 키로 동작한다. 여기에 ph_to_case 를 더하면 묶음이
+	//    쪼개져 읽음/삭제가 어긋난다. 그래서 그룹 대표 행(latest)의 값을 그대로
+	//    실어 보내기만 한다 — 쿼리도 그룹 로직도 바뀌지 않는다.
+	//
+	// ⚠️ 한 그룹 안에서 ph_to_case 가 섞이는 경우가 실제로 있다 (7일 실측:
+	//    comment 1,022 그룹, write 306 그룹). 예컨대 게시판을 구독하면서 글쓴이를
+	//    팔로우도 하면 같은 글에 두 알림이 온다. 이때는 **가장 최근 행의 종류**를
+	//    보여준다 — 묶음 행의 시각·본문이 이미 최신 행 기준이라 그쪽이 일관된다.
+	//    good 의 wr_parent 는 섞이는 그룹이 0건이라 이 문제가 없다.
+	PhToCase      string    `gorm:"column:ph_to_case"`
+	WrParent      int       `gorm:"column:wr_parent"`
 	LatestPhID    int       `gorm:"column:latest_ph_id"`
 	LatestAt      time.Time `gorm:"column:latest_at"`
 	SenderCount   int       `gorm:"column:sender_count"`
@@ -305,9 +333,13 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 		senders := senderMap[key]
 
 		groups = append(groups, GroupedNotification{
-			BoTable:       t.BoTable,
-			WrID:          t.WrID,
-			PhFromCase:    t.PhFromCase,
+			BoTable:    t.BoTable,
+			WrID:       t.WrID,
+			PhFromCase: t.PhFromCase,
+			// 그룹 대표(최신) 행의 표시용 필드를 그대로 싣는다(bug#13242).
+			// 섞인 그룹에서는 최신 행 기준 — 위 GroupedNotification 주석 참조.
+			PhToCase:      latest.PhToCase,
+			WrParent:      latest.WrParent,
 			LatestPhID:    t.LatestPhID,
 			LatestAt:      latest.PhDatetime,
 			SenderCount:   t.SenderCount,
@@ -366,13 +398,16 @@ type MergedNotification struct {
 	UnreadCount  int    `gorm:"column:unread_count"`
 	Senders      string `gorm:"column:senders"`
 	// 아래는 최신 행(pass 2)에서 채운다
-	LatestAt       time.Time `gorm:"-"`
-	LatestSender   string    `gorm:"-"`
-	LatestFromCase string    `gorm:"-"`
-	RelURL         string    `gorm:"-"`
-	ParentSubject  string    `gorm:"-"`
-	RelMsg         string    `gorm:"-"`
-	WrID           int       `gorm:"-"`
+	LatestAt     time.Time `gorm:"-"`
+	LatestSender string    `gorm:"-"`
+	// 비묶음(s:) 항목의 세부 종류 판별용 — GroupedNotification 의 PhToCase 주석 참조.
+	LatestFromCase string `gorm:"-"`
+	LatestToCase   string `gorm:"-"`
+	LatestWrParent int    `gorm:"-"`
+	RelURL         string `gorm:"-"`
+	ParentSubject  string `gorm:"-"`
+	RelMsg         string `gorm:"-"`
+	WrID           int    `gorm:"-"`
 }
 
 // GetMergedNotifications — GetGroupedNotifications 와 같은 2-pass 구조에 키만 대상 단위다.
@@ -456,6 +491,8 @@ func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, fi
 			groups[i].LatestAt = latest.PhDatetime
 			groups[i].LatestSender = latest.RelMbNick
 			groups[i].LatestFromCase = latest.PhFromCase
+			groups[i].LatestToCase = latest.PhToCase
+			groups[i].LatestWrParent = latest.WrParent
 			groups[i].RelURL = latest.RelURL
 			groups[i].ParentSubject = latest.ParentSubject
 			groups[i].RelMsg = latest.RelMsg
