@@ -50,39 +50,87 @@ type v1NotificationListResponse struct {
 	TotalPages  int64                    `json:"total_pages"`
 }
 
-// mapFromCase maps ph_from_case to frontend NotificationType
-func mapFromCase(fromCase string) string {
+// mapNotificationType maps a notification row to the frontend NotificationType.
+//
+// ⛔ ph_from_case 하나만 보면 안 된다(bug#13242). 30일 실측:
+//
+//	write   + subscribe      914,410  구독 게시판 새 글   ← 예전엔 전부 "system"(회색)
+//	good    + good           740,872  글 공감 + 댓글 공감이 한 덩어리
+//	comment + comment        131,461  내 글에 댓글        ← 예전엔 "reply"(답글)로 표시
+//	write   + follow          97,405  팔로우한 분 새 글   ← 예전엔 "system"(회색)
+//	comment + comment_reply   32,904  내 댓글에 답글
+//
+// write 계열만 101만건 = 전체의 52% 가 의미 없는 회색 아이콘이었다.
+//
+// 공감의 글/댓글은 ph_to_case 도 'good' 으로 같아서 wr_parent 로 가른다.
+// 3일 실측에서 완전히 분리된다 — wr_parent==wr_id 106,236건은 전부 "글을 추천",
+// wr_parent!=wr_id 68,127건은 전부 "댓글을 추천". rel_url 의 '#c_' 유무로 센
+// 집합과도 정확히 일치한다(독립 신호 2개 합치).
+//
+// ⛔ "board" 는 실 데이터에 없다(30일 0건). 사문화됐지만 옛 행이 남아 있을 수 있어
+// 지우지 않는다.
+func mapNotificationType(fromCase, toCase string, wrID, wrParent int) string {
 	switch fromCase {
 	case "board":
 		return "comment"
 	case "comment", "reply":
-		return "reply"
+		if toCase == "comment_reply" {
+			return "reply"
+		}
+		// 내 '글'에 달린 댓글. 이게 comment 계열의 80% 다.
+		return "comment"
 	case "mention":
 		return "mention"
-	case "good", "nogood":
+	case "good":
+		// wr_parent 가 0 이면 판별 불가 — 안전하게 글 공감으로 둔다.
+		if wrParent != 0 && wrParent != wrID {
+			return "like_comment"
+		}
+		return "like"
+	case "nogood":
 		return "like"
 	case "memo":
 		return "memo"
-	case "write", "inquire", "answer":
-		return "system"
+	case "digest":
+		return "digest"
+	case "write":
+		if toCase == "follow" {
+			return "follow"
+		}
+		return "subscribe"
 	default:
 		return "system"
 	}
 }
 
-// generateTitle generates a notification title based on ph_from_case
-func generateTitle(fromCase, relMbNick string) string {
+// generateTitle generates a notification title.
+//
+// ⛔ 문구를 창작하지 말 것. 여기 표현은 DB 의 rel_msg 가 실제로 쓰는 문장과 같게
+// 맞춘 것이다. 예전에는 comment 계열을 모두 "답글을 달았습니다"로 썼는데,
+// 실제로는 그중 80% 가 "회원님의 글에 댓글을 남겼습니다" 였다(bug#13242).
+//
+// 종류를 문장 뒤쪽에 두면 닉네임이 길 때 line-clamp 로 먼저 잘려 사라진다.
+// 그래서 화면은 별도로 맨 앞에 종류 표식을 그린다 — 이 문자열은 정확성만 책임진다.
+func generateTitle(fromCase, toCase, relMbNick string, wrID, wrParent int) string {
 	switch fromCase {
 	case "board":
-		return relMbNick + "님이 댓글을 달았습니다"
+		return relMbNick + "님이 회원님의 글에 댓글을 남겼습니다"
 	case "comment", "reply":
-		return relMbNick + "님이 답글을 달았습니다"
+		if toCase == "comment_reply" {
+			return relMbNick + "님이 회원님의 댓글에 답글을 남겼습니다"
+		}
+		return relMbNick + "님이 회원님의 글에 댓글을 남겼습니다"
 	case "mention":
 		return relMbNick + "님이 회원님을 멘션했습니다"
 	case "write":
 		return relMbNick + "님이 새 글을 작성했습니다"
+	case "digest":
+		return "새 글 요약이 도착했습니다"
 	case "good":
-		return relMbNick + "님이 추천했습니다"
+		if wrParent != 0 && wrParent != wrID {
+			return relMbNick + "님이 회원님의 댓글을 추천했습니다"
+		}
+		return relMbNick + "님이 회원님의 글을 추천했습니다"
 	case "nogood":
 		return "게시글이 비추천을 받았습니다"
 	case "memo":
@@ -125,8 +173,8 @@ func convertLegacyURL(rawURL string) string {
 func toV1Notification(n gnurepo.Notification) v1NotificationResponse {
 	return v1NotificationResponse{
 		ID:            n.PhID,
-		Type:          mapFromCase(n.PhFromCase),
-		Title:         generateTitle(n.PhFromCase, n.RelMbNick),
+		Type:          mapNotificationType(n.PhFromCase, n.PhToCase, n.WrID, n.WrParent),
+		Title:         generateTitle(n.PhFromCase, n.PhToCase, n.RelMbNick, n.WrID, n.WrParent),
 		Content:       n.RelMsg,
 		URL:           convertLegacyURL(n.RelURL),
 		SenderID:      n.RelMbID,
@@ -286,17 +334,27 @@ type groupedNotificationListResponse struct {
 }
 
 // generateGroupTitle generates a title for grouped notifications
-func generateGroupTitle(fromCase, latestSender string, senderCount int) string {
+// ⛔ 문구는 generateTitle 과 같은 규칙이다(bug#13242) — 종류를 정확히 쓴다.
+// 둘 중 하나만 고치면 묶음 알림과 낱개 알림이 서로 다른 말을 한다.
+func generateGroupTitle(fromCase, toCase, latestSender string, senderCount, wrID, wrParent int) string {
 	action := ""
 	switch fromCase {
 	case "board":
-		action = "댓글을 달았습니다"
+		action = "회원님의 글에 댓글을 남겼습니다"
 	case "comment", "reply":
-		action = "답글을 달았습니다"
+		if toCase == "comment_reply" {
+			action = "회원님의 댓글에 답글을 남겼습니다"
+		} else {
+			action = "회원님의 글에 댓글을 남겼습니다"
+		}
 	case "mention":
 		action = "회원님을 멘션했습니다"
 	case "good":
-		action = "추천했습니다"
+		if wrParent != 0 && wrParent != wrID {
+			action = "회원님의 댓글을 추천했습니다"
+		} else {
+			action = "회원님의 글을 추천했습니다"
+		}
 	case "nogood":
 		action = "비추천했습니다"
 	case "write":
@@ -335,7 +393,8 @@ func generateMergedTitle(targetKey, latestSender string, senderCount, good, cmt,
 		parts = append(parts, fmt.Sprintf("좋아요 %d", good))
 	}
 	if len(parts) == 0 {
-		return generateGroupTitle("", latestSender, senderCount)
+		// fromCase 를 모르는 폴백 경로 — default 분기("새 알림이 있습니다")로 떨어진다.
+		return generateGroupTitle("", "", latestSender, senderCount, 0, 0)
 	}
 	who := latestSender + "님"
 	if senderCount > 1 {
@@ -387,10 +446,10 @@ func (h *NotiHandler) GetGroupedNotifications(c *gin.Context) {
 		}
 
 		items = append(items, groupedNotificationResponse{
-			Type:          mapFromCase(g.PhFromCase),
+			Type:          mapNotificationType(g.PhFromCase, g.PhToCase, g.WrID, g.WrParent),
 			BoTable:       g.BoTable,
 			WrID:          g.WrID,
-			Title:         generateGroupTitle(g.PhFromCase, g.LatestSender, g.SenderCount),
+			Title:         generateGroupTitle(g.PhFromCase, g.PhToCase, g.LatestSender, g.SenderCount, g.WrID, g.WrParent),
 			URL:           convertLegacyURL(g.RelURL),
 			ParentSubject: g.ParentSubject,
 			Content:       g.RelMsg,
@@ -440,9 +499,9 @@ func (h *NotiHandler) getMergedNotifications(c *gin.Context, mbID string, page, 
 		fromCase := "merged"
 		title := generateMergedTitle(g.TargetKey, g.LatestSender, g.SenderCount, g.GoodCount, g.CommentCount, g.ReplyCount)
 		if strings.HasPrefix(g.TargetKey, "s:") {
-			itemType = mapFromCase(g.LatestFromCase)
+			itemType = mapNotificationType(g.LatestFromCase, g.LatestToCase, g.WrID, g.LatestWrParent)
 			fromCase = g.LatestFromCase
-			title = generateGroupTitle(g.LatestFromCase, g.LatestSender, g.SenderCount)
+			title = generateGroupTitle(g.LatestFromCase, g.LatestToCase, g.LatestSender, g.SenderCount, g.WrID, g.LatestWrParent)
 		}
 		items = append(items, groupedNotificationResponse{
 			Type:          itemType,
