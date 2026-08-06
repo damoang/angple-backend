@@ -3393,8 +3393,19 @@ func main() {
 				WrOption:    wrOption,
 			}
 
-			if req.Category != nil {
-				post.CaName = *req.Category
+			if req.Category != nil && *req.Category != "" {
+				// bug/12827: 다른 게시판의 카테고리가 검증 없이 저장되는 것 방지.
+				// 글쓰기 폼의 임시저장 복원이 타 게시판 draft 의 카테고리까지 부어 넣어,
+				// 카테고리가 없는 자유게시판에 「여행·답사」가 박히는 식의 오염이
+				// 실측 25건 있었다(「진행중」11·「이벤트」5 등 전부 남의 말머리).
+				// 이 게시판의 bo_category_list(| 구분)에 있는 값만 받는다 — 목록이
+				// 비어 있으면(카테고리 없는 게시판) 무엇이 와도 버린다.
+				for _, cat := range strings.Split(board.BoCategoryList, "|") {
+					if cat != "" && cat == *req.Category {
+						post.CaName = *req.Category
+						break
+					}
+				}
 			}
 			if req.Link1 != nil {
 				post.WrLink1 = *req.Link1
