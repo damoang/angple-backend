@@ -1,0 +1,98 @@
+# 오목 실시간 대전 서버 (bug 없음 — 신규 기능)
+#
+# ⛔ 이 파일은 **참조용 사본**이다. 운영 정본은 angple-k8s 저장소의
+#    k8s/prod/ 아래에 두고 그쪽에서 apply 한다(yaml=angple-k8s 규약).
+#    여기 두는 이유: 이미지·환경변수·포트가 이 저장소의 코드와 함께 바뀌므로
+#    변경 이력을 코드 옆에서 볼 수 있어야 한다.
+#
+# 설계 결정:
+#   - API 와 **같은 이미지**를 쓰되 command 로 진입점만 바꾼다(빌드 1회).
+#   - **별도 Deployment** 인 이유: WebSocket 은 장시간 연결이라 API 롤아웃마다
+#     대국이 끊기면 안 된다. replicas=1 인 이유: 대국 상태가 프로세스 메모리에
+#     있어 여러 파드로 나뉘면 같은 방의 두 사람이 다른 파드에 붙는다.
+#     (수평 확장하려면 방 상태를 Redis 로 빼는 별도 작업이 필요하다)
+#   - 재시작 시 진행 중 대국은 서버가 자동으로 aborted 처리하고 참가비를 환불한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: angple-omok
+  namespace: angple
+  labels:
+    app: angple-omok
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate # 상태가 메모리라 두 파드가 동시에 뜨면 안 된다
+  selector:
+    matchLabels:
+      app: angple-omok
+  template:
+    metadata:
+      labels:
+        app: angple-omok
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: omok
+          image: localhost:5000/angple-backend:REPLACE_WITH_SHA
+          imagePullPolicy: Always
+          command: ['./omok-ws']
+          env:
+            - name: APP_ENV
+              value: k3s
+            - name: OMOK_PORT
+              value: '8084'
+            - name: OMOK_PATH
+              value: /omok-ws/
+          envFrom:
+            - configMapRef:
+                name: angple-config # DB_HOST/DB_NAME 등
+            - secretRef:
+                name: angple-secrets # DB_PASSWORD, JWT_SECRET
+          ports:
+            - containerPort: 8084
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8084
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8084
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8084
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: angple-omok-svc
+  namespace: angple
+spec:
+  type: NodePort
+  selector:
+    app: angple-omok
+  ports:
+    - port: 8084
+      targetPort: 8084
+      nodePort: 30084 # ⛔ 호스트 nginx 가 /omok-ws/ 를 이 포트로 프록시하도록 변경 필요
+      protocol: TCP
