@@ -394,9 +394,31 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 		return
 	}
 
+	// 작성자를 차단한 회원에게는 새 글 알림을 보내지 않는다 (bug/13252).
+	//
+	// 화면(목록·댓글)은 차단을 걸러 주는데 알림 발송은 거르지 않아, 차단한 회원의
+	// 글이 알림으로 되살아났다 — "차단이 풀렸나 해서 찾아봤다"는 제보 그대로다.
+	// 실증: 제보 계정에 차단 작성자의 write 알림 2건 존재.
+	//
+	// ⛔ block_scope='all' 만 대상이다. 'message'(쪽지 한정 차단, 33건)는 글 알림과
+	//    무관하므로 거르면 안 된다.
+	blockedBy := make(map[string]bool)
+	{
+		var ids []string
+		w.db.Table("g5_member_block").Select("mb_id").
+			Where("blocked_mb_id = ? AND block_scope = 'all'", job.MemberID).
+			Pluck("mb_id", &ids)
+		for _, id := range ids {
+			blockedBy[id] = true
+		}
+	}
+
 	var followerIDs []string
 	w.db.Table("g5_member_follow").Select("mb_id").Where("target_id = ?", job.MemberID).Pluck("mb_id", &followerIDs)
 	for _, fid := range followerIDs {
+		if blockedBy[fid] {
+			continue
+		}
 		pref, ok := w.mustGetNotiPreference(fid)
 		if !ok || !pref.NotiFollow {
 			continue
@@ -423,6 +445,10 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	}
 	for _, sid := range subscriberIDs {
 		if followerSet[sid] {
+			continue
+		}
+		// 차단 필터 — 위 blockedBy 주석 참조 (bug/13252)
+		if blockedBy[sid] {
 			continue
 		}
 		pref, ok := w.mustGetNotiPreference(sid)

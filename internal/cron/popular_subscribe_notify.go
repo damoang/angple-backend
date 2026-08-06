@@ -114,8 +114,20 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 			if authorName == "" {
 				authorName = p.MbID
 			}
+			// 작성자를 차단한 구독자는 제외 (bug/13252 — write_after_worker 와 같은 규칙).
+			// ⛔ block_scope='all' 만. 'message' 는 쪽지 한정이라 거르면 안 된다.
+			blockedBy := map[string]bool{}
+			{
+				var ids []string
+				db.Table("g5_member_block").Select("mb_id").
+					Where("blocked_mb_id = ? AND block_scope = 'all'", p.MbID).
+					Pluck("mb_id", &ids)
+				for _, id := range ids {
+					blockedBy[id] = true
+				}
+			}
 			for _, sid := range subs {
-				if sid == p.MbID || offSet[sid] {
+				if sid == p.MbID || offSet[sid] || blockedBy[sid] {
 					continue
 				}
 				noti := &gnurepo.Notification{
