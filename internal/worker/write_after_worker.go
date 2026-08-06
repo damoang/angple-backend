@@ -377,6 +377,12 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 			log.Printf("[WriteAfterWorker] activity sync failed for post %s/%d: %v", job.BoardSlug, job.WriteID, err)
 		}
 	}
+	// 소모임 개설 신청 안내 — newgroup 새 글에 "공감 100개" 안내 댓글 (멱등, newgroup/1193)
+	if job.BoardSlug == "newgroup" && w.db != nil {
+		if err := service.PostNewgroupGuideComment(w.db, job.WriteID); err != nil {
+			log.Printf("[WriteAfterWorker] newgroup guide comment failed for %d: %v", job.WriteID, err)
+		}
+	}
 	if w.db == nil || w.notiRepo == nil || w.notiPrefRepo == nil {
 		return
 	}
