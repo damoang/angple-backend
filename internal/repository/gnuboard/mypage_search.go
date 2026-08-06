@@ -152,7 +152,7 @@ func (r *myPageRepository) SearchPostsByMember(
 				"SELECT wr_id, wr_subject, wr_content, wr_hit, wr_good, wr_nogood, wr_comment,"+
 					" wr_datetime, mb_id, wr_name, wr_option, wr_file, '%s' as board_id,"+
 					" wr_deleted_at AS deleted_at FROM `g5_write_%s`"+
-					" WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0",
+					" WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL",
 				boardID, boardID,
 			), ids, mbID,
 		).Scan(&rows)
@@ -188,7 +188,7 @@ func (r *myPageRepository) SearchCommentsByMember(
 					" p.wr_deleted_at AS parent_deleted_at"+
 					" FROM `g5_write_%s` c"+
 					" LEFT JOIN `g5_write_%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0"+
-					" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1",
+					" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL",
 				boardID, boardID, boardID,
 			), ids, mbID,
 		).Scan(&rows)
