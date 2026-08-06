@@ -1343,13 +1343,15 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 					}
 				}
 				if sendReply {
-					wrID := safeUint64ToInt(postID)
-					if exists, _ := h.notiRepo.Exists(parentAuthorMbID, boardSlug, wrID, "comment", commenterMbID); !exists {
+					// ⛔ 규약: comment 계열 알림의 wr_id 는 '새 댓글 id' 다 (원글은 rel_url·wr_parent 에).
+					//    worker 경로(write_after_worker)와 동일해야 grouped 키·Exists 중복판정이 맞물린다.
+					commentID := safeUint64ToInt(comment.ID)
+					if exists, _ := h.notiRepo.Exists(parentAuthorMbID, boardSlug, commentID, "comment", commenterMbID); !exists {
 						noti := &gnurepo.Notification{
 							PhToCase:      "comment_reply",
 							PhFromCase:    "comment",
 							BoTable:       boardSlug,
-							WrID:          wrID,
+							WrID:          commentID,
 							MbID:          parentAuthorMbID,
 							RelMbID:       commenterMbID,
 							RelMbNick:     commenterNick,
@@ -1358,7 +1360,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 							PhReaded:      "N",
 							PhDatetime:    time.Now(),
 							ParentSubject: post.Title,
-							WrParent:      wrID,
+							WrParent:      safeUint64ToInt(postID),
 						}
 						_ = h.notiRepo.Create(noti)
 					}
@@ -1382,13 +1384,14 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 	}
 
 	// 게시글 작성자에게 알림
-	wrID := safeUint64ToInt(postID)
-	if exists, _ := h.notiRepo.Exists(postAuthorMbID, boardSlug, wrID, "comment", commenterMbID); !exists {
+	// ⛔ 규약: comment 계열 알림의 wr_id 는 '새 댓글 id' 다 (worker 경로와 동일 — 위 답글 블록 주석 참조).
+	commentID := safeUint64ToInt(comment.ID)
+	if exists, _ := h.notiRepo.Exists(postAuthorMbID, boardSlug, commentID, "comment", commenterMbID); !exists {
 		noti := &gnurepo.Notification{
 			PhToCase:      "comment",
 			PhFromCase:    "comment",
 			BoTable:       boardSlug,
-			WrID:          wrID,
+			WrID:          commentID,
 			MbID:          postAuthorMbID,
 			RelMbID:       commenterMbID,
 			RelMbNick:     commenterNick,
@@ -1397,7 +1400,7 @@ func (h *V2Handler) createCommentNotification(boardSlug string, postID uint64, c
 			PhReaded:      "N",
 			PhDatetime:    time.Now(),
 			ParentSubject: post.Title,
-			WrParent:      wrID,
+			WrParent:      safeUint64ToInt(postID),
 		}
 		_ = h.notiRepo.Create(noti)
 	}

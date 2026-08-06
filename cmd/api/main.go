@@ -1671,6 +1671,7 @@ func main() {
 		notiHandler := handler.NewNotiHandler(notiRepo, notiPrefRepo)
 		notiGroup := router.Group("/api/v1/notifications", middleware.JWTAuth(jwtManager))
 		notiGroup.GET("/unread-count", notiHandler.GetUnreadCount)
+		notiGroup.POST("/seen", notiHandler.MarkSeen)
 		notiGroup.GET("", notiHandler.GetNotifications)
 		notiGroup.GET("/grouped", notiHandler.GetGroupedNotifications)
 		notiGroup.GET("/preferences", notiHandler.GetPreferences)
@@ -1687,6 +1688,7 @@ func main() {
 		// GetUserID 는 숫자 v2_users.id 라, remap 으로 mb_id 로 맞춰야 알림이 매칭된다(리액션과 동일 패턴).
 		notiGroupV2 := router.Group("/api/v2/notifications", middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID())
 		notiGroupV2.GET("/unread-count", notiHandler.GetUnreadCount)
+		notiGroupV2.POST("/seen", notiHandler.MarkSeen)
 		notiGroupV2.GET("", notiHandler.GetNotifications)
 		notiGroupV2.GET("/grouped", notiHandler.GetGroupedNotifications)
 		notiGroupV2.GET("/preferences", notiHandler.GetPreferences)

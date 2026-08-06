@@ -93,6 +93,10 @@ func mapNotificationType(fromCase, toCase string, wrID, wrParent int) string {
 		return "memo"
 	case "digest":
 		return "digest"
+	case "levelup", "promote":
+		return "levelup"
+	case "point_expiry":
+		return "point"
 	case "write":
 		if toCase == "follow" {
 			return "follow"
@@ -199,6 +203,21 @@ func (h *NotiHandler) GetUnreadCount(c *gin.Context) {
 		return
 	}
 	common.V2Success(c, gin.H{"total_unread": count})
+}
+
+// MarkSeen 은 알림함 열람을 기록한다 — 뱃지만 0 이 되고 항목별 읽음은 그대로다.
+// (seen/read 분리 — bug/13367·13332·13206·12991 체인. 레딧·페이스북과 같은 모델)
+func (h *NotiHandler) MarkSeen(c *gin.Context) {
+	mbID := middleware.GetUserID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+	if err := h.repo.MarkSeen(mbID); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "열람 기록 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"seen": true})
 }
 
 // GetNotifications handles GET /api/v1/notifications
@@ -365,6 +384,15 @@ func generateGroupTitle(fromCase, toCase, latestSender string, senderCount, wrID
 		return "새 문의가 등록되었습니다"
 	case "answer":
 		return "문의에 답변이 등록되었습니다"
+	case "digest":
+		// 요약 구독(level=3) — 발신자 개념이 없어 문장형으로 (실측 604행이 default 로 뭉개졌었다)
+		return "구독한 게시판의 새 글 요약이 도착했습니다"
+	case "levelup":
+		return "레벨이 올랐습니다! 🎉"
+	case "promote":
+		return "등급이 올랐습니다! 🎉"
+	case "point_expiry":
+		return "곧 소멸되는 포인트가 있습니다"
 	default:
 		return "새 알림이 있습니다"
 	}
@@ -538,7 +566,8 @@ func (h *NotiHandler) getMergedNotifications(c *gin.Context, mbID string, page, 
 	items := make([]groupedNotificationResponse, 0, len(groups))
 	for _, g := range groups {
 		senders := make([]string, 0, 5)
-		for _, nick := range strings.Split(g.Senders, ",") {
+		// 구분자는 grouped 와 동일한 '||' — ',' 는 닉네임에 쉼표가 있으면 분해가 깨진다
+		for _, nick := range strings.Split(g.Senders, "||") {
 			if nick != "" {
 				senders = append(senders, nick)
 			}

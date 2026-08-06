@@ -83,6 +83,8 @@ type NotiRepository interface {
 	GetNotifications(mbID string, page, limit int) ([]Notification, int64, error)
 	GetGroupedNotifications(mbID string, page, limit int, filterType string) ([]GroupedNotification, int64, int64, error)
 	CountUnread(mbID string) (int64, error)
+	// MarkSeen 은 알림함 열람 시점을 기록한다(뱃지 소거용, 항목 읽음과 별개)
+	MarkSeen(mbID string) error
 	MarkAsRead(mbID string, phID int) error
 	MarkAllAsRead(mbID string) error
 	MarkGroupAsRead(mbID, boTable string, wrID int, fromCase string) error
@@ -123,13 +125,61 @@ func (r *notiRepository) GetNotifications(mbID string, page, limit int) ([]Notif
 	return notifications, total, nil
 }
 
-// CountUnread returns the count of unread notifications for the user
+// CountUnread 는 뱃지에 표시할 "새 알림" 수를 돌려준다.
+//
+// seen/read 2단계 모델 (bug/13367·13332·13206·12991 체인의 종결):
+//   - 종을 연 시점(seen)이 g5_kv_store `noti_seen:{mb_id}` 에 ph_id 로 기록된다.
+//   - 뱃지 = 그 이후에 도착한 알림 수. 항목별 읽음(ph_readed)은 건드리지 않는다.
+//   - seen 기록이 없는 회원(신규·미접속)은 기존 ph_readed 기준으로 폴백한다.
+//   - `reaction` 은 목록 쿼리가 상시 제외하므로 뱃지에서도 제외한다 —
+//     "뱃지는 켜지는데 목록이 빈" 불일치의 원인이었다(실측 605행).
 func (r *notiRepository) CountUnread(mbID string) (int64, error) {
+	lastSeen := r.lastSeenPhID(mbID)
 	var count int64
-	err := r.db.Model(&Notification{}).
-		Where("mb_id = ? AND ph_readed = 'N'", mbID).
-		Count(&count).Error
+	q := r.db.Model(&Notification{}).Where("mb_id = ? AND ph_from_case != 'reaction'", mbID)
+	if lastSeen > 0 {
+		// idx_mb_phid (mb_id, ph_id) 정확 적중 — ph_readed 스캔보다 빠르다.
+		q = q.Where("ph_id > ?", lastSeen)
+	} else {
+		q = q.Where("ph_readed = 'N'")
+	}
+	err := q.Count(&count).Error
 	return count, err
+}
+
+// lastSeenPhID 는 회원이 마지막으로 알림함을 연 시점의 ph_id 를 돌려준다. 없으면 0.
+func (r *notiRepository) lastSeenPhID(mbID string) int64 {
+	var row struct {
+		ValueInt int64 `gorm:"column:value_int"`
+	}
+	err := r.db.Raw(
+		"SELECT value_int FROM g5_kv_store WHERE `key` = ? LIMIT 1",
+		"noti_seen:"+mbID,
+	).Scan(&row).Error
+	if err != nil {
+		return 0
+	}
+	return row.ValueInt
+}
+
+// MarkSeen 은 "알림함을 봤다"를 기록한다 — 현재 이 회원의 최대 ph_id 를 저장.
+// 뱃지만 소거되고 항목별 읽음 상태는 그대로다 (12991 의 원요구).
+// GREATEST 로 역행을 막는다(여러 탭·기기 동시 열람 레이스).
+func (r *notiRepository) MarkSeen(mbID string) error {
+	var maxID int64
+	if err := r.db.Raw(
+		"SELECT COALESCE(MAX(ph_id),0) FROM g5_na_noti WHERE mb_id = ?", mbID,
+	).Scan(&maxID).Error; err != nil {
+		return err
+	}
+	if maxID == 0 {
+		return nil // 알림이 하나도 없으면 기록할 것도 없다
+	}
+	return r.db.Exec(
+		"INSERT INTO g5_kv_store (`key`, value_type, value_int, updated_at) VALUES (?, 'INT', ?, ?) "+
+			"ON DUPLICATE KEY UPDATE value_int = GREATEST(value_int, VALUES(value_int)), updated_at = VALUES(updated_at)",
+		"noti_seen:"+mbID, maxID, time.Now().Unix(),
+	).Error
 }
 
 // MarkAsRead marks a single notification as read
@@ -201,9 +251,9 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 	topGroupsSQL := `SELECT
 		bo_table, wr_id, ph_from_case,
 		MAX(ph_id) as latest_ph_id,
-		COUNT(*) as sender_count
+		COUNT(DISTINCT rel_mb_id) as sender_count
 	FROM (
-		SELECT ph_id, bo_table, wr_id, ph_from_case
+		SELECT ph_id, bo_table, wr_id, ph_from_case, rel_mb_id
 		FROM g5_na_noti FORCE INDEX (idx_mb_phid)
 		WHERE mb_id = ? ` + fromCaseFilter + `
 		ORDER BY ph_id DESC
@@ -481,14 +531,14 @@ func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, fi
 	topSQL := `SELECT
 		bo_table, ` + targetKeyExpr + ` AS tkey,
 		MAX(ph_id) AS latest_ph_id,
-		COUNT(*) AS sender_count,
+		COUNT(DISTINCT rel_mb_id) AS sender_count,
 		SUM(ph_from_case = 'good') AS good_count,
 		SUM(ph_from_case IN ('comment','board','reply') AND ph_to_case != 'comment_reply') AS comment_count,
 		SUM(ph_to_case = 'comment_reply') AS reply_count,
 		SUM(ph_readed = 'N') AS unread_count,
-		SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT rel_mb_nick ORDER BY ph_id DESC SEPARATOR ','), ',', 5) AS senders
+		SUBSTRING_INDEX(GROUP_CONCAT(DISTINCT rel_mb_nick ORDER BY ph_id DESC SEPARATOR '||'), '||', 5) AS senders
 	FROM (
-		SELECT ph_id, bo_table, wr_id, ph_from_case, ph_to_case, ph_readed, rel_mb_nick, rel_url
+		SELECT ph_id, bo_table, wr_id, ph_from_case, ph_to_case, ph_readed, rel_mb_id, rel_mb_nick, rel_url
 		FROM g5_na_noti FORCE INDEX (idx_mb_phid)
 		WHERE mb_id = ? ` + fromCaseFilter + `
 		ORDER BY ph_id DESC

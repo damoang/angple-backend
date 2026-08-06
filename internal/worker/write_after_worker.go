@@ -642,6 +642,12 @@ func (w *WriteAfterWorker) mustGetNotiPreference(mbID string) (*gnurepo.NotiPref
 }
 
 func (w *WriteAfterWorker) createNotification(noti *gnurepo.Notification) {
+	// 중복 가드: 알림 INSERT 후 MarkProcessed 전에 프로세스가 죽으면 이벤트가
+	// 재클레임되어 팔로워·구독자 전원에게 같은 알림이 재발행된다.
+	// idx_noti_dedup (bo_table, wr_id, rel_mb_id, ph_from_case) 로 싸게 걸러진다.
+	if exists, err := w.notiRepo.Exists(noti.MbID, noti.BoTable, noti.WrID, noti.PhFromCase, noti.RelMbID); err == nil && exists {
+		return
+	}
 	if err := w.notiRepo.Create(noti); err != nil {
 		log.Printf("[WriteAfterWorker] notification create failed for %s/%d: %v", noti.BoTable, noti.WrID, err)
 	}

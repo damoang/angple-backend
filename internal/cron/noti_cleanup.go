@@ -28,12 +28,17 @@ type NotiCleanupResult struct {
 func runNotiCleanup(db *gorm.DB) (*NotiCleanupResult, error) {
 	readOlderThanDays := envInt("NOTI_CLEANUP_READ_DAYS", 30)
 	allOlderThanDays := envInt("NOTI_CLEANUP_ALL_DAYS", 90)
+	// 구독 새 글(write/subscribe)은 별도 단축 보존 — 전체 행의 65%를 차지하는데
+	// 그 93%를 아무도 안 읽는다(2026-08 실측 217만/335만 행). 시의성 알림이라
+	// 14일이면 소비 가치가 끝난다. 인덱스(2.36GB)가 데이터(1.67GB)보다 커진 주범.
+	subscribeOlderThanDays := envInt("NOTI_CLEANUP_SUBSCRIBE_DAYS", 14)
 	window := int64(envInt("NOTI_CLEANUP_BATCH", 5000)) // ph_id 윈도우 폭 (PK 범위 스캔)
 	maxBatches := envInt("NOTI_CLEANUP_MAX_BATCHES", 200)
 
 	now := time.Now()
 	readCutoff := now.AddDate(0, 0, -readOlderThanDays).Format("2006-01-02 15:04:05")
 	allCutoff := now.AddDate(0, 0, -allOlderThanDays).Format("2006-01-02 15:04:05")
+	subscribeCutoff := now.AddDate(0, 0, -subscribeOlderThanDays).Format("2006-01-02 15:04:05")
 
 	res := &NotiCleanupResult{ExecutedAt: now.Format("2006-01-02 15:04:05")}
 
@@ -51,7 +56,8 @@ func runNotiCleanup(db *gorm.DB) (*NotiCleanupResult, error) {
 	}
 
 	// 한 윈도우 내에서 두 조건을 OR 로 한 번에 삭제(범위 재주행 방지).
-	const where = "ph_id >= ? AND ph_id < ? AND ((ph_readed = 'Y' AND ph_datetime < ?) OR ph_datetime < ?)"
+	const where = "ph_id >= ? AND ph_id < ? AND ((ph_readed = 'Y' AND ph_datetime < ?) OR ph_datetime < ?" +
+		" OR (ph_from_case = 'write' AND ph_to_case = 'subscribe' AND ph_datetime < ?))"
 
 	for cursor := bounds.MinID; cursor <= bounds.MaxID; cursor += window {
 		if res.Batches >= maxBatches {
@@ -59,7 +65,7 @@ func runNotiCleanup(db *gorm.DB) (*NotiCleanupResult, error) {
 			break
 		}
 		hi := cursor + window // [cursor, hi)
-		r := db.Exec("DELETE FROM g5_na_noti WHERE "+where, cursor, hi, readCutoff, allCutoff)
+		r := db.Exec("DELETE FROM g5_na_noti WHERE "+where, cursor, hi, readCutoff, allCutoff, subscribeCutoff)
 		if r.Error != nil {
 			return res, r.Error
 		}

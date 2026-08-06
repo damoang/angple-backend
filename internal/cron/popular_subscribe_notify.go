@@ -126,8 +126,20 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 					blockedBy[id] = true
 				}
 			}
+			// 작성자를 팔로우 중인 구독자도 제외 — 글 작성 시 follow 알림을 이미 받았다.
+			// (level=1 구독은 write_after_worker 가 같은 제외를 하는데 여기(level=2)만 빠져
+			// 팔로우+인기글 2중 알림이 갔다.)
+			followerSet := map[string]bool{}
+			{
+				var ids []string
+				db.Table("g5_member_follow").Select("mb_id").
+					Where("target_id = ?", p.MbID).Pluck("mb_id", &ids)
+				for _, id := range ids {
+					followerSet[id] = true
+				}
+			}
 			for _, sid := range subs {
-				if sid == p.MbID || offSet[sid] || blockedBy[sid] {
+				if sid == p.MbID || offSet[sid] || blockedBy[sid] || followerSet[sid] {
 					continue
 				}
 				noti := &gnurepo.Notification{
