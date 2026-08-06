@@ -2235,6 +2235,48 @@ func main() {
 		v1Boards.Use(middleware.ArchiveBoardCheck())
 		v1Boards.Use(middleware.APICacheControl(10)) // 브라우저 캐시 10초
 
+		// bug/13348: 보드 레벨 게이트 — g5_board 의 접근 레벨을 API 에서도 강제한다.
+		// 지금까지 레벨 검사는 web SSR 에만 있어서, 회원 전용 보드(레벨 2+)의
+		// 목록·본문·댓글이 API 직접 호출로는 게스트에게 그대로 노출됐다.
+		// - 목록 계열은 bo_list_level, 개별 글(:id) 접근은 bo_read_level
+		//   (list≠read 인 보드가 실존: angreport 2/1, discord 2/10 등 — max 로 묶으면 회귀)
+		// - /:slug 보드 메타는 게이트하지 않는다 — 콘텐츠가 없고, SSR 이 이 레벨값으로
+		//   403 판단을 하므로 메타까지 막으면 판단 근거가 사라진다.
+		// - 그누보드 규약: 비회원=레벨1 → 레벨 1 이하 보드는 검사 없이 통과.
+		v1Boards.Use(func(c *gin.Context) {
+			slug := c.Param("slug")
+			if slug == "" || c.Request.Method != http.MethodGet ||
+				c.FullPath() == "/api/v1/boards/:slug" {
+				c.Next()
+				return
+			}
+			board, err := gnuBoardRepo.FindByID(slug) // 60초 인메모리 캐시
+			if err != nil || board == nil {
+				c.Next() // 없는 보드는 각 핸들러가 404 처리
+				return
+			}
+			required := board.BoListLevel
+			if c.Param("id") != "" {
+				required = board.BoReadLevel
+			}
+			if required <= 1 {
+				c.Next()
+				return
+			}
+			eff := middleware.GetUserLevel(c)
+			if eff < 1 {
+				eff = 1 // 비회원=레벨1 (그누보드 규약)
+			}
+			if eff < required {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+					"success": false,
+					"message": "로그인이 필요한 게시판입니다.",
+				})
+				return
+			}
+			c.Next()
+		})
+
 		// Board extended settings repo & write restriction service (used by multiple handlers)
 		v2ExtendedSettingsRepo := v2repo.NewBoardExtendedSettingsRepository(db)
 		writeRestrictionSvc := service.NewBoardWriteRestrictionService(db, v2ExtendedSettingsRepo)
