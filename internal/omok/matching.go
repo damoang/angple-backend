@@ -156,7 +156,9 @@ func (s *Server) startMatch(a, b *queueEntry, mode string) {
 						log.Printf("[omok] ⛔ refund failed game=%d mb=%s: %v", gameID, c.MbID, err)
 					}
 				}
-				_ = s.store.AbortGame(gameID, "entry_fee_failed")
+				if aerr := s.store.AbortGame(gameID, "entry_fee_failed"); aerr != nil {
+					log.Printf("[omok] abort game failed id=%d: %v", gameID, aerr)
+				}
 				for _, c := range []*Client{black, white} {
 					msg := "상대방의 참가비 결제가 되지 않아 대국이 취소되었습니다. 낸 참가비는 돌려드렸습니다."
 					if c.MbID == failed {
@@ -221,7 +223,7 @@ func (s *Server) handleCancelMatching(client *Client) {
 		client.matchingMode = ""
 	}
 	s.mu.Unlock()
-	s.sendToClient(client, map[string]interface{}{"type": "matching_cancelled"})
+	s.sendToClient(client, map[string]interface{}{"type": "matching_canceled"})
 }
 
 func (s *Server) playerInfo(c *Client) map[string]interface{} {

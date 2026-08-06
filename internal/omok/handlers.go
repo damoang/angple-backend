@@ -103,7 +103,7 @@ func (s *Server) handleDisconnect(client *Client) {
 }
 
 func (s *Server) handleReconnect(client *Client, data map[string]interface{}) {
-	sessionID, _ := data["sessionId"].(string)
+	sessionID, _ := data["sessionId"].(string) //nolint:errcheck // 없으면 빈 문자열 → 아래에서 조기 반환
 	if sessionID == "" {
 		return
 	}

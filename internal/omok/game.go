@@ -66,7 +66,7 @@ func (s *Server) armTurnTimer(roomID string) {
 }
 
 func (s *Server) handleMove(client *Client, data map[string]interface{}) {
-	roomID, _ := data["roomId"].(string)
+	roomID, _ := data["roomId"].(string) //nolint:errcheck // 없으면 빈 문자열 → 아래에서 방 조회 실패로 처리
 	xf, okx := data["x"].(float64)
 	yf, oky := data["y"].(float64)
 	if !okx || !oky {
@@ -83,19 +83,9 @@ func (s *Server) handleMove(client *Client, data map[string]interface{}) {
 	}
 	gs := room.GameState
 	color := room.PlayerColors[client.MbID]
-	if color == 0 {
+	if reason := validateMove(gs, color, x, y); reason != "" {
 		s.mu.Unlock()
-		s.sendToClient(client, errMsg("이 대국의 참가자가 아닙니다."))
-		return
-	}
-	if gs.CurrentPlayer != color {
-		s.mu.Unlock()
-		s.sendToClient(client, errMsg("차례가 아닙니다."))
-		return
-	}
-	if x < 0 || x >= boardSize || y < 0 || y >= boardSize || gs.Board[y][x] != 0 {
-		s.mu.Unlock()
-		s.sendToClient(client, errMsg("둘 수 없는 자리입니다."))
+		s.sendToClient(client, errMsg(reason))
 		return
 	}
 
@@ -132,7 +122,7 @@ func (s *Server) handleMove(client *Client, data map[string]interface{}) {
 }
 
 func (s *Server) handleSurrender(client *Client, data map[string]interface{}) {
-	roomID, _ := data["roomId"].(string)
+	roomID, _ := data["roomId"].(string) //nolint:errcheck // 위와 동일
 	s.mu.RLock()
 	room := s.rooms[roomID]
 	s.mu.RUnlock()
@@ -171,9 +161,10 @@ func (s *Server) finishGame(roomID, winnerMbID, reason, note string) {
 	}
 
 	winnerColor := 0
-	if winnerMbID == black {
+	switch winnerMbID {
+	case black:
 		winnerColor = 1
-	} else if winnerMbID == white {
+	case white:
 		winnerColor = 2
 	}
 	for _, c := range clients {
@@ -196,6 +187,21 @@ func (s *Server) finishGame(roomID, winnerMbID, reason, note string) {
 }
 
 // ── 판정 로직 (서버 단독 권한 — 클라이언트는 좌표만 보낸다) ──
+
+// validateMove 는 착수 가능 여부를 판정한다. 빈 문자열이면 통과.
+func validateMove(gs *GameState, color, x, y int) string {
+	switch {
+	case color == 0:
+		return "이 대국의 참가자가 아닙니다."
+	case gs.CurrentPlayer != color:
+		return "차례가 아닙니다."
+	case x < 0 || x >= boardSize || y < 0 || y >= boardSize:
+		return "둘 수 없는 자리입니다."
+	case gs.Board[y][x] != 0:
+		return "이미 돌이 놓인 자리입니다."
+	}
+	return ""
+}
 
 func checkWin(board [][]int, x, y, player int) bool {
 	dirs := [][2]int{{1, 0}, {0, 1}, {1, 1}, {1, -1}}

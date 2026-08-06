@@ -26,7 +26,7 @@ func NewServer(store *Store, verifyToken func(string) (string, string, error)) *
 		store:       store,
 		verifyToken: verifyToken,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		},
 	}
 }
@@ -161,7 +161,9 @@ func (s *Server) StartHeartbeat() {
 				continue
 			}
 			client.isAlive = false
-			_ = client.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
+			if perr := client.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); perr != nil {
+				client.conn.Close()
+			}
 		}
 		s.mu.Unlock()
 	}
