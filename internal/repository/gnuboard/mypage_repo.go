@@ -19,6 +19,9 @@ const maxDBConcurrency = 10
 type MyPageRepository interface {
 	FindPostsByMember(mbID string, page, limit int) ([]gnuboard.MyPost, int64, error)
 	FindCommentsByMember(mbID string, page, limit int) ([]gnuboard.MyCommentRow, int64, error)
+	// 본인이 삭제한 글·댓글 — 작성자에게만 보이는 별도 목록 (bug/13341, mypage_deleted.go)
+	FindDeletedPostsByMember(mbID string, page, limit int) ([]gnuboard.MyPost, int64, error)
+	FindDeletedCommentsByMember(mbID string, page, limit int) ([]gnuboard.MyCommentRow, int64, error)
 	// 검색 전용 경로 — 구현·근거는 mypage_search.go 참조.
 	// ⛔ 검색이 없을 때는 위의 fan-out 을 그대로 쓴다. 기존 목록의 순서·건수를 건드리지 않기 위함.
 	SearchPostsByMember(mbID, q string, page, limit int) ([]gnuboard.MyPost, int64, error)
