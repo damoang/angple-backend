@@ -55,9 +55,14 @@ func (h *MyPageHandler) GetMyPosts(c *gin.Context) {
 		total int64
 		err   error
 	)
-	if q != "" {
+	// filter=deleted — 본인이 삭제한 글만 (bug/13341: "작성자는 자기 글 리스트를
+	// 모두 알 수 있어야 한다"). mbID 는 세션에서 온 값이라 남의 삭제글은 볼 수 없다.
+	switch {
+	case c.Query("filter") == "deleted":
+		posts, total, err = h.myPageRepo.FindDeletedPostsByMember(mbID, page, limit)
+	case q != "":
 		posts, total, err = h.myPageRepo.SearchPostsByMember(mbID, q, page, limit)
-	} else {
+	default:
 		posts, total, err = h.myPageRepo.FindPostsByMember(mbID, page, limit)
 	}
 	if err != nil {
@@ -90,9 +95,12 @@ func (h *MyPageHandler) GetMyComments(c *gin.Context) {
 		total    int64
 		err      error
 	)
-	if q != "" {
+	switch {
+	case c.Query("filter") == "deleted":
+		comments, total, err = h.myPageRepo.FindDeletedCommentsByMember(mbID, page, limit)
+	case q != "":
 		comments, total, err = h.myPageRepo.SearchCommentsByMember(mbID, q, page, limit)
-	} else {
+	default:
 		comments, total, err = h.myPageRepo.FindCommentsByMember(mbID, page, limit)
 	}
 	if err != nil {
