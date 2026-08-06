@@ -286,9 +286,10 @@ func SetupMemberActivity(router *gin.Engine, myPageHandler *handler.MyPageHandle
 }
 
 // SetupDisciplineLog configures discipline log routes (read-only, uses gnuboard g5_write_disciplinelog)
-func SetupDisciplineLog(router *gin.Engine, h *v2handler.DisciplineLogHandler, _ *jwt.Manager) {
-	// Public routes (read-only)
-	disciplineLog := router.Group("/api/v1/discipline-logs")
+func SetupDisciplineLog(router *gin.Engine, h *v2handler.DisciplineLogHandler, jwtManager *jwt.Manager) {
+	// bug/13348: 회원 전용 — 이용제한 기록을 게스트/검색엔진에 노출하지 않는다.
+	// 화면(disciplinelog 라우트)만 막으면 API 가 열려 있어 의미가 없으므로 서버에서 막는다.
+	disciplineLog := router.Group("/api/v1/discipline-logs", middleware.JWTAuth(jwtManager))
 	disciplineLog.GET("", h.GetList)
 	disciplineLog.GET("/violation-types", h.GetViolationTypes)
 	disciplineLog.GET("/:id", h.GetDetail)
