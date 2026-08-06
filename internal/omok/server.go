@@ -1,15 +1,22 @@
 package omok
 
 import (
+	crand "crypto/rand"
 	"encoding/json"
 	"log"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// closeQuietly 는 연결을 닫고 에러는 로그만 남긴다(닫는 중 에러는 조치할 게 없다).
+func closeQuietly(c *Client) {
+	if err := c.conn.Close(); err != nil {
+		log.Printf("[omok] close error for %s: %v", c.MbID, err)
+	}
+}
 
 // NewServer 는 허브를 만든다. verifyToken 은 JWT → (mb_id, 닉네임) 검증기다.
 func NewServer(store *Store, verifyToken func(string) (string, string, error)) *Server {
@@ -93,7 +100,9 @@ func bearerToken(r *http.Request) string {
 func (s *Server) readPump(client *Client) {
 	defer func() {
 		s.handleDisconnect(client)
-		client.conn.Close()
+		if cerr := client.conn.Close(); cerr != nil {
+			log.Printf("[omok] close error: %v", cerr)
+		}
 	}()
 	client.conn.SetReadLimit(16 << 10)
 	for {
@@ -136,11 +145,19 @@ func (s *Server) sendToClient(client *Client, data interface{}) {
 	}
 }
 
+// generateID 는 방·세션 식별자를 만든다.
+// 세션 id 는 재접속 시 남의 대국에 끼어드는 데 쓰일 수 있으므로 예측 불가여야
+// 한다 — crypto/rand 를 쓴다(math/rand 는 시드만 알면 재현된다).
 func generateID() string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 9)
+	if _, err := crand.Read(b); err != nil {
+		// crypto/rand 실패는 사실상 없지만, 실패 시 예측 가능한 값을 쓰느니
+		// 시간 기반 유니크 값으로 대체한다.
+		return "t" + time.Now().Format("150405.000000000")
+	}
 	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
+		b[i] = chars[int(b[i])%len(chars)]
 	}
 	return string(b)
 }
@@ -157,12 +174,12 @@ func (s *Server) StartHeartbeat() {
 		s.mu.Lock()
 		for client := range s.clients {
 			if !client.isAlive {
-				client.conn.Close()
+				closeQuietly(client)
 				continue
 			}
 			client.isAlive = false
 			if perr := client.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); perr != nil {
-				client.conn.Close()
+				closeQuietly(client)
 			}
 		}
 		s.mu.Unlock()
