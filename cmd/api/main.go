@@ -6369,7 +6369,11 @@ func main() {
 		tenantSvc := service.NewTenantService(siteRepo, db, tenantDBResolver)
 		tenantHandler := handler.NewTenantHandler(tenantSvc)
 
+		// ⛔ 2026-08-08 보안: 이 그룹은 미들웨어가 전혀 없어 무인증으로 소유자 이메일·
+		//    DB 호스트 노출 + 사이트 정지/삭제까지 가능했다. admin 경로명과 달리 게이트가
+		//    없었다. 전 라우트를 관리자 인증으로 봉인한다.
 		adminTenants := router.Group("/api/v2/admin/tenants")
+		adminTenants.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 		adminTenants.GET("", tenantHandler.ListTenants)
 		adminTenants.GET("/plans", middleware.CacheWithTTL(redisClient, 10*time.Minute), tenantHandler.GetPlanLimits)
 		adminTenants.GET("/:id", tenantHandler.GetTenant)
@@ -6387,13 +6391,18 @@ func main() {
 		provisioningHandler := handler.NewProvisioningHandler(provisioningSvc)
 
 		saas := router.Group("/api/v2/saas")
+		// 요금제 카탈로그만 공개. 개별 커뮤니티의 구독·청구·프로비저닝은 소유자 이메일·
+		// 결제내역·사이트 생성/삭제가 걸린 관리 기능이라 무인증 노출/조작을 막는다
+		// (2026-08-08 보안전수). ⚠️소유자 단위 권한은 후속 — 우선 인증 게이트로 봉인.
 		saas.GET("/pricing", middleware.CacheWithTTL(redisClient, 10*time.Minute), provisioningHandler.GetPricing)
-		saas.POST("/communities", provisioningHandler.ProvisionCommunity)
-		saas.DELETE("/communities/:id", provisioningHandler.DeleteCommunity)
-		saas.GET("/communities/:id/subscription", provisioningHandler.GetSubscription)
-		saas.PUT("/communities/:id/subscription/plan", provisioningHandler.ChangePlan)
-		saas.POST("/communities/:id/subscription/cancel", provisioningHandler.CancelSubscription)
-		saas.GET("/communities/:id/invoices", provisioningHandler.GetInvoices)
+		saasCommunities := saas.Group("/communities")
+		saasCommunities.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+		saasCommunities.POST("", provisioningHandler.ProvisionCommunity)
+		saasCommunities.DELETE("/:id", provisioningHandler.DeleteCommunity)
+		saasCommunities.GET("/:id/subscription", provisioningHandler.GetSubscription)
+		saasCommunities.PUT("/:id/subscription/plan", provisioningHandler.ChangePlan)
+		saasCommunities.POST("/:id/subscription/cancel", provisioningHandler.CancelSubscription)
+		saasCommunities.GET("/:id/invoices", provisioningHandler.GetInvoices)
 
 		// OAuth2 Social Login
 		oauthService := service.NewOAuthService(db, jwtManager)

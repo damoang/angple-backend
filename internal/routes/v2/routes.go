@@ -44,8 +44,14 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	api.GET("/feed", middleware.OptionalJWTAuth(jwtManager), h.ListRecentFeed)
 
 	// Users
+	//
+	// ⛔ 2026-08-08 개인정보 노출 사고: 이 그룹 전체가 무인증 공개였고
+	//    V2User.Email 이 json 에 실려 회원 이메일이 그대로 나갔다(목록 20건/페이지).
+	//    ① 이메일은 도메인 태그에서 json:"-" 로 제거(models.go)
+	//    ② 목록(회원 열거)은 관리자 전용으로 잠근다 — 앱은 개별 조회만 쓴다(실측).
+	//    ③ 개별 조회는 앱 실사용 경로라 공개 유지하되, 이메일 없는 공개 프로필만 나간다.
 	users := api.Group("/users")
-	users.GET("", h.ListUsers)
+	users.GET("", auth, middleware.RequireAdmin(), h.ListUsers)
 	users.GET("/:id", h.GetUser)
 	users.GET("/username/:username", h.GetUserByUsername)
 

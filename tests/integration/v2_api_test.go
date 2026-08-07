@@ -334,12 +334,14 @@ func (s *V2APISuite) TestListComments() {
 // --- User Tests ---
 
 func (s *V2APISuite) TestListUsers() {
+	// 회원 목록은 관리자 전용(2026-08-08 개인정보 노출 사고 후속).
+	// 무인증 요청은 인증 미들웨어에서 401 이어야 한다.
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/users", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
 
-	assert.Equal(s.T(), http.StatusOK, w.Code)
+	assert.Equal(s.T(), http.StatusUnauthorized, w.Code)
 }
 
 func (s *V2APISuite) TestGetUserByUsername() {
