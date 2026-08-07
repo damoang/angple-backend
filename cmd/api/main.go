@@ -3378,6 +3378,18 @@ func main() {
 				}
 			}
 
+			// 나눔 게시판: 시작·마감 일시(extra_4/5) 필수.
+			// 일정 없는 나눔 글은 status=no_giving 이 되어 참가 버튼이 아예 렌더되지
+			// 않은 채 게시된다 — giving/2397 실사고(2026-07-24) 재발 방지.
+			// 운영진(mb_level 10)은 공지 등 나눔이 아닌 글을 쓸 수 있어 예외.
+			if slug == "giving" && userLevel < 10 {
+				if req.Extra4 == nil || strings.TrimSpace(*req.Extra4) == "" ||
+					req.Extra5 == nil || strings.TrimSpace(*req.Extra5) == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "나눔 시작·마감 일시를 입력해주세요."})
+					return
+				}
+			}
+
 			// 포인트 차감 게시판인 경우 잔액 확인 (g5_member.mb_point 기반)
 			if board.BoWritePoint < 0 {
 				canAfford, err := gnuPointWriteRepo.CanAfford(mbID, board.BoWritePoint)
@@ -6848,6 +6860,8 @@ func main() {
 		// Internal cron endpoints (curl-based cron jobs, localhost only)
 		cronHandler := cron.NewHandler(db)
 		cronHandler.SetPointExpiryDeps(pointConfigRepo, gnuPointWriteRepo, gnurepo.NewNotiRepository(db))
+		// 나눔 마감 스윕 — cron 패키지가 handler 를 import 하지 않도록 클로저 주입
+		cronHandler.SetGivingSweep(func() (interface{}, error) { return givingHandler.RunDueDrawSweep() })
 		cronGroup := router.Group("/api/internal/cron")
 		cronGroup.Use(middleware.RequireInternalCron())
 		cronGroup.POST("/member-lock-release", cronHandler.MemberLockRelease)
@@ -6865,6 +6879,7 @@ func main() {
 		cronGroup.POST("/auto-dismiss-reports", cronHandler.AutoDismissReports)
 		cronGroup.POST("/withdrawal-grace-anonymize", cronHandler.WithdrawalGraceAnonymize)
 		cronGroup.POST("/verification-guide", cronHandler.VerificationGuide)
+		cronGroup.POST("/giving-draw-sweep", cronHandler.GivingDrawSweep)
 
 		// Start delete worker for delayed deletion processing
 		deleteWorker := worker.NewDeleteWorker(db, gnuWriteRepo, scheduledDeleteRepo, writeAfterEventRepo)
