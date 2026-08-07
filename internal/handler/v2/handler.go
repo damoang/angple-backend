@@ -228,6 +228,36 @@ func isOwnerOrAdmin(c *gin.Context, resourceUserID uint64) bool {
 
 // === Users ===
 
+// publicUser 는 무인증 공개 조회에 내보내는 최소 프로필이다.
+//
+// ⛔ 2026-08-08 개인정보 노출 사고 후속. V2User 를 그대로 내보내면
+//
+//	① email(1차 사고, json:"-" 로 봉인) ② username(= mb_id, `google_9485…` 같은
+//	소셜 계정 식별자) 이 함께 나가고, id 가 순차라 **전 회원 열거**가 가능했다.
+//	화면에 필요한 것은 표시용 프로필뿐이므로 화이트리스트로 좁힌다.
+//	구조체 필드가 늘어도 여기 명시한 것만 나간다 — 재발 방지의 핵심.
+type publicUser struct {
+	ID          uint64  `json:"id"`
+	Nickname    string  `json:"nickname"`
+	Level       uint8   `json:"level"`
+	NariyaLevel uint8   `json:"nariya_level"`
+	AvatarURL   *string `json:"avatar_url,omitempty"`
+	Bio         *string `json:"bio,omitempty"`
+	Status      string  `json:"status"`
+}
+
+func toPublicUser(u *v2domain.V2User) publicUser {
+	return publicUser{
+		ID:          u.ID,
+		Nickname:    u.Nickname,
+		Level:       u.Level,
+		NariyaLevel: u.NariyaLevel,
+		AvatarURL:   u.AvatarURL,
+		Bio:         u.Bio,
+		Status:      u.Status,
+	}
+}
+
 // GetUser handles GET /api/v1/users/:id
 func (h *V2Handler) GetUser(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -240,7 +270,7 @@ func (h *V2Handler) GetUser(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
 		return
 	}
-	common.V2Success(c, user)
+	common.V2Success(c, toPublicUser(user))
 }
 
 // GetUserByUsername handles GET /api/v1/users/username/:username
@@ -251,7 +281,7 @@ func (h *V2Handler) GetUserByUsername(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
 		return
 	}
-	common.V2Success(c, user)
+	common.V2Success(c, toPublicUser(user))
 }
 
 // ListUsers handles GET /api/v1/users
