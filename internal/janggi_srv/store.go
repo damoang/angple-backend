@@ -23,7 +23,7 @@ type Store struct {
 func NewStore(db *gorm.DB) *Store { return &Store{db: db} }
 
 // CreateGame 은 대국 행을 만들고 id 를 돌려준다.
-func (s *Store) CreateGame(blackMbID, whiteMbID string, entryFee int) (int64, error) {
+func (s *Store) CreateGame(choMbID, hanMbID string, entryFee int) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, nil
 	}
@@ -31,9 +31,9 @@ func (s *Store) CreateGame(blackMbID, whiteMbID string, entryFee int) (int64, er
 		ID int64 `gorm:"column:id"`
 	}
 	res := s.db.Exec(
-		`INSERT INTO angple_janggi_games (black_mb_id, white_mb_id, status, entry_fee, started_at)
+		`INSERT INTO angple_janggi_games (cho_mb_id, han_mb_id, status, entry_fee, started_at)
 		 VALUES (?, ?, 'playing', ?, NOW())`,
-		blackMbID, whiteMbID, entryFee,
+		choMbID, hanMbID, entryFee,
 	)
 	if res.Error != nil {
 		return 0, res.Error
@@ -109,7 +109,7 @@ func (s *Store) RefundEntryFee(gameID int64, mbID string, amount int) error {
 
 // FinishGame 은 대국 결과를 기록하고 양쪽 전적·레이팅을 갱신한다.
 // winnerMbID 가 빈 문자열이면 무승부.
-func (s *Store) FinishGame(gameID int64, blackMbID, whiteMbID, winnerMbID, reason string, moves []Move) error {
+func (s *Store) FinishGame(gameID int64, choMbID, hanMbID, winnerMbID, reason string, moves []Move) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
@@ -125,14 +125,14 @@ func (s *Store) FinishGame(gameID int64, blackMbID, whiteMbID, winnerMbID, reaso
 			return err
 		}
 		if winnerMbID == "" {
-			if err := upsertStat(tx, blackMbID, 0, 0, 1, 0); err != nil {
+			if err := upsertStat(tx, choMbID, 0, 0, 1, 0); err != nil {
 				return err
 			}
-			return upsertStat(tx, whiteMbID, 0, 0, 1, 0)
+			return upsertStat(tx, hanMbID, 0, 0, 1, 0)
 		}
-		loserMbID := blackMbID
-		if winnerMbID == blackMbID {
-			loserMbID = whiteMbID
+		loserMbID := choMbID
+		if winnerMbID == choMbID {
+			loserMbID = hanMbID
 		}
 		wR := s.ratingOf(tx, winnerMbID)
 		lR := s.ratingOf(tx, loserMbID)
