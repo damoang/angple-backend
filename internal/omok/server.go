@@ -207,5 +207,8 @@ func (s *Server) Snapshot() map[string]int {
 		"connections": len(s.clients),
 		"rooms":       len(s.rooms),
 		"queue":       len(s.matchingQueue[ModeRandom]) + len(s.matchingQueue[ModeRating]) + len(s.matchingQueue[ModeFavorite]),
+		// 공개 대기자 수 — 초대 대국(favorite)은 지정 상대만 기다리므로 제외.
+		// /omok-ws/lobby 가 이 값을 「지금 N명 대기 중」으로 노출한다.
+		"waiting": len(s.matchingQueue[ModeRandom]) + len(s.matchingQueue[ModeRating]),
 	}
 }
