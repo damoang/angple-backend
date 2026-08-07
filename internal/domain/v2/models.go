@@ -6,8 +6,8 @@ import (
 
 // V2User represents a user in the v2 schema
 type V2User struct {
-	ID          uint64    `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Username    string    `gorm:"column:username;type:varchar(50);uniqueIndex" json:"username"`
+	ID       uint64 `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Username string `gorm:"column:username;type:varchar(50);uniqueIndex" json:"username"`
 	// ⛔ 응답에 절대 싣지 않는다(2026-08-08 개인정보 노출 사고).
 	// GET /api/v2/users(/:id) 가 무인증 공개인데 이 태그가 json:"email" 이라
 	// 회원 이메일이 그대로 나갔다. 자기 이메일이 필요한 화면은 전용 DTO 를 쓸 것.
