@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 
@@ -9,6 +11,27 @@ import (
 	"github.com/damoang/angple-backend/pkg/jwt"
 	"github.com/gin-gonic/gin"
 )
+
+// internalSharedSecret 은 SvelteKit SSR 등 내부 호출자가 제시해야 하는 공유 비밀이다.
+// 부팅 시 1회만 읽는다 — 요청 헤더에서 읽으면 "자기 자신과 비교"가 되어 인증이 무너진다.
+//
+// ⛔ 2026-08-08 사고: `internalSecret := c.GetHeader("X-Internal-Secret")` 로 바뀐 뒤
+//
+//	`internalSecret == c.GetHeader("X-Internal-Secret")` 를 검사해, 헤더가 비어있지만
+//	않으면 항상 참이었다. 그 결과 아무나 X-Internal-User-ID/Level 을 붙여 **임의 회원
+//	사칭·관리자 승격**이 가능했다(인터넷에서 실증). 원래 os.Getenv 였던 것이
+//	lint 정리 커밋에서 지역변수로 회귀한 것이 원인.
+var internalSharedSecret = os.Getenv("INTERNAL_SECRET")
+
+// hasValidInternalSecret 은 제시된 헤더가 서버가 보유한 공유 비밀과 일치하는지 본다.
+// 비밀이 설정되지 않았으면 이 경로는 **항상 거부**한다(fail-closed).
+// 비교는 타이밍 공격을 피해 상수 시간으로 한다.
+func hasValidInternalSecret(headerSecret string) bool {
+	if internalSharedSecret == "" || headerSecret == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(headerSecret), []byte(internalSharedSecret)) == 1
+}
 
 // getRemoteIP extracts the actual connection IP from RemoteAddr (ignores X-Forwarded-For)
 // RemoteAddr format: "IP:port" or "[IPv6]:port"
@@ -37,7 +60,7 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		// 1. 127.0.0.1에서 오는 요청 (nginx → SvelteKit → Backend)
 		// 2. 공유 시크릿 일치 (CloudFront가 직접 Backend로 라우팅하는 경우)
 		isLocalhost := remoteIP == localhostIPv4 || remoteIP == localhostIPv6
-		hasValidSecret := internalSecret != "" && internalSecret == c.GetHeader("X-Internal-Secret")
+		hasValidSecret := hasValidInternalSecret(internalSecret)
 		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
 			userID := c.GetHeader("X-Internal-User-ID")
 			levelStr := c.GetHeader("X-Internal-User-Level")
@@ -114,7 +137,7 @@ func OptionalJWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		internalAuth := c.GetHeader("X-Internal-Auth")
 		internalSecret := c.GetHeader("X-Internal-Secret")
 		isLocalhost := remoteIP == localhostIPv4 || remoteIP == localhostIPv6
-		hasValidSecret := internalSecret != "" && internalSecret == c.GetHeader("X-Internal-Secret")
+		hasValidSecret := hasValidInternalSecret(internalSecret)
 		if internalAuth == "sveltekit-session" && (isLocalhost || hasValidSecret) {
 			userID := c.GetHeader("X-Internal-User-ID")
 			levelStr := c.GetHeader("X-Internal-User-Level")
