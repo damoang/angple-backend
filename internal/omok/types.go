@@ -60,6 +60,8 @@ type queueEntry struct {
 	client   *Client
 	rating   int
 	joinedAt time.Time
+	// 초대 대국(favorite) 전용 — 같은 코드끼리만 매칭된다. 그 외 모드에선 빈 문자열.
+	inviteCode string
 }
 
 type Session struct {

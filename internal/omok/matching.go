@@ -19,6 +19,25 @@ func (s *Server) handleMatching(client *Client, data map[string]interface{}) {
 		mode = m
 	}
 
+	// 초대 대국은 같은 코드끼리만 만난다. 코드 없는 favorite 진입은 거부 —
+	// 열어 두면 "친구와 두기" 링크로 모르는 둘이 붙는 사고가 난다(무료 큐라
+	// 무한정 공짜 대국 통로가 되기도 한다). 코드는 클라이언트가 만들어 URL 로
+	// 전달하므로 서버는 형식만 조인다(영숫자 4~32자).
+	inviteCode := ""
+	if mode == ModeFavorite {
+		if c, ok := data["invite"].(string); ok {
+			inviteCode = sanitizeInviteCode(c)
+		}
+		if inviteCode == "" {
+			s.sendToClient(client, map[string]interface{}{
+				"type": "matching_status", "status": "error",
+				"message": "초대 링크가 올바르지 않습니다. 링크를 다시 확인해 주세요.",
+				"code":    "invalid_invite",
+			})
+			return
+		}
+	}
+
 	// 유료 모드는 잔액을 미리 본다 — 큐에서 오래 기다린 뒤 "잔액 부족"으로
 	// 튕기면 상대까지 헛걸음한다. (확정 차감은 매칭 시점의 FOR UPDATE 가 한다)
 	if mode != ModeFavorite && s.store != nil {
@@ -48,7 +67,7 @@ func (s *Server) handleMatching(client *Client, data map[string]interface{}) {
 	if s.store != nil {
 		rating = s.store.Rating(client.MbID)
 	}
-	entry := &queueEntry{client: client, rating: rating, joinedAt: time.Now()}
+	entry := &queueEntry{client: client, rating: rating, joinedAt: time.Now(), inviteCode: inviteCode}
 	s.matchingQueue[mode] = append(s.matchingQueue[mode], entry)
 	client.matchingMode = mode
 	position := len(s.matchingQueue[mode]) // 슬라이스라 이 값이 실제 순번이다
@@ -94,9 +113,26 @@ func (s *Server) popMatchLocked(mode string) []*queueEntry {
 	return nil
 }
 
+// sanitizeInviteCode 는 초대 코드를 영숫자 4~32자로 조인다. 그 외는 빈 문자열.
+func sanitizeInviteCode(c string) string {
+	if len(c) < 4 || len(c) > 32 {
+		return ""
+	}
+	for _, r := range c {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return ""
+		}
+	}
+	return c
+}
+
 // compatible 은 레이팅 밴드를 본다. 기다린 시간이 길수록 밴드를 넓혀
 // "실력이 비슷한 상대"와 "언젠가는 매칭됨"을 함께 만족시킨다.
 func (s *Server) compatible(mode string, a, b *queueEntry) bool {
+	// 초대 대국은 같은 코드끼리만.
+	if mode == ModeFavorite {
+		return a.inviteCode != "" && a.inviteCode == b.inviteCode
+	}
 	if mode != ModeRating {
 		return true
 	}
