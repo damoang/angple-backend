@@ -2116,6 +2116,14 @@ func main() {
 		writeAfterWorker.Start(4)
 		defer writeAfterWorker.Stop()
 
+		// 푸시 알림 outbox 폴러 — g5_na_noti 를 폴링해 Expo Push 로 발송.
+		// PUSH_ENABLED=true 일 때만 가동(canary 검증 후 prod on).
+		if v := os.Getenv("PUSH_ENABLED"); v == "true" || v == "1" {
+			pushWorker := worker.NewPushNotifyWorker(db)
+			pushWorker.Start()
+			defer pushWorker.Stop()
+		}
+
 		// v1 block routes
 		v1Members := router.Group("/api/v1/members")
 		// 탈퇴 숙려기간 셀프 서비스: 본인 탈퇴 신청/취소. /me 스코프이므로 JWT 주체 계정만 대상(타인 지정 불가).

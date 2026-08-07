@@ -30,6 +30,9 @@ func RunV2Schema(db *gorm.DB) error {
 		// Content revisions
 		&v2.V2ContentRevision{},
 
+		// Push notification outbox cursor (PushNotifyWorker watermark)
+		&v2.V2PushCursor{},
+
 		// Board display settings - table already exists, skip auto-migration
 		// &v2.V2BoardDisplaySettings{},
 

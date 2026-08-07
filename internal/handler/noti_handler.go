@@ -148,6 +148,12 @@ func generateTitle(fromCase, toCase, relMbNick string, wrID, wrParent int) strin
 	}
 }
 
+// NotificationTitle exposes generateTitle to other packages (push worker 등).
+// 제목 문구의 단일 소스 — 다른 곳에 복제하지 말 것(bug#13242 재발 방지).
+func NotificationTitle(fromCase, toCase, relMbNick string, wrID, wrParent int) string {
+	return generateTitle(fromCase, toCase, relMbNick, wrID, wrParent)
+}
+
 // convertLegacyURL converts Gnuboard PHP URLs to SvelteKit URLs
 // /bbs/board.php?bo_table=free&wr_id=123#c_456 → /free/123#c_456
 func convertLegacyURL(rawURL string) string {
