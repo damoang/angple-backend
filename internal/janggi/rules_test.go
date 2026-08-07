@@ -192,3 +192,46 @@ func TestApplyMoveCaptures(t *testing.T) {
 		t.Fatal("원본이 변형됐다 — ApplyMove 는 복사본을 반환해야 한다")
 	}
 }
+
+// ===== 2차: 점수제·빅장 =====
+
+// 초기 배치 점수 — 협회 점수표에서 손으로 유도:
+// 차 2×13 + 포 2×7 + 마 2×5 + 상 2×3 + 사 2×3 + 졸 5×2 + 궁 0 = 72.
+func TestScoreInitial(t *testing.T) {
+	pcs := InitPieces()
+	if got := Score(pcs, TeamCho); got != 72 {
+		t.Fatalf("초 초기 점수 = %d, want 72", got)
+	}
+	if got := Score(pcs, TeamHan); got != 72 {
+		t.Fatalf("한 초기 점수 = %d, want 72", got)
+	}
+}
+
+// 빅장 판정 — 같은 열에서 궁이 마주보되 사이가 비어야 참.
+func TestIsBikjang(t *testing.T) {
+	facing := []Piece{
+		{Kind: KindGung, Team: TeamCho, X: 4, Y: 8, Alive: true},
+		{Kind: KindGung, Team: TeamHan, X: 4, Y: 1, Alive: true},
+	}
+	if !IsBikjang(facing) {
+		t.Fatal("사이가 빈 동일 열 마주봄인데 빅장 아님")
+	}
+
+	blocked := append(append([]Piece(nil), facing...),
+		Piece{Kind: KindJol, Team: TeamCho, X: 4, Y: 5, Alive: true})
+	if IsBikjang(blocked) {
+		t.Fatal("사이에 기물이 있는데 빅장 판정")
+	}
+
+	offCol := []Piece{
+		{Kind: KindGung, Team: TeamCho, X: 3, Y: 8, Alive: true},
+		{Kind: KindGung, Team: TeamHan, X: 4, Y: 1, Alive: true},
+	}
+	if IsBikjang(offCol) {
+		t.Fatal("다른 열인데 빅장 판정")
+	}
+	// 초기 배치 — 궁은 같은 열(4)이지만 그 사이에 졸(4,6)·병(4,3)이 있어 빅장이 아니다.
+	if IsBikjang(InitPieces()) {
+		t.Fatal("초기 배치는 궁렬에 졸·병이 있어 빅장이 아니어야 한다")
+	}
+}

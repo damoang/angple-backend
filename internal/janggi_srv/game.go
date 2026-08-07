@@ -2,6 +2,7 @@ package janggisrv
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -122,7 +123,6 @@ func (s *Server) handleMove(client *Client, data map[string]interface{}) {
 	mate := janggi.IsCheckmate(gs.Pieces, opp)
 	check := !mate && janggi.IsCheck(gs.Pieces, opp)
 	// 한 수 쉼: 상대가 장군이 아닌데 둘 수가 없으면 자동 패스 — 턴이 되돌아온다.
-	// 교착 무한루프 방지: 패스가 4번 쌓이면 무승부(1차 규칙 — 빅장·점수제는 2차).
 	passed := false
 	if !mate && !check && len(janggi.LegalMoves(gs.Pieces, opp)) == 0 {
 		passed = true
@@ -131,7 +131,17 @@ func (s *Server) handleMove(client *Client, data map[string]interface{}) {
 		gs.CurrentTeam = opp
 		gs.passStreak = 0
 	}
-	drawByStall := gs.passStreak >= 4
+	// 빅장(궁 마주봄) — 이번 착수로 생기거나 유지되면 +1, 해소되면 0.
+	// 2가 쌓이면(선언 후 상대가 한 수 안에 해소하지 않음) 점수 판정으로 넘어간다.
+	bik := janggi.IsBikjang(gs.Pieces)
+	if bik {
+		gs.bikjangStreak++
+	} else {
+		gs.bikjangStreak = 0
+	}
+	settleByBikjang := bik && gs.bikjangStreak >= 2
+	// 교착(패스 4회 누적)도 1차의 단순 무승부 대신 점수 판정으로 종료한다(2차 규칙).
+	settleByStall := gs.passStreak >= 4
 	pieces := gs.Pieces
 	cur := gs.CurrentTeam
 	clients := s.clientsInRoomLocked(room)
@@ -143,18 +153,48 @@ func (s *Server) handleMove(client *Client, data map[string]interface{}) {
 			"from": map[string]int{"x": from.X, "y": from.Y},
 			"to":   map[string]int{"x": to.X, "y": to.Y},
 			"team": team, "pieces": pieces, "currentTeam": cur,
-			"check": check, "passed": passed,
+			"check": check, "passed": passed, "bikjang": bik,
 		})
 	}
 
 	switch {
 	case mate:
 		s.finishGame(roomID, client.MbID, "checkmate", "외통입니다.")
-	case drawByStall:
-		s.finishGame(roomID, "", "draw", "쌍방 둘 수 없어 무승부로 종료되었습니다.")
+	case settleByBikjang:
+		s.settleByScore(roomID, "bikjang", pieces)
+	case settleByStall:
+		s.settleByScore(roomID, "stall", pieces)
 	default:
 		s.armTurnTimer(roomID)
 	}
+}
+
+// settleByScore — 점수제 판정(2차 규칙, 대한장기협회 점수: 차13 포7 마5 상3 사3 졸2).
+// 한(후수)은 덤 1.5 를 더한다. 정수+1.5 라 동점이 존재하지 않으므로 항상 승자가 나온다.
+func (s *Server) settleByScore(roomID, cause string, pieces []janggi.Piece) {
+	s.mu.RLock()
+	room := s.rooms[roomID]
+	var choMbID, hanMbID string
+	if room != nil && room.GameState != nil {
+		choMbID, hanMbID = room.GameState.ChoMbID, room.GameState.HanMbID
+	}
+	s.mu.RUnlock()
+	if room == nil {
+		return
+	}
+
+	choScore := janggi.Score(pieces, janggi.TeamCho)
+	hanScore := float64(janggi.Score(pieces, janggi.TeamHan)) + 1.5 // 덤
+	winner := choMbID
+	if hanScore > float64(choScore) {
+		winner = hanMbID
+	}
+	causeLabel := "빅장"
+	if cause == "stall" {
+		causeLabel = "쌍방 교착"
+	}
+	note := fmt.Sprintf("%s — 점수 판정: 초 %d점 vs 한 %.1f점(덤 1.5 포함)", causeLabel, choScore, hanScore)
+	s.finishGame(roomID, winner, cause+"_score", note)
 }
 
 func (s *Server) handleSurrender(client *Client, data map[string]interface{}) {
