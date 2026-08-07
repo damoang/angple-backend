@@ -90,12 +90,12 @@ type Room struct {
 }
 
 type GameState struct {
-	Pieces      []janggi.Piece
-	CurrentTeam int // 1=초(선공) 2=한 — matching 의 색 배정(PlayerColors)과 같은 값
-	ChoMbID     string
-	HanMbID     string
-	MoveHistory []Move
-	StartTime   time.Time
+	Pieces       []janggi.Piece
+	CurrentTeam  int // 1=초(선공) 2=한 — matching 의 색 배정(PlayerColors)과 같은 값
+	ChoMbID      string
+	HanMbID      string
+	MoveHistory  []Move
+	StartTime    time.Time
 	LastMoveTime time.Time
 	// turnTimer 는 현재 턴의 제한시간 타이머다. 착수·종료 때마다 교체된다.
 	turnTimer *time.Timer
