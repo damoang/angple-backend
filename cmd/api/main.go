@@ -3069,9 +3069,10 @@ func main() {
 			offset := (page - 1) * limit
 
 			// LikerInfo struct for response
+			// ⛔ mb_name(실명)은 응답에 싣지 않는다 — 2026-08-08 개인정보 전수점검.
+			//    표시는 닉네임이고, 닉네임이 비면 mb_id 로 폴백한다(쿼리의 COALESCE).
 			type LikerInfo struct {
 				MbID             string     `json:"mb_id"`
-				MbName           string     `json:"mb_name"`
 				MbNick           string     `json:"mb_nick"`
 				MbImageUrl       string     `json:"mb_image,omitempty"`
 				MbImageUpdatedAt *time.Time `json:"mb_image_updated_at,omitempty"`
@@ -3116,7 +3117,7 @@ func main() {
 
 			// Query likers with member info
 			db.Table("g5_board_good bg").
-				Select("bg.mb_id, COALESCE(m.mb_name, '') as mb_name, COALESCE(m.mb_nick, bg.mb_id) as mb_nick, COALESCE(m.mb_image_url, '') as mb_image_url, m.mb_image_updated_at, bg.bg_ip, bg.bg_datetime as liked_at").
+				Select("bg.mb_id, COALESCE(m.mb_nick, bg.mb_id) as mb_nick, COALESCE(m.mb_image_url, '') as mb_image_url, m.mb_image_updated_at, bg.bg_ip, bg.bg_datetime as liked_at").
 				Joins("LEFT JOIN g5_member m ON bg.mb_id = m.mb_id").
 				Where("bg.bo_table = ? AND bg.wr_id = ? AND bg.bg_flag = ?", slug, postID, "good").
 				Order("bg.bg_datetime DESC").
