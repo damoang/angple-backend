@@ -170,6 +170,12 @@ func (w *PushNotifyWorker) processBatch() {
 	// Settle window: auto-increment ids can commit out of order — a row with a
 	// smaller ph_id may become visible after we've already advanced past it.
 	// Only process rows older than 2s so late commits aren't skipped forever.
+	//
+	// ph_readed: 이미 읽은 알림(웹/앱에서 먼저 확인)은 푸시하지 않는다 — 읽음 동기화.
+	// 읽힌 행도 커서는 정상 전진한다(발송만 스킵이 아니라 조회에서 제외돼도,
+	// 커서는 배치의 마지막 ph_id 가 아닌 "조회된" 행 기준이므로 아래 주의:
+	// 조회에서 빼면 그 행 위로 커서가 못 넘어가 무한 재조회된다. 그래서
+	// WHERE 가 아니라 발송 단계에서 스킵한다.
 	settled := time.Now().Add(-2 * time.Second)
 	var notis []gnurepo.Notification
 	if err := w.db.Where("ph_id > ? AND ph_datetime <= ?", cursor, settled).
@@ -197,7 +203,8 @@ func (w *PushNotifyWorker) processBatch() {
 	lastProcessed := cursor
 	for _, n := range notis {
 		var candidate []expoPushMessage
-		if pushFromCases[n.PhFromCase] {
+		// 화이트리스트 + 미읽음만 발송. 읽힌 행도 커서는 전진(스킵만).
+		if pushFromCases[n.PhFromCase] && n.PhReaded != "Y" {
 			for _, tok := range tokensByMb[n.MbID] {
 				candidate = append(candidate, w.buildMessage(n, tok))
 			}
