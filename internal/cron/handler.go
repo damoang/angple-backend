@@ -19,6 +19,7 @@ type Handler struct {
 	pointConfigRepo   v2repo.PointConfigRepository
 	gnuPointWriteRepo v2repo.GnuboardPointWriteRepository
 	notiRepo          gnurepo.NotiRepository
+	givingSweep       func() (interface{}, error)
 }
 
 // NewHandler creates a new cron Handler

@@ -12,6 +12,7 @@ import (
 	givingdomain "github.com/damoang/angple-backend/internal/domain/giving"
 	gnuboard "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"github.com/damoang/angple-backend/internal/middleware"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -749,6 +750,7 @@ func (h *GivingHandler) Draw(c *gin.Context) {
 	}
 	// 개표 완료 → 설정 상태 종료
 	h.db.Exec("UPDATE g5_giving_meta SET status = 'drawn', updated_at = ? WHERE wr_id = ?", time.Now(), wrID)
+	h.NotifyDrawResult(wrID)
 
 	var saved givingDrawRow
 	h.db.Table("g5_giving_draw").Where("wr_id = ?", wrID).Take(&saved)
@@ -934,7 +936,9 @@ func (h *GivingHandler) AdminAction(c *gin.Context) {
 			var existing int64
 			h.db.Table("g5_giving_draw").Where("wr_id = ?", wrID).Count(&existing)
 			if existing == 0 {
-				_ = h.runDraw(wrID, post, meta, givingDrawRequest{}, middleware.GetUsername(c))
+				if err := h.runDraw(wrID, post, meta, givingDrawRequest{}, middleware.GetUsername(c)); err == nil {
+					h.NotifyDrawResult(wrID)
+				}
 			}
 		}
 		h.db.Exec("UPDATE g5_giving_meta SET status = 'ended', updated_at = ? WHERE wr_id = ?", now, wrID)
@@ -966,4 +970,164 @@ func sortStrings(s []string) {
 			s[j-1], s[j] = s[j], s[j-1]
 		}
 	}
+}
+
+// ===== 마감 자동 개표 스윕 + 개표 알림 (cron: /api/internal/cron/giving-draw-sweep) =====
+//
+// 배경(2026-08-07 실측): 시간 기반 개표 트리거가 없어 giving/2405 가 마감 12일이
+// 지나도록 status=open 미개표로 방치됐고, 개표가 되어도 당첨자에게 아무 알림이
+// 가지 않았다(참가 150명 나눔도 당첨자가 직접 들어와 확인해야 했다).
+
+// GivingSweepResult 는 스윕 1회의 처리 결과다.
+type GivingSweepResult struct {
+	Due       int      `json:"due"`        // 마감 경과 + 미개표
+	AutoDrawn int      `json:"auto_drawn"` // 자동 개표 실행
+	Reminded  int      `json:"reminded"`   // 지명 방식 주최자 독촉
+	Errors    []string `json:"errors,omitempty"`
+}
+
+// givingKSTNow 는 wr_5('2006-01-02T15:04', KST 문자열)와 같은 포맷의 현재 시각.
+// ISO 형태라 사전순 비교가 시간순 비교와 일치한다.
+func givingKSTNow() string {
+	loc, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		loc = time.FixedZone("KST", 9*3600)
+	}
+	return time.Now().In(loc).Format("2006-01-02T15:04")
+}
+
+// RunDueDrawSweep 는 마감이 지난 open 나눔을 찾아
+//   - 자동 방식(random/ladder/lowest_unique): runDraw 실행(멱등) + 당첨 알림
+//   - 지명 방식(curation/host_pick): 주최자에게 개표 독촉 알림(1회)
+//
+// runDraw 는 g5_giving_draw 존재 시 기존 결과를 재사용하므로 중복 실행에 안전하다.
+func (h *GivingHandler) RunDueDrawSweep() (*GivingSweepResult, error) {
+	res := &GivingSweepResult{}
+	now := givingKSTNow()
+
+	type dueRow struct {
+		WrID    int    `gorm:"column:wr_id"`
+		Method  string `gorm:"column:method"`
+		Subject string `gorm:"column:wr_subject"`
+		HostID  string `gorm:"column:mb_id"`
+	}
+	var due []dueRow
+	err := h.db.Table("g5_giving_meta m").
+		Select("m.wr_id, m.method, w.wr_subject, w.mb_id").
+		Joins("JOIN g5_write_giving w ON w.wr_id = m.wr_id").
+		Where("m.status = 'open'").
+		Where("w.wr_5 <> '' AND w.wr_5 <= ?", now).
+		Where("NOT EXISTS (SELECT 1 FROM g5_giving_draw d WHERE d.wr_id = m.wr_id)").
+		Find(&due).Error
+	if err != nil {
+		return nil, err
+	}
+	res.Due = len(due)
+
+	for _, row := range due {
+		method := givingdomain.NormalizeMethod(row.Method)
+		if !givingdomain.IsAutoDraw(method) {
+			if h.notifyOnce(row.HostID, "giving_remind", row.WrID,
+				fmt.Sprintf("⏰ 나눔 「%s」 마감! 당첨자 지정(개표)을 진행해 주세요.", givingTrim(row.Subject))) {
+				res.Reminded++
+			}
+			continue
+		}
+
+		post, perr := h.loadGivingPost(row.WrID)
+		if perr != nil || post == nil {
+			res.Errors = append(res.Errors, fmt.Sprintf("%d: 글 조회 실패", row.WrID))
+			continue
+		}
+		meta, ok := h.loadGivingMeta(row.WrID)
+		if !ok {
+			continue
+		}
+		if derr := h.runDraw(row.WrID, post, meta, givingDrawRequest{}, "cron"); derr != nil {
+			res.Errors = append(res.Errors, fmt.Sprintf("%d: %v", row.WrID, derr))
+			continue
+		}
+		h.db.Exec("UPDATE g5_giving_meta SET status = 'drawn', updated_at = ? WHERE wr_id = ?", time.Now(), row.WrID)
+		h.NotifyDrawResult(row.WrID)
+		res.AutoDrawn++
+	}
+	return res, nil
+}
+
+// NotifyDrawResult 는 개표 결과를 당첨자·주최자에게 알린다(중복 방지 내장).
+// cron 스윕과 수동 개표(Draw)·강제종료(AdminAction) 모두에서 호출된다.
+// 알림 실패는 개표 결과에 영향을 주면 안 되므로 전부 흡수한다.
+func (h *GivingHandler) NotifyDrawResult(wrID int) {
+	post, err := h.loadGivingPost(wrID)
+	if err != nil || post == nil {
+		return
+	}
+	var draw givingDrawRow
+	if err := h.db.Table("g5_giving_draw").Where("wr_id = ?", wrID).Take(&draw).Error; err != nil {
+		return
+	}
+
+	winners := map[string]bool{}
+	if draw.WinnerMbID != "" {
+		winners[draw.WinnerMbID] = true
+	}
+	var parsed struct {
+		Winners []string `json:"winners"`
+	}
+	_ = json.Unmarshal(draw.ResultJSON, &parsed)
+	for _, w := range parsed.Winners {
+		if w != "" {
+			winners[w] = true
+		}
+	}
+
+	subject := givingTrim(post.WrSubject)
+	for w := range winners {
+		h.notifyOnce(w, "giving_win", wrID,
+			fmt.Sprintf("🎉 나눔 「%s」에 당첨되셨습니다! 축하드립니다.", subject))
+	}
+	// 주최자에게 개표 완료(본인이 직접 개표한 경우는 이미 알고 있으므로 생략)
+	if draw.DrawnBy != post.MbID {
+		h.notifyOnce(post.MbID, "giving_drawn", wrID,
+			fmt.Sprintf("📦 나눔 「%s」 개표가 완료되었습니다. (참여 감사드립니다)", subject))
+	}
+}
+
+// notifyOnce 는 같은 (수신자, 종류, 글) 조합 알림이 없을 때만 1건 생성한다.
+// 미지의 ph_from_case 는 웹 알림함에서 기본 아이콘 + rel_msg 전문으로 렌더된다
+// (notification-type.ts 의 default 폴백 실측 확인, 8/7).
+func (h *GivingHandler) notifyOnce(mbID, fromCase string, wrID int, msg string) bool {
+	if mbID == "" {
+		return false
+	}
+	var cnt int64
+	h.db.Table("g5_na_noti").
+		Where("mb_id = ? AND bo_table = 'giving' AND wr_id = ? AND ph_from_case = ?", mbID, wrID, fromCase).
+		Count(&cnt)
+	if cnt > 0 {
+		return false
+	}
+	noti := &gnurepo.Notification{
+		PhToCase:      "giving",
+		PhFromCase:    fromCase,
+		BoTable:       "giving",
+		WrID:          wrID,
+		MbID:          mbID,
+		RelMsg:        msg,
+		RelURL:        fmt.Sprintf("/giving/%d", wrID),
+		PhReaded:      "N",
+		PhDatetime:    time.Now(),
+		ParentSubject: msg,
+		WrParent:      wrID,
+	}
+	return h.db.Create(noti).Error == nil
+}
+
+// givingTrim 은 알림 문구용으로 제목을 40자 내로 줄인다(rune 안전).
+func givingTrim(s string) string {
+	r := []rune(s)
+	if len(r) <= 40 {
+		return s
+	}
+	return string(r[:40]) + "…"
 }

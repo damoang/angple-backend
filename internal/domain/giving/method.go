@@ -25,7 +25,10 @@ const (
 )
 
 // DefaultMethod 미지정/레거시 글 폴백.
-const DefaultMethod = MethodLowestUnique
+// ⛔ lowest_unique 로 두지 말 것 — 유료(포인트 소모) 방식이라 폴백이 하필 가장
+// 위험한 경로였다. 실사용 0건(2026-08 meta 분포: random 10/ladder 1/host_pick 1,
+// 유료 0)이고 과거 포인트 정산 사고 이력이 있는 경로다. 무료 랜덤이 안전한 기본.
+const DefaultMethod = MethodRandom
 
 // maxParsedNumbers 한 번의 파싱에서 허용하는 최대 번호 개수 (레거시 100000 상한 이식).
 const maxParsedNumbers = 100000
