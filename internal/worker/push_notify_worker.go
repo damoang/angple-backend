@@ -69,6 +69,12 @@ func NewPushNotifyWorker(db *gorm.DB) *PushNotifyWorker {
 // Start launches the single poller goroutine. A single worker is intentional:
 // the cursor is a global watermark and one poller avoids double-send races.
 func (w *PushNotifyWorker) Start() {
+	// 커서 테이블은 워커가 직접 보장한다 — AUTO_MIGRATE_ON_BOOT=false 인
+	// 환경(canary/prod)에서 전체 스키마 마이그레이션 없이도 동작하도록.
+	// AutoMigrate 는 멱등이고 이 한 테이블만 만진다.
+	if err := w.db.AutoMigrate(&v2domain.V2PushCursor{}); err != nil {
+		log.Printf("[PushNotifyWorker] cursor table migrate failed: %v", err)
+	}
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
