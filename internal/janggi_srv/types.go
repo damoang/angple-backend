@@ -100,8 +100,11 @@ type GameState struct {
 	// turnTimer 는 현재 턴의 제한시간 타이머다. 착수·종료 때마다 교체된다.
 	turnTimer *time.Timer
 	finished  bool
-	// passStreak — 한 수 쉼(합법수 0·장군 아님) 연속 횟수. 4면 무승부(교착 방지, 1차 규칙).
+	// passStreak — 한 수 쉼(합법수 0·장군 아님) 연속 횟수. 4면 점수 판정(2차 규칙).
 	passStreak int
+	// bikjangStreak — 빅장(궁 마주봄) 유지 착수 횟수. 착수 후 빅장이면 +1, 해소되면 0.
+	// 2가 되면(선언 후 상대가 한 수 안에 해소하지 않으면) 점수 판정으로 종료한다(2차 규칙).
+	bikjangStreak int
 }
 
 type Move struct {

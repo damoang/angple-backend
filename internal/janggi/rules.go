@@ -403,3 +403,59 @@ func IsLegal(pcs []Piece, team, idx int, to Point) bool {
 func IsCheckmate(pcs []Piece, team int) bool {
 	return IsCheck(pcs, team) && len(LegalMoves(pcs, team)) == 0
 }
+
+// ===== 2차: 점수제·빅장 (서버 전용 확장 — TS 클라이언트 AI 에는 없는 규칙) =====
+
+// pieceValues 는 대한장기협회 점수제 기물 점수다. 궁은 0점.
+var pieceValues = map[int]int{
+	KindCha:  13,
+	KindPo:   7,
+	KindMa:   5,
+	KindSang: 3,
+	KindSa:   3,
+	KindJol:  2,
+	KindGung: 0,
+}
+
+// Score 는 살아있는 기물의 점수 합이다. 덤(한 +1.5)은 호출부(서버)가 더한다 —
+// 엔진은 판 위 사실만 계산한다.
+func Score(pcs []Piece, team int) int {
+	sum := 0
+	for _, p := range pcs {
+		if p.Alive && p.Team == team {
+			sum += pieceValues[p.Kind]
+		}
+	}
+	return sum
+}
+
+// IsBikjang 은 빅장(두 궁이 같은 세로줄에서 사이 기물 없이 마주봄)인지 본다.
+// 판정만 한다 — "빅장이 유지되면 점수로 판가름" 같은 진행 규칙은 서버 몫.
+func IsBikjang(pcs []Piece) bool {
+	var cho, han *Piece
+	for i := range pcs {
+		p := &pcs[i]
+		if p.Alive && p.Kind == KindGung {
+			switch p.Team {
+			case TeamCho:
+				cho = p
+			case TeamHan:
+				han = p
+			}
+		}
+	}
+	if cho == nil || han == nil || cho.X != han.X {
+		return false
+	}
+	b := MakeBoard(pcs)
+	lo, hi := cho.Y, han.Y
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	for y := lo + 1; y < hi; y++ {
+		if b[y][cho.X] != nil {
+			return false
+		}
+	}
+	return true
+}
