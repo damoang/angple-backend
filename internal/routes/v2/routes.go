@@ -48,12 +48,16 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	// ⛔ 2026-08-08 개인정보 노출 사고: 이 그룹 전체가 무인증 공개였고
 	//    V2User.Email 이 json 에 실려 회원 이메일이 그대로 나갔다(목록 20건/페이지).
 	//    ① 이메일은 도메인 태그에서 json:"-" 로 제거(models.go)
-	//    ② 목록(회원 열거)은 관리자 전용으로 잠근다 — 앱은 개별 조회만 쓴다(실측).
-	//    ③ 개별 조회는 앱 실사용 경로라 공개 유지하되, 이메일 없는 공개 프로필만 나간다.
+	//    ② 목록(회원 열거)은 관리자 전용으로 잠근다.
+	//    ③ 개별 조회도 **로그인 필수**로 바꾼다 — 응답을 publicUser 로 좁혔어도
+	//       id 가 순차라 익명 스캔으로 전 회원 프로필을 훑을 수 있었다.
+	//       앱은 로그인 후 이 경로를 쓰므로 토큰이 있다(접근 로그 실측).
+	//       ⛔ 엣지의 Authorization 헤더 검사만으로는 부족하다 — 임의 문자열
+	//         `Bearer x` 로 통과되므로 서명 검증은 여기서 해야 한다.
 	users := api.Group("/users")
 	users.GET("", auth, middleware.RequireAdmin(), h.ListUsers)
-	users.GET("/:id", h.GetUser)
-	users.GET("/username/:username", h.GetUserByUsername)
+	users.GET("/:id", auth, h.GetUser)
+	users.GET("/username/:username", auth, h.GetUserByUsername)
 
 	// Boards (OptionalJWTAuth로 인증된 사용자에게 permissions 제공)
 	boards := api.Group("/boards")

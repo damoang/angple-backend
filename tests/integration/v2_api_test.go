@@ -345,12 +345,28 @@ func (s *V2APISuite) TestListUsers() {
 }
 
 func (s *V2APISuite) TestGetUserByUsername() {
+	// 회원 조회는 로그인 필수(2026-08-08). 무인증은 401.
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/users/username/testuser", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
 
+	assert.Equal(s.T(), http.StatusUnauthorized, w.Code)
+}
+
+// TestGetUserAuthorized 는 로그인 상태에서 공개 프로필이 나오되
+// 민감 필드(email·username)가 빠져 있는지 본다.
+func (s *V2APISuite) TestGetUserAuthorized() {
+	token := s.getAuthToken()
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/users/username/testuser", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
 	assert.Equal(s.T(), http.StatusOK, w.Code)
+	assert.NotContains(s.T(), w.Body.String(), `"email"`)
+	assert.NotContains(s.T(), w.Body.String(), `"username"`)
 }
 
 // --- Helper ---
