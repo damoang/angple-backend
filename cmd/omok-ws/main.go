@@ -62,6 +62,25 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, server.HandleWebSocket)
+	// 대기 현황 (인증 불요·공개). 온라인 대전 탭이 폴링해 「지금 N명 대기 중」을 띄운다.
+	// 유동성이 낮을 때는 "누가 기다리고 있다"는 사실 자체가 매칭 확률을 만든다 —
+	// 두 번째 사람이 지금 누르면 바로 붙는다는 것을 알아야 누른다. (8/7 첫 대국까지
+	// 전원이 각자 혼자 대기하다 이탈한 원인이 이 정보 부재였다.)
+	// 개인정보 없음: 숫자만 내보낸다(대기자 닉네임 노출 금지).
+	mux.HandleFunc(path+"lobby", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "public, max-age=5")
+		body, _ := json.Marshal(server.Snapshot())
+		_, _ = w.Write(body)
+	})
+	// 공개 랭킹 (인증 불요). 레이팅 상위 20 — 닉네임·승·패·무·레이팅만 담긴다.
+	// DB 부하 방지: 60초 공유 캐시면 충분하다(전적은 대국 종료 때만 변한다).
+	mux.HandleFunc(path+"ranking", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		body, _ := json.Marshal(map[string]interface{}{"ranking": store.RankingTop(20)})
+		_, _ = w.Write(body)
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		body, _ := json.Marshal(map[string]interface{}{

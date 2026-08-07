@@ -217,6 +217,37 @@ func (s *Store) Stats(mbID string) (wins, losses, draws, rating int) {
 	return row.Wins, row.Losses, row.Draws, row.Rating
 }
 
+// RankingRow 는 공개 랭킹 한 줄이다.
+// ⛔ mb_id 는 담지 않는다 — 공개 표면에는 닉네임까지만 나간다(개인정보 원칙).
+type RankingRow struct {
+	Nickname string `gorm:"column:mb_nick" json:"nickname"`
+	Wins     int    `gorm:"column:wins" json:"wins"`
+	Losses   int    `gorm:"column:losses" json:"losses"`
+	Draws    int    `gorm:"column:draws" json:"draws"`
+	Rating   int    `gorm:"column:rating" json:"rating"`
+}
+
+// RankingTop 은 레이팅 상위 n 명을 돌려준다. 대국 이력이 있는 회원만 나온다
+// (stats 행은 첫 대국 종료 때 생기므로 별도 필터가 필요 없다).
+func (s *Store) RankingTop(n int) []RankingRow {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	if n <= 0 || n > 100 {
+		n = 20
+	}
+	var rows []RankingRow
+	if err := s.db.Raw(
+		`SELECT m.mb_nick, t.wins, t.losses, t.draws, t.rating
+		 FROM angple_omok_stats t
+		 JOIN g5_member m ON m.mb_id = t.mb_id
+		 ORDER BY t.rating DESC, t.wins DESC LIMIT ?`, n,
+	).Scan(&rows).Error; err != nil {
+		return nil
+	}
+	return rows
+}
+
 func (s *Store) ratingOf(tx *gorm.DB, mbID string) int {
 	var r int
 	if err := tx.Raw("SELECT rating FROM angple_omok_stats WHERE mb_id = ?", mbID).Scan(&r).Error; err != nil || r == 0 {
