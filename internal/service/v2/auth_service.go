@@ -460,7 +460,14 @@ func (s *V2AuthService) provisionV2UserFromMember(mbID string) (*v2domain.V2User
 		if found, ferr := s.userRepo.FindByUsername(mbID); ferr == nil {
 			return found, nil
 		}
-		return nil, createErr
+		// email 이 uniqueIndex 라, 같은 이메일의 다른 계정(중복계정·재가입 흔적)이
+		// v2_users 에 이미 있으면 여기서 실패한다(2026-08-08 백필에서 59명 실측).
+		// v2 는 username 으로만 인증하고 email 은 응답에 싣지 않으므로,
+		// 빈 이메일과 같은 규약(mb_id@legacy.local)으로 폴백해 재시도한다.
+		user.Email = mbID + "@legacy.local"
+		if retryErr := s.userRepo.Create(user); retryErr != nil {
+			return nil, createErr
+		}
 	}
 	return user, nil
 }
