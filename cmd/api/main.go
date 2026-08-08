@@ -6515,7 +6515,11 @@ func main() {
 			media.POST("/images", mediaHandler.UploadImage)
 			media.POST("/attachments", mediaHandler.UploadAttachment)
 			media.POST("/videos", mediaHandler.UploadVideo)
-			media.DELETE("/files", mediaHandler.DeleteFile)
+			// ⛔ 2026-08-08: DeleteFile 은 key prefix 화이트리스트만 검사하고 소유자
+			//    확인이 없어, 인증된 아무 회원이나 key 를 알면 타인 파일을 지울 수 있었다.
+			//    media 키에 업로더 정보가 없어 소유 검증이 불가하고, 웹·앱 소비처가 0
+			//    (호출 로그도 0)인 사실상 미사용 엔드포인트다. 관리자 전용으로 봉인한다.
+			media.DELETE("/files", middleware.RequireAdmin(), mediaHandler.DeleteFile)
 
 			// Member profile image
 			memberSvc := service.NewMemberService(s3Client, gnuMemberRepo)
