@@ -385,7 +385,82 @@ func (s *V2AuthService) refreshWebIssuedToken(refreshToken, mbID string) (*v2dom
 
 	user, err := s.userRepo.FindByUsername(mbID)
 	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, common.ErrUnauthorized
+		}
+		// Auto-provision: 웹 소셜 로그인/가입은 g5_member 만 만들고 v2_users 를 남기지 않는다.
+		// #561(a75af94) 이후 이 경로가 FindByUsername 을 요구하면서, v2_users 없는 회원은
+		// access 만료 시 refresh 가 여기서 401 → 위에서 이미 토큰을 폐기했으므로 재로그인해도
+		// 같은 상태 반복(세션 영구 만료). g5_member 를 정본으로 프로비저닝해 끊어준다.
+		provisioned, perr := s.provisionV2UserFromMember(mbID)
+		if perr != nil {
+			return nil, common.ErrUnauthorized
+		}
+		user = provisioned
+	}
+	return user, nil
+}
+
+// provisionV2UserFromMember 는 g5_member(정본)에서 회원을 읽어 v2_users 행을 만든다.
+// cmd/migrate/main.go migrateUsers() 와 동일한 필드 매핑을 쓴다. 웹 refresh 경로에는
+// JWT claims(닉네임/레벨/이메일)가 없으므로 AppExchangeLogin 과 달리 DB 를 정본으로 삼는다.
+func (s *V2AuthService) provisionV2UserFromMember(mbID string) (*v2domain.V2User, error) {
+	if s.db == nil {
 		return nil, common.ErrUnauthorized
+	}
+	var m struct {
+		MbEmail         string
+		MbPassword      string
+		MbNick          string
+		MbLevel         int
+		MbProfile       string
+		MbLeaveDate     string
+		MbInterceptDate string
+	}
+	err := s.db.Table("g5_member").
+		Select("mb_email, mb_password, mb_nick, mb_level, mb_profile, mb_leave_date, mb_intercept_date").
+		Where("mb_id = ?", mbID).Take(&m).Error
+	if err != nil {
+		// g5_member 에도 없으면 실재하지 않는 회원 — 프로비저닝 불가.
+		return nil, err
+	}
+	// 탈퇴·정지 회원은 세션을 되살리지 않는다(migrateUsers 의 status 매핑과 동일).
+	if m.MbLeaveDate != "" || m.MbInterceptDate != "" {
+		return nil, common.ErrUnauthorized
+	}
+	level := m.MbLevel
+	if level < 1 {
+		level = 1
+	}
+	if level > 10 {
+		level = 10 // migrateUsers 와 동일: LEAST(mb_level, 10)
+	}
+	nickname := m.MbNick
+	if nickname == "" {
+		nickname = mbID
+	}
+	email := m.MbEmail
+	if email == "" {
+		email = mbID + "@legacy.local"
+	}
+	user := &v2domain.V2User{
+		Username: mbID,
+		Email:    email,
+		Password: m.MbPassword,
+		Nickname: nickname,
+		Level:    uint8(level), // #nosec G115 -- level clamped to [1,10] above
+		Status:   "active",
+	}
+	if m.MbProfile != "" {
+		bio := m.MbProfile
+		user.Bio = &bio
+	}
+	if createErr := s.userRepo.Create(user); createErr != nil {
+		// 경합으로 다른 요청이 먼저 만들었을 수 있다 — 재조회로 회복.
+		if found, ferr := s.userRepo.FindByUsername(mbID); ferr == nil {
+			return found, nil
+		}
+		return nil, createErr
 	}
 	return user, nil
 }
