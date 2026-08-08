@@ -1654,7 +1654,9 @@ func main() {
 			response := gin.H{"success": true, "data": items}
 
 			// Cache the response
-			if !summaryMode && cacheService != nil && !degraded {
+			// ⛔ 2026-08-08: posts 와 동일 — 관리자 응답은 원본 IP override 가 실려 있어
+			//    공유 캐시(레벨 차원 없음)에 넣으면 일반 사용자에게 샌다. 관리자는 저장 스킵.
+			if !summaryMode && cacheService != nil && !degraded && middleware.GetUserLevel(c) < 10 {
 				_ = cacheService.SetNotices(ctx, slug, response)
 			}
 
@@ -2636,7 +2638,11 @@ func main() {
 			}
 
 			// Store in both caches (only for non-search, non-category requests, unfiltered data)
-			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" {
+			// ⛔ 2026-08-08: 캐시 키에 사용자/레벨 차원이 없다. 관리자 요청은
+			//    OverrideIPForAdmin 으로 items 에 마스킹 안 된 원본 IP가 들어가 있어,
+			//    이 응답을 공유 캐시에 저장하면 직후 익명·일반 사용자에게 원본 IP가
+			//    그대로 나간다. 관리자 요청은 캐시에 쓰지 않는다(읽기는 그대로 히트).
+			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && middleware.GetUserLevel(c) < 10 {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
@@ -6452,7 +6458,11 @@ func main() {
 			searchV1.GET("", searchHandler.Search)
 			searchV1.GET("/autocomplete", searchHandler.Autocomplete)
 
-			adminSearch := router.Group("/api/v2/admin/search")
+			// ⛔ 2026-08-08: 이 그룹에 인증 미들웨어가 없어 무인증으로 전체 재색인
+			//    (비용 폭탄 DoS)·인덱스 임의 삭제(검색 사보타주)가 가능했다.
+			//    (현재 ES 미가용이라 라우트 미등록이지만, 켜지는 순간 열린다.)
+			//    형제 admin 그룹과 동일하게 관리자 인증으로 봉인.
+			adminSearch := router.Group("/api/v2/admin/search", middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 			adminSearch.POST("/index", searchHandler.BulkIndex)
 			adminSearch.POST("/index-post", searchHandler.IndexPost)
 			adminSearch.DELETE("/index/:board_id/:post_id", searchHandler.DeletePostIndex)
