@@ -3,6 +3,7 @@ package v2
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -57,6 +58,19 @@ type CreateAdminResponse struct {
 // RequireNotInstalled returns middleware that blocks access if installation is already complete
 func (h *InstallHandler) RequireNotInstalled() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// ⛔ 2026-08-08 심층방어: 유일 방벽이 "v2_users 에 관리자 행이 있나" 하나뿐이라,
+		//    그 조건이 비면 무인증으로 관리자 계정 발급(create-admin)과 임의 host 로의
+		//    DB 접속 프로빙(test-db = 내부망 SSRF)이 열린다. 설치는 최초 부트스트랩
+		//    전용이므로, 명시적 로컬/개발 환경이 아니면 원천 차단한다(화이트리스트).
+		//    ⚠️ prod 의 APP_ENV 는 "k3s" 라 blocklist 방식은 못 잡는다 — allowlist 필수.
+		switch os.Getenv("APP_ENV") {
+		case "local", "dev", "development", "test":
+			// 설치 허용 환경 — 계속
+		default:
+			common.V2ErrorResponse(c, http.StatusForbidden, "이미 설치가 완료되었습니다", nil)
+			c.Abort()
+			return
+		}
 		var count int64
 		h.db.Table("v2_users").Where("level >= 10").Count(&count)
 		if count > 0 {

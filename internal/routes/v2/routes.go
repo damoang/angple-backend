@@ -78,7 +78,11 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 	boardPosts.PATCH("/:id/soft-delete", auth, banCheck, h.SoftDeletePost)
 	boardPosts.POST("/:id/restore", auth, middleware.RequireAdmin(), h.RestorePost)
 	boardPosts.DELETE("/:id/permanent", auth, middleware.RequireAdmin(), h.PermanentDeletePost)
-	boardPosts.GET("/:id/revisions", auth, h.GetPostRevisions)
+	// ⛔ 2026-08-08: v1 형제 엔드포인트(main.go:3224)는 관리자에게만 전체 리비전
+	//    본문을 주고 일반 사용자는 edit_count 만 준다. v2 는 auth 만 걸려 있어
+	//    아무 로그인 사용자나 타인 글의 수정하며 지운 이전 본문을 통째로 읽었다.
+	//    v1 정책과 일치시켜 관리자 전용으로 잠근다.
+	boardPosts.GET("/:id/revisions", auth, middleware.RequireAdmin(), h.GetPostRevisions)
 	boardPosts.POST("/:id/revisions/:version/restore", auth, middleware.RequireAdmin(), h.RestoreRevision)
 
 	// 리액션(da_reaction) — GET 공개(비로그인 choose=false), POST 는 로그인+이용제한(banCheck) 게이트.
