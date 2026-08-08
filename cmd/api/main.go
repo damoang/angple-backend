@@ -3714,7 +3714,7 @@ func main() {
 			logWritePhase(c, "create_post", slug, post.WrID, startedAt, phaseDurations)
 			c.JSON(http.StatusCreated, payload)
 		}
-		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), createPostFn)
+		v1Boards.POST("/:slug/posts", middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID(), banCheck, middleware.IPProtection(ipProtectCfg), createPostFn)
 
 		// POST /api/v1/boards/:slug/posts/:id/comments - Create comment in g5_write_{slug}
 		// createCommentFn: 댓글 작성 핸들러. v1 + v2 앱 라우트(어댑터 경유) 공유.
@@ -4091,7 +4091,7 @@ func main() {
 			logWritePhase(c, "create_comment", slug, comment.WrID, startedAt, phaseDurations)
 			c.JSON(http.StatusCreated, payload)
 		}
-		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), banCheck, middleware.IPProtection(ipProtectCfg), createCommentFn)
+		v1Boards.POST("/:slug/posts/:id/comments", middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID(), banCheck, middleware.IPProtection(ipProtectCfg), createCommentFn)
 
 		// 네이티브 앱(v2) 쓰기 브리지: 앱이 호출하는 /api/v2/boards/:slug/posts[/comments] 를
 		// 검증된 v1 핸들러(현세대 g5_write_*)로 서빙한다. RemapUserIDToMbID 어댑터로 v2 토큰의
@@ -5613,7 +5613,7 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/report - Report a post
-		v1Boards.POST("/:slug/posts/:id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
+		v1Boards.POST("/:slug/posts/:id/report", middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID(), middleware.BanCheck(db), middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
 			slug := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
@@ -5700,7 +5700,7 @@ func main() {
 		})
 
 		// POST /api/v1/boards/:slug/posts/:id/comments/:comment_id/report - Report a comment
-		v1Boards.POST("/:slug/posts/:id/comments/:comment_id/report", middleware.JWTAuth(jwtManager), middleware.BanCheck(db), middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
+		v1Boards.POST("/:slug/posts/:id/comments/:comment_id/report", middleware.JWTAuth(jwtManager), middleware.RemapUserIDToMbID(), middleware.BanCheck(db), middleware.IPProtection(ipProtectCfg), func(c *gin.Context) {
 			slug := c.Param("slug")
 			postID, err := strconv.Atoi(c.Param("id"))
 			if err != nil {
