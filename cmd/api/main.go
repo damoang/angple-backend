@@ -3029,6 +3029,34 @@ func main() {
 				return
 			}
 
+			// ⛔ 2026-08-08: 첨부 목록에도 상세 본문과 동일한 비밀글·삭제글 게이트를
+			//    적용한다. 이 게이트가 없어, 상세는 content 를 마스킹하는데 이 엔드포인트는
+			//    비밀글(선관위 비공개 처리 등)의 CDN 첨부 URL 을 무인증으로 그대로 뱉어
+			//    게스트가 곧바로 다운로드할 수 있었다(실측 확인). slug 는 ValidateBoardSlug
+			//    그룹 미들웨어로 검증돼 테이블명 연결이 안전하다.
+			var meta struct {
+				WrOption    string     `gorm:"column:wr_option"`
+				WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
+				MbID        string     `gorm:"column:mb_id"`
+			}
+			if e := db.Table("g5_write_"+slug).
+				Select("wr_option, wr_deleted_at, mb_id").
+				Where("wr_id = ?", postID).Scan(&meta).Error; e == nil {
+				if meta.WrDeletedAt != nil {
+					c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+					return
+				}
+				if strings.Contains(meta.WrOption, "secret") {
+					uid := middleware.GetUserID(c)
+					lvl := middleware.GetUserLevel(c)
+					isAuthor := uid != "" && uid == meta.MbID
+					if !isAuthor && lvl < 10 {
+						c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+						return
+					}
+				}
+			}
+
 			// Get files from g5_board_file
 			files, err := gnuFileRepo.GetFilesByPost(slug, postID)
 			if err != nil {
