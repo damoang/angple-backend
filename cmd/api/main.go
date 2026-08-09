@@ -6909,6 +6909,20 @@ func main() {
 			givingAuthed.POST("/admin/:id/:action", givingHandler.AdminAction) // pause/resume/force-stop
 		}
 
+		// Poll plugin API — 글 부착형 투표 (설계: /home/damoang/docs/poll-design.html)
+		pollHandler := handler.NewPollHandler(db)
+		pollGroup := router.Group("/api/plugins/poll")
+		{
+			// 조회는 비회원도 가능 (내 선택·작성 가능 여부는 토큰 있으면 반영)
+			pollGroup.GET("/by-post/:board/:post", middleware.OptionalJWTAuth(jwtManager), pollHandler.GetByPost)
+
+			pollAuthed := pollGroup.Group("", middleware.JWTAuth(jwtManager))
+			pollAuthed.POST("", pollHandler.Create)            // 글 작성자만 (서버 검증)
+			pollAuthed.POST("/:id/vote", pollHandler.Vote)     // 투표·재투표
+			pollAuthed.DELETE("/:id/vote", pollHandler.Unvote) // 투표 취소
+			pollAuthed.POST("/:id/close", pollHandler.Close)   // 작성자·관리자 조기 마감
+		}
+
 		// Internal cron endpoints (curl-based cron jobs, localhost only)
 		cronHandler := cron.NewHandler(db)
 		cronHandler.SetPointExpiryDeps(pointConfigRepo, gnuPointWriteRepo, gnurepo.NewNotiRepository(db))
