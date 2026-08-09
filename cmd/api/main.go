@@ -6910,17 +6910,18 @@ func main() {
 		}
 
 		// Poll plugin API — 글 부착형 투표 (설계: /home/damoang/docs/poll-design.html)
-		pollHandler := handler.NewPollHandler(db)
-		pollGroup := router.Group("/api/plugins/poll")
+		// 위의 /api/v1/polls (그누보드 g5_poll 사이트 전역 투표 브리지)와는 별개 시스템.
+		pollPluginHandler := handler.NewPollHandler(db)
+		pollPluginGroup := router.Group("/api/plugins/poll")
 		{
 			// 조회는 비회원도 가능 (내 선택·작성 가능 여부는 토큰 있으면 반영)
-			pollGroup.GET("/by-post/:board/:post", middleware.OptionalJWTAuth(jwtManager), pollHandler.GetByPost)
+			pollPluginGroup.GET("/by-post/:board/:post", middleware.OptionalJWTAuth(jwtManager), pollPluginHandler.GetByPost)
 
-			pollAuthed := pollGroup.Group("", middleware.JWTAuth(jwtManager))
-			pollAuthed.POST("", pollHandler.Create)            // 글 작성자만 (서버 검증)
-			pollAuthed.POST("/:id/vote", pollHandler.Vote)     // 투표·재투표
-			pollAuthed.DELETE("/:id/vote", pollHandler.Unvote) // 투표 취소
-			pollAuthed.POST("/:id/close", pollHandler.Close)   // 작성자·관리자 조기 마감
+			pollPluginAuthed := pollPluginGroup.Group("", middleware.JWTAuth(jwtManager))
+			pollPluginAuthed.POST("", pollPluginHandler.Create)            // 글 작성자만 (서버 검증)
+			pollPluginAuthed.POST("/:id/vote", pollPluginHandler.Vote)     // 투표·재투표
+			pollPluginAuthed.DELETE("/:id/vote", pollPluginHandler.Unvote) // 투표 취소
+			pollPluginAuthed.POST("/:id/close", pollPluginHandler.Close)   // 작성자·관리자 조기 마감
 		}
 
 		// Internal cron endpoints (curl-based cron jobs, localhost only)
