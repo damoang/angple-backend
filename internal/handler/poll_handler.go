@@ -108,6 +108,33 @@ type pollCreateRequest struct {
 	DurationHours int      `json:"duration_hours"` // 0=무기한
 }
 
+// validateCreate 는 생성 요청을 정규화하고 문제가 있으면 사용자 안내 문구를 반환한다.
+func validateCreate(req *pollCreateRequest) string {
+	if !pollBoardRe.MatchString(req.BoTable) || req.WrID <= 0 {
+		return "잘못된 대상입니다."
+	}
+	if len(req.Options) < pollMinOptions || len(req.Options) > pollMaxOptions {
+		return fmt.Sprintf("선택지는 %d~%d개여야 합니다.", pollMinOptions, pollMaxOptions)
+	}
+	for i := range req.Options {
+		req.Options[i] = strings.TrimSpace(req.Options[i])
+		if req.Options[i] == "" || len([]rune(req.Options[i])) > pollMaxLabel {
+			return "선택지 내용을 확인해 주세요."
+		}
+	}
+	req.Question = strings.TrimSpace(req.Question)
+	if len([]rune(req.Question)) > pollMaxQuery {
+		return "질문이 너무 깁니다."
+	}
+	if req.Reveal != "after_close" {
+		req.Reveal = "after_vote"
+	}
+	if req.DurationHours < 0 || req.DurationHours > 24*30 {
+		return "기간을 확인해 주세요."
+	}
+	return ""
+}
+
 // Create 는 글 작성자가 자기 글에 투표를 만든다. 글당 1개(UNIQUE).
 func (h *PollHandler) Create(c *gin.Context) {
 	me := middleware.GetUsername(c)
@@ -120,31 +147,8 @@ func (h *PollHandler) Create(c *gin.Context) {
 		pollErr(c, http.StatusBadRequest, "잘못된 요청입니다.")
 		return
 	}
-	if !pollBoardRe.MatchString(req.BoTable) || req.WrID <= 0 {
-		pollErr(c, http.StatusBadRequest, "잘못된 대상입니다.")
-		return
-	}
-	if len(req.Options) < pollMinOptions || len(req.Options) > pollMaxOptions {
-		pollErr(c, http.StatusBadRequest, fmt.Sprintf("선택지는 %d~%d개여야 합니다.", pollMinOptions, pollMaxOptions))
-		return
-	}
-	for i := range req.Options {
-		req.Options[i] = strings.TrimSpace(req.Options[i])
-		if req.Options[i] == "" || len([]rune(req.Options[i])) > pollMaxLabel {
-			pollErr(c, http.StatusBadRequest, "선택지 내용을 확인해 주세요.")
-			return
-		}
-	}
-	req.Question = strings.TrimSpace(req.Question)
-	if len([]rune(req.Question)) > pollMaxQuery {
-		pollErr(c, http.StatusBadRequest, "질문이 너무 깁니다.")
-		return
-	}
-	if req.Reveal != "after_close" {
-		req.Reveal = "after_vote"
-	}
-	if req.DurationHours < 0 || req.DurationHours > 24*30 {
-		pollErr(c, http.StatusBadRequest, "기간을 확인해 주세요.")
+	if msg := validateCreate(&req); msg != "" {
+		pollErr(c, http.StatusBadRequest, msg)
 		return
 	}
 
@@ -211,6 +215,30 @@ func (h *PollHandler) GetByPost(c *gin.Context) {
 	h.respondByPost(c, boTable, wrID, me)
 }
 
+// respondNoPoll 은 투표 없는 글의 응답(작성 가능 여부 포함)을 보낸다.
+func (h *PollHandler) respondNoPoll(c *gin.Context, boTable string, wrID int, me string) {
+	canCreate := false
+	if me != "" {
+		if author, secret, e := h.loadPostAuthor(boTable, wrID); e == nil && !secret && author == me {
+			canCreate = true
+		}
+	}
+	pollOK(c, gin.H{"exists": false, "can_create": canCreate})
+}
+
+// buildOptions 는 옵션 응답 배열을 만든다. hideCounts 면 집계를 뺀다(서버 강제 가림).
+func buildOptions(opts []pollOptionRow, hideCounts bool) []gin.H {
+	options := make([]gin.H, 0, len(opts))
+	for _, o := range opts {
+		item := gin.H{"idx": o.Idx, "label": o.Label}
+		if !hideCounts {
+			item["votes"] = o.VotesCount
+		}
+		options = append(options, item)
+	}
+	return options
+}
+
 func (h *PollHandler) respondByPost(c *gin.Context, boTable string, wrID int, me string) {
 	var poll pollRow
 	err := h.db.Table("angple_polls").
@@ -220,13 +248,7 @@ func (h *PollHandler) respondByPost(c *gin.Context, boTable string, wrID int, me
 			pollErr(c, http.StatusInternalServerError, "잠시 후 다시 시도해 주세요.")
 			return
 		}
-		canCreate := false
-		if me != "" {
-			if author, secret, e := h.loadPostAuthor(boTable, wrID); e == nil && !secret && author == me {
-				canCreate = true
-			}
-		}
-		pollOK(c, gin.H{"exists": false, "can_create": canCreate})
+		h.respondNoPoll(c, boTable, wrID, me)
 		return
 	}
 
@@ -264,14 +286,7 @@ func (h *PollHandler) respondByPost(c *gin.Context, boTable string, wrID int, me
 
 	// reveal='after_close' 인 열린 투표는 집계를 가린다 — 작성자 포함 전원(서버 강제).
 	hideCounts := poll.Reveal == "after_close" && open
-	options := make([]gin.H, 0, len(opts))
-	for _, o := range opts {
-		item := gin.H{"idx": o.Idx, "label": o.Label}
-		if !hideCounts {
-			item["votes"] = o.VotesCount
-		}
-		options = append(options, item)
-	}
+	options := buildOptions(opts, hideCounts)
 
 	resp := gin.H{
 		"exists":       true,
@@ -294,6 +309,18 @@ func (h *PollHandler) respondByPost(c *gin.Context, boTable string, wrID int, me
 
 type pollVoteRequest struct {
 	OptionIdxs []int `json:"option_idxs"`
+}
+
+// validIdxSet 은 선택지 인덱스들이 범위 안이고 중복이 없는지 본다.
+func validIdxSet(idxs []int, optCount int64) bool {
+	seen := map[int]bool{}
+	for _, idx := range idxs {
+		if idx < 0 || int64(idx) >= optCount || seen[idx] {
+			return false
+		}
+		seen[idx] = true
+	}
+	return true
 }
 
 // Vote 는 투표하거나(첫 투표) 선택을 바꾼다(재투표). 마감 전만 가능.
@@ -330,13 +357,9 @@ func (h *PollHandler) Vote(c *gin.Context) {
 
 	var optCount int64
 	h.db.Table("angple_poll_options").Where("poll_id = ?", pollID).Count(&optCount)
-	seen := map[int]bool{}
-	for _, idx := range req.OptionIdxs {
-		if idx < 0 || int64(idx) >= optCount || seen[idx] {
-			pollErr(c, http.StatusBadRequest, "잘못된 선택지입니다.")
-			return
-		}
-		seen[idx] = true
+	if !validIdxSet(req.OptionIdxs, optCount) {
+		pollErr(c, http.StatusBadRequest, "잘못된 선택지입니다.")
+		return
 	}
 
 	txErr := h.db.Transaction(func(tx *gorm.DB) error {
