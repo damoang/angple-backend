@@ -33,6 +33,9 @@ type MyPageRepository interface {
 	// FindDisciplinedIDs returns the set of wr_ids (within the given board) that are
 	// referenced as discipline evidence in g5_na_singo. 글·댓글 공용 (#12751/#12908).
 	FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error)
+	// CountCommentReplies 는 주어진 댓글들(wr_id)에 달린 답글(대댓글) 수를 반환한다 (makeang/88).
+	// 그누보드 댓글 트리: 같은 wr_comment 그룹에서 내 wr_comment_reply 로 시작하고 더 긴 코드 = 내 답글.
+	CountCommentReplies(boardID string, wrIDs []int) (map[int]int, error)
 	GetSearchableBoards() ([]searchableBoard, error)
 	// FindRecentAcrossBoards 는 검색가능 게시판별 최신 perBoard개를 모은 시간순 후보 풀을 반환한다.
 	// 보드별 캡·인터리브(다양성)는 핸들러에서 적용. cursor 는 보드slug→wr_id 워터마크. excludeMbIDs 는 차단.
@@ -972,6 +975,52 @@ func (r *myPageRepository) FindDisciplinedIDs(boardID string, wrIDs []int) (map[
 	}
 	for _, id := range ids {
 		result[id] = true
+	}
+	return result, nil
+}
+
+// CountCommentReplies 는 댓글별 답글(대댓글) 수를 반환한다 (makeang/88).
+//
+// 그누보드 댓글 트리: 한 글의 댓글은 wr_comment(그룹번호)로 묶이고, wr_comment_reply
+// 문자열(” → 'A' → 'AA' …)이 답글 깊이를 나타낸다. 내 댓글 C(그룹 N, 코드 R)의 답글은
+// 같은 wr_parent·wr_comment=N 안에서 wr_comment_reply 가 R 로 시작하고 R 보다 긴 행들이다
+// (R=” 이면 그룹의 모든 하위 = 최상위 댓글의 답글 전부). 실데이터로 검증한 규칙.
+//
+// ⛔ boardID 를 테이블명에 직접 넣으므로 활성 게시판 화이트리스트로 검증한다(주입 방지).
+func (r *myPageRepository) CountCommentReplies(boardID string, wrIDs []int) (map[int]int, error) {
+	result := make(map[int]int)
+	if boardID == "" || len(wrIDs) == 0 {
+		return result, nil
+	}
+	valid := false
+	for _, b := range r.getActiveBoards() {
+		if b == boardID {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return result, nil
+	}
+	table := fmt.Sprintf("g5_write_%s", boardID)
+	var rows []struct {
+		WrID int `gorm:"column:wr_id"`
+		Cnt  int `gorm:"column:cnt"`
+	}
+	q := fmt.Sprintf("SELECT c.wr_id AS wr_id, COUNT(r.wr_id) AS cnt "+
+		"FROM `%s` c LEFT JOIN `%s` r "+
+		"ON r.wr_is_comment = 1 AND r.wr_parent = c.wr_parent AND r.wr_comment = c.wr_comment "+
+		"AND r.wr_comment_reply LIKE CONCAT(c.wr_comment_reply, '%%') "+
+		"AND r.wr_comment_reply <> c.wr_comment_reply AND r.wr_deleted_at IS NULL "+
+		"WHERE c.wr_id IN ? AND c.wr_is_comment = 1 "+
+		"GROUP BY c.wr_id", table, table)
+	if err := r.db.Raw(q, wrIDs).Scan(&rows).Error; err != nil {
+		return result, err
+	}
+	for _, row := range rows {
+		if row.Cnt > 0 {
+			result[row.WrID] = row.Cnt
+		}
 	}
 	return result, nil
 }
