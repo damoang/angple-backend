@@ -348,6 +348,34 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 		comments = make([]map[string]interface{}, 0)
 	}
 
+	// makeang/88: 내 댓글에 달린 답글(대댓글) 수를 게시판별 배치로 조회해 붙인다.
+	// 우상단 알림만으론 추천과 섞여 분별이 어렵다는 제보 대응. feed 에는 답글수가 없어
+	// (comment_count=0) 원본 g5_write_{board} 에서 그누보드 댓글 트리로 계산한다.
+	if len(comments) > 0 {
+		idsByBoard := make(map[string][]int)
+		for _, cm := range comments {
+			board, _ := cm["bo_table"].(string)
+			wrID, _ := cm["wr_id"].(int)
+			if board != "" && wrID > 0 {
+				idsByBoard[board] = append(idsByBoard[board], wrID)
+			}
+		}
+		replyCounts := make(map[string]map[int]int, len(idsByBoard))
+		for board, ids := range idsByBoard {
+			if m, err := h.myPageRepo.CountCommentReplies(board, ids); err == nil {
+				replyCounts[board] = m
+			}
+		}
+		for _, cm := range comments {
+			board, _ := cm["bo_table"].(string)
+			wrID, _ := cm["wr_id"].(int)
+			cm["reply_count"] = 0
+			if m := replyCounts[board]; m != nil {
+				cm["reply_count"] = m[wrID]
+			}
+		}
+	}
+
 	// #12908: 이용제한 근거 글(g5_na_singo discipline)은 프로필 최근글에서도 제목을 가린다
 	// (링크는 유지). 제목에 욕설·분란 유도가 많아 목록 노출을 차단. 게시글 상세와 통일.
 	if len(posts) > 0 {
