@@ -2785,11 +2785,15 @@ func main() {
 			}
 
 			// Admin sees full (unmasked) IP (삭제글은 Unmasked 판이라 WrIP 원값 필요)
+			// 로그인 회원은 마스킹 IP, 비로그인은 빈 값(transform 기본값 그대로) —
+			// 크롤러·비회원에게는 마스킹된 형태조차 내리지 않는다.
 			if isAdminViewer {
 				v1handler.OverrideIPForAdminSingle(postDetail, post)
 				if post.WrDeletedAt != nil {
 					postDetail["author_ip"] = post.WrIP
 				}
+			} else if middleware.GetUsername(c) != "" {
+				v1handler.OverrideIPMaskedSingle(postDetail, post)
 			}
 
 			// 삭제된 글: 일반 유저는 tombstone(transform 이 이미 drop), 관리자는 원본 + 리비전
@@ -2927,9 +2931,12 @@ func main() {
 			// 댓글별 수정 횟수: 비정규화 컬럼(wr_edit_count) 사용 — 배치 COUNT 제거(읽기 쿼리 0).
 			// 댓글 수정 핸들러가 wr_last 와 함께 wr_edit_count 를 누적, 댓글 목록 캐시가 실어 나름.
 			transformed := v1handler.TransformToV1Comments(comments)
-			// Admin sees full (unmasked) IP
+			// Admin sees full (unmasked) IP / 로그인 회원은 마스킹 / 비로그인은 빈 값.
+			// 댓글 캐시는 transform 이전의 원본 행을 담으므로 요청자별 분기가 안전하다.
 			if isAdmin {
 				v1handler.OverrideIPForAdmin(transformed, comments)
+			} else if middleware.GetUsername(c) != "" {
+				v1handler.OverrideIPMasked(transformed, comments)
 			}
 			for i, comment := range comments {
 				// 삭제 댓글 tombstone 에는 부가 메타를 얹지 않는다 (#13174 후속)
@@ -3134,6 +3141,16 @@ func main() {
 				return
 			}
 
+			// 좋아요 목록도 글·댓글과 같은 IP 정책을 따른다: 비로그인은 빈 값.
+			// 이 경로만 빠지면 "비로그인에게 IP 미노출" 이 우회 가능해진다(실측:
+			// 익명 호출에 `58.♡.94.201` 반환). 응답이 공유 Redis 에 15초 캐시되므로
+			// **캐시 키에 뷰어 차원을 넣어** 회원용 응답이 익명에게 재사용되지 않게 한다.
+			viewerIsMember := middleware.GetUsername(c) != ""
+			viewerDim := "anon"
+			if viewerIsMember {
+				viewerDim = "member"
+			}
+
 			cacheVersion := "0"
 			if redisClient != nil {
 				ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Millisecond)
@@ -3143,7 +3160,7 @@ func main() {
 					cacheVersion = rawVersion
 				}
 
-				cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:v%s", slug, postID, page, limit, cacheVersion)
+				cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:%s:v%s", slug, postID, page, limit, viewerDim, cacheVersion)
 				if cached, getErr := redisClient.Get(ctx, cacheKey).Bytes(); getErr == nil {
 					c.Data(http.StatusOK, "application/json; charset=utf-8", cached)
 					return
@@ -3164,9 +3181,13 @@ func main() {
 				Offset(offset).Limit(limit).
 				Scan(&likers)
 
-			// IP 마스킹: 마지막 옥텟을 ***로 변환
+			// 비로그인 → 빈 값 / 로그인 회원 → 마스킹.
 			for i := range likers {
-				likers[i].BgIP = maskIP(likers[i].BgIP)
+				if viewerIsMember {
+					likers[i].BgIP = maskIP(likers[i].BgIP)
+				} else {
+					likers[i].BgIP = ""
+				}
 			}
 
 			c.JSON(http.StatusOK, gin.H{
@@ -3188,7 +3209,7 @@ func main() {
 				if raw, marshalErr := json.Marshal(payload); marshalErr == nil {
 					ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Millisecond)
 					defer cancel()
-					cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:v%s", slug, postID, page, limit, cacheVersion)
+					cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:%s:v%s", slug, postID, page, limit, viewerDim, cacheVersion)
 					redisClient.Set(ctx, cacheKey, raw, 15*time.Second) //nolint:errcheck
 				}
 			}
