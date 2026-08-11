@@ -215,6 +215,66 @@ func (h *NotiHandler) GetUnreadCount(c *gin.Context) {
 	common.V2Success(c, gin.H{"total_unread": count})
 }
 
+// CreateBroadcast handles POST /api/v1/admin/notifications/broadcast
+// 전 회원 방송 발송 = na_broadcast 1행 INSERT(fan-out-on-read). 관리자 전용.
+func (h *NotiHandler) CreateBroadcast(c *gin.Context) {
+	mbID := middleware.GetUsername(c)
+	var req struct {
+		Title       string `json:"title"`
+		Body        string `json:"body"`
+		URL         string `json:"url"`
+		Target      string `json:"target"`
+		ExpiresDays int    `json:"expires_days"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "제목은 필수입니다", nil)
+		return
+	}
+	// MVP 는 전체 발송만 지원한다 — 읽기 머지가 아직 target 을 구분하지 않으므로,
+	// 다른 값을 받아 "일부만" 간 것처럼 오인되지 않게 강제로 all 로 저장한다.
+	req.Target = "all"
+	if req.ExpiresDays <= 0 {
+		req.ExpiresDays = 14
+	}
+	if err := h.repo.CreateBroadcast(req.Title, req.Body, req.URL, req.Target, mbID, req.ExpiresDays); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "방송 발송 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"message": "방송을 발송했습니다"})
+}
+
+// ListBroadcasts handles GET /api/v1/admin/notifications/broadcast — 이력 + 읽음 통계.
+func (h *NotiHandler) ListBroadcasts(c *gin.Context) {
+	rows, err := h.repo.ListBroadcasts(100)
+	if err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "방송 목록 조회 실패", err)
+		return
+	}
+	targetCount, _ := h.repo.CountActiveMembers()
+	common.V2Success(c, gin.H{"items": rows, "target_count": targetCount})
+}
+
+// CancelBroadcast handles POST /api/v1/admin/notifications/broadcast/:id/cancel
+// canceled_at 1행 UPDATE 로 전원에게서 즉시 소멸.
+func (h *NotiHandler) CancelBroadcast(c *gin.Context) {
+	mbID := middleware.GetUsername(c)
+	id, _ := strconv.Atoi(c.Param("id"))
+	if id <= 0 {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 방송 id", nil)
+		return
+	}
+	if err := h.repo.CancelBroadcast(uint(id), mbID); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "발송 취소 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"message": "발송을 취소했습니다"})
+}
+
 // MarkSeen 은 알림함 열람을 기록한다 — 뱃지만 0 이 되고 항목별 읽음은 그대로다.
 // (seen/read 분리 — bug/13367·13332·13206·12991 체인. 레딧·페이스북과 같은 모델)
 func (h *NotiHandler) MarkSeen(c *gin.Context) {

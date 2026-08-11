@@ -1701,6 +1701,12 @@ func main() {
 		notiGroupV2.DELETE("/:id", notiHandler.Delete)
 		notiGroupV2.DELETE("/group", notiHandler.DeleteGroup)
 
+		// 관리자 전체 알림 방송(fan-out-on-read) — ops 콘솔이 Bearer 로 호출. RequireAdmin(level>=10).
+		adminNotiGroup := router.Group("/api/v1/admin/notifications", middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+		adminNotiGroup.POST("/broadcast", notiHandler.CreateBroadcast)
+		adminNotiGroup.GET("/broadcast", notiHandler.ListBroadcasts)
+		adminNotiGroup.POST("/broadcast/:id/cancel", notiHandler.CancelBroadcast)
+
 		// v1 members memo — 회원이 다른 회원에 대해 남긴 메모 (g5_member_memo)
 		memberMemoGroup := router.Group("/api/v1/members/:id/memo")
 		memberMemoGroup.Use(middleware.JWTAuth(jwtManager))
