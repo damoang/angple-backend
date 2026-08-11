@@ -6933,6 +6933,7 @@ func main() {
 			givingAuthed.POST("/config/:id", givingHandler.Config)             // 주최자 방식 설정
 			givingAuthed.POST("/bid/:id", givingHandler.Bid)                   // 방식별 참가
 			givingAuthed.POST("/draw/:id", givingHandler.Draw)                 // 개표
+			givingAuthed.POST("/claim/:id", givingHandler.ClaimGiving)         // N-3: 당첨 수령 확인
 			givingAuthed.POST("/admin/:id/:action", givingHandler.AdminAction) // pause/resume/force-stop
 		}
 

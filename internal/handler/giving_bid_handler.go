@@ -88,7 +88,18 @@ type givingDrawRow struct {
 	ResultJSON    json.RawMessage `gorm:"column:result_json"`
 	DrawnBy       string          `gorm:"column:drawn_by"`
 	DrawnAt       time.Time       `gorm:"column:drawn_at"`
+	// N-3: 수령확인·미수령 재추첨(수동 DDL 선행 4컬럼)
+	ClaimedAt      *time.Time      `gorm:"column:claimed_at"`
+	ClaimDue       *time.Time      `gorm:"column:claim_due"`
+	RedrawCount    int             `gorm:"column:redraw_count"`
+	ForfeitedMbIDs json.RawMessage `gorm:"column:forfeited_mb_ids"`
 }
+
+// N-3 상수: 수령 확인 창(24h) + 재추첨 상한(원당첨+2회).
+const (
+	givingClaimWindow = 24 * time.Hour
+	givingMaxRedraw   = 2
+)
 
 func givingOK(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
@@ -384,6 +395,10 @@ func (h *GivingHandler) Detail(c *gin.Context) { //nolint:gocyclo // 응답 조�
 			"drawn_by":       draw.DrawnBy,
 			"drawn_at":       draw.DrawnAt,
 			"result":         draw.ResultJSON,
+			// N-3: 수령확인 상태(프론트가 당첨자에게 '수령 확인' 버튼/카운트다운 렌더).
+			"claim_due":    draw.ClaimDue,
+			"claimed_at":   draw.ClaimedAt,
+			"redraw_count": draw.RedrawCount,
 			// 표시용 닉네임 맵. 저장 데이터는 mb_id 정본 유지(닉변 추적 가능),
 			// 프론트는 이 맵으로 그리고 없으면 mb_id 폴백.
 			"nicknames": h.givingDrawNicknames(draw),
@@ -877,11 +892,17 @@ func (h *GivingHandler) runDraw(wrID int, _ *givingPostRow, meta givingMetaRow, 
 		storeSeed = seed
 		storeSeedHash = seedHash
 	}
+	// N-3: 자동방식·정원1명·당첨자 있음이면 24h 수령 창을 연다(재추첨 대상).
+	var claimDue *time.Time
+	if givingdomain.IsAutoDraw(method) && capacity == 1 && winnerMbID != "" {
+		t := time.Now().Add(givingClaimWindow)
+		claimDue = &t
+	}
 	return h.db.Exec(`
-		INSERT INTO g5_giving_draw (wr_id, method, seed, seed_hash, winner_mb_id, winning_number, result_json, drawn_by, drawn_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO g5_giving_draw (wr_id, method, seed, seed_hash, winner_mb_id, winning_number, result_json, drawn_by, drawn_at, claim_due)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		wrID, method, nullIfEmpty(storeSeed), nullIfEmpty(storeSeedHash),
-		nullIfEmpty(winnerMbID), winningNumber, string(resultBytes), drawnBy, time.Now()).Error
+		nullIfEmpty(winnerMbID), winningNumber, string(resultBytes), drawnBy, time.Now(), claimDue).Error
 }
 
 // isGivingParticipant reports whether mb entered the draw or commented on the post.
@@ -983,6 +1004,7 @@ type GivingSweepResult struct {
 	Due       int      `json:"due"`        // 마감 경과 + 미개표
 	AutoDrawn int      `json:"auto_drawn"` // 자동 개표 실행
 	Reminded  int      `json:"reminded"`   // 지명 방식 주최자 독촉
+	Redrawn   int      `json:"redrawn"`    // N-3: 미수령 24h 경과 재추첨
 	Errors    []string `json:"errors,omitempty"`
 }
 
@@ -1051,7 +1073,172 @@ func (h *GivingHandler) RunDueDrawSweep() (*GivingSweepResult, error) {
 		h.NotifyDrawResult(row.WrID)
 		res.AutoDrawn++
 	}
+
+	// N-3: 미수령 24h 경과 재추첨. status=drawn·미수령·claim_due 경과·상한 미도달만.
+	// claim_due 를 미래로 밀어 같은 틱/다음 틱 이중 재추첨을 막는다(멱등).
+	type redrawRow struct {
+		WrID int `gorm:"column:wr_id"`
+	}
+	var toRedraw []redrawRow
+	h.db.Table("g5_giving_draw d").
+		Select("d.wr_id").
+		Joins("JOIN g5_giving_meta m ON m.wr_id = d.wr_id").
+		Where("m.status = 'drawn'").
+		Where("d.claimed_at IS NULL").
+		Where("d.claim_due IS NOT NULL AND d.claim_due < ?", time.Now()).
+		Where("d.redraw_count < ?", givingMaxRedraw).
+		Find(&toRedraw)
+	for _, r := range toRedraw {
+		if err := h.redrawForfeited(r.WrID); err != nil {
+			res.Errors = append(res.Errors, fmt.Sprintf("%d: redraw %v", r.WrID, err))
+			continue
+		}
+		res.Redrawn++
+	}
+
 	return res, nil
+}
+
+// redrawForfeited 는 미수령 당첨자를 제외하고 다음 순번을 재추첨한다(자동방식·정원1명 한정).
+// forfeited 를 참가자에서 빼고 같은 시드로 재선정 → 결정적·검증 가능(다음 순번이 뽑힌다).
+// 대상 소진 시 주최자에게 수동 처리 알림 후 claim_due 를 비워 재시도를 멈춘다.
+func (h *GivingHandler) redrawForfeited(wrID int) error { //nolint:gocyclo // 재추첨 로직 응집 — 방식별 재선정/트랜잭션 경계 위험
+	var draw givingDrawRow
+	if err := h.db.Table("g5_giving_draw").Where("wr_id = ?", wrID).Take(&draw).Error; err != nil {
+		return err
+	}
+	meta, ok := h.loadGivingMeta(wrID)
+	if !ok {
+		return fmt.Errorf("meta 없음")
+	}
+	method := givingdomain.NormalizeMethod(draw.Method)
+	capacity := 1
+	if meta.Capacity != nil && *meta.Capacity > 0 {
+		capacity = *meta.Capacity
+	}
+	if !givingdomain.IsAutoDraw(method) || capacity != 1 {
+		return nil // v1 범위 밖 — 지명형·다수정원은 수동
+	}
+
+	// 미수령 당첨자를 forfeited 에 추가
+	var forfeited []string
+	_ = json.Unmarshal(draw.ForfeitedMbIDs, &forfeited)
+	prevWinner := draw.WinnerMbID
+	if prevWinner != "" {
+		forfeited = append(forfeited, prevWinner)
+	}
+	forf := map[string]bool{}
+	for _, f := range forfeited {
+		forf[f] = true
+	}
+
+	bids, err := h.activeBids(wrID)
+	if err != nil {
+		return err
+	}
+	seen := map[string]struct{}{}
+	participants := make([]string, 0)
+	for _, b := range bids {
+		if forf[b.MbID] {
+			continue
+		}
+		if _, ok := seen[b.MbID]; !ok {
+			seen[b.MbID] = struct{}{}
+			participants = append(participants, b.MbID)
+		}
+	}
+	sortStrings(participants)
+
+	secret, secretOK := givingSeedSecret()
+	if (method == givingdomain.MethodRandom || method == givingdomain.MethodLadder) && !secretOK {
+		return fmt.Errorf("개표 시드 미설정")
+	}
+	seed := givingdomain.DeriveSeed(secret, givingBoardSlug, wrID)
+	var newWinner string
+	switch method {
+	case givingdomain.MethodLowestUnique:
+		byNumber := map[int][]string{}
+		for _, b := range bids {
+			if forf[b.MbID] {
+				continue
+			}
+			for _, n := range givingdomain.ParseBidNumbers(b.BidNumbers) {
+				byNumber[n] = append(byNumber[n], b.MbID)
+			}
+		}
+		if _, mb, ok := givingdomain.LowestUniqueWinner(byNumber); ok {
+			newWinner = mb
+		}
+	case givingdomain.MethodRandom:
+		if w := givingdomain.RandomWinners(seed, participants, 1); len(w) > 0 {
+			newWinner = w[0]
+		}
+	case givingdomain.MethodLadder:
+		if l := givingdomain.BuildLadder(seed, participants, 1); len(l.Winners) > 0 {
+			newWinner = l.Winners[0]
+		}
+	}
+
+	forfBytes, _ := json.Marshal(forfeited)
+	post, _ := h.loadGivingPost(wrID)
+	subject := ""
+	if post != nil {
+		subject = givingTrim(post.WrSubject)
+	}
+
+	if newWinner == "" {
+		// 재추첨 대상 소진 — claim_due 를 비워 재시도 중단, 주최자에게 수동 처리 요청
+		h.db.Exec("UPDATE g5_giving_draw SET claim_due = NULL, forfeited_mb_ids = ?, redraw_count = redraw_count + 1 WHERE wr_id = ?", string(forfBytes), wrID)
+		if post != nil {
+			h.notifyOnce(post.MbID, "giving_redraw_exhausted", wrID,
+				fmt.Sprintf("⚠️ 나눔 「%s」 재추첨 대상이 없습니다. 직접 확인/처리해 주세요.", subject))
+		}
+		return nil
+	}
+
+	newDue := time.Now().Add(givingClaimWindow)
+	if derr := h.db.Exec(`UPDATE g5_giving_draw
+		SET winner_mb_id = ?, claimed_at = NULL, claim_due = ?, redraw_count = redraw_count + 1, forfeited_mb_ids = ?, drawn_at = ?
+		WHERE wr_id = ?`, newWinner, newDue, string(forfBytes), time.Now(), wrID).Error; derr != nil {
+		return derr
+	}
+	h.notifyOnce(newWinner, "giving_win", wrID,
+		fmt.Sprintf("🎉 나눔 「%s」에 (재추첨) 당첨되셨습니다! 24시간 내 '수령 확인'을 눌러주세요.", subject))
+	if prevWinner != "" {
+		h.notifyOnce(prevWinner, "giving_forfeit", wrID,
+			fmt.Sprintf("⏰ 나눔 「%s」 수령 미확인(24시간)으로 재추첨되었습니다.", subject))
+	}
+	return nil
+}
+
+// ClaimGiving — 당첨자가 24h 내 수령을 확인한다. POST /api/plugins/giving/claim/:id (당첨자 본인).
+func (h *GivingHandler) ClaimGiving(c *gin.Context) {
+	wrID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || wrID <= 0 {
+		givingErr(c, http.StatusBadRequest, "잘못된 요청입니다.")
+		return
+	}
+	me := middleware.GetUsername(c)
+	if me == "" {
+		givingErr(c, http.StatusUnauthorized, "로그인이 필요합니다.")
+		return
+	}
+	var draw givingDrawRow
+	if e := h.db.Table("g5_giving_draw").Where("wr_id = ?", wrID).Take(&draw).Error; e != nil {
+		givingErr(c, http.StatusNotFound, "아직 개표 전이거나 나눔을 찾을 수 없습니다.")
+		return
+	}
+	if draw.WinnerMbID != me {
+		givingErr(c, http.StatusForbidden, "당첨자만 수령을 확인할 수 있습니다.")
+		return
+	}
+	if draw.ClaimedAt != nil {
+		givingOK(c, gin.H{"claimed": true, "already": true})
+		return
+	}
+	now := time.Now()
+	h.db.Exec("UPDATE g5_giving_draw SET claimed_at = ? WHERE wr_id = ? AND winner_mb_id = ? AND claimed_at IS NULL", now, wrID, me)
+	givingOK(c, gin.H{"claimed": true, "claimed_at": now})
 }
 
 // NotifyDrawResult 는 개표 결과를 당첨자·주최자에게 알린다(중복 방지 내장).
@@ -1090,6 +1277,20 @@ func (h *GivingHandler) NotifyDrawResult(wrID int) {
 	if draw.DrawnBy != post.MbID {
 		h.notifyOnce(post.MbID, "giving_drawn", wrID,
 			fmt.Sprintf("📦 나눔 「%s」 개표가 완료되었습니다. (참여 감사드립니다)", subject))
+	}
+
+	// N-3(요청 B): 응모자 전원에게 종료·결과 알림. 당첨자🎉·주최자📦는 위에서 이미 받았으므로 제외.
+	// 나눔당 응모자는 수십~수백 규모라 배치로 순회(방송 fan-out 과 달리 물질화 위험 낮음).
+	var applicants []string
+	h.db.Table("g5_giving_bid").
+		Where("bo_table = ? AND wr_id = ? AND bid_status = 1", givingBoardSlug, wrID).
+		Distinct().Pluck("mb_id", &applicants)
+	for _, mb := range applicants {
+		if mb == "" || winners[mb] || mb == post.MbID {
+			continue
+		}
+		h.notifyOnce(mb, "giving_result", wrID,
+			fmt.Sprintf("🎁 나눔 「%s」이 마감되었습니다. 이번엔 아쉽게 미당첨이에요. 참여해 주셔서 감사합니다!", subject))
 	}
 }
 
