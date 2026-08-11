@@ -208,6 +208,10 @@ func (h *NotiHandler) GetUnreadCount(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "미읽음 알림 수 조회 실패", err)
 		return
 	}
+	// 전 회원 방송 미읽음을 뱃지에 가산(fan-out-on-read). 방송이 없으면 +0(회귀 0).
+	if bc, bcErr := h.repo.CountUnreadBroadcasts(mbID); bcErr == nil {
+		count += bc
+	}
 	common.V2Success(c, gin.H{"total_unread": count})
 }
 
@@ -488,6 +492,49 @@ func generateMergedTitle(targetKey, latestSender string, senderCount, good, cmt,
 	return fmt.Sprintf("%s이 회원님의 %s에 %s", who, target, strings.Join(parts, " · "))
 }
 
+// mergeBroadcasts 는 전 회원 방송(fan-out-on-read)을 이 회원의 알림 목록/미읽음에 얹는다.
+//
+// ⛔ 활성 방송이 없으면 완전한 no-op 이다(회귀 0) — 방송 기능 배포가 기존 알림을 건드리지
+// 않는 핵심 보증. 방송은 1페이지 상단에만 붙이고, 유형 탭이 빈 값 또는 "system" 일 때만
+// 노출한다(댓글·좋아요·멘션 탭에는 안 보인다). 각 방송은 target_key "bc:{id}" 를 달아
+// 읽음 처리(MarkGroupAsRead)가 라우팅되게 한다.
+func (h *NotiHandler) mergeBroadcasts(mbID string, page int, filterType string, items []groupedNotificationResponse, total, unread int64) ([]groupedNotificationResponse, int64, int64) {
+	if filterType != "" && filterType != "system" {
+		return items, total, unread
+	}
+	bcs, err := h.repo.GetActiveBroadcastsForUser(mbID)
+	if err != nil || len(bcs) == 0 {
+		return items, total, unread
+	}
+	var unreadAdd int64
+	bItems := make([]groupedNotificationResponse, 0, len(bcs))
+	for _, b := range bcs {
+		uc := 0
+		if !b.Read {
+			uc = 1
+			unreadAdd++
+		}
+		bItems = append(bItems, groupedNotificationResponse{
+			Type:        "system",
+			Title:       b.Title,
+			Content:     b.Body,
+			URL:         b.URL,
+			Senders:     []string{},
+			UnreadCount: uc,
+			HasUnread:   !b.Read,
+			LatestAt:    b.CreatedAt.Format(time.RFC3339),
+			FromCase:    "broadcast",
+			TargetKey:   fmt.Sprintf("bc:%d", b.ID),
+		})
+	}
+	total += int64(len(bcs))
+	unread += unreadAdd
+	if page == 1 {
+		items = append(bItems, items...)
+	}
+	return items, total, unread
+}
+
 // GetGroupedNotifications handles GET /api/v1/notifications/grouped
 func (h *NotiHandler) GetGroupedNotifications(c *gin.Context) {
 	mbID := middleware.GetUserID(c)
@@ -548,6 +595,7 @@ func (h *NotiHandler) GetGroupedNotifications(c *gin.Context) {
 		})
 	}
 
+	items, totalGroups, unreadCount = h.mergeBroadcasts(mbID, page, filterType, items, totalGroups, unreadCount)
 	totalPages := int64(math.Ceil(float64(totalGroups) / float64(limit)))
 
 	common.V2Success(c, groupedNotificationListResponse{
@@ -611,6 +659,7 @@ func (h *NotiHandler) getMergedNotifications(c *gin.Context, mbID string, page, 
 		})
 	}
 
+	items, totalGroups, unreadCount = h.mergeBroadcasts(mbID, page, filterType, items, totalGroups, unreadCount)
 	totalPages := int64(math.Ceil(float64(totalGroups) / float64(limit)))
 	common.V2Success(c, groupedNotificationListResponse{
 		Items:       items,
@@ -637,6 +686,19 @@ func (h *NotiHandler) MarkGroupAsRead(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
+		return
+	}
+
+	// 전 회원 방송 읽음 — target_key "bc:{id}". na_broadcast_read 에 멱등 기록.
+	if strings.HasPrefix(req.TargetKey, "bc:") {
+		bid, _ := strconv.Atoi(strings.TrimPrefix(req.TargetKey, "bc:"))
+		if bid > 0 {
+			if err := h.repo.MarkBroadcastRead(mbID, bid); err != nil {
+				common.V2ErrorResponse(c, http.StatusInternalServerError, "방송 읽음 처리 실패", err)
+				return
+			}
+		}
+		common.V2Success(c, gin.H{"message": "방송 읽음 처리 완료"})
 		return
 	}
 
