@@ -100,6 +100,11 @@ type NotiRepository interface {
 	GetActiveBroadcastsForUser(mbID string) ([]BroadcastForUser, error)
 	CountUnreadBroadcasts(mbID string) (int64, error)
 	MarkBroadcastRead(mbID string, broadcastID int) error
+	// 관리자 발송/취소/통계
+	CreateBroadcast(title, body, url, target, createdBy string, expiresDays int) error
+	ListBroadcasts(limit int) ([]Broadcast, error)
+	CancelBroadcast(id uint, canceledBy string) error
+	CountActiveMembers() (int64, error)
 }
 
 type notiRepository struct {
