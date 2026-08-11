@@ -3141,6 +3141,16 @@ func main() {
 				return
 			}
 
+			// 좋아요 목록도 글·댓글과 같은 IP 정책을 따른다: 비로그인은 빈 값.
+			// 이 경로만 빠지면 "비로그인에게 IP 미노출" 이 우회 가능해진다(실측:
+			// 익명 호출에 `58.♡.94.201` 반환). 응답이 공유 Redis 에 15초 캐시되므로
+			// **캐시 키에 뷰어 차원을 넣어** 회원용 응답이 익명에게 재사용되지 않게 한다.
+			viewerIsMember := middleware.GetUsername(c) != ""
+			viewerDim := "anon"
+			if viewerIsMember {
+				viewerDim = "member"
+			}
+
 			cacheVersion := "0"
 			if redisClient != nil {
 				ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Millisecond)
@@ -3150,7 +3160,7 @@ func main() {
 					cacheVersion = rawVersion
 				}
 
-				cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:v%s", slug, postID, page, limit, cacheVersion)
+				cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:%s:v%s", slug, postID, page, limit, viewerDim, cacheVersion)
 				if cached, getErr := redisClient.Get(ctx, cacheKey).Bytes(); getErr == nil {
 					c.Data(http.StatusOK, "application/json; charset=utf-8", cached)
 					return
@@ -3171,9 +3181,13 @@ func main() {
 				Offset(offset).Limit(limit).
 				Scan(&likers)
 
-			// IP 마스킹: 마지막 옥텟을 ***로 변환
+			// 비로그인 → 빈 값 / 로그인 회원 → 마스킹.
 			for i := range likers {
-				likers[i].BgIP = maskIP(likers[i].BgIP)
+				if viewerIsMember {
+					likers[i].BgIP = maskIP(likers[i].BgIP)
+				} else {
+					likers[i].BgIP = ""
+				}
 			}
 
 			c.JSON(http.StatusOK, gin.H{
@@ -3195,7 +3209,7 @@ func main() {
 				if raw, marshalErr := json.Marshal(payload); marshalErr == nil {
 					ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Millisecond)
 					defer cancel()
-					cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:v%s", slug, postID, page, limit, cacheVersion)
+					cacheKey := fmt.Sprintf("post_likers:%s:%d:%d:%d:%s:v%s", slug, postID, page, limit, viewerDim, cacheVersion)
 					redisClient.Set(ctx, cacheKey, raw, 15*time.Second) //nolint:errcheck
 				}
 			}
