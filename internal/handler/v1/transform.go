@@ -209,6 +209,35 @@ func OverrideIPForAdminSingle(item map[string]any, w *gnuboard.G5Write) {
 	item["author_ip"] = w.WrIP
 }
 
+// OverrideIPMasked 는 **로그인 회원**에게만 마스킹 IP 를 얹는다.
+//
+// 기본 transform 은 author_ip 를 빈 값으로 둔다 — 비로그인(크롤러 포함)에게는
+// 마스킹된 값조차 내리지 않기 위해서다. 종전엔 익명도 `120.♡.35.175` 를 받아
+// 4옥텟 중 3옥텟이 그대로 나갔고 /24 대역이 식별됐다.
+// 좋아요 목록 API 가 이미 쓰는 정책(비로그인=빈 값)과 통일한다.
+//
+// ⛔ 목록(게시글 배열)에는 쓰지 않는다 — 목록 응답은 직렬화된 채로 공유 캐시에
+// 저장되어 요청자별 차등을 담을 수 없다(#13174 계열 사고). 목록 화면은 IP 를
+// 그리지 않으므로 빈 값으로 충분하고, 관리자만 OverrideIPForAdmin 으로 덮는다.
+func OverrideIPMasked(items []map[string]any, posts []*gnuboard.G5Write) {
+	for i, item := range items {
+		if i < len(posts) {
+			if posts[i].WrDeletedAt != nil {
+				continue
+			}
+			item["author_ip"] = MaskIP(posts[i].WrIP)
+		}
+	}
+}
+
+// OverrideIPMaskedSingle 은 단건(상세)용. 사유는 OverrideIPMasked 와 동일.
+func OverrideIPMaskedSingle(item map[string]any, w *gnuboard.G5Write) {
+	if w.WrDeletedAt != nil {
+		return
+	}
+	item["author_ip"] = MaskIP(w.WrIP)
+}
+
 // TransformToV1Post converts G5Write to v1 API response format.
 //
 // #13174: 삭제글은 tombstone 만 내려간다. 종전엔 원제·작성자·조회수가 응답에
@@ -284,9 +313,12 @@ func transformToV1PostUnmasked(w *gnuboard.G5Write, isNotice bool) map[string]an
 		"is_comments_disabled": strings.Contains(w.WrOption, "comments_disabled"),
 		"link1":                w.WrLink1,
 		"link2":                w.WrLink2,
-		"author_ip":            MaskIP(w.WrIP),
-		"created_at":           w.WrDatetime.Format(time.RFC3339),
-		"updated_at":           parseWrLast(w.WrLast, w.WrDatetime),
+		// 기본은 빈 값 — 비로그인에게는 마스킹 IP 도 내리지 않는다.
+		// 로그인 회원은 상세/댓글 핸들러가 OverrideIPMasked* 로, 관리자는
+		// OverrideIPForAdmin* 로 채운다. 키는 유지한다(소비자 보호, #604).
+		"author_ip":  "",
+		"created_at": w.WrDatetime.Format(time.RFC3339),
+		"updated_at": parseWrLast(w.WrLast, w.WrDatetime),
 	}
 
 	// unmasked 경로에도 실릴 수 있는 삭제 메타(관리자 상세 등).
@@ -400,14 +432,16 @@ func TransformToV1Comment(w *gnuboard.G5Write) map[string]any {
 		}
 	}
 	result := map[string]any{
-		"id":         w.WrID,
-		"post_id":    w.WrParent,
-		"content":    normalizeMediaContent(w.WrContent),
-		"author":     w.WrName,
-		"author_id":  w.MbID,
-		"likes":      w.WrGood,
-		"dislikes":   w.WrNogood,
-		"author_ip":  MaskIP(w.WrIP),
+		"id":        w.WrID,
+		"post_id":   w.WrParent,
+		"content":   normalizeMediaContent(w.WrContent),
+		"author":    w.WrName,
+		"author_id": w.MbID,
+		"likes":     w.WrGood,
+		"dislikes":  w.WrNogood,
+		// 기본은 빈 값 — 비로그인에게는 마스킹 IP 도 내리지 않는다.
+		// 로그인 회원은 댓글 핸들러의 OverrideIPMasked 가 채운다.
+		"author_ip":  "",
 		"depth":      depth,
 		"created_at": w.WrDatetime.Format(time.RFC3339),
 		"updated_at": parseWrLast(w.WrLast, w.WrDatetime),

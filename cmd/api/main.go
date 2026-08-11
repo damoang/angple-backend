@@ -2785,11 +2785,15 @@ func main() {
 			}
 
 			// Admin sees full (unmasked) IP (삭제글은 Unmasked 판이라 WrIP 원값 필요)
+			// 로그인 회원은 마스킹 IP, 비로그인은 빈 값(transform 기본값 그대로) —
+			// 크롤러·비회원에게는 마스킹된 형태조차 내리지 않는다.
 			if isAdminViewer {
 				v1handler.OverrideIPForAdminSingle(postDetail, post)
 				if post.WrDeletedAt != nil {
 					postDetail["author_ip"] = post.WrIP
 				}
+			} else if middleware.GetUsername(c) != "" {
+				v1handler.OverrideIPMaskedSingle(postDetail, post)
 			}
 
 			// 삭제된 글: 일반 유저는 tombstone(transform 이 이미 drop), 관리자는 원본 + 리비전
@@ -2927,9 +2931,12 @@ func main() {
 			// 댓글별 수정 횟수: 비정규화 컬럼(wr_edit_count) 사용 — 배치 COUNT 제거(읽기 쿼리 0).
 			// 댓글 수정 핸들러가 wr_last 와 함께 wr_edit_count 를 누적, 댓글 목록 캐시가 실어 나름.
 			transformed := v1handler.TransformToV1Comments(comments)
-			// Admin sees full (unmasked) IP
+			// Admin sees full (unmasked) IP / 로그인 회원은 마스킹 / 비로그인은 빈 값.
+			// 댓글 캐시는 transform 이전의 원본 행을 담으므로 요청자별 분기가 안전하다.
 			if isAdmin {
 				v1handler.OverrideIPForAdmin(transformed, comments)
+			} else if middleware.GetUsername(c) != "" {
+				v1handler.OverrideIPMasked(transformed, comments)
 			}
 			for i, comment := range comments {
 				// 삭제 댓글 tombstone 에는 부가 메타를 얹지 않는다 (#13174 후속)
