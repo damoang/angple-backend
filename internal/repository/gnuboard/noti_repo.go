@@ -96,6 +96,10 @@ type NotiRepository interface {
 	DeleteGroup(mbID, boTable string, wrID int, fromCase string) error
 	Create(noti *Notification) error
 	Exists(mbID, boTable string, wrID int, fromCase, relMbID string) (bool, error)
+	// 전 회원 방송(fan-out-on-read) — na_broadcast/na_broadcast_read. 상세는 broadcast.go.
+	GetActiveBroadcastsForUser(mbID string) ([]BroadcastForUser, error)
+	CountUnreadBroadcasts(mbID string) (int64, error)
+	MarkBroadcastRead(mbID string, broadcastID int) error
 }
 
 type notiRepository struct {
