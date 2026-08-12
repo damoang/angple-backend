@@ -2784,15 +2784,15 @@ func main() {
 				}
 			}
 
-			// Admin sees full (unmasked) IP (삭제글은 Unmasked 판이라 WrIP 원값 필요)
-			// 로그인 회원은 마스킹 IP, 비로그인은 빈 값(transform 기본값 그대로) —
-			// 크롤러·비회원에게는 마스킹된 형태조차 내리지 않는다.
+			// IP 투명성(다모앙 공정성 정책): 마스킹 IP는 비로그인 포함 모두에게 노출한다.
+			// 관리자만 원본, 그 외(회원·비로그인)는 마스킹. 삭제글은 OverrideIPMaskedSingle
+			// 이 빈 값으로 남긴다(전 뷰어 공통). 목록은 여전히 미표시(transform 이 drop).
 			if isAdminViewer {
 				v1handler.OverrideIPForAdminSingle(postDetail, post)
 				if post.WrDeletedAt != nil {
 					postDetail["author_ip"] = post.WrIP
 				}
-			} else if middleware.GetUsername(c) != "" {
+			} else {
 				v1handler.OverrideIPMaskedSingle(postDetail, post)
 			}
 
@@ -2931,11 +2931,11 @@ func main() {
 			// 댓글별 수정 횟수: 비정규화 컬럼(wr_edit_count) 사용 — 배치 COUNT 제거(읽기 쿼리 0).
 			// 댓글 수정 핸들러가 wr_last 와 함께 wr_edit_count 를 누적, 댓글 목록 캐시가 실어 나름.
 			transformed := v1handler.TransformToV1Comments(comments)
-			// Admin sees full (unmasked) IP / 로그인 회원은 마스킹 / 비로그인은 빈 값.
+			// IP 투명성: 관리자만 원본, 그 외(회원·비로그인)는 마스킹 IP 공통 노출.
 			// 댓글 캐시는 transform 이전의 원본 행을 담으므로 요청자별 분기가 안전하다.
 			if isAdmin {
 				v1handler.OverrideIPForAdmin(transformed, comments)
-			} else if middleware.GetUsername(c) != "" {
+			} else {
 				v1handler.OverrideIPMasked(transformed, comments)
 			}
 			for i, comment := range comments {
@@ -3181,13 +3181,9 @@ func main() {
 				Offset(offset).Limit(limit).
 				Scan(&likers)
 
-			// 비로그인 → 빈 값 / 로그인 회원 → 마스킹.
+			// IP 투명성: 마스킹된 IP는 비로그인 포함 모두에게 노출(글상세·댓글과 일관).
 			for i := range likers {
-				if viewerIsMember {
-					likers[i].BgIP = maskIP(likers[i].BgIP)
-				} else {
-					likers[i].BgIP = ""
-				}
+				likers[i].BgIP = maskIP(likers[i].BgIP)
 			}
 
 			c.JSON(http.StatusOK, gin.H{
