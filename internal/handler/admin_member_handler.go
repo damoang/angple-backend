@@ -310,6 +310,14 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 			log.Printf("[admin] v2_users level 동기화 스킵 (%s): %v", mbID, err)
 		}
 	}
+	// 관리자 탈퇴 처리 시 인증 산출물 파기 — 분쟁조정위 26R05-00197 대응.
+	// 회원 UPDATE 성공 뒤 별도 실행이며, 실패해도 탈퇴를 되돌리지 않는다
+	// (바로 위 v2_users 미러 동기화와 동일한 best-effort 패턴).
+	// 배경·원칙은 purgeAuthArtifacts 주석 참조 — 자가 탈퇴 경로와 공용이다.
+	// ⛔ 탈퇴 취소(MbLeave=false) 에는 적용하지 않는다 — 복귀시키는 동작이다.
+	if req.MbLeave != nil && *req.MbLeave {
+		purgeAuthArtifacts(h.db, mbID)
+	}
 	common.V2Success(c, gin.H{"message": "수정 완료"})
 }
 

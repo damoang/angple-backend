@@ -284,6 +284,13 @@ func applySelfLeave(db *gorm.DB, mbID, reason string, now time.Time) (withdrawal
 		member.MbLeaveDate = updates["mb_leave_date"].(string)
 	}
 
+	// 인증 산출물 파기 — 분쟁조정위 26R05-00197 대응.
+	// ⛔ WithdrawalNone 블록 **밖**이다. 이미 숙려중인 계정이 재신청하는 경우에도
+	//    돌아야 한다 — "숙려중에는 새 세션이 생기지 않는다"는 것은 검증되지 않은
+	//    전제이고, 그 전제에 기대는 대신 무조건 지운다.
+	//    DELETE 는 멱등이라 중복 실행은 무해하다(0행 매치).
+	purgeAuthArtifacts(db, mbID)
+
 	info := buildWithdrawalInfo(member.MbLeaveDate, member.MbNick, now)
 	// 이용제한 중 탈퇴면 복원 대상이 아니다 — 화면이 버튼을 감출 수 있게 알려준다.
 	// (실제 차단은 cancelSelfLeave 가 fail-closed 로 처리한다)
