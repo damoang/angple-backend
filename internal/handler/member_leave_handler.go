@@ -282,6 +282,10 @@ func applySelfLeave(db *gorm.DB, mbID, reason string, now time.Time) (withdrawal
 			return withdrawalInfo{}, err
 		}
 		member.MbLeaveDate = updates["mb_leave_date"].(string)
+
+		// 탈퇴 신청 시점에 인증 산출물을 파기한다 — 분쟁조정위 26R05-00197 대응.
+		// ⛔ WithdrawalNone 블록 안에 둔다. 이미 숙려중인데 재신청하면 중복 실행된다.
+		purgeAuthArtifacts(db, mbID)
 	}
 
 	info := buildWithdrawalInfo(member.MbLeaveDate, member.MbNick, now)

@@ -310,21 +310,13 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 			log.Printf("[admin] v2_users level 동기화 스킵 (%s): %v", mbID, err)
 		}
 	}
-	// 탈퇴 처리 시 인증 산출물(세션·리프레시 토큰) 선제 파기 — 분쟁조정위 26R05-00197 대응.
-	//
-	// 탈퇴가 기존 세션을 무효화하지 않아, 탈퇴 전 발급된 세션으로 인증 상태가 유지되던 문제가 있었다.
-	// ⛔ revoke 가 아니라 DELETE 다 — 두 테이블은 IP·User-Agent 를 보유해 사실상 접속기록이다.
-	// ⛔ 회원 UPDATE 가 성공한 **뒤 별도로** 실행한다. 파기 실패가 탈퇴를 되돌리면 안 된다
-	//    (web processMemberLeave 와 동일 원칙). 실패는 로그만 남기며,
-	//    남은 행은 web hooks 의 탈퇴자 세션 차단이 2차 방어로 처리한다.
-	// ⛔ 탈퇴 **취소**(MbLeave=false) 에는 적용하지 않는다 — 복귀시키는 동작이다.
+	// 관리자 탈퇴 처리 시 인증 산출물 파기 — 분쟁조정위 26R05-00197 대응.
+	// 회원 UPDATE 성공 뒤 별도 실행이며, 실패해도 탈퇴를 되돌리지 않는다
+	// (바로 위 v2_users 미러 동기화와 동일한 best-effort 패턴).
+	// 배경·원칙은 purgeAuthArtifacts 주석 참조 — 자가 탈퇴 경로와 공용이다.
+	// ⛔ 탈퇴 취소(MbLeave=false) 에는 적용하지 않는다 — 복귀시키는 동작이다.
 	if req.MbLeave != nil && *req.MbLeave {
-		if err := h.db.Exec("DELETE FROM angple_sessions WHERE mb_id = ?", mbID).Error; err != nil {
-			log.Printf("[admin] 탈퇴 세션 파기 실패 (%s): %v", mbID, err)
-		}
-		if err := h.db.Exec("DELETE FROM angple_refresh_tokens WHERE mb_id = ?", mbID).Error; err != nil {
-			log.Printf("[admin] 탈퇴 리프레시 토큰 파기 실패 (%s): %v", mbID, err)
-		}
+		purgeAuthArtifacts(h.db, mbID)
 	}
 	common.V2Success(c, gin.H{"message": "수정 완료"})
 }
