@@ -3830,6 +3830,22 @@ func main() {
 				}
 			}
 
+			// 소명(claim) 게시판: 관리자와 글 작성자만 댓글 가능 (bug/13477).
+			// ⛔ 이 게이트는 원래 handler/v2 의 CreateComment 에 있었으나 그 핸들러는
+			//    라우트에 연결되지 않은 dead code 였다. 실제 경로인 이 인라인 핸들러엔
+			//    빠져 있어 제3자가 남의 소명글에 댓글을 달 수 있었다(1735 순후추 사례).
+			if slug == "claim" && middleware.GetUserLevel(c) < 10 {
+				var claimAuthorID string
+				db.Table("g5_write_claim").
+					Select("mb_id").
+					Where("wr_id = ? AND wr_is_comment = 0", postID).
+					Scan(&claimAuthorID)
+				if claimAuthorID == "" || claimAuthorID != middleware.GetUserID(c) {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "소명 게시판에서는 관리자와 글 작성자만 댓글을 작성할 수 있습니다."})
+					return
+				}
+			}
+
 			// 요청 바디 파싱
 			var req struct {
 				Content  string `json:"content" binding:"required"`
