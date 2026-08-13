@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/damoang/angple-backend/internal/janggi_srv"
+	janggisrv "github.com/damoang/angple-backend/internal/janggi_srv"
 	"github.com/damoang/angple-backend/pkg/jwt"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"

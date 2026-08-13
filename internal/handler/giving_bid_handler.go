@@ -235,6 +235,28 @@ const (
 	givingEntryMaxPoint = 100000
 )
 
+// resolveGivingEntryConditions 는 요청과 기존 설정을 합쳐 최종 참가 조건을 정한다.
+// 미전송(nil)이면 기존 값 유지 — 구버전 클라이언트가 조건을 0 으로 덮어쓰지 않게 한다.
+// 반환하는 문자열이 비어 있지 않으면 검증 실패 사유(400)다.
+func resolveGivingEntryConditions(req givingConfigRequest, prev givingMetaRow, prevOK bool) (minDays, pointCost int, errMsg string) {
+	if prevOK {
+		minDays, pointCost = prev.EntryMinDays, prev.EntryPointCost
+	}
+	if req.EntryMinDays != nil {
+		minDays = *req.EntryMinDays
+	}
+	if req.EntryPointCost != nil {
+		pointCost = *req.EntryPointCost
+	}
+	if minDays < 0 || minDays > givingEntryMaxDays {
+		return 0, 0, fmt.Sprintf("가입 후 경과일은 0~%d 사이여야 합니다.", givingEntryMaxDays)
+	}
+	if pointCost < 0 || pointCost > givingEntryMaxPoint {
+		return 0, 0, fmt.Sprintf("참가비는 0~%d 포인트 사이여야 합니다.", givingEntryMaxPoint)
+	}
+	return minDays, pointCost, ""
+}
+
 // givingEntryFeeHostPercent 은 N-2 참가비 중 주최자에게 지급되는 비율이다.
 // 0 = 전액 소각(2026-08-12 사장님 결정). 참가비의 목적이 다중 계정의 무차별
 // 응모 억제이므로, 주최자에게 지급하면 "응모자를 모으면 포인트가 들어온다"는
@@ -275,22 +297,9 @@ func (h *GivingHandler) Config(c *gin.Context) {
 	prev, prevOK := h.loadGivingMeta(wrID)
 
 	// N-2 참가 조건. 미전송(nil)이면 기존 값을 유지한다.
-	entryMinDays, entryPointCost := 0, 0
-	if prevOK {
-		entryMinDays, entryPointCost = prev.EntryMinDays, prev.EntryPointCost
-	}
-	if req.EntryMinDays != nil {
-		entryMinDays = *req.EntryMinDays
-	}
-	if req.EntryPointCost != nil {
-		entryPointCost = *req.EntryPointCost
-	}
-	if entryMinDays < 0 || entryMinDays > givingEntryMaxDays {
-		givingErr(c, http.StatusBadRequest, fmt.Sprintf("가입 후 경과일은 0~%d 사이여야 합니다.", givingEntryMaxDays))
-		return
-	}
-	if entryPointCost < 0 || entryPointCost > givingEntryMaxPoint {
-		givingErr(c, http.StatusBadRequest, fmt.Sprintf("참가비는 0~%d 포인트 사이여야 합니다.", givingEntryMaxPoint))
+	entryMinDays, entryPointCost, condErr := resolveGivingEntryConditions(req, prev, prevOK)
+	if condErr != "" {
+		givingErr(c, http.StatusBadRequest, condErr)
 		return
 	}
 
@@ -556,17 +565,9 @@ func (h *GivingHandler) Bid(c *gin.Context) {
 	// ⛔ 포인트 조건(②)은 여기서 검사하지 않는다. 잔액을 미리 읽고 나중에 차감하면
 	//    그 사이에 다른 요청이 잔액을 빼가는 TOCTOU 가 된다. 잔액 확인과 차감은
 	//    bidFreeEntry 의 트랜잭션 안에서 FOR UPDATE 로 잠근 뒤 함께 처리한다.
-	if meta.EntryMinDays > 0 {
-		days, err := h.memberJoinedDays(mbID)
-		if err != nil {
-			givingErr(c, http.StatusInternalServerError, "가입일 확인에 실패했습니다.")
-			return
-		}
-		if days < meta.EntryMinDays {
-			givingErr(c, http.StatusForbidden,
-				fmt.Sprintf("가입 후 %d일이 지나야 참가할 수 있습니다. (현재 %d일)", meta.EntryMinDays, days))
-			return
-		}
+	if status, msg := h.checkGivingJoinAge(meta, mbID); msg != "" {
+		givingErr(c, status, msg)
+		return
 	}
 
 	if givingdomain.IsPaid(meta.Method) {
@@ -685,20 +686,34 @@ func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, met
 	hostFee := cost * givingHostFeePercent / 100
 
 	// 중복 번호 체크 (본인 기존 응모와 교집합)
-	existingBids, _ := h.db.Table("g5_giving_bid").
-		Select("bid_numbers").
-		Where("bo_table = ? AND wr_id = ? AND mb_id = ? AND bid_status = 1", givingBoardSlug, post.WrID, mbID).
-		Rows()
+	//
+	// ⛔ 커서를 즉시 닫으려 익명 함수로 감쌌다. defer 를 함수 스코프에 두면 아래
+	//    포인트 정산 트랜잭션이 도는 동안 커서가 열린 채로 남아 커넥션을 하나 더 문다.
+	// ⛔ 조회 실패를 삼키지 않는다. 종전에는 에러를 무시해 owned 가 빈 채로 진행됐는데,
+	//    그러면 중복 번호 검사가 조용히 무력화되어 같은 번호에 이중 과금될 수 있다.
 	owned := map[int]struct{}{}
-	if existingBids != nil {
-		for existingBids.Next() {
+	if err := func() error {
+		rows, err := h.db.Table("g5_giving_bid").
+			Select("bid_numbers").
+			Where("bo_table = ? AND wr_id = ? AND mb_id = ? AND bid_status = 1", givingBoardSlug, post.WrID, mbID).
+			Rows()
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var s string
-			_ = existingBids.Scan(&s)
+			if err := rows.Scan(&s); err != nil {
+				return err
+			}
 			for _, n := range givingdomain.ParseBidNumbers(s) {
 				owned[n] = struct{}{}
 			}
 		}
-		_ = existingBids.Close()
+		return rows.Err()
+	}(); err != nil {
+		givingErr(c, http.StatusInternalServerError, "기존 응모 확인에 실패했습니다.")
+		return
 	}
 	dups := make([]int, 0)
 	for _, n := range parsed {
@@ -769,6 +784,23 @@ var errInsufficientPoints = fmt.Errorf("insufficient points")
 // errGivingAlreadyJoined 는 중복 참가를 트랜잭션 안에서 되돌리기 위한 센티넬이다.
 // 중복 확인을 트랜잭션 밖에서 하면 동시 요청 두 개가 모두 통과한다.
 var errGivingAlreadyJoined = fmt.Errorf("already joined")
+
+// checkGivingJoinAge 는 N-2 참가 조건 ①(가입 후 경과일)을 검사한다.
+// 통과하면 빈 문자열을, 막아야 하면 (HTTP status, 사유) 를 돌려준다.
+func (h *GivingHandler) checkGivingJoinAge(meta givingMetaRow, mbID string) (int, string) {
+	if meta.EntryMinDays <= 0 {
+		return 0, ""
+	}
+	days, err := h.memberJoinedDays(mbID)
+	if err != nil {
+		return http.StatusInternalServerError, "가입일 확인에 실패했습니다."
+	}
+	if days < meta.EntryMinDays {
+		return http.StatusForbidden,
+			fmt.Sprintf("가입 후 %d일이 지나야 참가할 수 있습니다. (현재 %d일)", meta.EntryMinDays, days)
+	}
+	return 0, ""
+}
 
 // memberJoinedDays 는 회원 가입 후 경과일을 돌려준다(N-2 참가 조건 ①).
 //

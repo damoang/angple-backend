@@ -255,6 +255,29 @@ linters:
       - linters:
           - dupl
         path: internal/plugins/commerce/handler/.*\.go
+      # 보드게임 규칙·매칭은 분기가 곧 규칙이라 분해하면 오히려 읽기 어려워진다.
+      # (janggi/rules.go Moves 는 복잡도 79 — 장기 기물별 이동 규칙 그 자체다)
+      # staticcheck QF1001(De Morgan)도 같은 이유로 제외한다: 문자 범위 검사는
+      # !(a || b || c) 형태가 의도를 직접 드러낸다.
+      - linters:
+          - gocyclo
+        path: internal/janggi/.*\.go
+      - linters:
+          - gocyclo
+          - staticcheck
+        path: internal/janggi_srv/.*\.go
+      - linters:
+          - gocyclo
+          - staticcheck
+        path: internal/omok/.*\.go
+      # 알림 라우팅·푸시 배치는 분기 자체가 업무 규칙이라 명시적으로 둔다.
+      # (write_after_worker.go 가 같은 사유로 이미 //nolint:gocyclo 를 달고 있다)
+      - linters:
+          - gocyclo
+        path: internal/worker/.*\.go
+      - linters:
+          - gocyclo
+        path: internal/handler/noti_handler\.go
     paths:
       - .*\.pb\.go$
       - plugins
