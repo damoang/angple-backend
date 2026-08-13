@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/middleware"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -108,6 +109,18 @@ func purgeAuthArtifacts(db *gorm.DB, mbID string) {
 	// ④ 세션 캐시 키 삭제.
 	sessDeleted := delWebAuthCacheKeys(mbID, buildAuthCacheKeys("sess:", hashes))
 
+	// ⑤ 탈퇴 게이트 캐시를 "탈퇴함"으로 즉시 세팅한다.
+	//    안 하면 게이트가 최대 TTL(60초) 동안 낡은 "미탈퇴" 판정을 들고 있어
+	//    그 사이 API 요청이 통과한다. 실패해도 무시 — 게이트가 캐시 미스 시
+	//    DB 를 보므로 결과는 같고, 조금 늦어질 뿐이다.
+	if authCacheRedis != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := authCacheRedis.Set(ctx, middleware.WithdrawalGateKey(mbID), "1", time.Minute).Err(); err != nil {
+			log.Printf("[purgeAuthArtifacts] 탈퇴 게이트 캐시 세팅 실패 (%s): %v", mbID, err)
+		}
+		cancel()
+	}
+
 	// 파기 사실을 한 줄로 남긴다. 조사 대응상 "언제 무엇을 지웠는지"의 근거가 되고,
 	// 캐시 키가 있었는데 0개 삭제되면 네임스페이스 불일치 신호다(Del 은 없는 키에도
 	// 에러를 내지 않으므로, 개수를 안 남기면 조용히 실패한다).
@@ -198,4 +211,27 @@ func delWebAuthCacheKeys(mbID string, keys []string) int64 {
 		return 0
 	}
 	return n
+}
+
+// clearWithdrawalGateCache 는 탈퇴 취소(복귀) 시 게이트·회원 캐시를 지운다.
+//
+// ⛔ 파기(purgeAuthArtifacts)의 반대 동작이다. 여기서 지우지 않으면
+// 복귀한 회원이 캐시 TTL 동안 계속 차단된다 — 취소를 눌렀는데 아무것도 안 되는
+// 상태라 즉시 민원이 된다.
+//
+// 회원 캐시(member:)까지 지우는 이유: web hooks 의 탈퇴자 세션 차단이
+// getMemberById 결과를 보는데, 낡은 "탈퇴함" 을 읽으면 취소 직후 발급된
+// 세션을 도로 파기해 버린다.
+func clearWithdrawalGateCache(mbID string) {
+	if authCacheRedis == nil || mbID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	keys := append(buildAuthCacheKeys("member:", []string{mbID}),
+		middleware.WithdrawalGateKey(mbID))
+	if err := authCacheRedis.Del(ctx, keys...).Err(); err != nil {
+		log.Printf("[clearWithdrawalGateCache] 캐시 삭제 실패 (%s): %v", mbID, err)
+	}
 }

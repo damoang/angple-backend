@@ -386,6 +386,13 @@ func cancelSelfLeave(db *gorm.DB, mbID string, now time.Time) error {
 		return err
 	}
 
+	// 탈퇴 게이트 캐시를 즉시 지운다 — 안 하면 복귀한 회원이 최대 60초 동안
+	// "탈퇴함" 판정으로 403 을 맞는다. 취소 직후 바로 글을 쓰려는 사람에게는
+	// 기능이 고장난 것으로 보인다.
+	// ⛔ 회원 캐시도 함께 지운다. hooks 의 2차 방어가 낡은 "탈퇴함" 을 읽으면
+	//    세션을 파기해 버려 방금 만든 로그인이 즉시 끊긴다.
+	clearWithdrawalGateCache(mbID)
+
 	// 복원 이력 기록 — 반복 탈퇴·복원(bug/13133 ②케이스)을 추적하려면 이 행이 필요하다.
 	if err := recordLeaveHistory(db, leaveHistoryRow{
 		MbID:           mbID,
