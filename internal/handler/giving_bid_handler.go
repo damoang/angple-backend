@@ -75,6 +75,9 @@ type givingMetaRow struct {
 	NumberMax *int   `gorm:"column:number_max"`
 	SeedHash  string `gorm:"column:seed_hash"`
 	Status    string `gorm:"column:status"`
+	// N-2: 주최자 선택형 참가 조건(수동 DDL 선행 2컬럼). 둘 다 0 이면 제한 없음.
+	EntryMinDays   int `gorm:"column:entry_min_days"`
+	EntryPointCost int `gorm:"column:entry_point_cost"`
 }
 
 // givingDrawRow mirrors g5_giving_draw.
@@ -220,7 +223,24 @@ type givingConfigRequest struct {
 	Method    string `json:"method"`
 	Capacity  *int   `json:"capacity"`
 	NumberMax *int   `json:"number_max"`
+	// N-2 참가 조건. 미전송(nil)이면 기존 값을 유지한다 — 구버전 클라이언트가
+	// 조건을 실수로 0 으로 덮어쓰지 않게 하기 위함.
+	EntryMinDays   *int `json:"entry_min_days"`
+	EntryPointCost *int `json:"entry_point_cost"`
 }
+
+// 참가 조건 상한. 실수·악의로 터무니없는 값이 들어가는 것을 막는다.
+const (
+	givingEntryMaxDays  = 365
+	givingEntryMaxPoint = 100000
+)
+
+// givingEntryFeeHostPercent 은 N-2 참가비 중 주최자에게 지급되는 비율이다.
+// 0 = 전액 소각(2026-08-12 사장님 결정). 참가비의 목적이 다중 계정의 무차별
+// 응모 억제이므로, 주최자에게 지급하면 "응모자를 모으면 포인트가 들어온다"는
+// 반대 방향 유인이 생긴다. 유료 방식(lowest_unique)의 givingHostFeePercent=50
+// 과 의도적으로 다르다 — 그쪽은 게임 참가비, 이쪽은 응모 자격 문턱이다.
+const givingEntryFeeHostPercent = 0
 
 // Config upserts g5_giving_meta with the host-selected method + settings and
 // commits the commit-reveal seed hash. Author (or admin) only.
@@ -250,14 +270,35 @@ func (h *GivingHandler) Config(c *gin.Context) {
 	}
 
 	// 이미 응모(돈 낸 참가자)가 있는 게임은 규칙을 사후 변경할 수 없다:
-	// method/number_max/capacity 변경 거부 + status 강제 리셋(open) 방지.
+	// method/number_max/capacity/참가조건 변경 거부 + status 강제 리셋(open) 방지.
 	statusVal := "open"
+	prev, prevOK := h.loadGivingMeta(wrID)
+
+	// N-2 참가 조건. 미전송(nil)이면 기존 값을 유지한다.
+	entryMinDays, entryPointCost := 0, 0
+	if prevOK {
+		entryMinDays, entryPointCost = prev.EntryMinDays, prev.EntryPointCost
+	}
+	if req.EntryMinDays != nil {
+		entryMinDays = *req.EntryMinDays
+	}
+	if req.EntryPointCost != nil {
+		entryPointCost = *req.EntryPointCost
+	}
+	if entryMinDays < 0 || entryMinDays > givingEntryMaxDays {
+		givingErr(c, http.StatusBadRequest, fmt.Sprintf("가입 후 경과일은 0~%d 사이여야 합니다.", givingEntryMaxDays))
+		return
+	}
+	if entryPointCost < 0 || entryPointCost > givingEntryMaxPoint {
+		givingErr(c, http.StatusBadRequest, fmt.Sprintf("참가비는 0~%d 포인트 사이여야 합니다.", givingEntryMaxPoint))
+		return
+	}
+
 	var bidCount int64
 	h.db.Table("g5_giving_bid").
 		Where("bo_table = ? AND wr_id = ?", givingBoardSlug, wrID).
 		Count(&bidCount)
 	if bidCount > 0 {
-		prev, _ := h.loadGivingMeta(wrID)
 		if prev.Method != req.Method {
 			givingErr(c, http.StatusConflict, "이미 응모가 있어 나눔 방식을 변경할 수 없습니다.")
 			return
@@ -273,6 +314,16 @@ func (h *GivingHandler) Config(c *gin.Context) {
 			givingErr(c, http.StatusConflict, "이미 응모가 있어 인원을 변경할 수 없습니다.")
 			return
 		}
+		// 참가 조건도 같은 이유로 잠근다. 특히 참가비는 이미 낸 사람과 나중에 낼
+		// 사람의 부담이 달라지므로 사후 변경이 곧 불공정이다.
+		if prev.EntryMinDays != entryMinDays {
+			givingErr(c, http.StatusConflict, "이미 응모가 있어 참가 조건(가입일)을 변경할 수 없습니다.")
+			return
+		}
+		if prev.EntryPointCost != entryPointCost {
+			givingErr(c, http.StatusConflict, "이미 응모가 있어 참가비를 변경할 수 없습니다.")
+			return
+		}
 		if prev.Status != "" {
 			statusVal = prev.Status
 		}
@@ -284,16 +335,25 @@ func (h *GivingHandler) Config(c *gin.Context) {
 
 	// Preserve created_at on update; PK is wr_id.
 	err = h.db.Exec(`
-		INSERT INTO g5_giving_meta (wr_id, method, capacity, number_max, seed_hash, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO g5_giving_meta (wr_id, method, capacity, number_max, seed_hash, status, entry_min_days, entry_point_cost, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE method=VALUES(method), capacity=VALUES(capacity),
-			number_max=VALUES(number_max), seed_hash=VALUES(seed_hash), status=VALUES(status), updated_at=VALUES(updated_at)`,
-		wrID, req.Method, req.Capacity, req.NumberMax, seedHash, statusVal, now, now).Error
+			number_max=VALUES(number_max), seed_hash=VALUES(seed_hash), status=VALUES(status),
+			entry_min_days=VALUES(entry_min_days), entry_point_cost=VALUES(entry_point_cost),
+			updated_at=VALUES(updated_at)`,
+		wrID, req.Method, req.Capacity, req.NumberMax, seedHash, statusVal, entryMinDays, entryPointCost, now, now).Error
 	if err != nil {
 		givingErr(c, http.StatusInternalServerError, "설정 저장에 실패했습니다.")
 		return
 	}
-	givingOK(c, gin.H{"wr_id": wrID, "method": req.Method, "seed_hash": seedHash, "status": "open"})
+	givingOK(c, gin.H{
+		"wr_id":            wrID,
+		"method":           req.Method,
+		"seed_hash":        seedHash,
+		"status":           "open",
+		"entry_min_days":   entryMinDays,
+		"entry_point_cost": entryPointCost,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -355,16 +415,20 @@ func (h *GivingHandler) Detail(c *gin.Context) { //nolint:gocyclo // 응답 조�
 	}
 
 	resp := gin.H{
-		"wr_id":             wrID,
-		"title":             post.WrSubject,
-		"host_mb_id":        post.MbID,
-		"configured":        configured,
-		"method":            methodOut,
-		"capacity":          meta.Capacity,
-		"number_max":        meta.NumberMax,
-		"seed_hash":         meta.SeedHash,
-		"config_status":     meta.Status,
-		"unit_price":        unitPrice,
+		"wr_id":         wrID,
+		"title":         post.WrSubject,
+		"host_mb_id":    post.MbID,
+		"configured":    configured,
+		"method":        methodOut,
+		"capacity":      meta.Capacity,
+		"number_max":    meta.NumberMax,
+		"seed_hash":     meta.SeedHash,
+		"config_status": meta.Status,
+		"unit_price":    unitPrice,
+		// N-2 참가 조건. 0 이면 제한 없음. 프론트가 참가 버튼 옆에 명시하고,
+		// 참가비가 있으면 "반환되지 않습니다" 안내를 함께 띄운다.
+		"entry_min_days":    meta.EntryMinDays,
+		"entry_point_cost":  meta.EntryPointCost,
 		"status":            string(norm.Status),
 		"is_paused":         norm.IsPaused,
 		"is_urgent":         norm.IsUrgent,
@@ -487,32 +551,100 @@ func (h *GivingHandler) Bid(c *gin.Context) {
 		return
 	}
 
+	// N-2 참가 조건 ① 가입 후 경과일. 모든 방식에 적용한다.
+	//
+	// ⛔ 포인트 조건(②)은 여기서 검사하지 않는다. 잔액을 미리 읽고 나중에 차감하면
+	//    그 사이에 다른 요청이 잔액을 빼가는 TOCTOU 가 된다. 잔액 확인과 차감은
+	//    bidFreeEntry 의 트랜잭션 안에서 FOR UPDATE 로 잠근 뒤 함께 처리한다.
+	if meta.EntryMinDays > 0 {
+		days, err := h.memberJoinedDays(mbID)
+		if err != nil {
+			givingErr(c, http.StatusInternalServerError, "가입일 확인에 실패했습니다.")
+			return
+		}
+		if days < meta.EntryMinDays {
+			givingErr(c, http.StatusForbidden,
+				fmt.Sprintf("가입 후 %d일이 지나야 참가할 수 있습니다. (현재 %d일)", meta.EntryMinDays, days))
+			return
+		}
+	}
+
 	if givingdomain.IsPaid(meta.Method) {
+		// 유료 방식은 번호당 단가를 이미 낸다. 참가비까지 물리면 이중 부과이므로
+		// entry_point_cost 는 무료 방식에만 적용한다(가입일 조건은 위에서 공통 적용).
 		h.bidLowestUnique(c, post, meta, mbID)
 		return
 	}
-	h.bidFreeEntry(c, wrID, mbID, meta.Method)
+	h.bidFreeEntry(c, post, meta, mbID)
 }
 
-// bidFreeEntry registers a free 1-per-member entry (random/ladder/curation/host_pick).
-func (h *GivingHandler) bidFreeEntry(c *gin.Context, wrID int, mbID, method string) {
-	var existing int64
-	h.db.Table("g5_giving_bid").
-		Where("bo_table = ? AND wr_id = ? AND mb_id = ? AND bid_status = 1", givingBoardSlug, wrID, mbID).
-		Count(&existing)
-	if existing > 0 {
+// bidFreeEntry registers a 1-per-member entry (random/ladder/curation/host_pick).
+// N-2 참가비(entry_point_cost)가 설정돼 있으면 차감과 응모 INSERT 를 **한 트랜잭션**
+// 으로 처리한다 — 나뉘어 있으면 포인트만 빠지고 응모가 없거나 그 반대가 생긴다
+// (lowest_unique 가 이미 같은 이유로 원자화돼 있다).
+func (h *GivingHandler) bidFreeEntry(c *gin.Context, post *givingPostRow, meta givingMetaRow, mbID string) {
+	cost := meta.EntryPointCost
+	hostFee := cost * givingEntryFeeHostPercent / 100
+	relID := strconv.Itoa(post.WrID)
+	uniqueTag := time.Now().Format("20060102150405.000000")
+	pointConfig := h.pointConfig()
+
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		// ⛔ 회원 행을 **항상** 먼저 잠근다(참가비 0 이어도).
+		//
+		// 중복 참가 확인만 하고 잠그지 않으면, 같은 회원의 동시 요청 두 개가 모두
+		// existing=0 을 읽어 이중 참가·이중 차감이 된다. 회원 행 잠금이 그 두 요청을
+		// 직렬화한다. 잠금 범위는 회원 1행이라 비용도 작다.
+		var balance int
+		if err := tx.Raw("SELECT mb_point FROM g5_member WHERE mb_id = ? FOR UPDATE", mbID).Scan(&balance).Error; err != nil {
+			return err
+		}
+		var existing int64
+		if err := tx.Table("g5_giving_bid").
+			Where("bo_table = ? AND wr_id = ? AND mb_id = ? AND bid_status = 1", givingBoardSlug, post.WrID, mbID).
+			Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			return errGivingAlreadyJoined
+		}
+		if cost > 0 && balance < cost {
+			return errInsufficientPoints
+		}
+		if err := tx.Exec(`
+			INSERT INTO g5_giving_bid (bo_table, wr_id, mb_id, bid_numbers, bid_count, bid_points, bid_datetime, bid_ip, bid_status)
+			VALUES (?, ?, ?, '', 1, ?, ?, ?, 1)`,
+			givingBoardSlug, post.WrID, mbID, cost, time.Now(), givingClientIP(c)).Error; err != nil {
+			return err
+		}
+		if cost > 0 {
+			content := fmt.Sprintf("나눔 게시판 %d번 글 참가비", post.WrID)
+			if err := givingDeductPointTx(tx, mbID, cost, content, givingBoardSlug, relID, "entryfee_"+uniqueTag); err != nil {
+				return err
+			}
+		}
+		// givingEntryFeeHostPercent=0 이면 전액 소각이라 이 블록은 돌지 않는다.
+		if hostFee > 0 {
+			content := fmt.Sprintf("나눔 게시판 %d번 글 참가비 [%s님 참가, %d%%]", post.WrID, mbID, givingEntryFeeHostPercent)
+			if err := givingCreditPointTx(tx, post.MbID, hostFee, content, givingBoardSlug, relID, "entryfeehost_"+uniqueTag, pointConfig); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errGivingAlreadyJoined) {
 		givingErr(c, http.StatusConflict, "이미 참가하셨습니다.")
 		return
 	}
-	err := h.db.Exec(`
-		INSERT INTO g5_giving_bid (bo_table, wr_id, mb_id, bid_numbers, bid_count, bid_points, bid_datetime, bid_ip, bid_status)
-		VALUES (?, ?, ?, '', 1, 0, ?, ?, 1)`,
-		givingBoardSlug, wrID, mbID, time.Now(), givingClientIP(c)).Error
+	if errors.Is(err, errInsufficientPoints) {
+		givingErr(c, http.StatusPaymentRequired, fmt.Sprintf("참가비 %d포인트가 필요합니다. 보유 포인트가 부족합니다.", cost))
+		return
+	}
 	if err != nil {
 		givingErr(c, http.StatusInternalServerError, "참가 처리에 실패했습니다.")
 		return
 	}
-	givingOK(c, gin.H{"joined": true, "method": method})
+	givingOK(c, gin.H{"joined": true, "method": meta.Method, "points_spent": cost})
 }
 
 // bidLowestUnique parses numbers, blocks duplicates, and settles points
@@ -633,6 +765,32 @@ func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, met
 }
 
 var errInsufficientPoints = fmt.Errorf("insufficient points")
+
+// errGivingAlreadyJoined 는 중복 참가를 트랜잭션 안에서 되돌리기 위한 센티넬이다.
+// 중복 확인을 트랜잭션 밖에서 하면 동시 요청 두 개가 모두 통과한다.
+var errGivingAlreadyJoined = fmt.Errorf("already joined")
+
+// memberJoinedDays 는 회원 가입 후 경과일을 돌려준다(N-2 참가 조건 ①).
+//
+// ⛔ Go 에서 time.Since 로 계산하지 않는다. mb_datetime 은 레거시(그누보드)가 서버
+// 로컬시간(KST)으로 넣은 값인데 DB 세션은 UTC 라, 두 기준이 섞이면 하루 경계에서
+// 어긋난다. NOW() 와 같은 기준으로 DB 가 직접 계산하게 맡긴다.
+func (h *GivingHandler) memberJoinedDays(mbID string) (int, error) {
+	var days *int
+	if err := h.db.Raw("SELECT DATEDIFF(NOW(), mb_datetime) FROM g5_member WHERE mb_id = ?", mbID).
+		Scan(&days).Error; err != nil {
+		return 0, err
+	}
+	if days == nil {
+		// 가입일이 NULL/0000-00-00 인 레거시 계정은 통과시킨다.
+		// 막으면 가장 오래된 회원이 오히려 배제된다.
+		return givingEntryMaxDays, nil
+	}
+	if *days < 0 {
+		return 0, nil
+	}
+	return *days, nil
+}
 
 func (h *GivingHandler) pointConfig() *v2repo.PointConfig {
 	if h.pointConfigRepo == nil {
