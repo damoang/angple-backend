@@ -104,3 +104,18 @@ func TestDiffViolationTitles_중복은_한번만(t *testing.T) {
 		t.Errorf("중복이 그대로 나왔다: %v", got)
 	}
 }
+
+// 41(부적절한 닉네임)은 운영 콘솔이 제공하는 사유인데 표에 없었다.
+// 없으면 removed·added 가 모두 비어 **정정 항목 자체가 사라지고**,
+// 회원은 소명이 반영된 걸 볼 수 없다.
+func TestBuildReasonCorrections_코드41_도_보인다(t *testing.T) {
+	out := buildReasonCorrections([]ReasonHistoryEntry{
+		{At: "2026-08-13 20:00:00", From: []int{41}, To: []int{}},
+	})
+	if len(out) != 1 {
+		t.Fatalf("정정이 통째로 사라졌다: %v", out)
+	}
+	if len(out[0].Removed) != 1 || out[0].Removed[0] != "부적절한 닉네임" {
+		t.Errorf("41 이 이름 없이 버려졌다: %v", out[0].Removed)
+	}
+}
