@@ -43,6 +43,23 @@ type DisciplineLogContent struct {
 	RevokedAt string `json:"revoked_at,omitempty"`
 	RevokedBy string `json:"revoked_by,omitempty"`
 	AdminMemo string `json:"admin_memo,omitempty"`
+	// 사유가 정정된 경우 운영 콘솔이 기록. 최초 사유는 한 번만 쓰이고 덮이지 않는다.
+	SgTypesOriginal []int                `json:"sg_types_original,omitempty"`
+	ReasonHistory   []ReasonHistoryEntry `json:"reason_history,omitempty"`
+}
+
+// ReasonHistoryEntry 는 wr_content 에 누적된 사유 정정 이력 한 줄이다.
+//
+// ⛔ By(운영자 ID)·Memo(변경 사유)는 **회원에게 내리지 않는다.**
+// RevokedBy·AdminMemo 를 감추는 것과 같은 이유다. 회원이 알아야 할 것은
+// "무엇이 언제 빠졌는가"이고, 그 이유는 소명 답변으로 따로 전달된다.
+type ReasonHistoryEntry struct {
+	At      string `json:"at"`
+	By      string `json:"by"`
+	From    []int  `json:"from"`
+	To      []int  `json:"to"`
+	Memo    string `json:"memo"`
+	ClaimID int    `json:"claim_id,omitempty"`
 }
 
 // ReportedItem represents a reported post or comment.
@@ -111,6 +128,9 @@ var ViolationTypes = []ViolationType{
 	// 추가 유형 (39-40)
 	{39, "뉴스펌글누락", "뉴스 펌글 작성 시 필수 사항(스크린샷, 출처, 의견) 누락"},
 	{40, "뉴스전문전재", "뉴스 전문을 허가 없이 전재하는 행위"},
+	// ⛔ 41 은 운영 콘솔이 선택지로 제공하는데 이 표에 없었다.
+	//    없으면 이 사유로 받은 제재가 회원 화면에서 **이름 없이 사라진다.**
+	{41, "부적절한 닉네임", "부적절한 닉네임을 사용하는 행위"},
 }
 
 // violationTypeMap is a pre-built lookup map for O(1) access by code
@@ -125,6 +145,66 @@ var violationTypeMap = func() map[int]*ViolationType {
 // getViolationType returns the violation type by code
 func getViolationType(code int) *ViolationType {
 	return violationTypeMap[code]
+}
+
+// normalizeViolationCode 는 구 코드(1~18)를 현행 코드(21~38)로 맞춘다.
+//
+// ⛔ 이걸 빠뜨리면 16→36 처럼 **뜻이 같은데 번호만 바뀐 경우**가
+// "운영정책부정 제외 · 운영정책부정 추가"로 보인다.
+func normalizeViolationCode(code int) int {
+	if code >= 1 && code <= 18 {
+		return code + 20
+	}
+	return code
+}
+
+// diffViolationTitles 는 from 에는 있고 to 에는 없는 사유의 이름을 돌려준다.
+// 순서는 from 을 따르고, 이름을 모르는 코드는 버린다(회원 화면에 숫자를 노출하지 않는다).
+func diffViolationTitles(from, to []int) []string {
+	present := make(map[int]bool, len(to))
+	for _, c := range to {
+		present[normalizeViolationCode(c)] = true
+	}
+	seen := make(map[int]bool, len(from))
+	titles := make([]string, 0, len(from))
+	for _, c := range from {
+		n := normalizeViolationCode(c)
+		if present[n] || seen[n] {
+			continue
+		}
+		seen[n] = true
+		if vt := getViolationType(n); vt != nil {
+			titles = append(titles, vt.Title)
+		}
+	}
+	return titles
+}
+
+// buildReasonCorrections 는 내부 이력을 회원 공개용으로 줄인다.
+// ⛔ By(운영자 ID)·Memo(변경 사유)는 옮기지 않는다.
+func buildReasonCorrections(history []ReasonHistoryEntry) []ReasonCorrection {
+	if len(history) == 0 {
+		return nil
+	}
+	out := make([]ReasonCorrection, 0, len(history))
+	for _, h := range history {
+		removed := diffViolationTitles(h.From, h.To)
+		added := diffViolationTitles(h.To, h.From)
+		// 사유 구성이 그대로면(코드만 정리된 경우 등) 보여줄 것이 없다.
+		if len(removed) == 0 && len(added) == 0 {
+			continue
+		}
+		out = append(out, ReasonCorrection{
+			At:      h.At,
+			Removed: removed,
+			Added:   added,
+			ClaimID: h.ClaimID,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // DisciplineLogListItem represents a discipline log item in list
@@ -159,6 +239,19 @@ type DisciplineLogDetail struct {
 	ClaimPostID       *int            `json:"claim_post_id,omitempty"`
 	// 소명 인용 등으로 회수된 경우 회수 일시만 공개. ⛔ revoked_by(운영자ID)·admin_memo(회수사유)는 비공개.
 	RevokedAt *string `json:"revoked_at,omitempty"`
+	// 사유가 정정된 경우의 공개 이력. 회수와 같은 기준으로 **운영자 ID·내부 메모는 뺀다.**
+	ReasonCorrections []ReasonCorrection `json:"reason_corrections,omitempty"`
+}
+
+// ReasonCorrection 은 회원에게 보여줄 사유 정정 한 건이다.
+//
+// 정정 사실을 감추면 회원은 소명이 반영됐는지 알 수 없고, 그렇다고 내부 메모까지
+// 열면 판단 근거가 새어 나간다. 그래서 **무엇이 빠지고 더해졌는지**와 시점만 남긴다.
+type ReasonCorrection struct {
+	At      string   `json:"at"`
+	Removed []string `json:"removed,omitempty"` // 제외된 사유 이름
+	Added   []string `json:"added,omitempty"`   // 추가된 사유 이름
+	ClaimID int      `json:"claim_id,omitempty"`
 }
 
 // parseContentJSON parses the wr_content JSON or extracts from HTML
@@ -481,6 +574,9 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 	if data.RevokedAt != "" {
 		detail.RevokedAt = &data.RevokedAt
 	}
+
+	// 사유 정정 이력 — 같은 기준으로 운영자 ID·내부 메모를 뺀 형태만 공개
+	detail.ReasonCorrections = buildReasonCorrections(data.ReasonHistory)
 
 	// 소명글 존재 여부 조회 (claim 게시판에서 wr_link1 또는 wr_content 매칭)
 	var claimPostID int
