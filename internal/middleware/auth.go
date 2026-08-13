@@ -76,6 +76,11 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 				c.Set("nickname", "")
 				c.Set("level", level)
 				c.Set("v2_user_id", userID)
+				// 탈퇴 게이트 — ⛔ 이 분기를 빠뜨리면 우회로가 된다(JWT 검증을 건너뛰는 경로).
+				//    여기서는 X-Internal-User-ID 가 곧 mb_id 다.
+				if blockIfWithdrawn(c, userID) {
+					return
+				}
 				c.Next()
 				return
 			}
@@ -123,6 +128,12 @@ func JWTAuth(jwtManager *jwt.Manager) gin.HandlerFunc {
 		c.Set("nickname", claims.Nickname)
 		c.Set("level", claims.Level)
 		c.Set("v2_user_id", claims.UserID)
+
+		// 탈퇴 게이트 — ⛔ 판정 키는 username(mb_id) 이다.
+		//    claims.UserID 는 v2_users.id(숫자)라 g5_member 조회에 쓸 수 없다.
+		if blockIfWithdrawn(c, claims.Username) {
+			return
+		}
 
 		c.Next()
 	}

@@ -2136,6 +2136,11 @@ func main() {
 		v1Members := router.Group("/api/v1/members")
 		// 탈퇴 숙려기간 셀프 서비스: 본인 탈퇴 신청/취소. /me 스코프이므로 JWT 주체 계정만 대상(타인 지정 불가).
 		// 취소는 제재중(intercept) 계정도 가능해야 하므로 BanCheck 를 적용하지 않는다(취소는 intercept 를 건드리지 않음).
+		// 탈퇴 게이트(WithdrawalCheck) 배선 — 26R05-00197 Phase 1.
+		// ⛔ 라우팅 개시 전 1회. db 가 nil 이면 게이트는 skip 된다.
+		//    문제가 생기면 **이미지 롤백 없이 이 한 줄만 빼서** 끌 수 있다.
+		middleware.SetWithdrawalCheck(db, redisClient)
+
 		// 탈퇴 파기 시 web 세션·회원 캐시(L2)까지 지우기 위한 Redis 주입.
 		// nil 이면 DB 파기만 수행한다(캐시는 TTL 로 자연 만료).
 		handler.SetAuthCacheRedis(redisClient)
