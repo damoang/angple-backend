@@ -2,7 +2,9 @@ package worker
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -106,7 +108,7 @@ func (w *PushNotifyWorker) loadCursor() (int, bool) {
 	if err == nil {
 		return cur.LastPhID, true
 	}
-	if err != gorm.ErrRecordNotFound {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		log.Printf("[PushNotifyWorker] cursor load failed: %v", err)
 		return 0, false
 	}
@@ -350,7 +352,10 @@ func (w *PushNotifyWorker) sendChunk(msgs []expoPushMessage) ([]expoPushTicket, 
 		if attempt > 0 {
 			time.Sleep(2 * time.Second)
 		}
-		req, err := http.NewRequest(http.MethodPost, expoPushURL, bytes.NewReader(payload))
+		// context.Background() 는 http.NewRequest 의 내부 동작과 동일하다 —
+		// 취소 신호를 새로 도입하지 않으려 일부러 그대로 둔다. 요청 시한은
+		// 종전처럼 w.client 의 Timeout 이 담당한다.
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, expoPushURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}

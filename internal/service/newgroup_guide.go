@@ -2,6 +2,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -42,7 +43,7 @@ func PostNewgroupGuideComment(db *gorm.DB, wrID int) error {
 		Where("wr_id = ? AND wr_is_comment = 0 AND wr_deleted_at IS NULL", wrID).
 		Take(&post).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil // 이미 삭제됐거나 댓글 — 안내 대상 아님
 		}
 		return fmt.Errorf("newgroup guide: 원글 조회 실패: %w", err)

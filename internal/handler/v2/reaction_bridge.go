@@ -25,6 +25,9 @@ import (
 
 const reactionKindLimit = 20 // 대상당 리액션 "종류" 최대 개수(비관리자). 웹 REACTION_LIMIT 동일.
 
+// reactionModeAdd 는 reactionMode 기본값이다. 있으면 유지(no-op) — 토글은 클라이언트가 "toggle" 을 명시해야 한다.
+const reactionModeAdd = "add"
+
 // reactionCharset: 웹 VALID_REACTION_PATTERN / sanitizeId 와 동일 문자집합.
 var reactionInvalidChars = regexp.MustCompile(`[^a-zA-Z0-9:_-]`)
 var reactionValidPattern = regexp.MustCompile(`^[a-zA-Z0-9:_-]+$`)
@@ -130,9 +133,9 @@ func (h *V2Handler) PostPostReaction(c *gin.Context) {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 요청", err)
 		return
 	}
-	// 웹과 동일: reactionMode 기본값은 "add"(있으면 유지=no-op). 토글하려면 클라이언트가 "toggle" 명시.
+	// 웹과 동일: reactionMode 기본값은 add(있으면 유지=no-op). 토글하려면 클라이언트가 "toggle" 명시.
 	if body.ReactionMode == "" {
-		body.ReactionMode = "add"
+		body.ReactionMode = reactionModeAdd
 	}
 	reaction := sanitizeReactionID(body.Reaction)
 	if reaction == "" || len(reaction) > 250 || !reactionValidPattern.MatchString(reaction) {
@@ -175,7 +178,7 @@ func (h *V2Handler) PostPostReaction(c *gin.Context) {
 			common.V2ErrorResponse(c, http.StatusInternalServerError, "리액션 처리 실패", err)
 			return
 		}
-	} else if body.ReactionMode != "add" {
+	} else if body.ReactionMode != reactionModeAdd {
 		// toggle/default: 있으면 취소
 		if err := h.revokeReaction(memberID, reaction, targetID); err != nil {
 			common.V2ErrorResponse(c, http.StatusInternalServerError, "리액션 처리 실패", err)
