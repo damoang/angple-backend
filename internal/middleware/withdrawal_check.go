@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -110,7 +111,7 @@ func isWithdrawn(ctx context.Context, mbID string) bool {
 		if err == nil {
 			return v == "1"
 		}
-		if err != redis.Nil {
+		if !errors.Is(err, redis.Nil) {
 			// 캐시 장애는 치명적이지 않다(DB 로 폴백). 다만 조용히 넘기면
 			// 모든 요청이 DB 를 때리는 상태를 눈치채지 못한다.
 			log.Printf("[withdrawalGate] 캐시 조회 실패 (%s): %v", mbID, err)
