@@ -119,3 +119,89 @@ func TestBuildReasonCorrections_코드41_도_보인다(t *testing.T) {
 		t.Errorf("41 이 이름 없이 버려졌다: %v", out[0].Removed)
 	}
 }
+
+// ── 글마다 사유가 다른가 판정 ────────────────────────────────────
+//
+// 대표 사유(sg_types)는 항목별 사유의 합집합이라, 한 글에만 적용한 사유가
+// 전건에 적용된 것처럼 보인다. 이 판정이 틀리면 오해가 그대로 남거나(false 누락),
+// 멀쩡한 기록에 엉뚱한 안내가 붙는다(false 양성).
+
+func TestReasonsDifferByItem_사유가_다르면_참(t *testing.T) {
+	items := []ReportedItem{
+		{ID: 1, SgTypes: []int{22, 36}},
+		{ID: 2, SgTypes: []int{22, 36}},
+		{ID: 3, SgTypes: []int{25, 23}}, // 이 한 건만 다르다
+	}
+	if !reasonsDifferByItem(items) {
+		t.Error("글마다 사유가 다른데 false 다 — 상단 합집합이 그대로 노출된다")
+	}
+}
+
+func TestReasonsDifferByItem_순서만_다르면_같다(t *testing.T) {
+	// 클릭 순서에 따라 [22,36] 과 [36,22] 로 저장된다. 같은 사유다.
+	items := []ReportedItem{
+		{ID: 1, SgTypes: []int{22, 36}},
+		{ID: 2, SgTypes: []int{36, 22}},
+	}
+	if reasonsDifferByItem(items) {
+		t.Error("순서만 다른데 '다르다'로 잡혔다 — 멀쩡한 기록에 안내가 붙는다")
+	}
+}
+
+// ⛔ 설계서가 지목한 함정: 16(구) 과 36(현행) 은 같은 "운영정책부정" 이다.
+func TestReasonsDifferByItem_구코드와_현행코드는_같다(t *testing.T) {
+	items := []ReportedItem{
+		{ID: 1, SgTypes: []int{1, 16}},  // 구 코드
+		{ID: 2, SgTypes: []int{21, 36}}, // 현행 코드, 같은 뜻
+	}
+	if reasonsDifferByItem(items) {
+		t.Error("구/현행 코드 차이를 사유 차이로 봤다")
+	}
+}
+
+// ⛔ 설계서가 지목한 함정: 항목 정보가 없는 레거시 기록(2026년 21건).
+//
+//	글별 목록이 렌더되지 않으므로 상단을 접으면 사유를 볼 데가 없어진다.
+func TestReasonsDifferByItem_항목이_없으면_거짓(t *testing.T) {
+	if reasonsDifferByItem(nil) {
+		t.Error("항목이 없는데 참이다 — 사유를 볼 데가 없어진다")
+	}
+	if reasonsDifferByItem([]ReportedItem{}) {
+		t.Error("빈 목록인데 참이다")
+	}
+}
+
+func TestReasonsDifferByItem_사유_적힌_항목이_하나뿐이면_거짓(t *testing.T) {
+	items := []ReportedItem{
+		{ID: 1, SgTypes: []int{22}},
+		{ID: 2}, // 사유 없음 — 비교 대상이 아니다
+	}
+	if reasonsDifferByItem(items) {
+		t.Error("비교할 항목이 하나뿐인데 참이다")
+	}
+}
+
+func TestReasonsDifferByItem_중복이_있어도_같다(t *testing.T) {
+	items := []ReportedItem{
+		{ID: 1, SgTypes: []int{22, 22, 36}},
+		{ID: 2, SgTypes: []int{36, 22}},
+	}
+	if reasonsDifferByItem(items) {
+		t.Error("중복만 다른데 '다르다'로 잡혔다")
+	}
+}
+
+// #4275 는 정정을 마쳐 6건이 모두 같다 — 회귀 확인용 대조군.
+func TestReasonsDifferByItem_4275_정정후는_거짓(t *testing.T) {
+	items := []ReportedItem{
+		{ID: 6865495, SgTypes: []int{22, 36}},
+		{ID: 6922385, SgTypes: []int{36, 22}},
+		{ID: 6931391, SgTypes: []int{22, 36}},
+		{ID: 6931480, SgTypes: []int{22, 36}},
+		{ID: 6931566, SgTypes: []int{22, 36}},
+		{ID: 7001831, SgTypes: []int{22, 36}},
+	}
+	if reasonsDifferByItem(items) {
+		t.Error("정정을 마친 기록인데 참이다")
+	}
+}
