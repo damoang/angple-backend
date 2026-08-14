@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -180,6 +181,66 @@ func diffViolationTitles(from, to []int) []string {
 	return titles
 }
 
+// reasonsDifferByItem 은 **글마다 적용 사유가 다른지** 판정한다.
+//
+// 왜 필요한가
+//
+//	묶음 처분의 대표 사유(sg_types)는 항목별 사유의 **합집합**이다.
+//	다섯 글이 A·B 이고 한 글만 C·D 여도 상단에는 A·B·C·D 가 전부 뜬다.
+//	회원은 네 가지 사유로 제한받았다고 읽고, 소명에서 그 차이를 스스로 알아낼 수 없다.
+//	참이면 화면이 상단 나열을 접고 글별 목록으로 안내한다.
+//
+// ⛔ 판정 규칙
+//   - 사유가 적힌 항목이 2건 미만이면 **false**. 비교할 대상이 없다.
+//   - 구 코드(1~18)와 현행(21~38)은 같은 사유다. 정규화하지 않으면
+//     16 과 36 이 "다르다"로 잡혀 멀쩡한 기록에 안내가 붙는다.
+//   - reported_items 가 없는 옛 기록도 **false** — 글별 목록이 렌더되지 않으므로
+//     상단을 접으면 사유를 볼 데가 없어진다.
+func reasonsDifferByItem(items []ReportedItem) bool {
+	var first string
+	seen := 0
+	for _, it := range items {
+		if len(it.SgTypes) == 0 {
+			continue
+		}
+		key := normalizedReasonKey(it.SgTypes)
+		seen++
+		if seen == 1 {
+			first = key
+			continue
+		}
+		if key != first {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizedReasonKey 는 사유 코드 집합을 비교 가능한 문자열로 만든다.
+// 정규화 → 중복 제거 → 정렬. 순서만 다른 [22,36] 과 [36,22] 는 같은 값이 된다.
+func normalizedReasonKey(codes []int) string {
+	uniq := make([]int, 0, len(codes))
+	seen := make(map[int]bool, len(codes))
+	for _, c := range codes {
+		n := normalizeViolationCode(c)
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		uniq = append(uniq, n)
+	}
+	sort.Ints(uniq)
+
+	var b strings.Builder
+	for i, n := range uniq {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Itoa(n))
+	}
+	return b.String()
+}
+
 // buildReasonCorrections 는 내부 이력을 회원 공개용으로 줄인다.
 // ⛔ By(운영자 ID)·Memo(변경 사유)는 옮기지 않는다.
 func buildReasonCorrections(history []ReasonHistoryEntry) []ReasonCorrection {
@@ -219,6 +280,9 @@ type DisciplineLogListItem struct {
 	ViolationTitles []string `json:"violation_titles"`
 	Memo            string   `json:"memo,omitempty"`
 	Revoked         bool     `json:"revoked,omitempty"` // 소명 인용 등으로 회수된 제재 (목록 배지용)
+	// 글마다 적용 사유가 다른 경우. violation_titles 는 합집합이라 그대로 보여주면
+	// 전건에 적용된 것처럼 읽힌다 — 화면이 "사유 여러 건"으로 대체한다.
+	ReasonsDifferByItem bool `json:"reasons_differ_by_item,omitempty"`
 }
 
 // DisciplineLogDetail represents detailed discipline log
@@ -241,6 +305,10 @@ type DisciplineLogDetail struct {
 	RevokedAt *string `json:"revoked_at,omitempty"`
 	// 사유가 정정된 경우의 공개 이력. 회수와 같은 기준으로 **운영자 ID·내부 메모는 뺀다.**
 	ReasonCorrections []ReasonCorrection `json:"reason_corrections,omitempty"`
+	// 글마다 적용 사유가 다른 경우. violation_types 는 항목별 사유의 **합집합**이라,
+	// 그대로 상단에 나열하면 회원은 전건에 다 적용됐다고 읽는다.
+	// 참이면 화면이 상단 나열을 접고 글별 목록으로 안내한다.
+	ReasonsDifferByItem bool `json:"reasons_differ_by_item,omitempty"`
 }
 
 // ReasonCorrection 은 회원에게 보여줄 사유 정정 한 건이다.
@@ -419,6 +487,9 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 			ViolationTypes:  data.SgTypes,
 			ViolationTitles: titles,
 			Revoked:         data.RevokedAt != "",
+			// ⛔ 목록은 wr_content 의 reported_items 만 본다(레거시 보강은 상세에서만 한다).
+			//    보강 전 값이라 판정이 보수적으로 나온다 — 애매하면 false, 즉 지금 표시 유지.
+			ReasonsDifferByItem: reasonsDifferByItem(data.ReportedItems),
 		})
 	}
 
@@ -577,6 +648,10 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 
 	// 사유 정정 이력 — 같은 기준으로 운영자 ID·내부 메모를 뺀 형태만 공개
 	detail.ReasonCorrections = buildReasonCorrections(data.ReasonHistory)
+
+	// 글마다 사유가 다르면 상단 나열이 오해를 부른다 — 화면이 글별 목록으로 안내한다.
+	// ⛔ reportedItems 는 레거시 보강(g5_na_singo)까지 끝난 값이어야 한다.
+	detail.ReasonsDifferByItem = reasonsDifferByItem(reportedItems)
 
 	// 소명글 존재 여부 조회 (claim 게시판에서 wr_link1 또는 wr_content 매칭)
 	var claimPostID int
