@@ -240,8 +240,18 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 		g.Go(func() error {
 			var cnt int64
 			if boardID == largeBoardID {
-				// Use member_activity_feed covering index instead of scanning 600K-row table
-				r.db.Raw("SELECT COUNT(*) FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2 AND is_deleted = 0", mbID, largeBoardID).Scan(&cnt)
+				// bug/13518: member_activity_feed.is_deleted 는 댓글 삭제 경로가
+				// 동기화하지 않아 낡아 있다(웹/레거시 댓글 삭제는 wr_deleted_at 만
+				// UPDATE 하고 피드를 건드리지 않는다). 그래서 삭제된 댓글이 피드에는
+				// 살아있는 것처럼 남아 "남은 댓글" 수가 부풀려졌다(제보 회원 기준
+				// 피드 2409 vs 정본 920). "남은 댓글" 수는 피드를 믿지 말고 정본
+				// g5_write_free 에서 직접 센다 — 작성자 프로필의 생존 수와 일치한다.
+				// idx_mb_comment(mb_id, wr_is_comment) 로 회원 댓글 행만 스캔하므로
+				// 600K/7M-행 풀스캔이 아니다(바운드된 COUNT). 예측(wr_deleted_at IS NULL)은
+				// 같은 함수의 다른 보드 COUNT·free Phase B 조회와 동일해 목록과 수가 맞는다.
+				// 게시글 경로(activity_type=1)는 피드 is_deleted 가 동기화돼 있어 손대지 않는다.
+				table := fmt.Sprintf("g5_write_%s", largeBoardID)
+				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
 			} else {
 				table := fmt.Sprintf("g5_write_%s", boardID)
 				r.db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE mb_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", table), mbID).Scan(&cnt)
