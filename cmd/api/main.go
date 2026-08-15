@@ -5028,36 +5028,11 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "복구 완료"})
 		})
 
-		// DELETE /api/v1/boards/:slug/posts/:id/permanent - Permanently delete post (admin only)
+		// DELETE /api/v1/boards/:slug/posts/:id/permanent - 영구(물리) 삭제
+		// 정책: 영구 삭제 전면 비활성화. 모든 삭제는 소프트삭제로 원본 이력을 보존한다
+		// (사법기관·KISA 등 자료제출 대응). 정식 삭제는 소프트삭제 경로를 사용한다.
 		v1Boards.DELETE("/:slug/posts/:id/permanent", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
-			slug := c.Param("slug")
-			postID, err := strconv.Atoi(c.Param("id"))
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
-				return
-			}
-
-			// 관리자 확인
-			userLevel := middleware.GetUserLevel(c)
-			if userLevel < 10 {
-				c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "관리자만 영구 삭제할 수 있습니다"})
-				return
-			}
-
-			// 게시글 조회 (삭제된 게시글 포함)
-			_, err = gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID)
-			if err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "게시글을 찾을 수 없습니다"})
-				return
-			}
-
-			// 게시글 영구 삭제 (글·댓글 이력은 repo 내부에서 기록)
-			if err := gnuWriteRepo.DeletePost(slug, postID, middleware.GetUserID(c)); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 영구 삭제 실패"})
-				return
-			}
-
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "영구 삭제 완료"})
+			c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "영구 삭제는 정책상 비활성화되어 있습니다"})
 		})
 
 		// DELETE /api/v1/boards/:slug/posts/:id/comments/:comment_id - Soft delete comment
