@@ -235,6 +235,26 @@ const (
 	givingEntryMaxPoint = 100000
 )
 
+// givingRuleLockReason 은 응모가 이미 있는 나눔에서 바꾸려는 규칙이 있으면 그 사유를
+// 돌려준다(없으면 빈 문자열). 시드가 커밋돼 있어 *누가* 뽑힐지는 못 고르지만, 방식·번호
+// 상한·인원·참가조건은 사후에 바꿀 수 있으면 그 자체가 규칙 변경이므로 전부 잠근다.
+// 특히 참가비는 이미 낸 사람과 나중에 낼 사람의 부담이 달라져 사후 변경이 곧 불공정이다.
+func givingRuleLockReason(prev givingMetaRow, req givingConfigRequest, entryMinDays, entryPointCost int) string {
+	switch {
+	case prev.Method != req.Method:
+		return "이미 응모가 있어 나눔 방식을 변경할 수 없습니다."
+	case !givingIntPtrEqual(prev.NumberMax, req.NumberMax):
+		return "이미 응모가 있어 번호 상한을 변경할 수 없습니다."
+	case !givingIntPtrEqual(prev.Capacity, req.Capacity):
+		return "이미 응모가 있어 인원을 변경할 수 없습니다."
+	case prev.EntryMinDays != entryMinDays:
+		return "이미 응모가 있어 참가 조건(가입일)을 변경할 수 없습니다."
+	case prev.EntryPointCost != entryPointCost:
+		return "이미 응모가 있어 참가비를 변경할 수 없습니다."
+	}
+	return ""
+}
+
 // resolveGivingEntryConditions 는 요청과 기존 설정을 합쳐 최종 참가 조건을 정한다.
 // 미전송(nil)이면 기존 값 유지 — 구버전 클라이언트가 조건을 0 으로 덮어쓰지 않게 한다.
 // 반환하는 문자열이 비어 있지 않으면 검증 실패 사유(400)다.
@@ -308,29 +328,8 @@ func (h *GivingHandler) Config(c *gin.Context) {
 		Where("bo_table = ? AND wr_id = ?", givingBoardSlug, wrID).
 		Count(&bidCount)
 	if bidCount > 0 {
-		if prev.Method != req.Method {
-			givingErr(c, http.StatusConflict, "이미 응모가 있어 나눔 방식을 변경할 수 없습니다.")
-			return
-		}
-		if !givingIntPtrEqual(prev.NumberMax, req.NumberMax) {
-			givingErr(c, http.StatusConflict, "이미 응모가 있어 번호 상한을 변경할 수 없습니다.")
-			return
-		}
-		// capacity 는 random/ladder 에서 **당첨자 수**다. 참가자 명단을 본 뒤 인원을
-		// 늘리거나 줄일 수 있으면 규칙 사후 변경이다. 시드가 커밋돼 있어 *누가* 뽑힐지는
-		// 못 고르지만 *몇 명*은 조정되므로 method/number_max 와 같이 잠근다.
-		if !givingIntPtrEqual(prev.Capacity, req.Capacity) {
-			givingErr(c, http.StatusConflict, "이미 응모가 있어 인원을 변경할 수 없습니다.")
-			return
-		}
-		// 참가 조건도 같은 이유로 잠근다. 특히 참가비는 이미 낸 사람과 나중에 낼
-		// 사람의 부담이 달라지므로 사후 변경이 곧 불공정이다.
-		if prev.EntryMinDays != entryMinDays {
-			givingErr(c, http.StatusConflict, "이미 응모가 있어 참가 조건(가입일)을 변경할 수 없습니다.")
-			return
-		}
-		if prev.EntryPointCost != entryPointCost {
-			givingErr(c, http.StatusConflict, "이미 응모가 있어 참가비를 변경할 수 없습니다.")
+		if msg := givingRuleLockReason(prev, req, entryMinDays, entryPointCost); msg != "" {
+			givingErr(c, http.StatusConflict, msg)
 			return
 		}
 		if prev.Status != "" {
