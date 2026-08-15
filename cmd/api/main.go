@@ -332,6 +332,19 @@ func isBugBoardHistoryLocked(boardID string, humanReplyCount int, userLevel int)
 
 func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, commentID int, deletedBy string, deletedAt time.Time) (bool, error) {
 	tableName := fmt.Sprintf("g5_write_%s", boardID)
+	// 삭제 직전 원본 스냅샷 — 이력(g5_da_content_history)에 남길 값. 같은 tx 로 읽어 정합 유지.
+	var snap struct {
+		WrContent  string    `gorm:"column:wr_content"`
+		WrName     string    `gorm:"column:wr_name"`
+		MbID       string    `gorm:"column:mb_id"`
+		WrDatetime time.Time `gorm:"column:wr_datetime"`
+	}
+	if err := tx.Table(tableName).
+		Select("wr_content, wr_name, mb_id, wr_datetime").
+		Where("wr_id = ? AND wr_is_comment = 1", commentID).
+		Scan(&snap).Error; err != nil {
+		return false, err
+	}
 	result := tx.Table(tableName).
 		Where("wr_id = ? AND wr_is_comment = 1 AND wr_deleted_at IS NULL", commentID).
 		Updates(map[string]interface{}{
@@ -345,6 +358,11 @@ func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, comment
 		return false, nil
 	}
 	if err := adjustPostCommentCount(tx, boardID, postID, -1); err != nil {
+		return false, err
+	}
+	// fail-closed: 이력 기록 실패 시 삭제 트랜잭션 전체 롤백(증거 누락 0).
+	if err := gnurepo.RecordContentHistory(tx, boardID, commentID, 1, snap.MbID, snap.WrName, "삭제", deletedBy, deletedAt,
+		gnurepo.CommentHistorySnapshot(snap.WrContent, snap.WrName, snap.MbID, snap.WrDatetime)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -4299,20 +4317,6 @@ func main() {
 				})
 			}
 
-			// g5_da_content_history에도 이중 기록
-			{
-				prevData, _ := json.Marshal(map[string]interface{}{
-					"wr_subject": post.WrSubject,
-					"wr_content": post.WrContent,
-					"wr_name":    post.WrName,
-					"mb_id":      post.MbID,
-				})
-				db.Exec(`INSERT INTO g5_da_content_history
-					(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
-					VALUES (?, ?, 0, ?, ?, '수정', ?, NOW(), ?)`,
-					slug, postID, post.MbID, post.WrName, userID, string(prevData))
-			}
-
 			// 업데이트할 필드 구성
 			updates := map[string]interface{}{}
 			if req.Title != nil {
@@ -4418,6 +4422,11 @@ func main() {
 			tableName := fmt.Sprintf("g5_write_%s", slug)
 			txErr := db.Transaction(func(tx *gorm.DB) error {
 				if err := tx.Table(tableName).Where("wr_id = ?", postID).Updates(updates).Error; err != nil {
+					return err
+				}
+				// fail-closed: 수정 전 원본 스냅샷을 같은 tx 에 기록. 실패 시 수정 롤백(증거 누락 0).
+				if err := gnurepo.RecordContentHistory(tx, slug, postID, 0, post.MbID, post.WrName, "수정", userID, time.Now(),
+					gnurepo.PostHistorySnapshot(post.WrSubject, post.WrContent, post.WrName, post.MbID, post.WrDatetime)); err != nil {
 					return err
 				}
 				return createWriteAfterEvent(
@@ -4653,19 +4662,6 @@ func main() {
 				})
 			}
 
-			// g5_da_content_history에도 이중 기록
-			{
-				prevData, _ := json.Marshal(map[string]interface{}{
-					"wr_content": comment.WrContent,
-					"wr_name":    comment.WrName,
-					"mb_id":      comment.MbID,
-				})
-				db.Exec(`INSERT INTO g5_da_content_history
-					(bo_table, wr_id, wr_is_comment, mb_id, wr_name, operation, operated_by, operated_at, previous_data)
-					VALUES (?, ?, 1, ?, ?, '수정', ?, NOW(), ?)`,
-					slug, commentID, comment.MbID, comment.WrName, userID, string(prevData))
-			}
-
 			tableName := fmt.Sprintf("g5_write_%s", slug)
 			now := time.Now().Format("2006-01-02 15:04:05")
 			postID, _ := strconv.Atoi(c.Param("id"))
@@ -4677,6 +4673,11 @@ func main() {
 					"wr_edit_count":     gorm.Expr("wr_edit_count + 1"),
 					"wr_last_edited_at": time.Now(),
 				}).Error; err != nil {
+					return err
+				}
+				// fail-closed: 수정 전 원본 스냅샷을 같은 tx 에 기록. 실패 시 수정 롤백(증거 누락 0).
+				if err := gnurepo.RecordContentHistory(tx, slug, commentID, 1, comment.MbID, comment.WrName, "수정", userID, time.Now(),
+					gnurepo.CommentHistorySnapshot(comment.WrContent, comment.WrName, comment.MbID, comment.WrDatetime)); err != nil {
 					return err
 				}
 				return createWriteAfterEvent(
@@ -4826,6 +4827,11 @@ func main() {
 			if userLevel >= 10 {
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
+					// fail-closed: 원본 스냅샷 이력을 삭제 UPDATE 와 같은 tx 에 기록. 실패 시 전체 롤백(증거 누락 0).
+					if err := gnurepo.RecordContentHistory(tx, slug, postID, 0, post.MbID, post.WrName, "삭제", userID, now,
+						gnurepo.PostHistorySnapshot(post.WrSubject, post.WrContent, post.WrName, post.MbID, post.WrDatetime)); err != nil {
+						return err
+					}
 					if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ?", postID).Updates(map[string]interface{}{
 						"wr_deleted_at": now,
 						"wr_deleted_by": userID,
@@ -4856,12 +4862,6 @@ func main() {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
 				}
-				gnurepo.RecordContentHistory(db, slug, postID, 0, post.MbID, post.WrName, "삭제", userID, map[string]interface{}{
-					"wr_subject": post.WrSubject,
-					"wr_content": post.WrContent,
-					"wr_name":    post.WrName,
-					"mb_id":      post.MbID,
-				})
 				// 직접홍보 게시판: Redis 캐시 무효화
 				if slug == "promotion" && redisClient != nil {
 					redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
@@ -4875,6 +4875,11 @@ func main() {
 			if time.Since(post.WrDatetime) <= deleteGracePeriod {
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
+					// fail-closed: 원본 스냅샷 이력을 삭제 UPDATE 와 같은 tx 에 기록. 실패 시 전체 롤백(증거 누락 0).
+					if err := gnurepo.RecordContentHistory(tx, slug, postID, 0, post.MbID, post.WrName, "삭제", userID, now,
+						gnurepo.PostHistorySnapshot(post.WrSubject, post.WrContent, post.WrName, post.MbID, post.WrDatetime)); err != nil {
+						return err
+					}
 					if err := tx.Table(fmt.Sprintf("g5_write_%s", slug)).Where("wr_id = ?", postID).Updates(map[string]interface{}{
 						"wr_deleted_at": now,
 						"wr_deleted_by": userID,
@@ -4905,12 +4910,6 @@ func main() {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "게시글 삭제 실패"})
 					return
 				}
-				gnurepo.RecordContentHistory(db, slug, postID, 0, post.MbID, post.WrName, "삭제", userID, map[string]interface{}{
-					"wr_subject": post.WrSubject,
-					"wr_content": post.WrContent,
-					"wr_name":    post.WrName,
-					"mb_id":      post.MbID,
-				})
 				// 직접홍보 게시판: Redis 캐시 무효화
 				if slug == "promotion" && redisClient != nil {
 					redisClient.Del(c.Request.Context(), "promotion:board_posts", "promotion:posts")
@@ -5087,7 +5086,6 @@ func main() {
 			// 관리자(level >= 10)는 즉시 삭제
 			postID, _ := strconv.Atoi(c.Param("id"))
 			if userLevel >= 10 {
-				commentDeleted := false
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
 					changed, err := softDeleteCommentAndAdjust(tx, slug, postID, commentID, userID, now)
@@ -5097,7 +5095,6 @@ func main() {
 					if !changed {
 						return nil
 					}
-					commentDeleted = true
 					return createWriteAfterEvent(
 						tx,
 						writeAfterEventRepo,
@@ -5122,13 +5119,6 @@ func main() {
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
-				}
-				if commentDeleted {
-					gnurepo.RecordContentHistory(db, slug, commentID, 1, comment.MbID, comment.WrName, "삭제", userID, map[string]interface{}{
-						"wr_content": comment.WrContent,
-						"wr_name":    comment.WrName,
-						"mb_id":      comment.MbID,
-					})
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return
@@ -5145,7 +5135,6 @@ func main() {
 
 			if delayMinutes == 0 {
 				// 답글 없으면 즉시 삭제
-				commentDeleted := false
 				txErr := db.Transaction(func(tx *gorm.DB) error {
 					now := time.Now()
 					changed, err := softDeleteCommentAndAdjust(tx, slug, postID, commentID, userID, now)
@@ -5155,7 +5144,6 @@ func main() {
 					if !changed {
 						return nil
 					}
-					commentDeleted = true
 					return createWriteAfterEvent(
 						tx,
 						writeAfterEventRepo,
@@ -5180,13 +5168,6 @@ func main() {
 				if txErr != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "댓글 삭제 실패"})
 					return
-				}
-				if commentDeleted {
-					gnurepo.RecordContentHistory(db, slug, commentID, 1, comment.MbID, comment.WrName, "삭제", userID, map[string]interface{}{
-						"wr_content": comment.WrContent,
-						"wr_name":    comment.WrName,
-						"mb_id":      comment.MbID,
-					})
 				}
 				c.JSON(http.StatusOK, gin.H{"success": true, "message": "삭제 완료"})
 				return

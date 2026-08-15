@@ -83,7 +83,6 @@ func (w *DeleteWorker) processPending() {
 				log.Printf("[DeleteWorker] Error finding comment %s/%d before delete: %v", sd.BoTable, sd.WrID, findErr)
 				continue
 			}
-			commentDeleted := false
 			if err := w.db.Transaction(func(tx *gorm.DB) error {
 				now := time.Now()
 				result := tx.Table("g5_write_"+sd.BoTable).
@@ -98,7 +97,6 @@ func (w *DeleteWorker) processPending() {
 				if result.RowsAffected == 0 {
 					return nil
 				}
-				commentDeleted = true
 				if err := tx.Table("g5_write_"+sd.BoTable).
 					Where("wr_id = ?", comment.WrParent).
 					Update("wr_comment", gorm.Expr("GREATEST(COALESCE(wr_comment, 0) - 1, 0)")).
@@ -120,17 +118,12 @@ func (w *DeleteWorker) processPending() {
 						return err
 					}
 				}
-				return nil
+				// fail-closed: 원본 스냅샷 이력을 삭제 UPDATE 와 같은 tx 에 기록. 실패 시 전체 롤백(증거 누락 0).
+				return gnurepo.RecordContentHistory(tx, sd.BoTable, sd.WrID, 1, comment.MbID, comment.WrName, "삭제", sd.RequestedBy, now,
+					gnurepo.CommentHistorySnapshot(comment.WrContent, comment.WrName, comment.MbID, comment.WrDatetime))
 			}); err != nil {
 				log.Printf("[DeleteWorker] Error soft deleting comment %s/%d: %v", sd.BoTable, sd.WrID, err)
 				continue
-			}
-			if commentDeleted {
-				gnurepo.RecordContentHistory(w.db, sd.BoTable, sd.WrID, 1, comment.MbID, comment.WrName, "삭제", sd.RequestedBy, map[string]interface{}{
-					"wr_content": comment.WrContent,
-					"wr_name":    comment.WrName,
-					"mb_id":      comment.MbID,
-				})
 			}
 		} else {
 			post, findErr := w.writeRepo.FindPostByIDIncludeDeleted(sd.BoTable, sd.WrID)
@@ -162,17 +155,13 @@ func (w *DeleteWorker) processPending() {
 						return err
 					}
 				}
-				return nil
+				// fail-closed: 원본 스냅샷 이력을 삭제 UPDATE 와 같은 tx 에 기록. 실패 시 전체 롤백(증거 누락 0).
+				return gnurepo.RecordContentHistory(tx, sd.BoTable, sd.WrID, 0, post.MbID, post.WrName, "삭제", sd.RequestedBy, now,
+					gnurepo.PostHistorySnapshot(post.WrSubject, post.WrContent, post.WrName, post.MbID, post.WrDatetime))
 			}); err != nil {
 				log.Printf("[DeleteWorker] Error soft deleting post %s/%d: %v", sd.BoTable, sd.WrID, err)
 				continue
 			}
-			gnurepo.RecordContentHistory(w.db, sd.BoTable, sd.WrID, 0, post.MbID, post.WrName, "삭제", sd.RequestedBy, map[string]interface{}{
-				"wr_subject": post.WrSubject,
-				"wr_content": post.WrContent,
-				"wr_name":    post.WrName,
-				"mb_id":      post.MbID,
-			})
 		}
 
 		// Mark as executed
