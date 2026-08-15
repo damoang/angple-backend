@@ -1160,9 +1160,11 @@ func (r *writeRepository) UpdatePost(boardID string, post *gnuboard.G5Write) err
 	return r.db.Table(tableName(boardID)).Save(post).Error
 }
 
-// RecordContentHistory 는 g5_da_content_history 에 감사 이력 한 건을 best-effort 로 남긴다.
-// 기록 실패가 본 작업(삭제 등)을 막으면 안 되므로 에러는 로그만 남기고 삼킨다.
-func RecordContentHistory(db *gorm.DB, boTable string, wrID int, wrIsComment int, mbID, wrName, operation, operatedBy string, prevData map[string]interface{}) {
+// recordContentHistoryLegacy 는 g5_da_content_history 에 감사 이력 한 건을 best-effort 로 남긴다.
+// 기록 실패가 본 작업을 막으면 안 되므로 에러는 로그만 남기고 삼킨다.
+// ⚠️ 영구삭제(DeletePost) 전용 레거시 경로다. 영구삭제는 정책상 비활성(fail-closed 소프트삭제로 대체)이라
+// 이 함수는 사실상 dead code 다. 신규/라이브 경로는 반드시 fail-closed 인 RecordContentHistory(tx, ...) 를 쓴다.
+func recordContentHistoryLegacy(db *gorm.DB, boTable string, wrID int, wrIsComment int, mbID, wrName, operation, operatedBy string, prevData map[string]interface{}) {
 	payload, err := json.Marshal(prevData)
 	if err != nil {
 		log.Printf("[ContentHistory] Failed to marshal previous data for %s/%d: %v", boTable, wrID, err)
@@ -1190,7 +1192,7 @@ func (r *writeRepository) DeletePost(boardID string, wrID int, deletedBy string)
 		MbID      string `gorm:"column:mb_id"`
 	}
 	if err := r.db.Table(table).Select("wr_subject, wr_content, wr_name, mb_id").Where("wr_id = ?", wrID).Scan(&post).Error; err == nil {
-		RecordContentHistory(r.db, boardID, wrID, 0, post.MbID, post.WrName, "영구삭제", deletedBy, map[string]interface{}{
+		recordContentHistoryLegacy(r.db, boardID, wrID, 0, post.MbID, post.WrName, "영구삭제", deletedBy, map[string]interface{}{
 			"wr_subject": post.WrSubject,
 			"wr_content": post.WrContent,
 			"wr_name":    post.WrName,
