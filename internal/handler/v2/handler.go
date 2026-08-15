@@ -880,18 +880,10 @@ func (h *V2Handler) RestorePost(c *gin.Context) {
 }
 
 // PermanentDeletePost handles DELETE /api/v1/boards/:slug/posts/:id/permanent (admin only)
+// 정책: 영구(물리) 삭제 전면 비활성화. 모든 삭제는 소프트삭제로 원본 이력을 보존한다
+// (사법기관·KISA 등 자료제출 대응).
 func (h *V2Handler) PermanentDeletePost(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		common.V2ErrorResponse(c, http.StatusBadRequest, "잘못된 게시글 ID", err)
-		return
-	}
-
-	if err := h.postRepo.PermanentDelete(id); err != nil {
-		common.V2ErrorResponse(c, http.StatusInternalServerError, "영구 삭제 실패", err)
-		return
-	}
-	common.V2Success(c, gin.H{"message": "영구 삭제 완료"})
+	common.V2ErrorResponse(c, http.StatusForbidden, "영구 삭제는 정책상 비활성화되어 있습니다", nil)
 }
 
 // GetDeletedPosts handles GET /api/v1/admin/posts/deleted (admin only)
