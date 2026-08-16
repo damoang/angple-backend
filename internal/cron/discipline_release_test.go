@@ -93,3 +93,82 @@ func TestCronExpiredDetection(t *testing.T) {
 		t.Error("YYYYMMDD ban for 20260318 should be expired at 2026-03-19 12:00:00")
 	}
 }
+
+// TestShouldReleaseIntercept 는 2026-08-17 "하루 초과 구금" 회귀를 막는다.
+//
+// 사고: 노사모준(log4245) 5일 처분이 KST 08-16 23:05 에 끝났는데 08-17 00:00 크론이
+// 풀지 않았다. mb_intercept_date 가 종료일보다 하루 뒤인 "20260817" 이었고,
+// 크론이 그 값을 다시 "그 날 23:59:59 까지"로 해석해 가산이 두 번 일어났다.
+// 회원이 "이용제한 시간이 지났는데 글을 쓸 수 없다"고 문의해 발견됐다.
+func TestShouldReleaseIntercept(t *testing.T) {
+	// 통보된 종료: 2026-08-16 23:05:15 (= penalty_date_from 08-11 23:05:15 + 5일)
+	notifiedEnd := time.Date(2026, 8, 16, 23, 5, 15, 0, time.Local)
+	justAfter := time.Date(2026, 8, 17, 0, 0, 14, 0, time.Local) // 실제 크론 실행 시각
+	justBefore := time.Date(2026, 8, 16, 22, 0, 0, 0, time.Local)
+
+	tests := []struct {
+		name          string
+		now           time.Time
+		interceptDate string
+		authEnd       time.Time
+		hasAuth       bool
+		want          bool
+	}{
+		{
+			// ⭐ 회귀 케이스 — 파생값은 하루 뒤(20260817)지만 정본으로 풀어야 한다.
+			name:          "정본이 만료됐으면 파생값이 하루 뒤여도 해제",
+			now:           justAfter,
+			interceptDate: "20260817",
+			authEnd:       notifiedEnd,
+			hasAuth:       true,
+			want:          true,
+		},
+		{
+			name:          "정본이 아직 안 끝났으면 유지",
+			now:           justBefore,
+			interceptDate: "20260817",
+			authEnd:       notifiedEnd,
+			hasAuth:       true,
+			want:          false,
+		},
+		{
+			name:          "정본 없으면 파생값으로 판정 — 당일은 유지",
+			now:           justAfter,
+			interceptDate: "20260817",
+			hasAuth:       false,
+			want:          false,
+		},
+		{
+			name:          "정본 없고 파생값이 어제면 해제",
+			now:           justAfter,
+			interceptDate: "20260816",
+			hasAuth:       false,
+			want:          true,
+		},
+		{
+			name:          "형식 불명은 풀지 않는다",
+			now:           justAfter,
+			interceptDate: "not-a-date",
+			hasAuth:       false,
+			want:          false,
+		},
+		{
+			name:          "영구(99991231)는 풀리지 않는다",
+			now:           justAfter,
+			interceptDate: "99991231",
+			hasAuth:       false,
+			want:          false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldReleaseIntercept(tt.now, tt.interceptDate, tt.authEnd, tt.hasAuth)
+			if got != tt.want {
+				t.Errorf("shouldReleaseIntercept(now=%s, intercept=%q, auth=%v/%t) = %t, want %t",
+					tt.now.Format("2006-01-02 15:04:05"), tt.interceptDate,
+					tt.authEnd.Format("2006-01-02 15:04:05"), tt.hasAuth, got, tt.want)
+			}
+		})
+	}
+}
