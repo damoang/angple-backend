@@ -222,6 +222,8 @@ func SetupBlock(router *gin.Engine, h *v2handler.BlockHandler, jwtManager *jwt.M
 func SetupDevices(router *gin.Engine, h *v2handler.DeviceHandler, jwtManager *jwt.Manager) {
 	auth := middleware.JWTAuth(jwtManager)
 
+	// 세션 만료 기기의 등록 해제 — JWT 불가 상황이라 토큰 단독 인증(#13444)
+	router.DELETE("/api/v2/devices/by-token/:token", h.UnregisterDeviceByToken)
 	devices := router.Group("/api/v2/devices", auth)
 	devices.POST("", h.RegisterDevice)
 	devices.GET("", h.ListDevices)
