@@ -184,6 +184,14 @@ func (h *V2Handler) toV2Post(w *gnuboard.G5Write, boardID uint64, boardSlug, boa
 		if cv, ok := m["content"].(string); ok {
 			out["content"] = cv
 		}
+		// 알뜰구매류는 구매 URL 을 본문이 아닌 wr_link1/2 전용 필드에 담는다(#13402).
+		// v2 계약에 없어 앱에서 링크가 통째로 사라졌던 원인 — 상세에서만 전달.
+		if w.WrLink1 != "" {
+			out["link1"] = w.WrLink1
+		}
+		if w.WrLink2 != "" {
+			out["link2"] = w.WrLink2
+		}
 	}
 	// 썸네일은 계약 외 필드지만 무해(앱은 미지의 필드 무시) — 있으면 전달.
 	if th, ok := m["thumbnail"]; ok {
@@ -196,6 +204,8 @@ func (h *V2Handler) toV2Post(w *gnuboard.G5Write, boardID uint64, boardSlug, boa
 		out["content"] = ""
 		out["excerpt"] = ""
 		delete(out, "thumbnail")
+		delete(out, "link1")
+		delete(out, "link2")
 	}
 	attachAuthor(out, w.MbID, authors)
 	return out

@@ -11,6 +11,9 @@ import (
 type DeviceRepository interface {
 	Upsert(device *v2.V2Device) error
 	DeleteByUserAndToken(userID uint64, token string) error
+	// DeleteByToken 은 토큰 단독으로 삭제한다 — 세션 만료로 JWT 가 없는 기기의
+	// 등록 해제용(#13444). 토큰은 비추측성 시크릿이라 보유 자체가 소유 증명이다.
+	DeleteByToken(token string) error
 	ListByUser(userID uint64) ([]v2.V2Device, error)
 }
 
@@ -49,4 +52,8 @@ func (r *deviceRepository) ListByUser(userID uint64) ([]v2.V2Device, error) {
 	var devices []v2.V2Device
 	err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&devices).Error
 	return devices, err
+}
+
+func (r *deviceRepository) DeleteByToken(token string) error {
+	return r.db.Where("token = ?", token).Delete(&v2.V2Device{}).Error
 }

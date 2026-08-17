@@ -91,3 +91,20 @@ func (h *DeviceHandler) ListDevices(c *gin.Context) {
 	}
 	common.V2Success(c, devices)
 }
+
+// UnregisterDeviceByToken handles DELETE /api/v2/devices/by-token/:token (무인증).
+// 세션이 만료되어 JWT 를 붙일 수 없는 기기가 푸시 등록을 해제하는 경로(#13444
+// "로그아웃 상태인데 푸시 수신"). 토큰은 기기만 아는 비추측성 값이므로
+// 보유 = 소유 증명으로 간주하고 토큰 단독 삭제를 허용한다.
+func (h *DeviceHandler) UnregisterDeviceByToken(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "token이 필요합니다", nil)
+		return
+	}
+	if err := h.deviceRepo.DeleteByToken(token); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "디바이스 삭제 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"message": "디바이스 삭제 완료"})
+}
