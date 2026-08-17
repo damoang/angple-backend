@@ -47,6 +47,25 @@ func ReportLockThreshold(db *gorm.DB) int {
 	return int(result.ValueInt)
 }
 
+// contentSanctioned 는 해당 콘텐츠로 이미 제재가 확정됐는지 본다.
+//
+// ⛔ sgID 기준이다. 부모 글로 판정하면 댓글에서 어긋난다 —
+// 부모가 제재됐다고 멀쩡한 댓글이 묶이거나, 제재된 댓글이 새어 나간다.
+// ⛔ 조회 실패 시 true 를 돌려준다(fail-closed). 모르는 상태에서 작성자에게
+// 냉각 제한을 거는 쪽이, 잠금이 한 번 늦는 쪽보다 나쁘다.
+func contentSanctioned(db *gorm.DB, boTable string, sgID int) bool {
+	var n int64
+	if err := db.Raw(`
+		SELECT COUNT(*) FROM g5_na_singo
+		 WHERE sg_table = ? AND sg_id = ? AND processed = 1 AND admin_approved = 1
+		 LIMIT 1
+	`, boTable, sgID).Scan(&n).Error; err != nil {
+		log.Printf("[autolock] 제재 여부 조회 실패 — 재잠금 보류 (%s/%d): %v", boTable, sgID, err)
+		return true
+	}
+	return n > 0
+}
+
 // ApplyReportAutoLock 은 신고 접수 직후 호출되어, 해당 콘텐츠의 고유 신고자 수가
 // 임계값 이상이면 wr_7 = 'lock' 을 세팅한다.
 //
@@ -84,6 +103,22 @@ func ApplyReportAutoLock(db *gorm.DB, boTable string, sgID, sgParent int) {
 		return
 	}
 	if currentWr7 == "lock" {
+		return
+	}
+
+	// ⛔ 이미 제재가 확정된 콘텐츠는 다시 잠그지 않는다.
+	//
+	// 왜: 새 잠금은 wr_7 만 바꾸는 게 아니라 **작성자 냉각(ApplyReportFreeze)** 과
+	// 진실의 방 참조글까지 만든다. 처분이 끝난 글에 신고가 더 쌓였다고 작성자에게
+	// 제한을 또 거는 것은 **같은 글로 두 번 처분하는 것**이다.
+	//
+	// 2026-08-18 실측: 제재확정인데 wr_7 이 'lock' 이 아닌 글이 free 기준 2,878건이다.
+	// 신고 접수를 상시 허용하면(같은 날 409 제거) 이 글들이 전부 이 경로를 탄다.
+	//
+	// ⭐ 각하(processed=1, admin_approved=0)는 제외하지 않는다 — 문제없음으로 본 글에
+	// 이후 신고가 쌓여 임계에 도달하면 잠기는 것이 맞다.
+	if contentSanctioned(db, boTable, sgID) {
+		log.Printf("[autolock] 제재확정 콘텐츠 — 재잠금 건너뜀 (%s/%d)", boTable, sgID)
 		return
 	}
 
