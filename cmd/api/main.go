@@ -5680,18 +5680,20 @@ func main() {
 				return
 			}
 
-			// #12420: 이미 신고 누적으로 자동 잠긴 글은 추가 신고 차단 (idempotent — 처리 완료 신호)
-			{
-				var wrLock string
-				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
-					Select("COALESCE(wr_7, '')").
-					Where("wr_id = ?", postID).
-					Scan(&wrLock).Error
-				if wrLock == "lock" {
-					c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고 처리가 완료된 게시물입니다"})
-					return
-				}
-			}
+			// ⭐ 2026-08-18: 잠긴 글에도 신고를 받는다.
+			//
+			// 종전에는 wr_7='lock' 이면 409 로 막았다(#12420). 그러나 잠금은
+			// **A형(신고 누적 자동잠금)과 B형(제재확정)을 구분하지 않는다.**
+			// 임계에 도달해 잠긴 글은 그 뒤 신고가 아예 기록되지 않아
+			//   · 실제 신고 규모가 임계값에서 멈춘 것처럼 보이고
+			//   · 잠금 이후 새로 생긴 문제를 회원이 알릴 방법이 없었다
+			//
+			// 접수는 열되 중복 처분은 따로 막는다:
+			//   · 같은 사람의 재신고 → 바로 아래 중복 가드
+			//   · 제재확정 콘텐츠 재잠금·작성자 냉각 → ApplyReportAutoLock 의 contentSanctioned
+			//   · ops inbox 중복 표시 → damoang-backend 의 processedExclusionSQL
+			//
+			// 설계: ops-docs/2026-08-18-report-accept-always-inbox-exclude-design.html
 
 			// 중복 신고 확인 (g5_na_singo 테이블)
 			var count int64
@@ -5775,18 +5777,9 @@ func main() {
 				return
 			}
 
-			// #12420: 이미 신고 누적으로 자동 잠긴 댓글은 추가 신고 차단 (idempotent)
-			{
-				var wrLock string
-				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
-					Select("COALESCE(wr_7, '')").
-					Where("wr_id = ?", commentID).
-					Scan(&wrLock).Error
-				if wrLock == "lock" {
-					c.JSON(http.StatusConflict, gin.H{"success": false, "error": "이미 신고 처리가 완료된 댓글입니다"})
-					return
-				}
-			}
+			// ⭐ 2026-08-18: 잠긴 댓글에도 신고를 받는다. 게시글 경로와 같은 규약이다.
+			// 중복 처분 방지는 아래 중복 가드 · ApplyReportAutoLock 의 contentSanctioned ·
+			// ops inbox 의 processedExclusionSQL 이 나눠 담당한다.
 
 			// 중복 신고 확인 (g5_na_singo 테이블)
 			var count int64
