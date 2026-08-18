@@ -251,6 +251,25 @@ func TransformToV1Post(w *gnuboard.G5Write, isNotice bool) map[string]any {
 	return transformToV1PostUnmasked(w, isNotice)
 }
 
+// deriveIsBlur 는 wr_option 콤마 토큰에서 부끄앙(blur) 상태를 3-state 로 파생한다.
+// 'noblur' 가 'blur' 의 부분문자열이라 strings.Contains 로는 오매칭되므로, 콤마 분리
+// 후 정확 토큰 매칭한다. blur 를 우선 검사(둘 다 있으면 blur 승)한다.
+// 반환 present=false 면 응답에 is_blur 키를 넣지 않는다(web 이 키워드 폴백으로 판정).
+func deriveIsBlur(wrOption string) (value bool, present bool) {
+	tokens := strings.Split(wrOption, ",")
+	for _, tok := range tokens {
+		if strings.TrimSpace(tok) == "blur" {
+			return true, true
+		}
+	}
+	for _, tok := range tokens {
+		if strings.TrimSpace(tok) == "noblur" {
+			return false, true
+		}
+	}
+	return false, false
+}
+
 // maskedDeletedV1Post 는 삭제글의 목록/상세 공용 tombstone 이다.
 //
 // 유지하는 필드와 이유:
@@ -319,6 +338,13 @@ func transformToV1PostUnmasked(w *gnuboard.G5Write, isNotice bool) map[string]an
 		"author_ip":  "",
 		"created_at": w.WrDatetime.Format(time.RFC3339),
 		"updated_at": parseWrLast(w.WrLast, w.WrDatetime),
+	}
+
+	// 부끄앙(#13571): 작성자가 게시 후 blur/noblur 를 토글한다. 3-state 파생 —
+	// blur→true, noblur→false, 둘 다 없으면 키 생략(web=키워드 폴백). 목록·요약·상세가
+	// 모두 이 함수를 거치므로 여기 한 곳이면 전 경로에 실린다.
+	if isBlur, present := deriveIsBlur(w.WrOption); present {
+		result["is_blur"] = isBlur
 	}
 
 	// unmasked 경로에도 실릴 수 있는 삭제 메타(관리자 상세 등).
