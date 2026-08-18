@@ -66,8 +66,40 @@ func NewMyPageRepository(db *gorm.DB, boardRepo BoardRepository) MyPageRepositor
 	return &myPageRepository{db: db, boardRepo: boardRepo}
 }
 
+// activeBoardsCache 는 getActiveBoards 결과를 통째로 캐시한다.
+//
+// ⛔ 이 함수는 호출마다 쿼리를 **두 개** 돌린다(g5_board 전량 + information_schema).
+//
+//	2026-08-18 실측: 각각 630만 회 / 19,238초 + 22,778초 = 합계 42,016초.
+//	information_schema 는 Aurora 에서 특히 비싸다.
+//
+// ⭐ 결과가 바뀌는 조건은 **게시판 생성·삭제뿐**이다. 글이 아무리 늘어도 안 바뀐다.
+//
+//	그래서 통째로 캐시해도 안전하다. 같은 파일 계열의 boardByIDCache 와 같은 방식.
+var activeBoardsCache struct {
+	sync.RWMutex
+	ids       []string
+	expiresAt time.Time
+}
+
+// 게시판 추가 후 최대 이만큼 목록에 안 나타난다. 게시판 생성은 드물어 5분이면 충분하다.
+const activeBoardsCacheTTL = 5 * time.Minute
+
 // getActiveBoards returns board IDs that actually have write tables
 func (r *myPageRepository) getActiveBoards() []string {
+	now := time.Now()
+
+	activeBoardsCache.RLock()
+	if activeBoardsCache.ids != nil && now.Before(activeBoardsCache.expiresAt) {
+		// ⛔ 캐시된 슬라이스를 그대로 돌려주면 호출자가 append/정렬로 오염시킬 수 있다.
+		//    복사본을 준다.
+		out := make([]string, len(activeBoardsCache.ids))
+		copy(out, activeBoardsCache.ids)
+		activeBoardsCache.RUnlock()
+		return out
+	}
+	activeBoardsCache.RUnlock()
+
 	boards, err := r.boardRepo.FindAll()
 	if err != nil {
 		return nil
@@ -89,6 +121,15 @@ func (r *myPageRepository) getActiveBoards() []string {
 		if existSet[fmt.Sprintf("g5_write_%s", b.BoTable)] {
 			ids = append(ids, b.BoTable)
 		}
+	}
+
+	// ⛔ 빈 결과는 캐시하지 않는다. DB 일시 장애로 빈 목록이 나왔을 때
+	//    그 상태가 TTL 동안 굳어 마이페이지가 통째로 비어 보인다.
+	if len(ids) > 0 {
+		activeBoardsCache.Lock()
+		activeBoardsCache.ids = ids
+		activeBoardsCache.expiresAt = time.Now().Add(activeBoardsCacheTTL)
+		activeBoardsCache.Unlock()
 	}
 	return ids
 }
