@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1915,6 +1916,153 @@ func main() {
 
 		// Admin member management + memo CRUD
 		adminMemberHandler := handler.NewAdminMemberHandler(db)
+		// ── 관리자 대시보드 통계 ─────────────────────────────────────────
+		//
+		// ⛔ 2026-08-18: 프런트는 예전부터 /api/v1/admin/stats 를 불렀는데 그 라우트가
+		// **없었다.** NoRoute 가 200 success:true 를 돌려주는 바람에 실패가 드러나지
+		// 않았고, 대시보드는 오래 "-" 만 띄우고 있었다. 여기서 실제로 만든다.
+		//
+		// ⭐ 회원 수 정본은 g5_member 다. v2_users(62,235)는 g5_member(62,725)와
+		// 490명 어긋나므로 회원 수 지표로 쓰지 않는다.
+		// ⛔ 탈퇴 회원도 행이 남으므로(soft delete) 전체와 활동 회원을 나눠 준다.
+		adminStatsGroup := router.Group("/api/v1/admin")
+		adminStatsGroup.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+		adminStatsGroup.GET("/stats", func(c *gin.Context) {
+			type stats struct {
+				TotalMembers  int64 `json:"totalMembers"`
+				ActiveMembers int64 `json:"activeMembers"`
+				LeftMembers   int64 `json:"leftMembers"`
+				TodayJoined   int64 `json:"todayJoined"`
+				TodayLogin    int64 `json:"todayLogin"`
+				MembersChange int64 `json:"membersChange"`
+				TodayPosts    int64 `json:"todayPosts"`
+				TodayComments int64 `json:"todayComments"`
+			}
+			var out stats
+			// 한 번의 스캔으로 회원 지표를 모은다. 6만 행이라 부담이 없고,
+			// 쿼리를 나누면 카드 사이에 시점 차가 생겨 합이 안 맞아 보인다.
+			row := db.Raw(`
+				SELECT COUNT(*) AS total,
+				       SUM(IFNULL(mb_leave_date,'') = '') AS active,
+				       SUM(IFNULL(mb_leave_date,'') <> '') AS left_cnt,
+				       SUM(DATE(mb_datetime) = CURDATE()) AS today_joined,
+				       SUM(DATE(mb_today_login) = CURDATE()) AS today_login,
+				       SUM(mb_datetime >= NOW() - INTERVAL 7 DAY) AS week_joined
+				  FROM g5_member`).Row()
+			var weekJoined int64
+			if err := row.Scan(&out.TotalMembers, &out.ActiveMembers, &out.LeftMembers,
+				&out.TodayJoined, &out.TodayLogin, &weekJoined); err != nil {
+				pkglogger.Error("[admin/stats] 회원 통계 조회 실패: %v", err)
+				c.JSON(http.StatusInternalServerError,
+					gin.H{"success": false, "error": "통계를 불러오지 못했습니다"})
+				return
+			}
+			out.MembersChange = weekJoined
+
+			// 오늘 글·댓글. g5_board_new 는 롤링 테이블이라 "오늘" 집계에는 적합하다.
+			// ⛔ g5_board 의 bo_count_* 는 누적 총계라 오늘 값이 아니다 — 섞지 않는다.
+			// 실패해도 회원 지표는 살려서 내보낸다(부분 실패가 화면 전체를 죽이지 않게).
+			if err := db.Raw(`
+				SELECT SUM(wr_is_comment = 0) AS posts,
+				       SUM(wr_is_comment = 1) AS comments
+				  FROM g5_board_new
+				 WHERE bn_datetime >= CURDATE()`).Row().
+				Scan(&out.TodayPosts, &out.TodayComments); err != nil {
+				pkglogger.Error("[admin/stats] 오늘 글·댓글 집계 실패: %v", err)
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
+		})
+
+		// ⛔ 동적 테이블명(g5_write_<slug>)을 쿼리에 넣기 전에 형식을 검증한다.
+		// slug 는 DB 에서 온 값이지만, 문자열 조합으로 테이블명을 만드는 자리에서는
+		// 출처를 믿지 않는다. service.boardTablePattern 과 같은 규칙이다.
+		boardTableName := regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+		// GET /api/v1/admin/activity — 대시보드 최근 활동
+		//
+		// ⛔ 이것도 라우트가 없어 NoRoute 로 빠지던 경로다(2026-08-18).
+		// g5_board_new 는 제목을 갖고 있지 않아 게시판별 write 테이블을 따로 읽는다.
+		// 건수를 10건으로 묶고 게시판 수만큼만 질의하므로(보통 3~5회) 부담이 없다.
+		adminStatsGroup.GET("/activity", func(c *gin.Context) {
+			limit := 10
+			if v, err := strconv.Atoi(c.DefaultQuery("limit", "10")); err == nil && v > 0 && v <= 50 {
+				limit = v
+			}
+
+			type row struct {
+				BoTable    string    `gorm:"column:bo_table"`
+				WrID       int       `gorm:"column:wr_id"`
+				MbID       string    `gorm:"column:mb_id"`
+				IsComment  int       `gorm:"column:wr_is_comment"`
+				BnDatetime time.Time `gorm:"column:bn_datetime"`
+			}
+			var rows []row
+			if err := db.Raw(`
+				SELECT bo_table, wr_id, mb_id, wr_is_comment, bn_datetime
+				  FROM g5_board_new
+				 WHERE wr_is_secret = 0
+				 ORDER BY bn_datetime DESC LIMIT ?`, limit).Scan(&rows).Error; err != nil {
+				pkglogger.Error("[admin/activity] 조회 실패: %v", err)
+				c.JSON(http.StatusInternalServerError,
+					gin.H{"success": false, "error": "최근 활동을 불러오지 못했습니다"})
+				return
+			}
+
+			// 게시판별로 제목을 한 번에 읽는다(N+1 회피).
+			titles := map[string]map[int]string{}
+			byTable := map[string][]int{}
+			for _, r := range rows {
+				byTable[r.BoTable] = append(byTable[r.BoTable], r.WrID)
+			}
+			for table, ids := range byTable {
+				if !boardTableName.MatchString(table) {
+					continue // 동적 테이블명은 형식을 검증한 것만 쓴다
+				}
+				var ts []struct {
+					WrID      int    `gorm:"column:wr_id"`
+					WrSubject string `gorm:"column:wr_subject"`
+					WrName    string `gorm:"column:wr_name"`
+				}
+				db.Raw(fmt.Sprintf(
+					"SELECT wr_id, wr_subject, wr_name FROM `g5_write_%s` WHERE wr_id IN (?)", table),
+					ids).Scan(&ts)
+				m := map[int]string{}
+				for _, t := range ts {
+					m[t.WrID] = t.WrSubject
+				}
+				titles[table] = m
+			}
+
+			type activity struct {
+				ID        int    `json:"id"`
+				Type      string `json:"type"`
+				Title     string `json:"title"`
+				Author    string `json:"author"`
+				BoardID   string `json:"boardId"`
+				CreatedAt string `json:"createdAt"`
+			}
+			out := make([]activity, 0, len(rows))
+			for _, r := range rows {
+				kind := "post"
+				if r.IsComment == 1 {
+					kind = "comment"
+				}
+				title := ""
+				if m, ok := titles[r.BoTable]; ok {
+					title = m[r.WrID]
+				}
+				if title == "" {
+					title = fmt.Sprintf("%s/%d", r.BoTable, r.WrID)
+				}
+				out = append(out, activity{
+					ID: r.WrID, Type: kind, Title: title, Author: r.MbID,
+					BoardID: r.BoTable, CreatedAt: r.BnDatetime.Format(time.RFC3339),
+				})
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
+		})
+
 		adminMemoGroup := router.Group("/api/v1/admin/members")
 		adminMemoGroup.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
 
@@ -6956,6 +7104,16 @@ func main() {
 	// v1 API catch-all: 미매핑 v1 엔드포인트에 대해 404 대신 빈 성공 응답 반환
 	router.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") {
+			// ⛔ 미등록 v1 경로는 200 success:true 로 응답한다(구버전 클라이언트 호환).
+			// 그 관대함 때문에 오타·삭제된 라우트가 **조용히** 묻힌다.
+			// 2026-08-18: 관리자 대시보드가 없는 /api/v1/admin/stats 를 부르며
+			// 오래 빈 화면을 띄우고 있었는데 아무도 몰랐다. 인증조차 타지 않는다.
+			//
+			// 동작은 그대로 두되(호환 유지) **흔적은 반드시 남긴다.**
+			// Error 로 쓰는 이유: 이것은 정상 상황이 아니라 배선 결함 신호이고,
+			// Info 에 섞이면 초당 수십 줄 사이에 묻혀 아무도 못 본다.
+			pkglogger.Error("[NOROUTE] 미등록 v1 경로가 200 으로 응답됨 — method=%s path=%s referer=%s",
+				c.Request.Method, c.Request.URL.Path, c.Request.Referer())
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
 			return
 		}
