@@ -1011,21 +1011,100 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 // FindDisciplinedIDs returns wr_ids (within boardID) that are referenced as
 // discipline evidence (g5_na_singo.discipline_log_id IS NOT NULL). 글/댓글 공용
 // (sg_id 는 글·댓글 wr_id 를 동일 컬럼으로 담음). 프로필 최근 글·댓글 마스킹에 사용.
+// disciplinedIDsCache 는 게시판별 "이용제한 근거" 대상 ID 집합을 통째로 캐시한다.
+//
+// ⛔ 예전에는 프로필을 열 때마다 게시판별로 DB 를 쳤다(글·댓글 두 곳에서 각각).
+//
+//	2026-08-19 실측: 누적 2억 640만회 · 156,912초 = DB 실행시간의 약 5.0%.
+//	평균 760us 로 한 번은 빠르지만 **반환이 평균 0.01행** — 100번 중 99번이 빈손이었다.
+//
+// ⭐ 대상 전체가 작다 — 전 게시판 합쳐 3,407개(약 54KB). free 3,171 · truthroom 120 · car 32 …
+//
+//	그래서 게시판별로 통째로 캐시하고 메모리에서 판정한다. web 의 댓글 경로도 같은 방식으로
+//	고쳤다(PR #2120) — 같은 문제가 두 저장소에 나뉘어 있었다.
+//
+// ⛔ 갱신 쿼리가 비싸면 문제를 옮기는 것뿐이다. g5_na_singo 에 discipline_log_id 를 포함한
+//
+//	인덱스가 없어 153,626행을 훑고 0.705초가 걸렸다. idx_table_disc_id(sg_table,
+//	discipline_log_id, sg_id) 를 추가해 0.072초(10배)로 줄였다 — 이 인덱스를 지우면 다시 비싸진다.
+var disciplinedIDsCache struct {
+	sync.RWMutex
+	byBoard map[string]map[int]bool
+	expires map[string]time.Time
+}
+
+// 제재는 하루 몇 건 수준이라 5분이면 충분하다. 늦어도 "근거 표시" 가 5분 늦게 붙을 뿐이다.
+const disciplinedIDsCacheTTL = 5 * time.Minute
+
+// 이 수를 넘으면 쓰기 시점에 만료분을 청소한다. 게시판 수(약 167)보다 넉넉히 잡되
+// 무한 증가는 막는다.
+const disciplinedIDsCacheMaxBoards = 200
+
+// loadDisciplinedIDs 는 게시판의 전체 근거 ID 집합을 가져온다(캐시 우선).
+func (r *myPageRepository) loadDisciplinedIDs(boardID string) map[int]bool {
+	disciplinedIDsCache.RLock()
+	if set, ok := disciplinedIDsCache.byBoard[boardID]; ok {
+		if exp, ok2 := disciplinedIDsCache.expires[boardID]; ok2 && time.Now().Before(exp) {
+			disciplinedIDsCache.RUnlock()
+			return set
+		}
+	}
+	disciplinedIDsCache.RUnlock()
+
+	var ids []int
+	if err := r.db.Raw(
+		"SELECT DISTINCT sg_id FROM g5_na_singo WHERE sg_table = ? AND discipline_log_id IS NOT NULL",
+		boardID,
+	).Scan(&ids).Error; err != nil {
+		// ⛔ 실패를 캐시하지 않는다. DB 일시 장애가 TTL 동안 굳으면
+		//    그 사이 근거 표시가 통째로 사라진다.
+		return nil
+	}
+
+	set := make(map[int]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+
+	disciplinedIDsCache.Lock()
+	if disciplinedIDsCache.byBoard == nil {
+		disciplinedIDsCache.byBoard = make(map[string]map[int]bool)
+		disciplinedIDsCache.expires = make(map[string]time.Time)
+	}
+	// ⛔ 게시판이 167개다. 만료된 항목을 치우지 않으면 맵이 계속 자란다.
+	//    전량이 54KB 수준이라 크지는 않지만, 상한 없는 캐시는 원칙적으로 두지 않는다.
+	//    쓰기 시점에 만료분을 함께 정리한다(별도 타이머 불필요).
+	if len(disciplinedIDsCache.byBoard) > disciplinedIDsCacheMaxBoards {
+		now := time.Now()
+		for b, exp := range disciplinedIDsCache.expires {
+			if now.After(exp) {
+				delete(disciplinedIDsCache.byBoard, b)
+				delete(disciplinedIDsCache.expires, b)
+			}
+		}
+	}
+	// ⛔ 빈 집합도 캐시한다. 대부분의 게시판이 실제로 0개라, 캐시하지 않으면
+	//    그 게시판들은 매 요청마다 DB 를 쳐서 원래 문제가 그대로 남는다.
+	disciplinedIDsCache.byBoard[boardID] = set
+	disciplinedIDsCache.expires[boardID] = time.Now().Add(disciplinedIDsCacheTTL)
+	disciplinedIDsCache.Unlock()
+
+	return set
+}
+
 func (r *myPageRepository) FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error) {
 	result := make(map[int]bool)
 	if boardID == "" || len(wrIDs) == 0 {
 		return result, nil
 	}
-	var ids []int
-	err := r.db.Raw(
-		"SELECT DISTINCT sg_id FROM g5_na_singo WHERE sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL",
-		boardID, wrIDs,
-	).Scan(&ids).Error
-	if err != nil {
-		return result, err
-	}
-	for _, id := range ids {
-		result[id] = true
+
+	// ⛔ 캐시된 map 을 그대로 돌려주지 마라 — 호출자가 쓰면 공유 상태가 오염된다.
+	//    요청된 ID 만 골라 새 map 을 만든다(호출자 계약도 그대로 유지된다).
+	boardSet := r.loadDisciplinedIDs(boardID)
+	for _, id := range wrIDs {
+		if boardSet[id] {
+			result[id] = true
+		}
 	}
 	return result, nil
 }
