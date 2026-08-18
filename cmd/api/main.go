@@ -4421,6 +4421,7 @@ func main() {
 				Category           *string  `json:"category"`
 				IsSecret           *bool    `json:"is_secret"`
 				IsCommentsDisabled *bool    `json:"is_comments_disabled"`
+				IsBlur             *bool    `json:"is_blur"` // 부끄앙(#13571): 작성자가 게시 후 blur/noblur 토글
 				Link1              *string  `json:"link1"`
 				Link2              *string  `json:"link2"`
 				Extra1             *string  `json:"extra_1"`
@@ -4505,10 +4506,13 @@ func main() {
 			// ⛔ 두 토글을 별도 블록으로 두면 서로 updates["wr_option"] 을 덮어쓴다 — 반드시 한 블록.
 			// 비밀글은 그동안 작성 시에만 설정 가능하고 수정으로는 해제/설정이 안 됐다. (#13161)
 			applyCommentsDisabled := req.IsCommentsDisabled != nil && userLevel >= 10 // frontend 게이트와 동일
-			if req.IsSecret != nil || applyCommentsDisabled {
+			if req.IsSecret != nil || applyCommentsDisabled || req.IsBlur != nil {
 				existing := strings.Split(post.WrOption, ",")
 				kept := existing[:0]
 				secret, commentsDisabled := false, false
+				// 부끄앙(#13571) blur/noblur 는 상호배타 토큰. req.IsBlur==nil 이면
+				// 기존 상태를 그대로 보존해야 하므로 존재 여부를 따로 추적한다.
+				hasBlur, hasNoblur := false, false
 				for _, tok := range existing {
 					tok = strings.TrimSpace(tok)
 					switch tok {
@@ -4517,6 +4521,10 @@ func main() {
 						secret = true
 					case "comments_disabled":
 						commentsDisabled = true
+					case "blur":
+						hasBlur = true
+					case "noblur":
+						hasNoblur = true
 					default:
 						kept = append(kept, tok)
 					}
@@ -4535,11 +4543,23 @@ func main() {
 				if applyCommentsDisabled {
 					commentsDisabled = *req.IsCommentsDisabled
 				}
+				// 부끄앙 토글 — true=blur(+noblur 제거), false=noblur(+blur 제거).
+				// nil 이면 위 루프에서 잡아둔 기존 has* 값을 그대로 재기록해 보존한다.
+				if req.IsBlur != nil {
+					hasBlur = *req.IsBlur
+					hasNoblur = !*req.IsBlur
+				}
 				if secret {
 					kept = append(kept, "secret")
 				}
 				if commentsDisabled {
 					kept = append(kept, "comments_disabled")
+				}
+				if hasBlur {
+					kept = append(kept, "blur")
+				}
+				if hasNoblur {
+					kept = append(kept, "noblur")
 				}
 				updates["wr_option"] = strings.Join(kept, ",")
 			}
