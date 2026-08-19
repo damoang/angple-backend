@@ -702,12 +702,34 @@ func (r *myPageRepository) verifyActivityPosts(
 			WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
 		}
 		var okRows []verifiedRow
+		// #13512: 후보에 이용제한 근거 글(비밀 처리)이 들어와도, 아래 비밀글 제외에
+		//    다시 걸려 사라지면 마스킹을 태울 행이 없다. 근거로 등록된 wr_id 만 예외적으로
+		//    비밀·잠금 제외를 우회시킨다(정본에 실재하면 남긴다). 제목 마스킹은 핸들러가
+		//    [이용제한 근거 글]로 덮는다. 일반 비밀글은 근거 집합에 없어 그대로 제외(무회귀).
+		//    근거 집합은 게시판 단위로 캐시돼 있어(loadDisciplinedIDs) 추가 DB 부하가 없다.
+		var evidenceIDs []int
+		if disciplined := r.loadDisciplinedIDs(boardID); len(disciplined) > 0 {
+			for _, id := range ids {
+				if disciplined[id] {
+					evidenceIDs = append(evidenceIDs, id)
+				}
+			}
+		}
 		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 		q := fmt.Sprintf(
 			"SELECT wr_id, wr_deleted_at FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
 				" AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL)"+
 				" AND (wr_7 IS NULL OR wr_7 != 'lock')", boardID)
-		if err := r.db.Raw(q, ids, mbID).Scan(&okRows).Error; err != nil {
+		qArgs := []interface{}{ids, mbID}
+		if len(evidenceIDs) > 0 {
+			// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
+			q = fmt.Sprintf(
+				"SELECT wr_id, wr_deleted_at FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
+					" AND (((wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL)"+
+					" AND (wr_7 IS NULL OR wr_7 != 'lock')) OR wr_id IN ?)", boardID)
+			qArgs = []interface{}{ids, mbID, evidenceIDs}
+		}
+		if err := r.db.Raw(q, qArgs...).Scan(&okRows).Error; err != nil {
 			continue
 		}
 		m := make(map[int]*time.Time, len(okRows))
@@ -832,6 +854,13 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 	// → 후보를 넉넉히 뽑은 뒤 정본으로 확인된 것만 남긴다.
 	// #13174: 삭제된 글도 자리표시자([삭제된 게시물])로 나가야 하므로 후보에 포함한다.
 	// 삭제 행은 is_public=0 이라, 공개 분기와 삭제 분기를 UNION ALL 로 나눠 뽑는다.
+	// #13512: 이용제한 근거 글은 비밀 처리(wr_option 'secret')로 피드에 is_public=0·
+	//    is_deleted=0 으로 실린다. 위 두 분기(is_public=1 / is_deleted=1) 어디에도
+	//    걸리지 않아 후보에서 통째로 빠졌고, #12908 근거글 마스킹이 무력화됐다.
+	//    → 세 번째 분기로 "근거로 등록된(g5_na_singo.discipline_log_id IS NOT NULL)"
+	//    비밀·미삭제 글만 정확히 살려 후보에 넣는다. 일반 비밀글은 EXISTS 에 걸리지
+	//    않아 계속 제외된다(무회귀). is_public=0 AND is_deleted=0 로 좁혀 1·2 분기와
+	//    중복되지 않게 한다(공개/삭제 근거글은 이미 1·2 분기가 잡는다).
 	// ⛔ 단일 쿼리 `(is_public=1 OR is_deleted=1)` 로 풀지 말 것 — OR 는 인덱스
 	//    등호 프리픽스를 깨서 다작 회원(수만 행)에서 filesort 가 난다. 분기별로는
 	//    기존 인덱스의 등호 연속이 유지된다.
@@ -864,9 +893,28 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		        AND write_table = CONCAT('g5_write_', board_id)
 		      ORDER BY source_created_at DESC, id DESC
 		      LIMIT ?)
+		    UNION ALL
+		    (SELECT write_id AS wr_id,
+		            COALESCE(title, '') AS wr_subject,
+		            source_created_at AS wr_datetime,
+		            board_id,
+		            id AS feed_id
+		       FROM member_activity_feed f
+		      WHERE f.member_id = ?
+		        AND f.activity_type = 1
+		        AND f.is_public = 0
+		        AND f.is_deleted = 0
+		        AND f.write_table = CONCAT('g5_write_', f.board_id)
+		        AND EXISTS (SELECT 1 FROM g5_na_singo s
+		                     WHERE s.sg_table = f.board_id
+		                       AND s.sg_id = f.write_id
+		                       AND s.discipline_log_id IS NOT NULL)
+		      ORDER BY source_created_at DESC, id DESC
+		      LIMIT ?)
 		 ) AS t
 		 ORDER BY wr_datetime DESC, feed_id DESC
 		 LIMIT ?`,
+		mbID, limit*activityCandidateFactor,
 		mbID, limit*activityCandidateFactor,
 		mbID, limit*activityCandidateFactor,
 		limit*activityCandidateFactor,
