@@ -11,9 +11,7 @@ package v2
 // 재사용하므로, 앱 동작이 damoang.net 사이트와 동일해진다(삭제글/공지/정렬 처리 포함).
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -437,10 +435,16 @@ const feedCacheTTL = 30 * time.Second
 // 남의 차단 결과를 받으면 차단한 사람의 글이 보인다. 그래서 blocked 가 비었을 때만 탄다.
 // 차단 보유 회원은 1,360명 / 62,725명 = **2.2%** 라, 97.8% 가 캐시 경로를 지난다.
 //
-// ⛔ 캐시 키에 커서 원문을 그대로 쓰지 않는다 — 임의 문자열로 키를 무한히 만들 수 있고,
+// ## ⛔ 커서가 있는 요청(무한스크롤 2페이지 이상)은 캐시하지 않는다
 //
-//	보드별 wr_id 가 실린 커서는 길다. 해시로 길이를 고정한다. 디코드에 실패한 커서는
-//	첫 페이지와 결과가 같으므로(decodeFeedCursor 가 빈 map 을 준다) 키도 "first" 로 합친다.
+// 캐시되는 값은 응답(20건)이 아니라 **후보 풀**이다 — 보드별 LEFT(wr_content,1000) 을
+// 최대 600행까지 담으므로 **건당 300~800KB** 다(실제 응답 본문 14KB 의 50배).
+// 커서는 앱 무한스크롤이 계속 만들어내므로 키 공간이 사실상 무한이고,
+// ⛔ Redis 가 maxmemory=0 + noeviction 이라 **RAM 이 차면 쫓아내는 대신 쓰기를 거부한다.**
+// 성능 저하가 아니라 장애이고, 세션 등 다른 키까지 같이 죽는다.
+//
+// 첫 페이지만 캐시하면 키가 limit 당 1개로 **유한**해진다. 앱은 열 때마다 첫 페이지를
+// 치므로 p95 문제의 대부분을 잡고, 깊은 페이지는 지금도 6초라 캐시하지 않아도 회귀가 아니다.
 func (h *V2Handler) loadRecentFeed(
 	c *gin.Context,
 	limit int,
@@ -450,17 +454,11 @@ func (h *V2Handler) loadRecentFeed(
 	load := func() ([]gnuboard.FeedPost, error) {
 		return h.feedRepo.FindRecentAcrossBoards(limit, cursor, blocked)
 	}
-	if len(blocked) > 0 || h.cache == nil {
+	if len(blocked) > 0 || len(cursor) > 0 || h.cache == nil {
 		return load()
 	}
 
-	ck := "first"
-	if len(cursor) > 0 {
-		sum := sha256.Sum256([]byte(c.Query("cursor")))
-		ck = hex.EncodeToString(sum[:8])
-	}
-	key := fmt.Sprintf("v2:feed:v1:%d:%s", limit, ck)
-
+	key := fmt.Sprintf("v2:feed:v1:%d", limit)
 	return pkgredis.GetOrSet(c.Request.Context(), h.cache, key, feedCacheTTL, load)
 }
 
