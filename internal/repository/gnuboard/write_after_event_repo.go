@@ -188,8 +188,13 @@ func (r *writeAfterEventRepository) ReclaimStaleProcessing(staleBefore time.Time
 	//	processed 로 바꿨을 수 있다 — 조건이 없으면 **끝난 이벤트를 되살려** 중복 실행한다.
 	// ⛔ available_at 을 60초에 흩는다. 한꺼번에 만기시키면 회수가 그 자체로 부하가 된다.
 	// ⛔ retry_count 는 올리지 않는다 — 이벤트가 실패한 게 아니라 우리가 흘린 것이다.
+	// ⛔ FORCE INDEX (PRIMARY) 를 빼면 안 된다. id IN (...) 을 줘도 옵티마이저가
+	//	status='processing' 이 선택적일 때 idx_status_available 를 고른다
+	//	(2026-08-21 EXPLAIN 실증: key=idx_status_available). 그러면 결국 processing
+	//	범위를 훑어 락을 잡아, 이 수정의 목적이 통째로 무효가 된다.
+	//	PRIMARY 를 강제하면 key=PRIMARY / rows=대상건수 로 **정확히 그 행만** 잠근다.
 	res := r.db.Exec(`
-		UPDATE `+"`"+`g5_write_after_events`+"`"+`
+		UPDATE `+"`"+`g5_write_after_events`+"`"+` FORCE INDEX (`+"`"+`PRIMARY`+"`"+`)
 		   SET status = ?, claimed_at = NULL,
 		       available_at = DATE_ADD(?, INTERVAL MOD(id, 60) SECOND)
 		 WHERE id IN (?) AND status = ?`,
