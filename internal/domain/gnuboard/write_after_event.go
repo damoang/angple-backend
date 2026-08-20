@@ -19,6 +19,15 @@ const (
 	WriteAfterEventStatusPending    = "pending"
 	WriteAfterEventStatusProcessing = "processing"
 	WriteAfterEventStatusProcessed  = "processed"
+	// WriteAfterEventStatusDead 는 재시도 상한을 넘겨 더 이상 시도하지 않는 종착 상태다.
+	// ⛔ 상한이 없으면 영구 실패 이벤트(원글 삭제 등)가 큐에 남아 **영원히 재시도**한다.
+	//    2026-08-21 실측: retry_count 최대 1,961회. 17.9만 건이 시간당 재시도하며
+	//    오리진·CDN 을 3중으로 물었다.
+	WriteAfterEventStatusDead = "dead"
+
+	// WriteAfterEventMaxRetry 는 재시도 상한이다. 제휴 이벤트는 1회→1분, 2회→10분,
+	// 그 이상 1시간 간격이므로 100회면 약 4일 재시도한 뒤 포기하는 셈이다.
+	WriteAfterEventMaxRetry = 100
 )
 
 type WriteAfterEvent struct {

@@ -10,11 +10,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
@@ -7141,11 +7143,44 @@ func main() {
 	})
 
 	// 서버 시작
+	//
+	// ⛔ router.Run() 을 쓰면 안 된다 — SIGTERM 에 기본 동작(즉시 종료)이 걸려
+	//    (a) in-flight 요청이 그 자리에서 끊기고,
+	//    (b) 이 함수의 **defer 가 하나도 실행되지 않는다.**
+	//    (b) 때문에 writeAfterWorker.Stop() 이 돌지 않아, ClaimPending 이 미리
+	//    processing 으로 찍어둔 배치가 통째로 유실됐다. 재시작 1회당 최대
+	//    batchSize(100) × concurrency(4) × 파드수 = 800건. 2026-08-21 실측으로
+	//    2026-03-24 부터 4,774 행이 그렇게 갇혀 있었다.
+	//    (회수 그물은 worker.reclaimStale 에 따로 있다 — OOM·SIGKILL 은 여기서 못 막는다)
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	pkglogger.Info("Server listening on %s", addr)
-	if err := router.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	go func() {
+		pkglogger.Info("Server listening on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	pkglogger.Info("Shutdown signal received — draining")
+
+	// ⛔ terminationGracePeriodSeconds(30s) 안에 끝나야 한다. 넘기면 SIGKILL 이라
+	//    여기서 아무리 기다려도 소용없다. preStop(5s) 이 이미 엔드포인트에서 빼주므로
+	//    새 요청은 들어오지 않는다 — 남은 것만 흘려보내면 된다.
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelShutdown()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		pkglogger.Error("HTTP shutdown error: %v", err)
+	}
+	pkglogger.Info("Shutdown complete")
+	// 여기서 return 하면 위의 defer 들(writeAfterWorker.Stop 등)이 실행된다.
 }
 
 // maskIP masks the second octet of an IPv4 address with ♡ (e.g. 222.114.55.158 → 222.♡.55.158)
