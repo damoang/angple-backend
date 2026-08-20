@@ -159,18 +159,49 @@ func (r *writeAfterEventRepository) ReclaimStaleProcessing(staleBefore time.Time
 	if limit <= 0 {
 		limit = 500
 	}
+
+	// ⛔ 한 방 UPDATE 로 하면 안 된다 — 2026-08-21 카나리에서 데드락이 실증됐다.
+	//
+	//	UPDATE ... WHERE status='processing' ORDER BY claimed_at LIMIT n 은
+	//	claimed_at 에 인덱스가 없어 **filesort** 가 되고, 그 과정에서 processing 범위의
+	//	행을 넓게 잠근다. 같은 시각 정상 처리 중인 MarkProcessed(단일 id UPDATE)와
+	//	락 순서가 엇갈려 Error 1213 이 났다:
+	//	  [WriteAfterWorker] mark processed 2689520: Error 1213 Deadlock found
+	//	멱등이라 데이터는 안 잃지만 그만큼 헛돈다.
+	//
+	// 그래서 **읽기와 쓰기를 나눈다.** SELECT 는 락 없는 일관된 읽기로 id 만 뽑고,
+	// UPDATE 는 PK 로만 잠근다. 잠그는 행이 정확히 대상 행뿐이라 범위가 겹치지 않는다.
+	var ids []int64
+	if err := r.db.Model(&domain.WriteAfterEvent{}).
+		Where("status = ? AND claimed_at IS NOT NULL AND claimed_at < ?",
+			domain.WriteAfterEventStatusProcessing, staleBefore).
+		Order("claimed_at ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	// ⛔ status 조건을 UPDATE 에도 다시 건다. SELECT 와 UPDATE 사이에 워커가 그 행을
+	//	processed 로 바꿨을 수 있다 — 조건이 없으면 **끝난 이벤트를 되살려** 중복 실행한다.
+	// ⛔ available_at 을 60초에 흩는다. 한꺼번에 만기시키면 회수가 그 자체로 부하가 된다.
+	// ⛔ retry_count 는 올리지 않는다 — 이벤트가 실패한 게 아니라 우리가 흘린 것이다.
+	// ⛔ FORCE INDEX (PRIMARY) 를 빼면 안 된다. id IN (...) 을 줘도 옵티마이저가
+	//	status='processing' 이 선택적일 때 idx_status_available 를 고른다
+	//	(2026-08-21 EXPLAIN 실증: key=idx_status_available). 그러면 결국 processing
+	//	범위를 훑어 락을 잡아, 이 수정의 목적이 통째로 무효가 된다.
+	//	PRIMARY 를 강제하면 key=PRIMARY / rows=대상건수 로 **정확히 그 행만** 잠근다.
 	res := r.db.Exec(`
-		UPDATE `+"`"+`g5_write_after_events`+"`"+`
+		UPDATE `+"`"+`g5_write_after_events`+"`"+` FORCE INDEX (`+"`"+`PRIMARY`+"`"+`)
 		   SET status = ?, claimed_at = NULL,
 		       available_at = DATE_ADD(?, INTERVAL MOD(id, 60) SECOND)
-		 WHERE status = ? AND claimed_at IS NOT NULL AND claimed_at < ?
-		 ORDER BY claimed_at ASC
-		 LIMIT ?`,
+		 WHERE id IN (?) AND status = ?`,
 		domain.WriteAfterEventStatusPending,
 		time.Now(),
+		ids,
 		domain.WriteAfterEventStatusProcessing,
-		staleBefore,
-		limit,
 	)
 	return res.RowsAffected, res.Error
 }
