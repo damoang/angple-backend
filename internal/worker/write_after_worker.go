@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -61,6 +62,23 @@ var (
 			Help: "Total number of member activity sync failures inside write-after processing",
 		},
 		[]string{"event_type"},
+	)
+	// 재시도 상한을 넘겨 포기한 이벤트. ⛔ 이 값이 늘면 "조용히 버려지는 중"이라는 뜻이다 —
+	// 0 이 정상이고, 오르면 원인을 봐야 한다(원글 삭제·엔드포인트 장애 등).
+	writeAfterEventDeadTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "write_after_events_dead_total",
+			Help: "Total number of write-after events abandoned after exceeding the retry cap",
+		},
+		[]string{"event_type"},
+	)
+	// 흘린 processing 행을 회수한 수. ⛔ 평시 0 에 가까워야 한다. 재시작마다 크게 튀면
+	// graceful shutdown 이 동작하지 않는다는 신호다.
+	writeAfterReclaimedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "write_after_events_reclaimed_total",
+			Help: "Total number of stale processing events reclaimed back to pending",
+		},
 	)
 )
 
@@ -152,13 +170,65 @@ func (w *WriteAfterWorker) Start(concurrency int) {
 			}
 		}()
 	}
+	// stale processing 회수 스윕 — 기동 직후 1회 + 이후 주기적으로.
+	// ⛔ graceful shutdown 을 넣어도 OOM·SIGKILL·노드 장애는 남는다. 이 그물이 마지막 방어선이다.
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.reclaimStale() // 기동 직후 — 직전 종료에서 흘린 분을 즉시 회수
+		ticker := time.NewTicker(reclaimInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-w.stop:
+				return
+			case <-ticker.C:
+				w.reclaimStale()
+			}
+		}
+	}()
+
 	log.Printf("[WriteAfterWorker] Started with %d workers", concurrency)
 }
 
+// reclaimStale 은 claimed_at 이 오래된 processing 행을 pending 으로 되돌린다.
+// ⛔ staleAfter 는 한 배치의 최악 처리시간보다 넉넉해야 한다. 짧으면 **정상 처리 중인**
+//
+//	이벤트를 회수해 중복 실행이 된다(제휴 sync 는 멱등이지만 다른 이벤트는 아닐 수 있다).
+//	batchSize 100 × httpClient 타임아웃 5s = 최악 500s 이므로 15분으로 잡는다.
+func (w *WriteAfterWorker) reclaimStale() {
+	if w.repo == nil {
+		return
+	}
+	n, err := w.repo.ReclaimStaleProcessing(time.Now().Add(-staleAfter), reclaimLimit)
+	if err != nil {
+		log.Printf("[WriteAfterWorker] reclaim stale failed: %v", err)
+		return
+	}
+	if n > 0 {
+		writeAfterReclaimedTotal.Add(float64(n))
+		log.Printf("[WriteAfterWorker] reclaimed %d stale processing events", n)
+	}
+}
+
+// Stop 은 워커를 멈추고 진행 중인 배치가 끝나기를 기다린다.
+// ⛔ 무한 대기를 하면 안 된다 — main 의 defer 는 LIFO 라 이 Stop 앞에 다른 워커의
+//
+//	Stop 이 먼저 서고, 그것들도 무한 대기다. terminationGracePeriod(30s)를 넘기면
+//	SIGKILL 이라 기다린 의미가 없다. 상한을 두고, 못 끝내면 로그로 드러낸다.
 func (w *WriteAfterWorker) Stop() {
 	close(w.stop)
-	w.wg.Wait()
-	log.Printf("[WriteAfterWorker] Stopped")
+	done := make(chan struct{})
+	go func() {
+		w.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		log.Printf("[WriteAfterWorker] Stopped")
+	case <-time.After(stopTimeout):
+		log.Printf("[WriteAfterWorker] Stop timed out after %s — 남은 배치는 processing 으로 남고 reclaimStale 이 회수한다", stopTimeout)
+	}
 }
 
 func (w *WriteAfterWorker) processBatch() {
@@ -176,6 +246,16 @@ func (w *WriteAfterWorker) processBatch() {
 		return
 	}
 	for _, event := range events {
+		// ⛔ 종료 신호가 오면 즉시 빠진다. 이게 없으면 배치 하나가 최악
+		//    batchSize(100) x 타임아웃(5s) = 500초를 잡아, terminationGracePeriod(30s)
+		//    안에 Stop() 이 못 끝나고 SIGKILL 로 배치가 통째로 유실된다
+		//    — 이 PR 이 막으려는 바로 그 상황이 부하 시에 그대로 재현된다.
+		//    남은 행은 processing 으로 남고 reclaimStale 이 회수한다(그물이 받는다).
+		select {
+		case <-w.stop:
+			return
+		default:
+		}
 		writeAfterEventLagSeconds.WithLabelValues(event.EventType).Observe(time.Since(event.OccurredAt).Seconds())
 		if err := w.handleEvent(event); err != nil {
 			writeAfterEventsProcessedTotal.WithLabelValues(event.EventType, "error").Inc()
@@ -234,6 +314,17 @@ func (w *WriteAfterWorker) handleEvent(event gnudomain.WriteAfterEvent) error {
 	}
 }
 
+// getAffiliateSyncBaseURL 은 제휴 동기화를 보낼 web 주소를 고른다.
+//
+// ⛔ 공용 도메인 폴백은 **조용한 고장**을 만든다. 2026-08-08~08-21, 운영에
+//
+//	WEB_INTERNAL_URL·WEB_BASE_URL 이 둘 다 없어 이 폴백이 걸렸고, 내부 호출이
+//	파드 → 공용 인터넷 → Cloudflare → CloudFront → ALB → web 을 한 바퀴 돌았다.
+//	엣지에서 X-Internal-Secret 헤더가 유실돼 403, 공개 rate limiter 에 429 —
+//	**13일간 성공 0건**, pending 17.9만 건, 오리진 트래픽의 12% 를 먹었다.
+//	아무도 몰랐던 이유는 이 폴백이 아무 소리도 내지 않았기 때문이다.
+//
+// 그래서 폴백 자체는 남기되(로컬 개발 호환) **반드시 흔적을 남긴다.**
 func getAffiliateSyncBaseURL() string {
 	if url := strings.TrimSpace(os.Getenv("WEB_INTERNAL_URL")); url != "" {
 		return url
@@ -241,7 +332,43 @@ func getAffiliateSyncBaseURL() string {
 	if url := strings.TrimSpace(os.Getenv("WEB_BASE_URL")); url != "" {
 		return url
 	}
-	return "https://damoang.net"
+	const publicFallback = "https://damoang.net"
+	log.Printf("[WriteAfterWorker] WEB_INTERNAL_URL/WEB_BASE_URL 미설정 — 공용 도메인(%s)으로 폴백한다. "+
+		"운영에서 이 로그가 보이면 배선 결함이다: 내부 호출이 CDN 을 경유해 403/429 로 전량 실패한다.",
+		publicFallback)
+	return publicFallback
+}
+
+// affiliatePermanentError 는 **재시도해도 절대 성공할 수 없는** 실패다.
+//
+// ⛔ 이 구분이 없으면 재시도 상한이 엉뚱한 것을 죽인다. 2026-08-08 사고에서
+//
+//	실패 원인은 우리 배선(403/429)이었는데, 상한만 있으면 배선을 고치기 전에
+//	큐 전체가 dead 로 떨어진다. 실측: pending 17.9만 중 11.2만 건이 이미
+//	retry_count >= 100 이었다(최대 307). 상한만으로 판단하면 그 순간 전멸이다.
+//
+// 반대로 원글이 지워진 이벤트(404)는 4일을 기다릴 이유가 없다.
+type affiliatePermanentError struct {
+	status int
+}
+
+func (e *affiliatePermanentError) Error() string {
+	return fmt.Sprintf("affiliate sync returned %d (permanent)", e.status)
+}
+
+// isPermanentAffiliateStatus 는 재시도가 무의미한 상태코드인지 본다.
+// ⛔ 401/403/429/5xx 는 여기 넣지 마라 — 전부 **우리 쪽 일시 상태**다
+//
+//	(시크릿 미배포·rate limit·배포 중). 넣으면 배선 사고가 데이터 유실이 된다.
+func isPermanentAffiliateStatus(status int) bool {
+	switch status {
+	case http.StatusBadRequest, // 400 — 페이로드가 규격에 안 맞다. 재시도해도 같다
+		http.StatusNotFound,            // 404 — 대상 없음
+		http.StatusGone,                // 410 — 삭제됨
+		http.StatusUnprocessableEntity: // 422
+		return true
+	}
+	return false
 }
 
 func (w *WriteAfterWorker) markFailed(event gnudomain.WriteAfterEvent, err error) error {
@@ -249,6 +376,26 @@ func (w *WriteAfterWorker) markFailed(event gnudomain.WriteAfterEvent, err error
 		return nil
 	}
 	if isAffiliateEventType(event.EventType) {
+		// 재시도가 무의미한 실패(원글 삭제 등)는 상한을 기다리지 않고 바로 접는다.
+		var permErr *affiliatePermanentError
+		if errors.As(err, &permErr) {
+			writeAfterEventDeadTotal.WithLabelValues(event.EventType).Inc()
+			log.Printf("[WriteAfterWorker] permanent failure, giving up: %s id=%d: %v",
+				event.EventType, event.ID, err)
+			return w.repo.MarkDead(event.ID, gnurepo.TrimWriteAfterEventError(err))
+		}
+		// ⛔ 재시도 상한 — 없으면 실패 이벤트가 큐에 남아 영원히 돈다.
+		//    2026-08-21 실측: retry_count 최대 1,961회. 17.9만 건이 시간당 재시도하며
+		//    오리진 트래픽의 12% 를 먹고 CDN 요금을 3중으로 물렸다.
+		// ⚠️ 이 상한은 **일시 실패에만** 걸린다. 배선 사고로 쌓인 retry_count 를 그대로
+		//    두고 배포하면 상한이 큐를 몰살한다 — 배포 전에 백로그의 retry_count 를
+		//    리셋할 것(runbooks/affiliate_sync_apply.sh 가 강제한다).
+		if event.RetryCount >= gnudomain.WriteAfterEventMaxRetry {
+			writeAfterEventDeadTotal.WithLabelValues(event.EventType).Inc()
+			log.Printf("[WriteAfterWorker] giving up after %d retries: %s id=%d: %v",
+				event.RetryCount, event.EventType, event.ID, err)
+			return w.repo.MarkDead(event.ID, gnurepo.TrimWriteAfterEventError(err))
+		}
 		delay := affiliateRetryDelay(event.RetryCount)
 		return w.repo.MarkFailedWithDelay(event.ID, gnurepo.TrimWriteAfterEventError(err), delay)
 	}
@@ -266,6 +413,20 @@ func isAffiliateEventType(eventType string) bool {
 		return false
 	}
 }
+
+const (
+	// staleAfter 는 이 시간이 지나도 processing 인 행을 "흘린 것"으로 본다.
+	// batchSize(100) × httpClient 타임아웃(5s) = 최악 500s 보다 넉넉해야 한다.
+	staleAfter = 30 * time.Minute
+	// reclaimInterval 은 회수 스윕 주기다.
+	reclaimInterval = 5 * time.Minute
+	// reclaimLimit 는 한 번에 되돌릴 최대 건수 — 대량 회수가 그 자체로 부하가 되지 않게 자른다.
+	reclaimLimit = 500
+	// stopTimeout 은 Stop() 이 진행 중인 배치를 기다리는 상한이다.
+	// terminationGracePeriod(30s) - preStop(5s) - HTTP Shutdown(8s) 안에서
+	// 다른 워커 Stop 들과 나눠 써야 하므로 짧게 잡는다.
+	stopTimeout = 5 * time.Second
+)
 
 func affiliateRetryDelay(retryCount int) time.Duration {
 	switch retryCount {
@@ -338,6 +499,9 @@ func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if isPermanentAffiliateStatus(resp.StatusCode) {
+			return &affiliatePermanentError{status: resp.StatusCode}
+		}
 		return fmt.Errorf("affiliate sync returned %d", resp.StatusCode)
 	}
 
