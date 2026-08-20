@@ -11,8 +11,11 @@ package v2
 // 재사용하므로, 앱 동작이 damoang.net 사이트와 동일해진다(삭제글/공지/정렬 처리 포함).
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -24,6 +27,7 @@ import (
 	v1handler "github.com/damoang/angple-backend/internal/handler/v1"
 	"github.com/damoang/angple-backend/internal/middleware"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
+	pkgredis "github.com/damoang/angple-backend/pkg/redis"
 	"github.com/gin-gonic/gin"
 )
 
@@ -409,6 +413,57 @@ func decodeFeedCursor(s string) map[string]int {
 	return out
 }
 
+// feedCacheTTL 은 피드 후보 풀 캐시 수명.
+// ⛔ 「새글」 성격이라 지연이 그대로 체감된다. 30초는 2026-08-21 승인값이며,
+//
+//	늘리기 전에 반드시 "새 글이 몇 초 늦게 보여도 되는가"를 다시 물을 것.
+const feedCacheTTL = 30 * time.Second
+
+// loadRecentFeed 는 피드 후보 풀을 가져온다. **차단 목록이 빈 요청만** 캐시한다.
+//
+// ## 왜 캐시하나
+//
+// FindRecentAcrossBoards 는 게시판 122개를 UNION ALL 로 묶는다. 읽는 행은 회당 2,859개뿐인데
+// **테이블 122개를 여는 오버헤드가 시간의 전부**라 인덱스로는 못 줄인다(각 가지가 이미 PK 역순
+// 스캔이다). 2026-08-21 실측:
+//
+//	/api/v2/feed  p95 6,029ms   (21시 714ms → 22시 5,381ms → 00시 6,524ms)
+//	그 외 전 라우트 p95 100ms 미만 (글상세 9ms, 목록 18ms)
+//
+// **트래픽에 비례해 악화**하던, 사용자가 실제로 기다리는 유일한 지점이었다.
+//
+// ## ⛔ 차단 목록이 있으면 절대 캐시하지 않는다
+//
+// 남의 차단 결과를 받으면 차단한 사람의 글이 보인다. 그래서 blocked 가 비었을 때만 탄다.
+// 차단 보유 회원은 1,360명 / 62,725명 = **2.2%** 라, 97.8% 가 캐시 경로를 지난다.
+//
+// ⛔ 캐시 키에 커서 원문을 그대로 쓰지 않는다 — 임의 문자열로 키를 무한히 만들 수 있고,
+//
+//	보드별 wr_id 가 실린 커서는 길다. 해시로 길이를 고정한다. 디코드에 실패한 커서는
+//	첫 페이지와 결과가 같으므로(decodeFeedCursor 가 빈 map 을 준다) 키도 "first" 로 합친다.
+func (h *V2Handler) loadRecentFeed(
+	c *gin.Context,
+	limit int,
+	cursor map[string]int,
+	blocked []string,
+) ([]gnuboard.FeedPost, error) {
+	load := func() ([]gnuboard.FeedPost, error) {
+		return h.feedRepo.FindRecentAcrossBoards(limit, cursor, blocked)
+	}
+	if len(blocked) > 0 || h.cache == nil {
+		return load()
+	}
+
+	ck := "first"
+	if len(cursor) > 0 {
+		sum := sha256.Sum256([]byte(c.Query("cursor")))
+		ck = hex.EncodeToString(sum[:8])
+	}
+	key := fmt.Sprintf("v2:feed:v1:%d:%s", limit, ck)
+
+	return pkgredis.GetOrSet(c.Request.Context(), h.cache, key, feedCacheTTL, load)
+}
+
 // ListRecentFeed handles GET /api/v2/feed — 크로스보드 최신 타임라인(무한스크롤, 커서 기반).
 // 응답 아이템은 board 목록과 동일 V2Post 형태(+excerpt). 차단 사용자 글은 SQL 에서 제외.
 func (h *V2Handler) ListRecentFeed(c *gin.Context) {
@@ -425,7 +480,7 @@ func (h *V2Handler) ListRecentFeed(c *gin.Context) {
 
 	// 순수 최신순: 보드별 최신 후보 풀(각 limit개)을 가져온다. 한 보드가 매우 활발하면 그 보드 글이
 	// 상위를 차지하도록 board별 후보 수를 페이지 크기만큼 확보(리포가 20으로 상한).
-	rows, err := h.feedRepo.FindRecentAcrossBoards(limit, cursor, blockedMbIDs)
+	rows, err := h.loadRecentFeed(c, limit, cursor, blockedMbIDs)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "피드 조회 실패", err)
 		return
