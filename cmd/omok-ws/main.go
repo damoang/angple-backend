@@ -25,9 +25,9 @@ func main() {
 	port := envOr("OMOK_PORT", "8084")
 	path := envOr("OMOK_PATH", "/omok-ws/")
 
-	db, err := openDB()
+	db, err := openDBWithRetry()
 	if err != nil {
-		log.Fatalf("[omok] DB 연결 실패: %v", err)
+		log.Fatalf("[omok] DB 연결 실패(재시도 소진): %v", err)
 	}
 	store := omok.NewStore(db)
 
@@ -98,6 +98,45 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("[omok] ListenAndServe: %v", err)
 	}
+}
+
+// openDBWithRetry 는 기동 시 DB 연결을 지수 백오프로 재시도한다.
+//
+// ⛔ 왜 필요한가 — 예전에는 openDB 가 한 번 실패하면 곧바로 log.Fatalf 로 죽었다.
+//
+//	2026-08-20 실측: CoreDNS 순간 장애로 이름 해석이 한 번 실패해 프로세스가 종료됐고,
+//	8시간 동안 4번 재시작됐다.
+//
+//	  [omok] DB 연결 실패: dial tcp: lookup ...rds.amazonaws.com on 10.43.0.10:53:
+//	          read udp ...: connection refused
+//
+//	재시작 비용이 크다. 이 파일 위쪽 주석대로 **게임 상태는 메모리에만 있어 이어갈 수 없고**,
+//	재시작할 때마다 진행 중 대국이 전부 aborted 되고 참가비가 환불된다.
+//	프로세스를 API 와 분리한 목적(롤아웃에 끌려다니지 않기)도 함께 무력화된다.
+//
+// ⛔ 무한 대기는 하지 않는다. 설정이 틀렸거나 DB 가 정말 죽었으면 빨리 죽어서
+//
+//	k8s 가 CrashLoopBackOff 로 드러내는 편이 낫다. 상한을 두고 소진되면 종료한다.
+func openDBWithRetry() (*gorm.DB, error) {
+	const attempts = 6 // 1+2+4+8+16+32 ≈ 63초. 순간 장애는 이 안에서 풀린다
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		db, err := openDB()
+		if err == nil {
+			if i > 0 {
+				log.Printf("[omok] DB 연결 성공 (재시도 %d회)", i)
+			}
+			return db, nil
+		}
+		lastErr = err
+		if i == attempts-1 {
+			break
+		}
+		wait := time.Duration(1<<uint(i)) * time.Second
+		log.Printf("[omok] DB 연결 실패 — %v 후 재시도 (%d/%d): %v", wait, i+1, attempts-1, err)
+		time.Sleep(wait)
+	}
+	return nil, lastErr
 }
 
 func openDB() (*gorm.DB, error) {
