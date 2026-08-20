@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -210,10 +211,24 @@ func (w *WriteAfterWorker) reclaimStale() {
 	}
 }
 
+// Stop 은 워커를 멈추고 진행 중인 배치가 끝나기를 기다린다.
+// ⛔ 무한 대기를 하면 안 된다 — main 의 defer 는 LIFO 라 이 Stop 앞에 다른 워커의
+//
+//	Stop 이 먼저 서고, 그것들도 무한 대기다. terminationGracePeriod(30s)를 넘기면
+//	SIGKILL 이라 기다린 의미가 없다. 상한을 두고, 못 끝내면 로그로 드러낸다.
 func (w *WriteAfterWorker) Stop() {
 	close(w.stop)
-	w.wg.Wait()
-	log.Printf("[WriteAfterWorker] Stopped")
+	done := make(chan struct{})
+	go func() {
+		w.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		log.Printf("[WriteAfterWorker] Stopped")
+	case <-time.After(stopTimeout):
+		log.Printf("[WriteAfterWorker] Stop timed out after %s — 남은 배치는 processing 으로 남고 reclaimStale 이 회수한다", stopTimeout)
+	}
 }
 
 func (w *WriteAfterWorker) processBatch() {
@@ -231,6 +246,16 @@ func (w *WriteAfterWorker) processBatch() {
 		return
 	}
 	for _, event := range events {
+		// ⛔ 종료 신호가 오면 즉시 빠진다. 이게 없으면 배치 하나가 최악
+		//    batchSize(100) x 타임아웃(5s) = 500초를 잡아, terminationGracePeriod(30s)
+		//    안에 Stop() 이 못 끝나고 SIGKILL 로 배치가 통째로 유실된다
+		//    — 이 PR 이 막으려는 바로 그 상황이 부하 시에 그대로 재현된다.
+		//    남은 행은 processing 으로 남고 reclaimStale 이 회수한다(그물이 받는다).
+		select {
+		case <-w.stop:
+			return
+		default:
+		}
 		writeAfterEventLagSeconds.WithLabelValues(event.EventType).Observe(time.Since(event.OccurredAt).Seconds())
 		if err := w.handleEvent(event); err != nil {
 			writeAfterEventsProcessedTotal.WithLabelValues(event.EventType, "error").Inc()
@@ -314,14 +339,57 @@ func getAffiliateSyncBaseURL() string {
 	return publicFallback
 }
 
+// affiliatePermanentError 는 **재시도해도 절대 성공할 수 없는** 실패다.
+//
+// ⛔ 이 구분이 없으면 재시도 상한이 엉뚱한 것을 죽인다. 2026-08-08 사고에서
+//
+//	실패 원인은 우리 배선(403/429)이었는데, 상한만 있으면 배선을 고치기 전에
+//	큐 전체가 dead 로 떨어진다. 실측: pending 17.9만 중 11.2만 건이 이미
+//	retry_count >= 100 이었다(최대 307). 상한만으로 판단하면 그 순간 전멸이다.
+//
+// 반대로 원글이 지워진 이벤트(404)는 4일을 기다릴 이유가 없다.
+type affiliatePermanentError struct {
+	status int
+}
+
+func (e *affiliatePermanentError) Error() string {
+	return fmt.Sprintf("affiliate sync returned %d (permanent)", e.status)
+}
+
+// isPermanentAffiliateStatus 는 재시도가 무의미한 상태코드인지 본다.
+// ⛔ 401/403/429/5xx 는 여기 넣지 마라 — 전부 **우리 쪽 일시 상태**다
+//
+//	(시크릿 미배포·rate limit·배포 중). 넣으면 배선 사고가 데이터 유실이 된다.
+func isPermanentAffiliateStatus(status int) bool {
+	switch status {
+	case http.StatusBadRequest, // 400 — 페이로드가 규격에 안 맞다. 재시도해도 같다
+		http.StatusNotFound,            // 404 — 대상 없음
+		http.StatusGone,                // 410 — 삭제됨
+		http.StatusUnprocessableEntity: // 422
+		return true
+	}
+	return false
+}
+
 func (w *WriteAfterWorker) markFailed(event gnudomain.WriteAfterEvent, err error) error {
 	if w.repo == nil {
 		return nil
 	}
 	if isAffiliateEventType(event.EventType) {
-		// ⛔ 재시도 상한 — 없으면 영구 실패 이벤트(원글 삭제 등)가 큐에 남아 영원히 돈다.
+		// 재시도가 무의미한 실패(원글 삭제 등)는 상한을 기다리지 않고 바로 접는다.
+		var permErr *affiliatePermanentError
+		if errors.As(err, &permErr) {
+			writeAfterEventDeadTotal.WithLabelValues(event.EventType).Inc()
+			log.Printf("[WriteAfterWorker] permanent failure, giving up: %s id=%d: %v",
+				event.EventType, event.ID, err)
+			return w.repo.MarkDead(event.ID, gnurepo.TrimWriteAfterEventError(err))
+		}
+		// ⛔ 재시도 상한 — 없으면 실패 이벤트가 큐에 남아 영원히 돈다.
 		//    2026-08-21 실측: retry_count 최대 1,961회. 17.9만 건이 시간당 재시도하며
 		//    오리진 트래픽의 12% 를 먹고 CDN 요금을 3중으로 물렸다.
+		// ⚠️ 이 상한은 **일시 실패에만** 걸린다. 배선 사고로 쌓인 retry_count 를 그대로
+		//    두고 배포하면 상한이 큐를 몰살한다 — 배포 전에 백로그의 retry_count 를
+		//    리셋할 것(runbooks/affiliate_sync_apply.sh 가 강제한다).
 		if event.RetryCount >= gnudomain.WriteAfterEventMaxRetry {
 			writeAfterEventDeadTotal.WithLabelValues(event.EventType).Inc()
 			log.Printf("[WriteAfterWorker] giving up after %d retries: %s id=%d: %v",
@@ -349,11 +417,15 @@ func isAffiliateEventType(eventType string) bool {
 const (
 	// staleAfter 는 이 시간이 지나도 processing 인 행을 "흘린 것"으로 본다.
 	// batchSize(100) × httpClient 타임아웃(5s) = 최악 500s 보다 넉넉해야 한다.
-	staleAfter = 15 * time.Minute
+	staleAfter = 30 * time.Minute
 	// reclaimInterval 은 회수 스윕 주기다.
 	reclaimInterval = 5 * time.Minute
 	// reclaimLimit 는 한 번에 되돌릴 최대 건수 — 대량 회수가 그 자체로 부하가 되지 않게 자른다.
 	reclaimLimit = 500
+	// stopTimeout 은 Stop() 이 진행 중인 배치를 기다리는 상한이다.
+	// terminationGracePeriod(30s) - preStop(5s) - HTTP Shutdown(8s) 안에서
+	// 다른 워커 Stop 들과 나눠 써야 하므로 짧게 잡는다.
+	stopTimeout = 5 * time.Second
 )
 
 func affiliateRetryDelay(retryCount int) time.Duration {
@@ -427,6 +499,9 @@ func (w *WriteAfterWorker) handleAffiliateEvent(event gnudomain.WriteAfterEvent)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if isPermanentAffiliateStatus(resp.StatusCode) {
+			return &affiliatePermanentError{status: resp.StatusCode}
+		}
 		return fmt.Errorf("affiliate sync returned %d", resp.StatusCode)
 	}
 

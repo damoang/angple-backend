@@ -7174,7 +7174,10 @@ func main() {
 	// ⛔ terminationGracePeriodSeconds(30s) 안에 끝나야 한다. 넘기면 SIGKILL 이라
 	//    여기서 아무리 기다려도 소용없다. preStop(5s) 이 이미 엔드포인트에서 빼주므로
 	//    새 요청은 들어오지 않는다 — 남은 것만 흘려보내면 된다.
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 20*time.Second)
+	// ⛔ 20초를 주면 안 된다. defer 는 LIFO 라 이 뒤에 deleteWorker/pushWorker/
+	//    writeAfterWorker 의 Stop 이 줄줄이 서고, 30초 grace 를 넘기면 SIGKILL 이다.
+	//    preStop(5s) + 여기(8s) + 워커 Stop 들(각 상한 5s) 이 30초 안에 들어와야 한다.
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancelShutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		pkglogger.Error("HTTP shutdown error: %v", err)
