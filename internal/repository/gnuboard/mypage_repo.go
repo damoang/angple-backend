@@ -2,6 +2,7 @@ package gnuboard
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -595,44 +596,133 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 // UNION ALL per searchable board with a PK (wr_id) range scan — no wr_datetime ORDER BY /
 // OFFSET inside subqueries, so the 670만-row free 보드도 안전(PK range). 병합만 wr_datetime DESC.
 func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error) {
-	if perBoard <= 0 || perBoard > 20 {
-		perBoard = 8
+	// ⚠️ perBoard 는 보드별 UNION 시절의 파라미터다. 크로스보드 단일 스캔으로 바뀌면서
+	//    쓰이지 않는다(후보는 항상 feedCandidatePool). 시그니처는 호출부 호환을 위해 유지한다.
+	_ = perBoard
+
+	// 1단계: 후보를 member_activity_feed 에서 뽑는다(인덱스 레인지 스캔 1회).
+	type cand struct {
+		WriteID int    `gorm:"column:write_id"`
+		BoardID string `gorm:"column:board_id"`
 	}
-	boards, err := r.GetSearchableBoards()
-	if err != nil || len(boards) == 0 {
+	var cands []cand
+	q := r.db.Table("member_activity_feed").
+		Select("write_id, board_id").
+		Where("activity_type = 1 AND is_public = 1 AND is_deleted = 0")
+	if len(cursor) > 0 {
+		// 기존 커서는 보드별 wr_id 다. 크로스보드 시간순에서는 보드별로 그 이하만 남긴다.
+		var ors []string
+		var oargs []interface{}
+		for b, wm := range cursor {
+			if wm <= 0 || !activityBoardSlugRe.MatchString(b) {
+				continue
+			}
+			ors = append(ors, "(board_id = ? AND write_id < ?)")
+			oargs = append(oargs, b, wm)
+		}
+		if len(ors) > 0 {
+			q = q.Where("("+strings.Join(ors, " OR ")+") OR board_id NOT IN ?", append(oargs, cursorBoards(cursor))...)
+		}
+	}
+	if err := q.Order("source_created_at DESC").Limit(feedCandidatePool).Scan(&cands).Error; err != nil {
 		return nil, err
 	}
+	if len(cands) == 0 {
+		return nil, nil
+	}
 
-	var unions []string
-	var args []interface{}
-	for _, b := range boards {
-		table := fmt.Sprintf("g5_write_%s", b.BoTable)
-		// mypage 의 검증된 WHERE(secret/lock) + 삭제 제외(제로데이트 호환).
-		where := "wr_is_comment = 0 AND (wr_option NOT LIKE '%secret%' OR wr_option IS NULL)" +
+	// 2단계: 등장 보드만 PK-IN 으로 **정본에서** 읽는다.
+	//
+	// ⛔ feed 테이블을 그대로 내보내지 않는 이유가 둘이다.
+	//    ① feed 에는 wr_7(신고잠금) 컬럼 자체가 없다. 잠긴 글을 거를 방법이 없다.
+	//    ② feed 의 is_deleted 는 비동기라 뒤처진다 — 2026-08-21 실측으로 free 한 곳에서만
+	//       **23,414건**이 「피드는 살아있음 / 정본은 삭제됨」이었다.
+	//    최신순 상위 600건에는 마침 0건이었지만 그건 운이지 설계가 아니다. 신고잠금은
+	//    글이 올라온 직후에도 걸리므로 상위 구간에 들어올 수 있다.
+	//
+	// ⭐ 그래서 feed 는 **후보 선정에만** 쓰고 표시 데이터는 전부 정본에서 가져온다.
+	//    wr_10 처럼 feed 에 없는 확장 필드가 누락되는 문제도 함께 사라진다.
+	// ⛔ fail-closed. searchableBoardSet 은 조회 실패·0건에 nil 을 주는데, 그걸 그냥 쓰면
+	//    보드 필터가 통째로 사라진다. feed 에는 검색 대상이 아닌 보드가 29개 섞여 있고
+	//    그중 adm(1,670글)·advertiser(755)·temp(753)·archive(432) 는 **읽기 레벨 10(관리자 전용)**,
+	//    disciplinelog·truthroom·claim·angreport 는 징계·소명 기록이다.
+	//    기존 UNION 경로도 GetSearchableBoards 실패 시 아무것도 주지 않았다(같은 계약).
+	//    ⭐ 피드가 잠깐 안 뜨는 것과 관리자 게시판이 노출되는 것 중에는 전자가 낫다.
+	searchable := r.searchableBoardSet()
+	if searchable == nil {
+		return nil, fmt.Errorf("searchable boards unavailable")
+	}
+	byBoard := make(map[string][]int)
+	order := make([]cand, 0, len(cands))
+	for _, c := range cands {
+		if c.BoardID == "" || !activityBoardSlugRe.MatchString(c.BoardID) {
+			continue
+		}
+		if !searchable[c.BoardID] {
+			continue
+		}
+		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WriteID)
+		order = append(order, c)
+	}
+
+	found := make(map[string]map[int]gnuboard.FeedPost, len(byBoard))
+	for boardID, ids := range byBoard {
+		where := "wr_id IN ? AND wr_is_comment = 0" +
+			" AND (wr_option NOT LIKE '%secret%' OR wr_option IS NULL)" +
 			" AND (wr_7 IS NULL OR wr_7 != 'lock')" +
 			" AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')"
-		if wm, ok := cursor[b.BoTable]; ok && wm > 0 {
-			where += fmt.Sprintf(" AND wr_id < %d", wm)
-		}
+		args := []interface{}{ids}
 		if len(excludeMbIDs) > 0 {
 			where += " AND mb_id NOT IN ?"
 			args = append(args, excludeMbIDs)
 		}
-		// 보드별 최신 perBoard개. LEFT(wr_content,1000) 로 전송량 제한(발췌 140자엔 충분).
-		unions = append(unions, fmt.Sprintf(
-			"(SELECT wr_id, wr_subject, LEFT(wr_content, 1000) AS wr_content, wr_datetime, wr_10, wr_hit, wr_good, wr_comment, mb_id, wr_name, wr_option, '%s' AS board_id FROM `%s` WHERE %s ORDER BY wr_id DESC LIMIT %d)",
-			b.BoTable, table, where, perBoard))
+		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
+		sql := fmt.Sprintf(
+			"SELECT wr_id, wr_subject, LEFT(wr_content, 1000) AS wr_content, wr_datetime, wr_10,"+
+				" wr_hit, wr_good, wr_comment, mb_id, wr_name, wr_option, '%s' AS board_id"+
+				" FROM `g5_write_%s` WHERE %s", boardID, boardID, where)
+		var rows []gnuboard.FeedPost
+		if err := r.db.Raw(sql, args...).Scan(&rows).Error; err != nil {
+			// 한 보드가 실패해도 피드 전체를 죽이지 않는다(기존 UNION 은 통째로 실패했다).
+			// ⛔ 다만 조용히 넘기면 한 보드가 영구히 피드에서 사라져도 아무도 모른다.
+			log.Printf("[feed] board %s verify failed, skipped: %v", boardID, err)
+			continue
+		}
+		m := make(map[int]gnuboard.FeedPost, len(rows))
+		for _, w := range rows {
+			m[w.WrID] = w
+		}
+		found[boardID] = m
 	}
 
-	// 각 보드의 최신 perBoard개를 모아 시간순 후보 풀로 반환(안전 상한 600). 보드별 캡·인터리브는 핸들러에서.
-	sql := fmt.Sprintf("SELECT * FROM (%s) AS t ORDER BY wr_datetime DESC LIMIT 600",
-		strings.Join(unions, " UNION ALL "))
-
-	var rows []gnuboard.FeedPost
-	if err := r.db.Raw(sql, args...).Scan(&rows).Error; err != nil {
-		return nil, err
+	// 3단계: 후보 순서(= source_created_at DESC)를 그대로 유지해 방출한다.
+	out := make([]gnuboard.FeedPost, 0, len(order))
+	for _, c := range order {
+		if m, ok := found[c.BoardID]; ok {
+			if w, ok2 := m[c.WriteID]; ok2 {
+				out = append(out, w)
+			}
+		}
 	}
-	return rows, nil
+	return out, nil
+}
+
+// feedCandidatePool 은 재검증에서 걸러질 것을 감안한 후보 여유분이다.
+// 기존 UNION 도 같은 상한(600)을 썼다.
+const feedCandidatePool = 600
+
+// cursorBoards 는 커서가 걸린 보드 슬러그 목록. 커서 없는 보드는 제한 없이 통과시킨다.
+func cursorBoards(cursor map[string]int) []string {
+	out := make([]string, 0, len(cursor))
+	for b, wm := range cursor {
+		if wm > 0 && activityBoardSlugRe.MatchString(b) {
+			out = append(out, b)
+		}
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
 }
 
 // 피드 후보를 몇 배로 뽑을지. 오염 행이 걸러져도 limit 을 채우기 위한 여유분이다.
