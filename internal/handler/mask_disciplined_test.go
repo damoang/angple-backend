@@ -38,6 +38,9 @@ func (f *fakeMyPageRepo) FindDisciplinedIDs(boardID string, _ []int) (map[int]bo
 	return map[int]bool{}, nil
 }
 
+// 핸들러가 쓰는 마스킹 라벨. 테스트에서 여러 번 비교하므로 상수로 둔다.
+const disciplinedLabel = "[이용제한 근거 글]"
+
 func item(board string, wrID int, subject string) map[string]interface{} {
 	return map[string]interface{}{"bo_table": board, "wr_id": wrID, "wr_subject": subject}
 }
@@ -59,12 +62,12 @@ func TestMaskDisciplined_NormalPath(t *testing.T) {
 	got := h.maskDisciplined([]map[string]interface{}{
 		item("free", 10, "근거글-원제목"),
 		item("free", 11, "평범한 글"),
-	}, "wr_subject", "[이용제한 근거 글]")
+	}, "wr_subject", disciplinedLabel)
 
 	if len(got) != 2 {
 		t.Fatalf("정상 경로에서는 항목이 빠지면 안 된다. got=%d", len(got))
 	}
-	if got[0]["wr_subject"] != "[이용제한 근거 글]" {
+	if got[0]["wr_subject"] != disciplinedLabel {
 		t.Errorf("근거글은 가려야 한다. got=%v", got[0]["wr_subject"])
 	}
 	if got[1]["wr_subject"] != "평범한 글" {
@@ -83,7 +86,7 @@ func TestMaskDisciplined_FailedBoardIsDropped(t *testing.T) {
 		item("free", 11, "무고한 글"),
 		item("humor", 20, "다른보드 근거글"),
 		item("humor", 21, "다른보드 평범한 글"),
-	}, "wr_subject", "[이용제한 근거 글]")
+	}, "wr_subject", disciplinedLabel)
 
 	for _, s := range subjects(got) {
 		// ① 원제목이 남으면 안 된다
@@ -100,7 +103,7 @@ func TestMaskDisciplined_FailedBoardIsDropped(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("humor 두 건만 남아야 한다. got=%d (%v)", len(got), subjects(got))
 	}
-	if got[0]["wr_subject"] != "[이용제한 근거 글]" {
+	if got[0]["wr_subject"] != disciplinedLabel {
 		t.Errorf("정상 보드의 근거글은 가려야 한다. got=%v", got[0]["wr_subject"])
 	}
 	if got[1]["wr_subject"] != "다른보드 평범한 글" {
@@ -115,10 +118,10 @@ func TestMaskDisciplined_NoFalseStigma(t *testing.T) {
 
 	got := h.maskDisciplined([]map[string]interface{}{
 		item("free", 11, "무고한 글"),
-	}, "wr_subject", "[이용제한 근거 글]")
+	}, "wr_subject", disciplinedLabel)
 
 	for _, s := range subjects(got) {
-		if s == "[이용제한 근거 글]" {
+		if s == disciplinedLabel {
 			t.Error("⛔ 판별 못 한 글에 「이용제한 근거 글」을 붙였다 — 허위 낙인이다")
 		}
 	}
