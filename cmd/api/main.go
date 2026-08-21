@@ -862,11 +862,28 @@ func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]an
 	}
 
 	// ⭐ 보드 단위 캐시(+만료 폴백)를 공유한다. 예전에는 요청마다 IN 절 쿼리를 쳤는데
-	//    이제 보드당 5분에 한 번이다. 조회 실패 시 만료된 캐시로 대체되므로
-	//    실제로 error 가 나가는 경우는 「그 보드 캐시가 아예 없는데 DB 도 실패」뿐이다.
+	//    이제 보드당 5분에 한 번이다.
 	disciplined, err := gnurepo.DisciplinedIDs(db, slug)
 	if err != nil {
-		return nil, err
+		// ⭐ 2단 방어 — 보드 전체가 실패해도 **요청된 id 만** 직접 본다(예전 방식 그대로).
+		//    보드 전체는 free 가 3,269행인데 여기는 몇 건짜리 IN 절이다. 실패 확률이 자릿수로 낮고,
+		//    성공하면 마스킹이 **정확히** 된다(근사도 낙인도 아니다).
+		//    ⛔ 이걸 지우지 마라. 이 폴백이 없으면 3,269행 조회 하나가 흔들릴 때
+		//       비로그인 상세가 통째로 막힌다(그리고 그 결과가 180초 엣지캐시된다).
+		type singoRow struct {
+			SgID int `gorm:"column:sg_id"`
+		}
+		var rows []singoRow
+		if e2 := db.Table("g5_na_singo").
+			Select("DISTINCT sg_id").
+			Where("sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL", slug, targetIDs).
+			Find(&rows).Error; e2 != nil {
+			return nil, err
+		}
+		disciplined = make(map[int]bool, len(rows))
+		for _, r := range rows {
+			disciplined[r.SgID] = true
+		}
 	}
 	disciplinedSet := make(map[int]struct{}, len(targetIDs))
 	for _, id := range targetIDs {
@@ -3069,14 +3086,25 @@ func main() {
 			enriched, derr := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}, false)
 			if derr != nil {
 				if middleware.GetUserID(c) == "" {
-					log.Printf("[discipline] 근거글 조회 실패 board=%s: %v — 비로그인 요청을 거부한다(원문 유출·엣지캐시 오염 방지)", slug, derr)
-					c.JSON(http.StatusServiceUnavailable, gin.H{
-						"success": false,
-						"error":   "일시적으로 글을 불러올 수 없습니다. 잠시 후 다시 시도해주세요.",
-					})
-					return
+					// ⛔ 여기서 에러를 내면 안 된다. 웹이 백엔드 5xx 를 BackendUnavailableError 로
+					//    보지 않아(+page.server.ts:144 는 평범한 Error 를 던진다) **404 페이지**로
+					//    떨어지고, 404 도 `s-maxage=60, swr=120` 으로 **똑같이 180초 캐시된다**
+					//    (2026-08-21 실측: MISS -> EXPIRED age=3 -> age=6).
+					//    「원문 유출 180초」를 「글 증발 180초」로 바꾸는 것뿐이다.
+					//
+					// ⛔ 마스킹 문구(`[이용제한 근거 글]`)를 쓰면 안 된다. 판별을 못 한 상태라
+					//    무고한 글에 낙인이 찍히고 **그것마저 180초 캐시된다.**
+					//
+					// ⭐ 그래서 중립 문구로 덮는다. 유출도 낙인도 글 증발도 아니다.
+					//    글은 그대로 있고 내용만 일시적으로 안 보인다 — 180초 캐시돼도 무해하다.
+					log.Printf("[discipline] 근거글 조회 2단 실패 board=%s: %v — 비로그인에 중립 자리표시자", slug, derr)
+					postDetail["content"] = ""
+					postDetail["title"] = "일시적으로 내용을 표시할 수 없습니다"
+				} else {
+					// 로그인 사용자는 원문을 받는 것이 원래 설계다(프런트가 blur 처리).
+					// 플래그가 빠지면 가림막이 안 그려질 뿐 노출은 아니다.
+					log.Printf("[discipline] 근거글 조회 2단 실패 board=%s: %v — 로그인 사용자라 원문 서빙(가림막 플래그만 빠짐)", slug, derr)
 				}
-				log.Printf("[discipline] 근거글 조회 실패 board=%s: %v — 로그인 사용자라 원문 서빙(가림막 플래그만 빠짐)", slug, derr)
 			}
 			if len(enriched) > 0 {
 				postDetail = enriched[0]
