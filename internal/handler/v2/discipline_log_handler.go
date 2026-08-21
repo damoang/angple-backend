@@ -309,6 +309,12 @@ type DisciplineLogDetail struct {
 	// 그대로 상단에 나열하면 회원은 전건에 다 적용됐다고 읽는다.
 	// 참이면 화면이 상단 나열을 접고 글별 목록으로 안내한다.
 	ReasonsDifferByItem bool `json:"reasons_differ_by_item,omitempty"`
+	// ⭐ 초기 형식(2024-05~08) 기록. 본문이 JSON 이 아니라 운영자가 쓴 자유 서술이라
+	// 구조화 필드를 채울 수 없다. 화면은 LegacyContent 를 그대로 보여준다.
+	// ⛔ 이 글들도 **실제 처분 기록**이다. 파싱이 안 된다고 500 을 내면
+	//    「기록이 없다」로 읽혀서 이력 조회가 통째로 틀린다(2026-08-21 실제 오판).
+	IsLegacy      bool   `json:"is_legacy,omitempty"`
+	LegacyContent string `json:"legacy_content,omitempty"`
 }
 
 // ReasonCorrection 은 회원에게 보여줄 사유 정정 한 건이다.
@@ -323,6 +329,17 @@ type ReasonCorrection struct {
 }
 
 // parseContentJSON parses the wr_content JSON or extracts from HTML
+// parseContentJSON 은 wr_content 에서 구조화 JSON 을 꺼낸다.
+//
+// ⛔ 반환 계약을 헷갈리지 마라 — **셋을 구분해야 한다.**
+//
+//	(data, nil) : 정상
+//	(nil,  nil) : **JSON 이 없다 = 초기 형식(레거시) 기록.** 오류가 아니다.
+//	(nil,  err) : 진짜 파싱 오류
+//
+// 예전 호출부가 `err != nil || data == nil` 로 뭉뚱그려 500 을 냈다. 그 결과
+// 레거시 25건(2024-05-29~08-26 + 일부)이 「이용제한 기록을 불러오는데 실패했습니다」로
+// 보였다. **기록은 멀쩡히 있는데 화면만 없다고 말하는** 상태였다.
 func parseContentJSON(content string) (*DisciplineLogContent, error) {
 	var data DisciplineLogContent
 
@@ -511,8 +528,26 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 	}
 
 	data, err := parseContentJSON(post.WrContent)
-	if err != nil || data == nil {
+	if err != nil {
 		common.V2ErrorResponse(c, http.StatusInternalServerError, "이용제한 기록 파싱 실패", err)
+		return
+	}
+	if data == nil {
+		// ⭐ 초기 형식(레거시) 기록. 구조화 JSON 이 없을 뿐 **처분은 실재한다.**
+		// ⛔ 여기서 500 을 내면 안 된다 — 조회하는 사람에게 「기록 없음」으로 읽힌다.
+		//    2026-08-21 다중이 조사에서 실제로 그 오판이 났다(30일 처분을 못 보고
+		//    「제재 이력 0」으로 판단). 화면이 원문이라도 보여주는 편이 훨씬 낫다.
+		// ⛔ 원문은 운영자가 쓴 것이지만 **신뢰하지 않고** 게시글 본문과 같은 정책으로 sanitize 한다.
+		c.Header("Cache-Control", "private, no-store")
+		common.V2Success(c, DisciplineLogDetail{
+			ID:             post.WrID,
+			MemberNickname: getMemberNickFromTitle(post.WrSubject),
+			CreatedBy:      post.MbID,
+			CreatedAt:      post.WrDatetime.Format("2006-01-02 15:04:05"),
+			ViolationTypes: []ViolationType{},
+			IsLegacy:       true,
+			LegacyContent:  common.SanitizePostContent(post.WrContent),
+		})
 		return
 	}
 
