@@ -3049,10 +3049,34 @@ func main() {
 			// is_discipline_related enrich (이용제한 근거 글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
 			// list/comments endpoint 와 일관성 유지 (PR #484 후속).
-			// 캐시가 없어 증폭이 없다. 실패는 그 요청 1건에 그치므로 로그만 남긴다.
+			// ⛔⛔ 여기는 **비로그인 마스킹의 전제**다. 아래 블록이
+			//    `is_discipline_related` 가 true 일 때만 제목·본문을 지우는데,
+			//    enrich 가 실패하면 그 플래그가 아예 없어서 **비로그인에게 원문이 나간다.**
+			//
+			// ⛔ 그리고 증폭 경로가 있다. 2026-08-21 실측:
+			//    비로그인 글상세 HTML 은 `public, s-maxage=60, stale-while-revalidate=120`
+			//    으로 Cloudflare 엣지캐시를 탄다(cf-cache-status HIT 확인).
+			//    한 번 오염되면 **최대 180초 동안 전원에게** 재배포된다.
+			//    아래 주석이 밝히듯 이 경로의 목적이 바로 "봇·작업세력 차단" 이다.
+			//
+			// ⭐ 그래서 비로그인은 fail-closed 한다.
+			//    ⛔ 보수적으로 마스킹하는 방법은 쓰지 않는다 — 무고한 글에
+			//       「이용제한 근거 글」이 붙고 **그것마저 180초 캐시된다.** 허위 낙인이 재배포된다.
+			//    ⭐ 로그인 사용자는 원문을 받는 것이 원래 설계라(프런트가 blur 처리)
+			//       플래그가 빠져도 노출이 아니다. 그쪽은 로그만 남기고 서빙한다.
+			//    ⚠️ DisciplinedIDs 에 만료 캐시 폴백이 있어, 여기까지 오는 경우는
+			//       「그 보드 캐시가 아예 없는데 DB 도 실패」뿐이다.
 			enriched, derr := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}, false)
 			if derr != nil {
-				log.Printf("[discipline] 근거글 조회 실패 board=%s: %v — 가림막 플래그가 빠진다", slug, derr)
+				if middleware.GetUserID(c) == "" {
+					log.Printf("[discipline] 근거글 조회 실패 board=%s: %v — 비로그인 요청을 거부한다(원문 유출·엣지캐시 오염 방지)", slug, derr)
+					c.JSON(http.StatusServiceUnavailable, gin.H{
+						"success": false,
+						"error":   "일시적으로 글을 불러올 수 없습니다. 잠시 후 다시 시도해주세요.",
+					})
+					return
+				}
+				log.Printf("[discipline] 근거글 조회 실패 board=%s: %v — 로그인 사용자라 원문 서빙(가림막 플래그만 빠짐)", slug, derr)
 			}
 			if len(enriched) > 0 {
 				postDetail = enriched[0]
@@ -3227,7 +3251,10 @@ func main() {
 
 			// is_discipline_related enrich (이용제한 근거 댓글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
-			// 캐시가 없어 증폭이 없다. 실패는 그 요청 1건에 그치므로 로그만 남긴다.
+			// ⭐ 댓글은 증폭 경로가 없다 — 2026-08-21 실측으로 확인:
+			//    비로그인 마스킹 블록이 없고(프런트 가림막만), 응답도
+			//    `private, max-age=2` + cf-cache-status=DYNAMIC 이라 엣지캐시를 안 탄다.
+			//    실패는 그 요청 1건에 그치므로 로그만 남긴다.
 			if enrichedC, derr := enrichWithDisciplineRelated(db, slug, transformed, false); derr != nil {
 				log.Printf("[discipline] 근거글 조회 실패(댓글) board=%s: %v — 가림막 플래그가 빠진다", slug, derr)
 			} else {
