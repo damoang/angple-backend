@@ -556,8 +556,11 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ⛔ (nil, nil) 을 돌려주지 않는다. 이 함수의 반환값은 **허용 목록**이라
+	//    "비었다"가 호출부에서 "제한 없음"으로 읽힌다. 게시판이 정상적으로 0개일 수는 없으므로
+	//    빈 목록은 결과가 아니라 조회 이상이다.
 	if len(boards) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("searchable boards: board list is empty")
 	}
 
 	tableNames := make([]string, len(boards))
@@ -568,8 +571,17 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 		boardMap[tableName] = b
 	}
 
+	// ⛔ 이 조회의 에러를 버리면 안 된다. 실패하면 existingTables 가 비고 result 가 nil 이 되어
+	//    조용히 (nil, nil) 로 나갔다 — 「검색 가능한 게시판이 하나도 없다」로 읽히는 값이다.
+	//    같은 형태가 getActiveBoards·GetBoardStats 에도 있으나 그쪽은 허용 목록이 아니라
+	//    이 변경의 범위 밖으로 둔다.
 	var existingTables []string
-	r.db.Raw("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ?", tableNames).Scan(&existingTables)
+	if err := r.db.Raw(
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ?",
+		tableNames,
+	).Scan(&existingTables).Error; err != nil {
+		return nil, fmt.Errorf("searchable boards: table existence check failed: %w", err)
+	}
 
 	var result []searchableBoard
 	for _, t := range existingTables {
@@ -581,6 +593,11 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 			BoTable:   b.BoTable,
 			BoSubject: b.BoSubject,
 		})
+	}
+
+	// ⛔ 빈 결과는 캐시하지도, 반환하지도 않는다. 위와 같은 이유다.
+	if len(result) == 0 {
+		return nil, fmt.Errorf("searchable boards: no searchable board resolved")
 	}
 
 	// Store in cache
@@ -642,15 +659,14 @@ func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[strin
 	//
 	// ⭐ 그래서 feed 는 **후보 선정에만** 쓰고 표시 데이터는 전부 정본에서 가져온다.
 	//    wr_10 처럼 feed 에 없는 확장 필드가 누락되는 문제도 함께 사라진다.
-	// ⛔ fail-closed. searchableBoardSet 은 조회 실패·0건에 nil 을 주는데, 그걸 그냥 쓰면
-	//    보드 필터가 통째로 사라진다. feed 에는 검색 대상이 아닌 보드가 29개 섞여 있고
+	// ⛔ fail-closed. 보드 목록을 못 얻으면 **필터 없이 진행하지 않는다.**
+	//    feed 에는 검색 대상이 아닌 보드가 29개 섞여 있고
 	//    그중 adm(1,670글)·advertiser(755)·temp(753)·archive(432) 는 **읽기 레벨 10(관리자 전용)**,
 	//    disciplinelog·truthroom·claim·angreport 는 징계·소명 기록이다.
-	//    기존 UNION 경로도 GetSearchableBoards 실패 시 아무것도 주지 않았다(같은 계약).
 	//    ⭐ 피드가 잠깐 안 뜨는 것과 관리자 게시판이 노출되는 것 중에는 전자가 낫다.
-	searchable := r.searchableBoardSet()
-	if searchable == nil {
-		return nil, fmt.Errorf("searchable boards unavailable")
+	searchable, err := r.searchableBoardSet()
+	if err != nil {
+		return nil, err
 	}
 	byBoard := make(map[string][]int)
 	order := make([]cand, 0, len(cands))
@@ -737,18 +753,32 @@ var activityBoardSlugRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 // searchableBoardSet 은 bo_use_search=1 보드의 슬러그 집합을 돌려준다.
 // 피드 후보의 board_id 는 정본(g5_board)을 거치지 않은 값이라, 비검색 보드가
 // 후보에 섞여도 여기서 걸러진다 (#13174 — is_public 완화로 새로 열린 경로 차단).
-// 조회 실패 시 nil 을 돌려주고 호출부는 필터를 생략한다(기존 동작 유지 — fail-open 이
-// 아니라 "종전과 동일" 이다. 이 함수 도입 전에는 이 필터 자체가 없었다).
-func (r *myPageRepository) searchableBoardSet() map[string]bool {
+// ⛔ 이 함수는 **절대 (nil, nil) 을 돌려주지 않는다.** 반환값이 「허용 목록」이라
+//
+//	nil 은 「제한 없음」으로 읽힌다. 호출부가 `if set != nil && !set[b]` 같은 가드를 쓰면
+//	조회 실패가 곧 **전면 허용**이 된다. 2026-08-21 에 이 실수를 하루에 세 곳에서 찾았다.
+//
+// 무엇이 새는가 — member_activity_feed 151개 보드 중 검색 대상이 아닌 것이 **29개**다:
+//
+//	adm(읽기레벨 10, 1,670글) · advertiser(10, 755) · temp(10, 753) · archive(10, 432)
+//	disciplinelog(징계기록, 6,394) · truthroom(신고누적, 2,327) · claim(소명, 644) · angreport(신고, 456)
+//
+// 필터가 사라지면 **회원 공개 프로필에 소명·징계 게시판 글이 뜬다** — 누가 소명을 냈는지,
+// 누가 징계 기록에 있는지가 제3자에게 드러난다. 관리자 게시판 노출보다 나쁜 종류다.
+//
+// ⭐ 그래서 실패는 반드시 error 로 나간다. 호출부가 "몰라서" 통과시키는 일이 없어야 한다.
+func (r *myPageRepository) searchableBoardSet() (map[string]bool, error) {
+	// ⭐ 빈 목록·조회 실패 판정은 GetSearchableBoards 가 한다(그쪽이 계약의 정본이다).
+	//    같은 지식이 두 곳에 있으면 한쪽만 고쳐질 때 다시 벌어진다.
 	boards, err := r.GetSearchableBoards()
-	if err != nil || len(boards) == 0 {
-		return nil
+	if err != nil {
+		return nil, err
 	}
 	set := make(map[string]bool, len(boards))
 	for _, b := range boards {
 		set[b.BoTable] = true
 	}
-	return set
+	return set, nil
 }
 
 // verifyActivityPosts 는 피드가 준 후보 중 정본에 실재하는 것만 남긴다.
@@ -767,13 +797,20 @@ func (r *myPageRepository) searchableBoardSet() map[string]bool {
 func (r *myPageRepository) verifyActivityPosts(
 	mbID string, candidates []gnuboard.ActivityPost, limit int,
 ) []gnuboard.ActivityPost {
-	searchable := r.searchableBoardSet()
+	// ⛔ fail-closed. 보드 목록을 못 얻으면 **필터 없이 진행하지 않는다.**
+	//    빈 결과를 돌려주면 호출부가 정본 UNION 폴백으로 떨어지고(그 경로도 fail-closed)
+	//    사용자에게는 정상 동작한다 — 가용성을 잃지 않으면서 노출도 막는다.
+	searchable, err := r.searchableBoardSet()
+	if err != nil {
+		log.Printf("[activity] %v — 보드 필터 없이 진행하지 않고 정본 조회로 폴백한다", err)
+		return nil
+	}
 	byBoard := make(map[string][]int)
 	for _, c := range candidates {
 		if c.BoardID == "" {
 			continue
 		}
-		if searchable != nil && !searchable[c.BoardID] {
+		if !searchable[c.BoardID] {
 			continue
 		}
 		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
@@ -867,13 +904,20 @@ func (r *myPageRepository) verifyActivityPosts(
 func (r *myPageRepository) verifyActivityComments(
 	mbID string, candidates []gnuboard.ActivityComment, limit int,
 ) []gnuboard.ActivityComment {
-	searchable := r.searchableBoardSet()
+	// ⛔ fail-closed. 보드 목록을 못 얻으면 **필터 없이 진행하지 않는다.**
+	//    빈 결과를 돌려주면 호출부가 정본 UNION 폴백으로 떨어지고(그 경로도 fail-closed)
+	//    사용자에게는 정상 동작한다 — 가용성을 잃지 않으면서 노출도 막는다.
+	searchable, err := r.searchableBoardSet()
+	if err != nil {
+		log.Printf("[activity] %v — 보드 필터 없이 진행하지 않고 정본 조회로 폴백한다", err)
+		return nil
+	}
 	byBoard := make(map[string][]int)
 	for _, c := range candidates {
 		if c.BoardID == "" {
 			continue
 		}
-		if searchable != nil && !searchable[c.BoardID] {
+		if !searchable[c.BoardID] {
 			continue
 		}
 		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
@@ -1022,8 +1066,11 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		// 후보는 있는데 확인된 게 0건일 때만 정본 UNION 으로 떨어진다.
 	}
 
+	// ⛔ 예전엔 `err != nil || len(boards) == 0` 이었다. 빈 목록일 때 err 가 nil 이라
+	//    (nil, nil) 로 나가 「이 회원은 글이 없다」는 성공 응답이 됐다 — 조회 실패가 조용히
+	//    정상 결과로 둔갑했다. 이제 GetSearchableBoards 가 빈 목록도 error 로 준다.
 	boards, err := r.GetSearchableBoards()
-	if err != nil || len(boards) == 0 {
+	if err != nil {
 		return nil, err
 	}
 
@@ -1114,8 +1161,11 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		// 후보는 있는데 확인된 게 0건일 때만 정본 UNION 으로 떨어진다.
 	}
 
+	// ⛔ 예전엔 `err != nil || len(boards) == 0` 이었다. 빈 목록일 때 err 가 nil 이라
+	//    (nil, nil) 로 나가 「이 회원은 글이 없다」는 성공 응답이 됐다 — 조회 실패가 조용히
+	//    정상 결과로 둔갑했다. 이제 GetSearchableBoards 가 빈 목록도 error 로 준다.
 	boards, err := r.GetSearchableBoards()
-	if err != nil || len(boards) == 0 {
+	if err != nil {
 		return nil, err
 	}
 
