@@ -2,6 +2,7 @@ package gnuboard
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -595,9 +596,9 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 // UNION ALL per searchable board with a PK (wr_id) range scan — no wr_datetime ORDER BY /
 // OFFSET inside subqueries, so the 670만-row free 보드도 안전(PK range). 병합만 wr_datetime DESC.
 func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error) {
-	if perBoard <= 0 || perBoard > 20 {
-		perBoard = 8
-	}
+	// ⚠️ perBoard 는 보드별 UNION 시절의 파라미터다. 크로스보드 단일 스캔으로 바뀌면서
+	//    쓰이지 않는다(후보는 항상 feedCandidatePool). 시그니처는 호출부 호환을 위해 유지한다.
+	_ = perBoard
 
 	// 1단계: 후보를 member_activity_feed 에서 뽑는다(인덱스 레인지 스캔 1회).
 	type cand struct {
@@ -641,14 +642,23 @@ func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[strin
 	//
 	// ⭐ 그래서 feed 는 **후보 선정에만** 쓰고 표시 데이터는 전부 정본에서 가져온다.
 	//    wr_10 처럼 feed 에 없는 확장 필드가 누락되는 문제도 함께 사라진다.
+	// ⛔ fail-closed. searchableBoardSet 은 조회 실패·0건에 nil 을 주는데, 그걸 그냥 쓰면
+	//    보드 필터가 통째로 사라진다. feed 에는 검색 대상이 아닌 보드가 29개 섞여 있고
+	//    그중 adm(1,670글)·advertiser(755)·temp(753)·archive(432) 는 **읽기 레벨 10(관리자 전용)**,
+	//    disciplinelog·truthroom·claim·angreport 는 징계·소명 기록이다.
+	//    기존 UNION 경로도 GetSearchableBoards 실패 시 아무것도 주지 않았다(같은 계약).
+	//    ⭐ 피드가 잠깐 안 뜨는 것과 관리자 게시판이 노출되는 것 중에는 전자가 낫다.
 	searchable := r.searchableBoardSet()
+	if searchable == nil {
+		return nil, fmt.Errorf("searchable boards unavailable")
+	}
 	byBoard := make(map[string][]int)
 	order := make([]cand, 0, len(cands))
 	for _, c := range cands {
 		if c.BoardID == "" || !activityBoardSlugRe.MatchString(c.BoardID) {
 			continue
 		}
-		if searchable != nil && !searchable[c.BoardID] {
+		if !searchable[c.BoardID] {
 			continue
 		}
 		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WriteID)
@@ -674,6 +684,8 @@ func (r *myPageRepository) FindRecentAcrossBoards(perBoard int, cursor map[strin
 		var rows []gnuboard.FeedPost
 		if err := r.db.Raw(sql, args...).Scan(&rows).Error; err != nil {
 			// 한 보드가 실패해도 피드 전체를 죽이지 않는다(기존 UNION 은 통째로 실패했다).
+			// ⛔ 다만 조용히 넘기면 한 보드가 영구히 피드에서 사라져도 아무도 모른다.
+			log.Printf("[feed] board %s verify failed, skipped: %v", boardID, err)
 			continue
 		}
 		m := make(map[int]gnuboard.FeedPost, len(rows))
