@@ -484,18 +484,35 @@ func (h *V2Handler) loadRecentFeed(
 	if err != nil {
 		return nil, err
 	}
-	h.storeFeed(ctx, key, rows)
+	// ⛔ 0건은 캐시하지 않는다. 122개 보드가 전부 비는 일은 없으므로 조회 실패로 본다.
+	//    비동기 갱신 경로와 같은 규칙이다.
+	if len(rows) > 0 {
+		h.storeFeed(ctx, key, rows)
+	}
 	return rows, nil
 }
 
 // refreshFeedAsync 는 옛 값을 내준 뒤 뒤에서 캐시를 갱신한다.
 //
-// ⛔ 락이 없으면 만료 순간 동시 요청만큼 6초짜리 122-UNION 이 동시에 돈다. SET NX 로 한 번만 돌게 한다.
+// ⛔ 락이 없으면 만료 순간 동시 요청만큼 6초짜리 122-UNION 이 동시에 돈다. SetNX 는 Redis 원자
+//
+//	연산이라 파드 간에도 막힌다.
+//
 // ⛔ 요청 컨텍스트를 쓰면 응답이 끝나는 순간 갱신이 취소된다. 반드시 독립 컨텍스트여야 한다.
 // ⛔ 실패하면 아무것도 쓰지 않는다 — 옛 값이 남아 다음 요청이 그걸 받는다(에러를 캐시하지 않는다).
+//
+// ⚠️ 아래 25초 타임아웃은 **Redis 쓰기에만** 걸린다. FindRecentAcrossBoards 가 context 를 받지
+//
+//	않아 정작 느린 122-UNION 은 묶이지 않는다. 쿼리가 락 TTL(30초)을 넘기면 락이 먼저 풀려
+//	두 번째 갱신이 시작될 수 있다. 실측 p95 가 6초대라 현실적이지 않지만, **보호가 없다는 사실은
+//	적어둔다.** 리포에 ctx 를 넘기는 것은 별건이다.
 func (h *V2Handler) refreshFeedAsync(key string, limit int) {
+	cl := h.cache.Client()
+	if cl == nil {
+		return
+	}
 	lockKey := key + ":lock"
-	ok, err := h.cache.Client().SetNX(context.Background(), lockKey, "1", feedLockTTL).Result()
+	ok, err := cl.SetNX(context.Background(), lockKey, "1", feedLockTTL).Result()
 	if err != nil || !ok {
 		return // 다른 고루틴/파드가 이미 갱신 중
 	}
@@ -503,7 +520,7 @@ func (h *V2Handler) refreshFeedAsync(key string, limit int) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
-		defer h.cache.Client().Del(context.Background(), lockKey)
+		defer cl.Del(context.Background(), lockKey)
 
 		rows, rerr := h.feedRepo.FindRecentAcrossBoards(limit, nil, nil)
 		if rerr != nil || len(rows) == 0 {
