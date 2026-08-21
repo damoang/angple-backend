@@ -11,6 +11,7 @@ package v2
 // 재사용하므로, 앱 동작이 damoang.net 사이트와 동일해진다(삭제글/공지/정렬 처리 포함).
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -415,7 +416,15 @@ func decodeFeedCursor(s string) map[string]int {
 // ⛔ 「새글」 성격이라 지연이 그대로 체감된다. 30초는 2026-08-21 승인값이며,
 //
 //	늘리기 전에 반드시 "새 글이 몇 초 늦게 보여도 되는가"를 다시 물을 것.
-const feedCacheTTL = 30 * time.Second
+const (
+	// feedFreshTTL 안에 있으면 갱신하지 않는다. 데이터 신선도를 정하는 값이다.
+	feedFreshTTL = 30 * time.Second
+	// feedValueTTL 은 "신선하지 않아도 일단 내줄 수 있는" 한계다. 이 값이 곧 최악의 데이터 나이다.
+	// ⛔ 새벽 최저 호출 간격이 600초라 300초를 넘기면 그만큼 오래된 값을 보게 된다.
+	feedValueTTL = 5 * time.Minute
+	// feedLockTTL 은 갱신 락. 쿼리가 6초대라 넉넉히 잡되, 파드가 죽어도 이 시간 뒤 풀린다.
+	feedLockTTL = 30 * time.Second
+)
 
 // loadRecentFeed 는 피드 후보 풀을 가져온다. **차단 목록이 빈 요청만** 캐시한다.
 //
@@ -458,8 +467,75 @@ func (h *V2Handler) loadRecentFeed(
 		return load()
 	}
 
+	ctx := c.Request.Context()
 	key := fmt.Sprintf("v2:feed:v1:%d", limit)
-	return pkgredis.GetOrSet(c.Request.Context(), h.cache, key, feedCacheTTL, load)
+
+	// 값이 남아 있으면 신선하지 않더라도 **먼저 내준다**. 사용자를 6초 기다리게 하지 않는 것이
+	// 이 함수의 목적이다. 신선도는 뒤에서 따라잡는다.
+	if cached, err := pkgredis.Get[[]gnuboard.FeedPost](ctx, h.cache, key); err == nil && len(cached) > 0 {
+		if _, ferr := pkgredis.Get[string](ctx, h.cache, key+":fresh"); ferr != nil {
+			h.refreshFeedAsync(key, limit)
+		}
+		return cached, nil
+	}
+
+	// 값 자체가 없다(첫 요청이거나 feedValueTTL 경과). 이때만 동기로 기다린다.
+	rows, err := load()
+	if err != nil {
+		return nil, err
+	}
+	// ⛔ 0건은 캐시하지 않는다. 122개 보드가 전부 비는 일은 없으므로 조회 실패로 본다.
+	//    비동기 갱신 경로와 같은 규칙이다.
+	if len(rows) > 0 {
+		h.storeFeed(ctx, key, rows)
+	}
+	return rows, nil
+}
+
+// refreshFeedAsync 는 옛 값을 내준 뒤 뒤에서 캐시를 갱신한다.
+//
+// ⛔ 락이 없으면 만료 순간 동시 요청만큼 6초짜리 122-UNION 이 동시에 돈다. SetNX 는 Redis 원자
+//
+//	연산이라 파드 간에도 막힌다.
+//
+// ⛔ 요청 컨텍스트를 쓰면 응답이 끝나는 순간 갱신이 취소된다. 반드시 독립 컨텍스트여야 한다.
+// ⛔ 실패하면 아무것도 쓰지 않는다 — 옛 값이 남아 다음 요청이 그걸 받는다(에러를 캐시하지 않는다).
+//
+// ⚠️ 아래 25초 타임아웃은 **Redis 쓰기에만** 걸린다. FindRecentAcrossBoards 가 context 를 받지
+//
+//	않아 정작 느린 122-UNION 은 묶이지 않는다. 쿼리가 락 TTL(30초)을 넘기면 락이 먼저 풀려
+//	두 번째 갱신이 시작될 수 있다. 실측 p95 가 6초대라 현실적이지 않지만, **보호가 없다는 사실은
+//	적어둔다.** 리포에 ctx 를 넘기는 것은 별건이다.
+func (h *V2Handler) refreshFeedAsync(key string, limit int) {
+	cl := h.cache.Client()
+	if cl == nil {
+		return
+	}
+	lockKey := key + ":lock"
+	ok, err := cl.SetNX(context.Background(), lockKey, "1", feedLockTTL).Result()
+	if err != nil || !ok {
+		return // 다른 고루틴/파드가 이미 갱신 중
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		defer cl.Del(context.Background(), lockKey)
+
+		rows, rerr := h.feedRepo.FindRecentAcrossBoards(limit, nil, nil)
+		if rerr != nil || len(rows) == 0 {
+			return
+		}
+		h.storeFeed(ctx, key, rows)
+	}()
+}
+
+// storeFeed 는 값과 신선도 마커를 함께 쓴다. 마커가 먼저 만료되면서 "갱신할 때"를 알린다.
+func (h *V2Handler) storeFeed(ctx context.Context, key string, rows []gnuboard.FeedPost) {
+	//nolint:errcheck // 캐시 쓰기 실패는 응답을 막지 않는다
+	pkgredis.Set(ctx, h.cache, key, rows, feedValueTTL)
+	//nolint:errcheck
+	pkgredis.Set(ctx, h.cache, key+":fresh", "1", feedFreshTTL)
 }
 
 // ListRecentFeed handles GET /api/v2/feed — 크로스보드 최신 타임라인(무한스크롤, 커서 기반).
