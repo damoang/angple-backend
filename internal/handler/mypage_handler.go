@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -242,6 +243,76 @@ func formatNullableTime(t *time.Time) interface{} {
 	return t.Format(time.RFC3339)
 }
 
+// maskDisciplined 는 이용제한 근거 글·댓글의 제목/내용을 가린다.
+//
+// ⛔ 판별에 실패한 보드의 항목은 **목록에서 뺀다.** 셋 중 하나를 골라야 하는데:
+//
+//	① 원제목을 그대로 둔다  → 노출. free 한 곳에서만 692글·341명이 이 마스킹만을 보호막으로 삼는다
+//	② 전부 가린다          → 무고한 글에 「이용제한 근거 글」이 붙는다. **허위 낙인**이라 ①만큼 나쁘다
+//	③ 목록에서 뺀다        → 노출도 낙인도 아니다. 목록이 조금 짧아질 뿐이다
+//
+// ③을 고른다. 판별을 못 하는 상태에서 "징계를 받았다"고 표시하는 것은 노출과 같은 등급의 피해다.
+//
+// ⛔ 실패는 반드시 로그로 드러낸다. 예전에는 FindDisciplinedIDs 가 error 를 낼 수가 없어
+//
+//	(return 경로가 둘 다 nil error) 소비자의 `if err == nil` 가드가 구조적으로 무의미했고,
+//	마스킹이 조용히 사라져도 아무 흔적이 남지 않았다.
+func (h *MyPageHandler) maskDisciplined(
+	items []map[string]interface{}, field, label string,
+) []map[string]interface{} {
+	if len(items) == 0 {
+		return items
+	}
+
+	idsByBoard := make(map[string][]int)
+	for _, it := range items {
+		board, _ := it["bo_table"].(string)
+		wrID, _ := it["wr_id"].(int)
+		if board != "" && wrID > 0 {
+			idsByBoard[board] = append(idsByBoard[board], wrID)
+		}
+	}
+
+	disciplined := make(map[string]map[int]bool, len(idsByBoard))
+	failed := make(map[string]bool)
+	for board, ids := range idsByBoard {
+		set, err := h.myPageRepo.FindDisciplinedIDs(board, ids)
+		if err != nil {
+			failed[board] = true
+			log.Printf("[activity] 근거글 판별 실패 board=%s: %v — 해당 보드 항목을 목록에서 제외한다",
+				board, err)
+			continue
+		}
+		disciplined[board] = set
+	}
+
+	if len(failed) == 0 {
+		// 정상 경로. 슬라이스를 새로 만들지 않는다.
+		for _, it := range items {
+			board, _ := it["bo_table"].(string)
+			wrID, _ := it["wr_id"].(int)
+			if set := disciplined[board]; set != nil && set[wrID] {
+				it[field] = label
+			}
+		}
+		return items
+	}
+
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, it := range items {
+		board, _ := it["bo_table"].(string)
+		if failed[board] {
+			continue
+		}
+		wrID, _ := it["wr_id"].(int)
+		if set := disciplined[board]; set != nil && set[wrID] {
+			it[field] = label
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
 // GetMemberActivity handles GET /api/v1/members/:id/activity
 //
 //nolint:gocyclo // Cache-first + parallel fetch control flow is intentionally kept local.
@@ -378,55 +449,11 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 
 	// #12908: 이용제한 근거 글(g5_na_singo discipline)은 프로필 최근글에서도 제목을 가린다
 	// (링크는 유지). 제목에 욕설·분란 유도가 많아 목록 노출을 차단. 게시글 상세와 통일.
-	if len(posts) > 0 {
-		idsByBoard := make(map[string][]int)
-		for _, p := range posts {
-			board, _ := p["bo_table"].(string)
-			wrID, _ := p["wr_id"].(int)
-			if board != "" && wrID > 0 {
-				idsByBoard[board] = append(idsByBoard[board], wrID)
-			}
-		}
-		disciplined := make(map[string]map[int]bool, len(idsByBoard))
-		for board, ids := range idsByBoard {
-			if set, err := h.myPageRepo.FindDisciplinedIDs(board, ids); err == nil {
-				disciplined[board] = set
-			}
-		}
-		for _, p := range posts {
-			board, _ := p["bo_table"].(string)
-			wrID, _ := p["wr_id"].(int)
-			if set := disciplined[board]; set != nil && set[wrID] {
-				p["wr_subject"] = "[이용제한 근거 글]"
-			}
-		}
-	}
+	posts = h.maskDisciplined(posts, "wr_subject", "[이용제한 근거 글]")
 
 	// #12751: 이용제한 근거 댓글(g5_na_singo discipline)은 프로필 최근댓글에서도
 	// 내용을 가린다(링크는 유지). 게시글 상세와 동작을 통일.
-	if len(comments) > 0 {
-		idsByBoard := make(map[string][]int)
-		for _, cm := range comments {
-			board, _ := cm["bo_table"].(string)
-			wrID, _ := cm["wr_id"].(int)
-			if board != "" && wrID > 0 {
-				idsByBoard[board] = append(idsByBoard[board], wrID)
-			}
-		}
-		disciplined := make(map[string]map[int]bool, len(idsByBoard))
-		for board, ids := range idsByBoard {
-			if set, err := h.myPageRepo.FindDisciplinedIDs(board, ids); err == nil {
-				disciplined[board] = set
-			}
-		}
-		for _, cm := range comments {
-			board, _ := cm["bo_table"].(string)
-			wrID, _ := cm["wr_id"].(int)
-			if set := disciplined[board]; set != nil && set[wrID] {
-				cm["preview"] = "[이용제한 댓글]"
-			}
-		}
-	}
+	comments = h.maskDisciplined(comments, "preview", "[이용제한 댓글]")
 
 	resp := activityResponse{RecentPosts: posts, RecentComments: comments}
 

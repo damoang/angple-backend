@@ -835,7 +835,12 @@ func (r *myPageRepository) verifyActivityPosts(
 		//    [이용제한 근거 글]로 덮는다. 일반 비밀글은 근거 집합에 없어 그대로 제외(무회귀).
 		//    근거 집합은 게시판 단위로 캐시돼 있어(loadDisciplinedIDs) 추가 DB 부하가 없다.
 		var evidenceIDs []int
-		if disciplined := r.loadDisciplinedIDs(boardID); len(disciplined) > 0 {
+		// ⛔ 여기서 조회가 실패하면 **우회를 붙이지 않는다.** 그러면 아래 엄격 필터가
+		//    그대로 적용돼 비밀·잠금 근거글이 목록에서 빠진다 — 원제목이 나가는 것보다 안전하다.
+		//    (마스킹만이 보호막인 일반 근거글은 이 필터를 통과하므로 핸들러 쪽 방어가 따로 필요하다.)
+		if disciplined, derr := r.loadDisciplinedIDs(boardID); derr != nil {
+			log.Printf("[activity] 근거글 조회 실패 board=%s: %v — 비밀·잠금 근거글 우회를 붙이지 않는다", boardID, derr)
+		} else {
 			for _, id := range ids {
 				if disciplined[id] {
 					evidenceIDs = append(evidenceIDs, id)
@@ -1229,13 +1234,27 @@ const disciplinedIDsCacheTTL = 5 * time.Minute
 const disciplinedIDsCacheMaxBoards = 200
 
 // loadDisciplinedIDs 는 게시판의 전체 근거 ID 집합을 가져온다(캐시 우선).
-func (r *myPageRepository) loadDisciplinedIDs(boardID string) map[int]bool {
+//
+// ⛔ 실패를 nil 로 뭉개지 않는다. 반환값이 「가려야 할 글 목록」이라 nil 은
+//
+//	「가릴 게 없다」로 읽히고, 그러면 원제목이 그대로 프로필에 나간다.
+//	2026-08-21 실측: free 한 곳에서만 **692글 · 341명**이 이 마스킹만을 보호막으로 삼는다
+//	(나머지는 삭제·잠금·비밀글이라 어차피 안 보인다).
+//	근거글은 징계를 부른 글이라 제목 자체가 분란 유도 문구인 경우가 많다.
+//
+// ⭐ 다만 곧바로 error 를 내지 않는다. 만료된 캐시가 있으면 그걸 쓴다 —
+// 「몇 분 전의 근거글 목록」은 「근거글 없음」보다 압도적으로 정확하다.
+// 제재는 하루 몇 건 수준이라 그 사이 새로 생긴 근거글은 사실상 없다.
+func (r *myPageRepository) loadDisciplinedIDs(boardID string) (map[int]bool, error) {
+	var stale map[int]bool
 	disciplinedIDsCache.RLock()
 	if set, ok := disciplinedIDsCache.byBoard[boardID]; ok {
 		if exp, ok2 := disciplinedIDsCache.expires[boardID]; ok2 && time.Now().Before(exp) {
 			disciplinedIDsCache.RUnlock()
-			return set
+			return set, nil
 		}
+		// ⭐ 만료됐어도 붙들어 둔다. 조회가 실패하면 이게 유일한 정답 근사치다.
+		stale = set
 	}
 	disciplinedIDsCache.RUnlock()
 
@@ -1246,7 +1265,12 @@ func (r *myPageRepository) loadDisciplinedIDs(boardID string) map[int]bool {
 	).Scan(&ids).Error; err != nil {
 		// ⛔ 실패를 캐시하지 않는다. DB 일시 장애가 TTL 동안 굳으면
 		//    그 사이 근거 표시가 통째로 사라진다.
-		return nil
+		if stale != nil {
+			log.Printf("[activity] 근거글 조회 실패 board=%s: %v — 만료된 캐시로 대체한다(%d건)",
+				boardID, err, len(stale))
+			return stale, nil
+		}
+		return nil, fmt.Errorf("disciplined ids lookup failed (board=%s): %w", boardID, err)
 	}
 
 	set := make(map[int]bool, len(ids))
@@ -1277,7 +1301,7 @@ func (r *myPageRepository) loadDisciplinedIDs(boardID string) map[int]bool {
 	disciplinedIDsCache.expires[boardID] = time.Now().Add(disciplinedIDsCacheTTL)
 	disciplinedIDsCache.Unlock()
 
-	return set
+	return set, nil
 }
 
 func (r *myPageRepository) FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error) {
@@ -1288,7 +1312,12 @@ func (r *myPageRepository) FindDisciplinedIDs(boardID string, wrIDs []int) (map[
 
 	// ⛔ 캐시된 map 을 그대로 돌려주지 마라 — 호출자가 쓰면 공유 상태가 오염된다.
 	//    요청된 ID 만 골라 새 map 을 만든다(호출자 계약도 그대로 유지된다).
-	boardSet := r.loadDisciplinedIDs(boardID)
+	// ⛔ 실패를 삼키지 않는다. 예전엔 이 함수의 return 경로가 둘 다 (result, nil) 이라
+	//    **error 를 낼 수가 없었고**, 소비자의 `if err == nil` 가드가 구조적으로 무의미했다.
+	boardSet, err := r.loadDisciplinedIDs(boardID)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range wrIDs {
 		if boardSet[id] {
 			result[id] = true
