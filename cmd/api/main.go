@@ -815,9 +815,23 @@ func enrichGivingExtras(db *gorm.DB, slug string, items []map[string]any) []map[
 	return items
 }
 
-func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]any, maskContent bool) []map[string]any {
+// enrichWithDisciplineRelated 는 이용제한 근거 아이템에 is_discipline_related 를 붙이고,
+// maskContent 면 제목·본문을 placeholder 로 덮는다.
+//
+// ⛔ 실패를 삼키면 안 된다. 예전에는 조회 에러에 `return items` 였고 시그니처에 error 조차
+//
+//	없었다. 그러면 **마스킹이 벗겨진 원문이 그대로 응답에 실린다.**
+//	is_discipline_related 는 단순 표시값이 아니라 프런트의 가림막(DisciplinedContent)을 켜는
+//	스위치라, 플래그가 없으면 가림막 자체가 안 그려진다(글 상세·댓글·목록 레이아웃 6종).
+//
+// ⛔⛔ 그리고 목록 경로는 이 함수가 **캐시 저장 직전**에 돈다. 실패하면 벗겨진 응답이
+//
+//	Redis(30초) + 인메모리(30초)에 들어가 **모든 사용자에게 재배포**된다.
+//	다른 fail-open 은 피해가 「그 요청 1건」인데 이건 증폭된다 — 그래서 error 를 올린다.
+//	호출부는 error 를 받으면 **캐시에 쓰지 않는다.**
+func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]any, maskContent bool) ([]map[string]any, error) {
 	if len(items) == 0 || slug == "" {
-		return items
+		return items, nil
 	}
 	seen := make(map[int]struct{}, len(items))
 	targetIDs := make([]int, 0, len(items))
@@ -844,24 +858,24 @@ func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]an
 		targetIDs = append(targetIDs, id)
 	}
 	if len(targetIDs) == 0 {
-		return items
+		return items, nil
 	}
-	type singoRow struct {
-		SgID int `gorm:"column:sg_id"`
+
+	// ⭐ 보드 단위 캐시(+만료 폴백)를 공유한다. 예전에는 요청마다 IN 절 쿼리를 쳤는데
+	//    이제 보드당 5분에 한 번이다. 조회 실패 시 만료된 캐시로 대체되므로
+	//    실제로 error 가 나가는 경우는 「그 보드 캐시가 아예 없는데 DB 도 실패」뿐이다.
+	disciplined, err := gnurepo.DisciplinedIDs(db, slug)
+	if err != nil {
+		return nil, err
 	}
-	var rows []singoRow
-	if err := db.Table("g5_na_singo").
-		Select("DISTINCT sg_id").
-		Where("sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL", slug, targetIDs).
-		Find(&rows).Error; err != nil {
-		return items
+	disciplinedSet := make(map[int]struct{}, len(targetIDs))
+	for _, id := range targetIDs {
+		if disciplined[id] {
+			disciplinedSet[id] = struct{}{}
+		}
 	}
-	if len(rows) == 0 {
-		return items
-	}
-	disciplinedSet := make(map[int]struct{}, len(rows))
-	for _, r := range rows {
-		disciplinedSet[r.SgID] = struct{}{}
+	if len(disciplinedSet) == 0 {
+		return items, nil
 	}
 	result := make([]map[string]any, len(items))
 	for i, item := range items {
@@ -888,7 +902,7 @@ func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]an
 		}
 		result[i] = copied
 	}
-	return result
+	return result, nil
 }
 
 // maskDisciplinedFields 는 이용제한 근거 아이템의 제목/본문 계열 필드를 placeholder 로
@@ -2780,7 +2794,20 @@ func main() {
 
 			// is_discipline_related enrich (이용제한 근거 글 표시용).
 			// g5_na_singo.discipline_log_id IS NOT NULL 매칭. cache 저장 전 적용 → cache 자동 포함.
-			items = enrichWithDisciplineRelated(db, slug, items, true)
+			// ⛔ 실패하면 마스킹이 벗겨진 채로 나간다. 그 자체도 노출이지만,
+			//    **캐시에 들어가면 30초간 전원에게 재배포**되어 등급이 달라진다.
+			//    그래서 실패 시 캐시 쓰기를 막는다(disciplineOK=false).
+			//    ⛔ 전부 마스킹하지 않는다 — 무고한 글에 「이용제한 근거 글」이 붙어
+			//       허위 낙인이 된다. 게시판 목록에서는 특히 눈에 띈다.
+			//    ⛔ 목록 전체를 500 으로 죽이지도 않는다 — 본 쿼리는 이미 성공했고
+			//       가용성 손실이 크다.
+			disciplineOK := true
+			if enriched, derr := enrichWithDisciplineRelated(db, slug, items, true); derr != nil {
+				disciplineOK = false
+				log.Printf("[discipline] 근거글 조회 실패 board=%s: %v — 마스킹 없이 서빙하되 캐시에 쓰지 않는다", slug, derr)
+			} else {
+				items = enriched
+			}
 
 			// 나눔(giving) 상태 배지 재료 — 캐시 저장 전 적용 (cache hit 자동 포함).
 			items = enrichGivingExtras(db, slug, items)
@@ -2824,7 +2851,9 @@ func main() {
 			//    OverrideIPForAdmin 으로 items 에 마스킹 안 된 원본 IP가 들어가 있어,
 			//    이 응답을 공유 캐시에 저장하면 직후 익명·일반 사용자에게 원본 IP가
 			//    그대로 나간다. 관리자 요청은 캐시에 쓰지 않는다(읽기는 그대로 히트).
-			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && middleware.GetUserLevel(c) < 10 {
+			// ⛔ disciplineOK 를 빼지 마라. 마스킹 실패분이 캐시에 들어가면
+			//    한 번의 DB 흔들림이 30초 × 전원 노출로 증폭된다.
+			if disciplineOK && !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && middleware.GetUserLevel(c) < 10 {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
@@ -3020,7 +3049,12 @@ func main() {
 			// is_discipline_related enrich (이용제한 근거 글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
 			// list/comments endpoint 와 일관성 유지 (PR #484 후속).
-			if enriched := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}, false); len(enriched) > 0 {
+			// 캐시가 없어 증폭이 없다. 실패는 그 요청 1건에 그치므로 로그만 남긴다.
+			enriched, derr := enrichWithDisciplineRelated(db, slug, []map[string]any{postDetail}, false)
+			if derr != nil {
+				log.Printf("[discipline] 근거글 조회 실패 board=%s: %v — 가림막 플래그가 빠진다", slug, derr)
+			}
+			if len(enriched) > 0 {
 				postDetail = enriched[0]
 			}
 
@@ -3193,7 +3227,12 @@ func main() {
 
 			// is_discipline_related enrich (이용제한 근거 댓글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
-			transformed = enrichWithDisciplineRelated(db, slug, transformed, false)
+			// 캐시가 없어 증폭이 없다. 실패는 그 요청 1건에 그치므로 로그만 남긴다.
+			if enrichedC, derr := enrichWithDisciplineRelated(db, slug, transformed, false); derr != nil {
+				log.Printf("[discipline] 근거글 조회 실패(댓글) board=%s: %v — 가림막 플래그가 빠진다", slug, derr)
+			} else {
+				transformed = enrichedC
+			}
 
 			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
 			editCost, editGraceSeconds := getCommentEditPolicy()

@@ -1245,7 +1245,15 @@ const disciplinedIDsCacheMaxBoards = 200
 // ⭐ 다만 곧바로 error 를 내지 않는다. 만료된 캐시가 있으면 그걸 쓴다 —
 // 「몇 분 전의 근거글 목록」은 「근거글 없음」보다 압도적으로 정확하다.
 // 제재는 하루 몇 건 수준이라 그 사이 새로 생긴 근거글은 사실상 없다.
-func (r *myPageRepository) loadDisciplinedIDs(boardID string) (map[int]bool, error) {
+// DisciplinedIDs 는 보드의 근거글 wr_id 집합을 돌려준다(캐시 + 만료 폴백).
+//
+// ⭐ 패키지 함수로 둔 이유 — 근거글 마스킹이 걸린 표면이 넷이고(회원 프로필 · 게시판 목록 ·
+//
+//	글 상세 · 댓글) 각자 따로 조회하면 같은 실수가 또 난다. 2026-08-21 에 이 계열 fail-open 을
+//	다섯 곳에서 찾았다. **캐시 하나 · 계약 하나**로 모은다.
+//
+// 부수효과: 목록 경로는 예전에 요청마다 IN 절 쿼리를 쳤다. 이제 보드당 5분에 한 번이다.
+func DisciplinedIDs(db *gorm.DB, boardID string) (map[int]bool, error) {
 	var stale map[int]bool
 	disciplinedIDsCache.RLock()
 	if set, ok := disciplinedIDsCache.byBoard[boardID]; ok {
@@ -1259,7 +1267,7 @@ func (r *myPageRepository) loadDisciplinedIDs(boardID string) (map[int]bool, err
 	disciplinedIDsCache.RUnlock()
 
 	var ids []int
-	if err := r.db.Raw(
+	if err := db.Raw(
 		"SELECT DISTINCT sg_id FROM g5_na_singo WHERE sg_table = ? AND discipline_log_id IS NOT NULL",
 		boardID,
 	).Scan(&ids).Error; err != nil {
@@ -1302,6 +1310,11 @@ func (r *myPageRepository) loadDisciplinedIDs(boardID string) (map[int]bool, err
 	disciplinedIDsCache.Unlock()
 
 	return set, nil
+}
+
+// loadDisciplinedIDs 는 DisciplinedIDs 로 위임한다. 계약의 정본은 그쪽 하나다.
+func (r *myPageRepository) loadDisciplinedIDs(boardID string) (map[int]bool, error) {
+	return DisciplinedIDs(r.db, boardID)
 }
 
 func (r *myPageRepository) FindDisciplinedIDs(boardID string, wrIDs []int) (map[int]bool, error) {
