@@ -940,6 +940,88 @@ func maskDisciplinedFields(m map[string]any) {
 	}
 }
 
+// writeTablePattern 은 동적 테이블명(g5_write_{slug})에 쓸 수 있는 보드 slug 형식이다.
+// service.boardTablePattern 과 같은 규칙이며, 파라미터 출처를 믿지 않는다.
+var writeTablePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// reportLockedIDs 는 신고 누적 자동 잠금(wr_7='lock')된 글·댓글의 id 집합을 돌려준다.
+//
+// ⛔ 자동 잠금(A형)과 이용제한 근거글은 **다른 것**이다.
+//
+//	A형   — 고유 신고자가 임계를 넘어 자동으로 잠긴 것. 아직 판정 전이다
+//	        (service.ApplyReportAutoLock). 미제재 상태다.
+//	근거글 — 처분이 끝나고 그 근거로 인용된 글(g5_na_singo.discipline_log_id).
+//
+// 라벨을 섞으면 아직 판정도 안 난 글에 「이용제한 근거 글」이 붙어 허위 낙인이 된다.
+// 그래서 집합도 함수도 분리한다.
+//
+// ⭐ 2026-08-21 실측 — 이 게이트의 실질 대상은 **댓글**이다.
+//
+//	free 기준 순증 노출(비밀글도 근거글도 아닌 잠금): 댓글 628건 · 글 28건 — 22배 차이다.
+//	그리고 댓글 API 는 Referer 게이트가 없어 봇이 직접 호출할 수 있다
+//	(글 상세는 외부 직접 호출이 403 으로 막힌다). 노출면이 댓글 쪽에 몰려 있다.
+//
+// ⚠️ error 는 「잠긴 것이 없다」가 아니라 **「잠금 여부를 모른다」** 는 뜻이다.
+//
+//	빈 집합과 반드시 구분해야 한다. 호출부는 비로그인에 대해 fail-closed 해야 한다.
+func reportLockedIDs(db *gorm.DB, slug string, ids []int, isComment bool) (map[int]struct{}, error) {
+	if slug == "" || len(ids) == 0 {
+		return map[int]struct{}{}, nil
+	}
+	if !writeTablePattern.MatchString(slug) {
+		return nil, fmt.Errorf("잘못된 보드 slug: %q", slug)
+	}
+	commentFlag := 0
+	if isComment {
+		commentFlag = 1
+	}
+	type lockRow struct {
+		WrID int    `gorm:"column:wr_id"`
+		Val  string `gorm:"column:wr_7_value"`
+	}
+	var rows []lockRow
+	// ⚠️ 예전 주석은 "board 마다 wr_7 컬럼 유무가 다르다"며 에러를 버렸다(fail-open).
+	//    2026-08-21 실측으로 확인했다: g5_write_* 167개 중 wr_7 이 없는 셋은
+	//    after_events · revisions · free_update_history 로 **게시판 테이블이 아니다.**
+	//    실제 게시판 164개는 전부 보유한다 → 여기서의 실패는 진짜 장애다. 버리지 않는다.
+	if err := db.Table("g5_write_"+slug).
+		Select("wr_id, COALESCE(wr_7, '') AS wr_7_value").
+		Where("wr_id IN ? AND wr_is_comment = ?", ids, commentFlag).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("신고잠금 조회 실패 (board=%s, comment=%t): %w", slug, isComment, err)
+	}
+	locked := make(map[int]struct{}, len(rows))
+	for _, r := range rows {
+		if r.Val == "lock" {
+			locked[r.WrID] = struct{}{}
+		}
+	}
+	return locked, nil
+}
+
+// maskLockedContent 는 신고잠금 항목의 본문 계열 필드를 비운다.
+//
+// ⛔ 제목은 지우지 않는다. 목록 응답에는 본문이 없고 제목만 실리는데(2026-08-21 실측)
+//
+//	목록은 A형을 가리지 않는다. 상세에서만 제목을 지우면 목록과 어긋나 보인다.
+//	이용제한 근거글은 목록에서도 제목을 가리므로 상세에서 지우는 것이 일관되지만,
+//	A형은 그렇지 않다 — 그래서 maskDisciplinedFields 와 분리한다.
+//
+// ⛔ 키를 지우지 않고 **값만 중립화**한다. 소비자가 무가드로 읽는다
+//
+//	(삭제 댓글 tombstone 이 같은 원칙을 쓴다 — transform.go:441).
+//
+// ⭐ 안내 문구를 백엔드가 정하지 않는다. is_restricted 플래그만 주고 문구는 프런트가 그린다.
+//
+//	문구를 바꾸려고 백엔드를 재배포할 일이 없다.
+func maskLockedContent(m map[string]any) {
+	for _, k := range []string{"content", "wr_content"} {
+		if _, ok := m[k]; ok {
+			m[k] = ""
+		}
+	}
+}
+
 // extractDisciplinelogID extracts the numeric ID from link1 values like "disciplinelog/1234" or "disciplinelog:1234"
 func extractDisciplinelogID(link1 string) string {
 	for _, prefix := range []string{"disciplinelog/", "disciplinelog:"} {
@@ -3126,6 +3208,41 @@ func main() {
 				}
 			}
 
+			// 신고잠금(A형) 게이트 — 비로그인에게는 본문을 주지 않는다.
+			//
+			// ⛔ 이 라우트에는 잠금 신호가 **아예 없었다.** 2026-08-21 익명 실측:
+			//    wr_7='lock' 인 글의 제목·본문이 전량 그대로 나갔고 is_restricted 필드조차 없었다.
+			//    (댓글 라우트에는 예전부터 is_restricted 가 있었는데 글에는 없었다.)
+			//
+			// ⭐ 제목은 남긴다. 목록에는 본문이 없고 제목만 실리는데 목록은 A형을 가리지 않으므로,
+			//    상세에서만 제목을 지우면 목록과 어긋나 보인다. 안내 문구는 프런트가
+			//    is_restricted 플래그로 그린다 — 문구 변경에 백엔드 재배포가 필요 없다.
+			//
+			// ⚠️ 이용제한(근거글) 블록보다 **뒤에** 둔다. 둘 다 해당하는 글이면 근거글 쪽이
+			//    제목까지 가리는 것이 맞고, 여기서는 플래그만 덧붙는다.
+			if post != nil && post.WrDeletedAt == nil {
+				isAnon := middleware.GetUserID(c) == ""
+				lockSet, lockErr := reportLockedIDs(db, slug, []int{id}, false)
+				if lockErr != nil {
+					// ⛔ 판정 실패 하나로 게이트가 뚫리면 안 된다. 비로그인은 본문을 비운다.
+					//
+					// ⭐ 「이용제한 근거 글」 문구를 쓰지 않는다 — 판정을 못 한 상태라 허위 낙인이 되고,
+					//    비로그인 응답은 최대 180초 엣지캐시된다(2026-08-21 실측). 낙인이 재배포된다.
+					//    제목은 건드리지 않고 본문만 비운다. 글이 사라지지도, 낙인이 찍히지도 않는다.
+					log.Printf("[reportlock] 글 잠금 조회 실패 board=%s post=%d anon=%t: %v", slug, id, isAnon, lockErr)
+					if isAnon {
+						maskLockedContent(postDetail)
+					}
+				} else if _, locked := lockSet[id]; locked {
+					postDetail["is_restricted"] = true
+					// ⛔ 플래그만으로는 못 막는다. SvelteKit 이 loader data 를 HTML 에 직렬화하므로
+					//    프런트 가림막으로는 소스 유출을 막을 수 없다(위 이용제한 블록과 같은 원칙).
+					if isAnon {
+						maskLockedContent(postDetail)
+					}
+				}
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data":    postDetail,
@@ -3249,32 +3366,52 @@ func main() {
 			}
 
 			// is_restricted enrich — 댓글의 wr_7='lock' 검사 (damoang-backend UnlockPostContent
-			// 가 잠금 시 wr_7='lock' 설정). batch 1 query. board 마다 wr_7 컬럼 유무 다름 →
-			// 에러 무시 (defensive, COALESCE).
+			// 가 잠금 시 wr_7='lock' 설정). batch 1 query.
+			//
+			// ⭐ 2026-08-21: 여기에 **비로그인 게이트**가 붙었다.
+			//    예전에는 플래그만 붙이고 원문을 그대로 내려보냈다 — 익명 호출로 실측했다:
+			//    is_restricted=true 인 댓글의 본문 64자가 그대로 실려 나갔다.
+			//    ⛔ 그리고 이 API 는 **Referer 게이트가 없다.** 글 상세는 외부 직접 호출이
+			//       403 으로 막히는데 댓글은 열려 있어, 봇이 곧장 긁을 수 있는 표면이다.
 			if len(comments) > 0 {
 				commentIDs := make([]int, 0, len(comments))
 				for _, cm := range comments {
 					commentIDs = append(commentIDs, cm.WrID)
 				}
-				type lockRow struct {
-					WrID   int    `gorm:"column:wr_id"`
-					Wr7Val string `gorm:"column:wr_7_value"`
-				}
-				var locks []lockRow
-				tbl := fmt.Sprintf("g5_write_%s", slug)
-				_ = db.Table(tbl).
-					Select("wr_id, COALESCE(wr_7, '') AS wr_7_value").
-					Where("wr_id IN ?", commentIDs).
-					Find(&locks).Error
-				lockSet := make(map[int]struct{}, len(locks))
-				for _, l := range locks {
-					if l.Wr7Val == "lock" {
-						lockSet[l.WrID] = struct{}{}
+				isAnon := middleware.GetUserID(c) == ""
+				lockSet, lockErr := reportLockedIDs(db, slug, commentIDs, true)
+				if lockErr != nil {
+					// ⛔ 게이트가 조회 실패 하나로 무력화되면 안 된다. 잠금 여부를 모르므로
+					//    비로그인에게는 본문을 주지 않는다(fail-closed).
+					//
+					// ⭐ 여기서 fail-closed 의 비용이 낮다는 것이 핵심이다. 피해는 **그 요청 1건**이다 —
+					//    이 응답은 `private, max-age=2` + cf-cache-status=DYNAMIC 이라
+					//    엣지캐시를 타지 않는다(2026-08-21 실측). 목록처럼 증폭되지 않는다.
+					//    반대로 fail-open 하면 게이트 대상이 통째로 새어 나간다.
+					//
+					// ⛔ is_restricted 를 세우지 않는다 — 판정을 못 한 상태라 멀쩡한 댓글까지
+					//    「신고잠금」으로 표시되면 허위 낙인이다. 본문만 비운다.
+					//
+					// ⭐ 로그인 사용자는 원문을 받는 것이 원래 설계라(프런트가 잠금 UI 처리)
+					//    플래그가 빠져도 노출이 아니다. 그쪽은 로그만 남기고 서빙한다.
+					log.Printf("[reportlock] 댓글 잠금 조회 실패 board=%s post=%d anon=%t: %v", slug, id, isAnon, lockErr)
+					if isAnon {
+						for i := range transformed {
+							maskLockedContent(transformed[i])
+						}
 					}
-				}
-				for i, cm := range comments {
-					if _, ok := lockSet[cm.WrID]; ok {
+				} else {
+					for i, cm := range comments {
+						if _, ok := lockSet[cm.WrID]; !ok {
+							continue
+						}
 						transformed[i]["is_restricted"] = true
+						// ⛔ 플래그만으로는 못 막는다. SvelteKit 이 loader data 를 HTML 에
+						//    직렬화하므로 프런트 가림막은 소스 유출을 못 막는다 —
+						//    비로그인에게는 원문을 애초에 안 보낸다(글 상세와 같은 원칙).
+						if isAnon {
+							maskLockedContent(transformed[i])
+						}
 					}
 				}
 			}
