@@ -918,6 +918,8 @@ func (r *myPageRepository) verifyActivityComments(
 		return nil
 	}
 	byBoard := make(map[string][]int)
+	// #13512 후속: 부모 글 id 도 모은다. 근거글 우회 판정은 **댓글이 아니라 부모 글**로 한다.
+	parentsByBoard := make(map[string][]int)
 	for _, c := range candidates {
 		if c.BoardID == "" {
 			continue
@@ -926,6 +928,9 @@ func (r *myPageRepository) verifyActivityComments(
 			continue
 		}
 		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
+		if c.WrParent > 0 {
+			parentsByBoard[c.BoardID] = append(parentsByBoard[c.BoardID], c.WrParent)
+		}
 	}
 
 	type verifiedComment struct {
@@ -939,6 +944,40 @@ func (r *myPageRepository) verifyActivityComments(
 			continue
 		}
 		var okRows []verifiedComment
+
+		// #13512 후속 — 근거글에 달린 **제3자 본인 댓글**이 통째로 사라지던 것.
+		//
+		// ⛔ 부모 글이 비밀·잠금이면 그 아래 댓글이 전부 빠졌다. 그런데 그 댓글들은
+		//    제재당한 콘텐츠가 아니라 **각자 소유**다. 2026-08-21 실측(free):
+		//      근거글(secret) 아래 댓글 956건 · 작성자 516명 · 그중 제3자 84%
+		//    글 경로는 #680 에서 이미 우회를 붙였는데 댓글 경로에는 없었다.
+		//
+		// ⭐ 우회 판정은 **부모 글**로 한다(댓글 자신이 아니라). 근거글로 등록된 부모만
+		//    비밀·잠금 제외를 우회시킨다 — 근거글이 아닌 일반 잠긴 글은 그대로 제외된다(무회귀).
+		//
+		// ⛔ 제재당한 댓글 자체(2,322건)는 이 우회와 무관하다. 핸들러가 [이용제한 댓글] 로
+		//    마스킹하므로 내용은 안 나간다. 여기서 되살리는 것은 **무고한 제3자 댓글**뿐이다.
+		//
+		// ⛔ 조회가 실패하면 우회를 붙이지 않는다 — 엄격 필터가 그대로 적용된다.
+		//    댓글이 덜 보이는 쪽이 원문이 새는 쪽보다 안전하다(글 경로와 같은 원칙).
+		var evidenceParents []int
+		if parents := parentsByBoard[boardID]; len(parents) > 0 {
+			if disciplined, derr := r.loadDisciplinedIDs(boardID); derr != nil {
+				log.Printf("[activity] 근거글 조회 실패(댓글) board=%s: %v — 우회를 붙이지 않는다", boardID, derr)
+			} else {
+				seen := make(map[int]struct{}, len(parents))
+				for _, pid := range parents {
+					if _, dup := seen[pid]; dup {
+						continue
+					}
+					seen[pid] = struct{}{}
+					if disciplined[pid] {
+						evidenceParents = append(evidenceParents, pid)
+					}
+				}
+			}
+		}
+
 		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 		q := fmt.Sprintf(
 			"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at"+
@@ -947,7 +986,19 @@ func (r *myPageRepository) verifyActivityComments(
 				" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1"+
 				" AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL)"+
 				" AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')", boardID, boardID)
-		if err := r.db.Raw(q, ids, mbID).Scan(&okRows).Error; err != nil {
+		qArgs := []interface{}{ids, mbID}
+		if len(evidenceParents) > 0 {
+			// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
+			q = fmt.Sprintf(
+				"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at"+
+					" FROM `g5_write_%s` c INNER JOIN `g5_write_%s` p"+
+					" ON p.wr_id = c.wr_parent AND p.wr_is_comment = 0"+
+					" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1"+
+					" AND (((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL)"+
+					" AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')) OR p.wr_id IN ?)", boardID, boardID)
+			qArgs = []interface{}{ids, mbID, evidenceParents}
+		}
+		if err := r.db.Raw(q, qArgs...).Scan(&okRows).Error; err != nil {
 			continue
 		}
 		m := make(map[int]verifiedComment, len(okRows))
@@ -1178,9 +1229,18 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 	var args []interface{}
 	for _, b := range boards {
 		table := fmt.Sprintf("g5_write_%s", b.BoTable)
+		// #13512 후속 — 이 폴백에도 같은 우회를 붙인다.
+		//
+		// ⛔ verify 경로만 고치면 **확인된 게 0건일 때** 여기로 떨어지면서 다시 사라진다.
+		//    실제로 근거글만 있는 회원은 verify 가 0건이 되기 쉬워, 폴백이 오히려 주 경로다.
+		//
+		// ⭐ 우회 조건은 verify 와 같다 — **부모 글이 근거글로 등록된 경우만** 비밀·잠금 제외를 푼다.
+		//    여기서는 id 목록을 미리 못 구하므로 EXISTS 서브쿼리로 같은 판정을 한다
+		//    (글 경로 FindPublicPostsByMember 의 3번째 분기와 동형).
+		//    idx_singo_discipline(sg_table, discipline_log_id, sg_id) 가 있어 비싸지 않다.
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock') WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
-			b.BoTable, table, table, limit))
+			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')) OR EXISTS (SELECT 1 FROM g5_na_singo s WHERE s.sg_table = '%s' AND s.sg_id = p.wr_id AND s.discipline_log_id IS NOT NULL)) WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
+			b.BoTable, table, table, b.BoTable, limit))
 		args = append(args, mbID)
 	}
 
