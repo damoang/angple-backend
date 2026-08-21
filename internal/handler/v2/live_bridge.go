@@ -15,6 +15,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -109,15 +110,70 @@ func (h *V2Handler) resolveLiveAuthors(mbIDs []string) map[string]liveAuthor {
 
 // getBlockedMbIDs 는 요청자의 콘텐츠 차단 대상 mb_id(문자열) 목록을 반환한다.
 // gnu 리포의 excludeMbIDs 파라미터에 그대로 사용(기존 getBlockedUserIDs 와 동일 소스).
-func (h *V2Handler) getBlockedMbIDs(mbID string) []string {
+// blockedCacheTTL 은 차단 목록 값의 수명이다. 이 안에서는 조회가 실패해도 이 값을 쓴다.
+// blockedFreshTTL 이 먼저 만료되면서 "다시 조회할 때"를 알린다.
+//
+// ⭐ 차단 목록은 거의 안 바뀐다(회원이 가끔 한 명씩 차단한다). 그래서 값 수명을 넉넉히
+// 잡아도 정확도 손해가 사실상 없고, 그만큼 실패 내성이 커진다.
+const (
+	blockedFreshTTL = 5 * time.Minute
+	blockedCacheTTL = 30 * time.Minute
+)
+
+// getBlockedMbIDs 는 요청자의 콘텐츠 차단 대상 mb_id(문자열) 목록을 반환한다.
+//
+// ⛔ 실패를 nil 로 뭉개지 않는다. 반환값이 「차단 목록」이라 nil 은 **「차단 없음」**으로 읽히고,
+//
+//	그러면 차단한 사람의 글이 그대로 보인다. 이 함수를 쓰는 화면이 셋이다 —
+//	글 목록(listPostsLive) · 댓글 목록(listCommentsLive) · 앱 피드(ListRecentFeed).
+//	예전에는 `if err != nil { return nil }` 이라 조회 실패와 차단 없음이 같은 값이었다.
+//
+// ⭐ 다만 곧바로 실패시키지 않는다. 값은 30분, 신선 마커는 5분으로 캐시하고,
+// 조회가 실패하면 **마지막 정상값**을 쓴다. 「20분 전의 차단 목록」은 「차단 없음」보다
+// 압도적으로 정확하다. 캐시가 아예 없을 때만 error 를 올린다.
+//
+// ⚠️ 가용성 반론("차단 하나 때문에 목록이 죽는다")은 이 경우 과장이다 —
+// 차단 조회가 DB 장애로 실패했다면 **본문 쿼리도 같은 DB 라 어차피 실패한다.**
+//
+// 덤: 예전에는 이 세 화면이 요청마다 DB 를 쳤다(2026-08-21 실측 **초당 19.2회**).
+// 캐시가 그것도 없앤다.
+func (h *V2Handler) getBlockedMbIDs(c *gin.Context, mbID string) ([]string, error) {
 	if h.blockRepo == nil || mbID == "" {
-		return nil
+		// 비로그인·차단 기능 미구성은 "차단 없음" 이 **정답**이다. 실패가 아니다.
+		return nil, nil
 	}
+
+	ctx := c.Request.Context()
+	key := "v2:block:v1:" + mbID
+
+	if h.cache != nil {
+		if _, ferr := pkgredis.Get[string](ctx, h.cache, key+":fresh"); ferr == nil {
+			if ids, err := pkgredis.Get[[]string](ctx, h.cache, key); err == nil {
+				return ids, nil
+			}
+		}
+	}
+
 	ids, err := h.blockRepo.GetContentBlockedUserIDs(mbID)
 	if err != nil {
-		return nil
+		// ⭐ 마지막 정상값이 남아 있으면 그걸 쓴다.
+		if h.cache != nil {
+			if cached, cerr := pkgredis.Get[[]string](ctx, h.cache, key); cerr == nil {
+				log.Printf("[block] 차단 조회 실패 mb_id=%s: %v — 캐시된 목록으로 대체한다(%d명)",
+					mbID, err, len(cached))
+				return cached, nil
+			}
+		}
+		return nil, fmt.Errorf("blocked list lookup failed: %w", err)
 	}
-	return ids
+
+	if h.cache != nil {
+		//nolint:errcheck // 캐시 쓰기 실패는 응답을 막지 않는다
+		pkgredis.Set(ctx, h.cache, key, ids, blockedCacheTTL)
+		//nolint:errcheck
+		pkgredis.Set(ctx, h.cache, key+":fresh", "1", blockedFreshTTL)
+	}
+	return ids, nil
 }
 
 // liveNoticeIDs 는 게시판의 공지 wr_id 집합을 만든다(g5_board.bo_notice 파싱).
@@ -275,7 +331,12 @@ func (h *V2Handler) listPostsLive(c *gin.Context, slug string) {
 	page, perPage := parsePagination(c)
 	searchField := c.Query("sfl")
 	searchQuery := c.Query("stx")
-	blockedMbIDs := h.getBlockedMbIDs(middleware.GetUserID(c))
+	blockedMbIDs, blockErr := h.getBlockedMbIDs(c, middleware.GetUserID(c))
+	if blockErr != nil {
+		// ⛔ 차단 목록을 모르는 채로 내보내면 차단한 사람의 글이 보인다. fail-closed.
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "목록을 불러오지 못했습니다", blockErr)
+		return
+	}
 
 	var posts []*gnuboard.G5Write
 	var total int64
@@ -350,7 +411,12 @@ func (h *V2Handler) listCommentsLive(c *gin.Context, slug string) {
 		return
 	}
 	page, perPage := parsePagination(c)
-	blockedMbIDs := h.getBlockedMbIDs(middleware.GetUserID(c))
+	blockedMbIDs, blockErr := h.getBlockedMbIDs(c, middleware.GetUserID(c))
+	if blockErr != nil {
+		// ⛔ 차단 목록을 모르는 채로 내보내면 차단한 사람의 글이 보인다. fail-closed.
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "목록을 불러오지 못했습니다", blockErr)
+		return
+	}
 
 	comments, err := h.gnuWriteRepo.FindCommentsFiltered(slug, postID, blockedMbIDs)
 	if err != nil {
@@ -550,7 +616,12 @@ func (h *V2Handler) ListRecentFeed(c *gin.Context) {
 		limit = v
 	}
 	cursor := decodeFeedCursor(c.Query("cursor"))
-	blockedMbIDs := h.getBlockedMbIDs(middleware.GetUserID(c))
+	blockedMbIDs, blockErr := h.getBlockedMbIDs(c, middleware.GetUserID(c))
+	if blockErr != nil {
+		// ⛔ 차단 목록을 모르는 채로 내보내면 차단한 사람의 글이 보인다. fail-closed.
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "목록을 불러오지 못했습니다", blockErr)
+		return
+	}
 
 	// 순수 최신순: 보드별 최신 후보 풀(각 limit개)을 가져온다. 한 보드가 매우 활발하면 그 보드 글이
 	// 상위를 차지하도록 board별 후보 수를 페이지 크기만큼 확보(리포가 20으로 상한).
