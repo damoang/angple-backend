@@ -1022,6 +1022,50 @@ func maskLockedContent(m map[string]any) {
 	}
 }
 
+// gateDisciplinedComments 는 **비로그인에게 이용제한 근거 댓글의 본문을 비운다.**
+//
+// ⛔ 왜 필요했나 — #693(신고잠금 게이트)은 `is_restricted` 만 익명 마스킹하고
+//
+//	`is_discipline_related` 는 손대지 않았다. 그래서 free 기준 **2,322건**이 익명에게 원문으로
+//	나갔다(잠긴 댓글 628건보다 크다). 근거 **글** 941건은 이미 막고 있어서
+//	"이용제한 쪽은 되고 있다"고 착각했는데, **글은 되고 댓글은 안 되고 있었다.**
+//
+// ⚠️ 사람이 보는 페이지의 댓글은 web 프록시가 막는다(web #2166). 이 함수가 닫는 것은
+//
+//	Referer 게이트가 없어 **봇이 직접 칠 수 있는** be 댓글 API 경로다. 프록시가 못 덮는다.
+//
+// ⛔ lookupFailed 는 「근거 댓글이 없다」가 아니라 **「모른다」** 다.
+//
+//	그때는 익명에게 전부 비운다(fail-closed) — 게이트가 조회 실패 하나로 무력화되면 안 된다.
+//	비용은 그 요청 1건이다: 이 응답은 `private, max-age=2` + DYNAMIC 이라 엣지캐시를 안 탄다.
+//	⚠️ 예전 주석의 "증폭이 없으니 로그만 남긴다" 는 **게이트가 없던 때** 기준이라 더는 근거가 아니다.
+//
+// ⛔ 실패 시 is_discipline_related 를 **세우지 않는다.** 판정을 못 한 댓글에 「이용제한 근거」가
+//
+//	붙으면 허위 낙인이다. 본문만 비운다.
+//
+// ⭐ 제목은 다루지 않는다. 근거 **글**은 maskDisciplinedFields 가 제목까지 가리지만
+//
+//	댓글 응답에는 제목 계열 필드가 없다.
+func gateDisciplinedComments(items []map[string]any, isAnon, lookupFailed bool) {
+	if !isAnon {
+		// 로그인 사용자는 원문을 받는 것이 원래 설계다 — 프런트 가림막(DisciplinedContent)이 처리한다.
+		return
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if lookupFailed {
+			maskLockedContent(item)
+			continue
+		}
+		if flag, _ := item["is_discipline_related"].(bool); flag {
+			maskLockedContent(item)
+		}
+	}
+}
+
 // extractDisciplinelogID extracts the numeric ID from link1 values like "disciplinelog/1234" or "disciplinelog:1234"
 func extractDisciplinelogID(link1 string) string {
 	for _, prefix := range []string{"disciplinelog/", "disciplinelog:"} {
@@ -3418,14 +3462,16 @@ func main() {
 
 			// is_discipline_related enrich (이용제한 근거 댓글 표시).
 			// g5_na_singo.discipline_log_id IS NOT NULL + sg_table+sg_id 매칭. batch 1 query.
-			// ⭐ 댓글은 증폭 경로가 없다 — 2026-08-21 실측으로 확인:
-			//    비로그인 마스킹 블록이 없고(프런트 가림막만), 응답도
-			//    `private, max-age=2` + cf-cache-status=DYNAMIC 이라 엣지캐시를 안 탄다.
-			//    실패는 그 요청 1건에 그치므로 로그만 남긴다.
+			//
+			// ⭐ 2026-08-21: 여기에도 **비로그인 게이트**를 붙인다 — 정책은 gateDisciplinedComments 참조.
+			isAnonComment := middleware.GetUserID(c) == ""
 			if enrichedC, derr := enrichWithDisciplineRelated(db, slug, transformed, false); derr != nil {
-				log.Printf("[discipline] 근거글 조회 실패(댓글) board=%s: %v — 가림막 플래그가 빠진다", slug, derr)
+				// ⛔ 실패는 「근거 댓글 없음」이 아니라 「모른다」다 → 익명은 fail-closed.
+				log.Printf("[discipline] 근거글 조회 실패(댓글) board=%s post=%d anon=%t: %v", slug, id, isAnonComment, derr)
+				gateDisciplinedComments(transformed, isAnonComment, true)
 			} else {
 				transformed = enrichedC
+				gateDisciplinedComments(transformed, isAnonComment, false)
 			}
 
 			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
