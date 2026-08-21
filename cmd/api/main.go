@@ -878,7 +878,9 @@ func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]an
 			Select("DISTINCT sg_id").
 			Where("sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL", slug, targetIDs).
 			Find(&rows).Error; e2 != nil {
-			return nil, err
+			// ⛔ 두 실패를 함께 남긴다. 원인이 다를 수 있다
+			//    (예: 1단=커넥션 고갈, 2단=문법·권한). 하나만 남기면 다음 사람이 못 가른다.
+			return nil, fmt.Errorf("근거글 조회 2단 실패 (1단: %w / 2단: %v)", err, e2)
 		}
 		disciplined = make(map[int]bool, len(rows))
 		for _, r := range rows {
