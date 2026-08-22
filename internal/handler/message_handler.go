@@ -21,11 +21,20 @@ type V1MessageHandler struct {
 	memberRepo gnurepo.MemberRepository
 	notiRepo   gnurepo.NotiRepository
 	blockRepo  v2repo.BlockRepository
+	// uiRepo 는 web 소유 UI 설정을 **읽기 전용**으로 본다(쪽지 수신 거부, bug/13664).
+	// nil 이면 게이트가 없는 것과 같다 — 주입 안 된 환경에서도 쪽지는 정상 동작한다.
+	uiRepo gnurepo.MemberUISettingsRepository
 }
 
 // NewV1MessageHandler creates a new V1MessageHandler using g5_memo
 func NewV1MessageHandler(memoRepo gnurepo.MemoRepository, memberRepo gnurepo.MemberRepository, notiRepo gnurepo.NotiRepository, blockRepo v2repo.BlockRepository) *V1MessageHandler {
 	return &V1MessageHandler{memoRepo: memoRepo, memberRepo: memberRepo, notiRepo: notiRepo, blockRepo: blockRepo}
+}
+
+// SetUISettingsRepo 는 쪽지 수신 거부 게이트를 켠다(bug/13664).
+// ⭐ 선택 주입이다 — 안 넣으면 게이트 없이 기존 동작 그대로다.
+func (h *V1MessageHandler) SetUISettingsRepo(r gnurepo.MemberUISettingsRepository) {
+	h.uiRepo = r
 }
 
 // v1MessageResponse matches frontend Message type
@@ -222,6 +231,32 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 	if h.blockRepo != nil {
 		if blocked, berr := h.blockRepo.IsMessageBlocked(req.ReceiverID, mbID); berr == nil && blocked {
 			common.V2ErrorResponse(c, http.StatusForbidden, "쪽지를 보낼 수 없는 대상입니다", nil)
+			return
+		}
+	}
+
+	// 수신자가 쪽지 수신을 전면 거부한 경우 (bug/13664).
+	//
+	// ⛔⛔ **시스템 통보를 이 핸들러로 옮기면 여기에 막힌다.**
+	//
+	//	제재·소명 통보가 막히면 **소명 기간이 시작되지 않아** 회원이 이의제기 기회를 잃는다.
+	//	2026-08-22 기준으로 시스템 통보는 저장소·서버가 아예 분리돼 있어 안전하다:
+	//	  제재 통보    damoang-be  service/discipline_service.go       G5MemoRepository.SendMemo
+	//	  임시조치     damoang-be  service/temporary_measure_service.go 같은 SendMemo
+	//	  크론 처분    angple-be   internal/cron/report_process.go      직접 INSERT
+	//	통합 리팩터링으로 이 핸들러에 모으려면 **예외를 먼저 만들어라.**
+	//
+	// ⭐ 조회 실패는 fail-**open** 이다(기존대로 발송).
+	//
+	//	이건 보안 게이트가 아니라 **수신자 편의 기능**이다. 설정을 못 읽었다고 쪽지를
+	//	막으면 아무 설정도 안 한 사람까지 못 받는다 — 못 막는 피해보다 크다.
+	//	차단(IsMessageBlocked)도 위에서 같은 이유로 `berr == nil && blocked` 다.
+	if h.uiRepo != nil {
+		denied, uerr := h.uiRepo.IsMessageDenied(req.ReceiverID)
+		if uerr != nil {
+			gnurepo.LogMessageDenyLookupFailure(req.ReceiverID, uerr)
+		} else if denied {
+			common.V2ErrorResponse(c, http.StatusForbidden, "수신자가 쪽지 기능을 비활성화했습니다.", nil)
 			return
 		}
 	}

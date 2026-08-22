@@ -6746,6 +6746,12 @@ func main() {
 		// v1 message routes (uses g5_memo table directly)
 		gnuMemoRepo := gnurepo.NewMemoRepository(db)
 		v1MsgHandler := handler.NewV1MessageHandler(gnuMemoRepo, gnuMemberRepo, notiRepo, v2BlockRepo)
+		// 쪽지 수신 전면 거부 게이트 (bug/13664).
+		// ⛔ 이 한 줄이 빠지면 게이트가 **조용히 꺼진다** — 에러도 로그도 없다.
+		//    선택 주입은 배선 실수로 쪽지가 막히는 사고를 막지만, 반대로 배선을
+		//    빠뜨리면 아무 일도 안 한다. 배포 후 실제로 거부가 먹는지 확인할 것.
+		// ⚠️ 읽는 테이블(g5_da_member_ui_settings)의 소유자는 web 이다. 읽기 전용이다.
+		v1MsgHandler.SetUISettingsRepo(gnurepo.NewMemberUISettingsRepository(db))
 		v1Messages := router.Group("/api/v1/messages", middleware.JWTAuth(jwtManager))
 		v1Messages.GET("", v1MsgHandler.GetMessages)
 		v1Messages.GET("/unread-count", v1MsgHandler.GetUnreadCount)
