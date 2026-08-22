@@ -301,11 +301,12 @@ func pushAppURL(n gnurepo.Notification) string {
 		return "/messages"
 	}
 	if n.BoTable != "" {
-		postID := n.WrID
 		if n.WrParent > 0 {
-			postID = n.WrParent
+			// 대상이 댓글(wr_parent=글) — 앱이 글 진입 후 해당 댓글로 스크롤하도록
+			// commentId 를 함께 전달한다.
+			return fmt.Sprintf("/post/%s/%d?commentId=%d", n.BoTable, n.WrParent, n.WrID)
 		}
-		return fmt.Sprintf("/post/%s/%d", n.BoTable, postID)
+		return fmt.Sprintf("/post/%s/%d", n.BoTable, n.WrID)
 	}
 	return ""
 }
