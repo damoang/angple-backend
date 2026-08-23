@@ -256,7 +256,10 @@ func (r *myPageRepository) FindPostsByMember(mbID string, page, limit int) ([]gn
 
 // FindCommentsByMember returns comments written by the member with parent post titles.
 // Uses parallel per-board queries instead of UNION ALL.
-// g5_write_free (600K+ rows) is handled via member_activity_feed to avoid 3.4s LEFT JOIN queries.
+// bug/13675 (2026-08-22): idx_mb_comment(mb_id, wr_is_comment) 추가 후 정본 g5_write_free
+// LEFT JOIN 이 77~337ms 로 측정돼 피드 우회를 걷어냈다. 피드(activity_type=2)는 최근 삭제분이
+// source_created_at 정렬 앞머리를 통째로 차지해, LIMIT perTable 로 긁으면 생존 댓글이 뒤로 밀려
+// 뒷페이지가 비는 페이지네이션 버그가 있었다(총계=정본 vs 목록=피드 불일치).
 func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([]gnuboard.MyCommentRow, int64, error) {
 	boards := r.getActiveBoards()
 	if len(boards) == 0 {
@@ -326,35 +329,16 @@ func (r *myPageRepository) FindCommentsByMember(mbID string, page, limit int) ([
 		g2.Go(func() error {
 			var rows []gnuboard.MyCommentRow
 			if bc.boardID == largeBoardID {
-				// Step 1: Get write_ids + parent_title from activity_feed (covering index, ~1ms)
-				type commentRef struct {
-					WriteID     int    `gorm:"column:write_id"`
-					ParentTitle string `gorm:"column:parent_title"`
-				}
-				var refs []commentRef
+				// bug/13675: 피드(activity_type=2)는 최근 삭제분이 source_created_at
+				// 정렬 앞머리를 통째로 차지해, LIMIT perTable 로 긁으면 생존 댓글이
+				// 뒤로 밀려 뒷페이지가 비었다(대량 삭제 회원일수록 심함). count 와
+				// 동일하게 정본 g5_write_free 에서 직접 조회한다(작은 보드 분기와 동일).
+				// idx_mb_comment(mb_id, wr_is_comment) 로 바운드돼 77~337ms(2026-08-22 측정).
+				table := fmt.Sprintf("g5_write_%s", bc.boardID)
 				r.db.Raw(
-					"SELECT write_id, COALESCE(parent_title, '') as parent_title FROM member_activity_feed WHERE member_id = ? AND board_id = ? AND activity_type = 2 AND is_deleted = 0 ORDER BY source_created_at DESC LIMIT ?",
-					mbID, largeBoardID, perTable,
-				).Scan(&refs)
-				if len(refs) > 0 {
-					writeIDs := make([]int, len(refs))
-					titleMap := make(map[int]string, len(refs))
-					for i, ref := range refs {
-						writeIDs[i] = ref.WriteID
-						titleMap[ref.WriteID] = ref.ParentTitle
-					}
-					// Step 2: Batch PK lookup for comment data (no LEFT JOIN needed)
-					r.db.Raw(
-						fmt.Sprintf("SELECT c.wr_id, c.wr_content, c.wr_datetime, c.mb_id, c.wr_name, c.wr_parent, c.wr_good, c.wr_nogood, c.wr_option, '' as post_title, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `g5_write_%s` c LEFT JOIN `g5_write_%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 WHERE c.wr_id IN ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL ORDER BY c.wr_datetime DESC", largeBoardID, largeBoardID, largeBoardID),
-						writeIDs,
-					).Scan(&rows)
-					// Fill parent titles from activity_feed (avoids expensive LEFT JOIN)
-					for i := range rows {
-						if t, ok := titleMap[rows[i].WrID]; ok {
-							rows[i].PostTitle = t
-						}
-					}
-				}
+					fmt.Sprintf("SELECT c.wr_id, c.wr_content, c.wr_datetime, c.mb_id, c.wr_name, c.wr_parent, c.wr_good, c.wr_nogood, c.wr_option, CASE WHEN p.wr_deleted_at IS NOT NULL THEN '[삭제된 글]' ELSE COALESCE(p.wr_subject, '') END as post_title, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c LEFT JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 WHERE c.mb_id = ? AND c.wr_is_comment = 1 AND c.wr_deleted_at IS NULL ORDER BY c.wr_datetime DESC LIMIT %d", bc.boardID, table, table, perTable),
+					mbID,
+				).Scan(&rows)
 			} else {
 				table := fmt.Sprintf("g5_write_%s", bc.boardID)
 				r.db.Raw(
