@@ -212,26 +212,59 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
-	// Block messages to admin account
-	if req.ReceiverID == adminMemberID {
-		common.V2ErrorResponse(c, http.StatusForbidden, "관리자에게는 쪽지를 보낼 수 없습니다", nil)
+	if !h.ensureSendAllowed(c, mbID, req.ReceiverID) {
 		return
 	}
 
-	// Verify receiver exists
-	_, err := h.memberRepo.FindByID(req.ReceiverID)
+	memo, err := h.memoRepo.Send(mbID, req.ReceiverID, req.Content)
 	if err != nil {
-		common.V2ErrorResponse(c, http.StatusBadRequest, "받는 사람을 찾을 수 없습니다", err)
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "쪽지 보내기 실패", err)
 		return
+	}
+
+	nickMap, _ := h.memberRepo.FindNicksByIDs([]string{mbID, req.ReceiverID})
+	if nickMap == nil {
+		nickMap = make(map[string]string)
+	}
+
+	// 쪽지 알림 (비동기, 중복 체크)
+	go h.notifyMemoAsync(req.ReceiverID, mbID, nickMap[mbID])
+
+	common.V2Created(c, h.toV1Message(memo, nickMap))
+}
+
+// ensureSendAllowed 는 쪽지 전송 전 관문을 통과시킨다.
+// 막히면 응답을 직접 쓰고 false 를 돌려준다(호출부는 그대로 return 하면 된다).
+//
+// ⛔ **관문의 순서를 바꾸지 마라.** 각 문구가 회원 화면에 그대로 나가고,
+//
+//	앞 관문이 뒤 관문의 존재를 가린다 — 차단당한 사람에게 "수신 거부" 문구가 나가면
+//	상대의 설정을 추측할 수 있게 된다. 순서 자체가 사양이다.
+//
+// ⭐ 이 관문들은 원래 SendMessage 안에 있었다(2026-08-23 분리).
+//
+//	gocyclo 18 > 15 로 push 모드 전체 검사에서만 걸렸다 —
+//	PR 모드는 diff 만 보는 reviewdog 이라 통과했다.
+func (h *V1MessageHandler) ensureSendAllowed(c *gin.Context, mbID, receiverID string) bool {
+	// Block messages to admin account
+	if receiverID == adminMemberID {
+		common.V2ErrorResponse(c, http.StatusForbidden, "관리자에게는 쪽지를 보낼 수 없습니다", nil)
+		return false
+	}
+
+	// Verify receiver exists
+	if _, err := h.memberRepo.FindByID(receiverID); err != nil {
+		common.V2ErrorResponse(c, http.StatusBadRequest, "받는 사람을 찾을 수 없습니다", err)
+		return false
 	}
 
 	// 수신자가 발신자를 차단한 경우 전송 차단 (#12825).
 	// blockRepo.Exists(blocker, blocked): 수신자(blocker)의 차단 목록에 발신자(blocked)가 있는지 확인.
 	// 차단 사실을 직접 노출하지 않도록 중립적 메시지로 응답.
 	if h.blockRepo != nil {
-		if blocked, berr := h.blockRepo.IsMessageBlocked(req.ReceiverID, mbID); berr == nil && blocked {
+		if blocked, berr := h.blockRepo.IsMessageBlocked(receiverID, mbID); berr == nil && blocked {
 			common.V2ErrorResponse(c, http.StatusForbidden, "쪽지를 보낼 수 없는 대상입니다", nil)
-			return
+			return false
 		}
 	}
 
@@ -252,62 +285,51 @@ func (h *V1MessageHandler) SendMessage(c *gin.Context) {
 	//	막으면 아무 설정도 안 한 사람까지 못 받는다 — 못 막는 피해보다 크다.
 	//	차단(IsMessageBlocked)도 위에서 같은 이유로 `berr == nil && blocked` 다.
 	if h.uiRepo != nil {
-		denied, uerr := h.uiRepo.IsMessageDenied(req.ReceiverID)
+		denied, uerr := h.uiRepo.IsMessageDenied(receiverID)
 		if uerr != nil {
-			gnurepo.LogMessageDenyLookupFailure(req.ReceiverID, uerr)
+			gnurepo.LogMessageDenyLookupFailure(receiverID, uerr)
 		} else if denied {
 			common.V2ErrorResponse(c, http.StatusForbidden, "수신자가 쪽지 기능을 비활성화했습니다.", nil)
-			return
+			return false
 		}
 	}
 
 	sender, err := h.memberRepo.FindByID(mbID)
 	if err != nil {
 		common.V2ErrorResponse(c, http.StatusBadRequest, "보내는 회원 정보를 찾을 수 없습니다", err)
-		return
+		return false
 	}
 	// 쪽지는 실명인증(mb_certify) 필요. 단 mb_level 5+(유료 광고주 등급·관리자)는 예외.
 	// mb_level(등급, XP as_level 아님)=5 는 "돈 낸 기간"에만 부여 → 결제 종료로 강등 시 권한 자동 소멸.
 	// 쪽지 경로 한정 예외. 글쓰기·댓글 등 다른 실명 게이트는 종전대로 유지.
 	if sender.MbCertify == "" && sender.MbLevel < 5 {
 		common.V2ErrorResponse(c, http.StatusForbidden, "실명인증이 필요합니다", nil)
+		return false
+	}
+
+	return true
+}
+
+// notifyMemoAsync 는 쪽지 도착 알림을 남긴다. 같은 발신자의 미읽음 알림이 이미 있으면 건너뛴다.
+// ⛔ 실패해도 쪽지 전송은 이미 끝났다 — 여기서 에러를 올리지 마라.
+func (h *V1MessageHandler) notifyMemoAsync(receiverID, senderID, senderNick string) {
+	if senderNick == "" {
+		senderNick = senderID
+	}
+	if exists, _ := h.notiRepo.Exists(receiverID, "", 0, "memo", senderID); exists {
 		return
 	}
-
-	memo, err := h.memoRepo.Send(mbID, req.ReceiverID, req.Content)
-	if err != nil {
-		common.V2ErrorResponse(c, http.StatusInternalServerError, "쪽지 보내기 실패", err)
-		return
-	}
-
-	nickMap, _ := h.memberRepo.FindNicksByIDs([]string{mbID, req.ReceiverID})
-	if nickMap == nil {
-		nickMap = make(map[string]string)
-	}
-
-	// 쪽지 알림 (비동기, 중복 체크)
-	go func() {
-		senderNick := nickMap[mbID]
-		if senderNick == "" {
-			senderNick = mbID
-		}
-		if exists, _ := h.notiRepo.Exists(req.ReceiverID, "", 0, "memo", mbID); exists {
-			return
-		}
-		_ = h.notiRepo.Create(&gnurepo.Notification{
-			PhToCase:   "memo",
-			PhFromCase: "memo",
-			MbID:       req.ReceiverID,
-			RelMbID:    mbID,
-			RelMbNick:  senderNick,
-			RelMsg:     fmt.Sprintf("%s님이 쪽지를 보냈습니다.", senderNick),
-			RelURL:     "/messages",
-			PhReaded:   "N",
-			PhDatetime: time.Now(),
-		})
-	}()
-
-	common.V2Created(c, h.toV1Message(memo, nickMap))
+	_ = h.notiRepo.Create(&gnurepo.Notification{
+		PhToCase:   "memo",
+		PhFromCase: "memo",
+		MbID:       receiverID,
+		RelMbID:    senderID,
+		RelMbNick:  senderNick,
+		RelMsg:     fmt.Sprintf("%s님이 쪽지를 보냈습니다.", senderNick),
+		RelURL:     "/messages",
+		PhReaded:   "N",
+		PhDatetime: time.Now(),
+	})
 }
 
 // DeleteMessage handles DELETE /api/v1/messages/:id
