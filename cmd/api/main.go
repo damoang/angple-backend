@@ -3811,10 +3811,14 @@ func main() {
 			// ⛔제재가 아니라 냉각이므로 만료되면 자동 해제된다(별도 배치 불필요).
 			if middleware.GetUserLevel(c) < 10 {
 				if until := service.FrozenUntil(db, middleware.GetUserID(c)); !until.IsZero() {
+					mins := int(time.Until(until).Minutes()) + 1
+					if mins < 1 {
+						mins = 1
+					}
 					c.JSON(http.StatusForbidden, gin.H{
 						"success": false,
-						"error": fmt.Sprintf("신고 누적으로 %s까지 글 작성이 일시 제한되었습니다.",
-							until.Format("2006-01-02 15:04")),
+						"error": fmt.Sprintf("신고가 누적되어 잠시 글 작성이 멈췄습니다. 약 %d분 뒤(%s)부터 다시 작성하실 수 있어요. 자동 해제되는 임시 조치입니다.",
+							mins, until.Format("15:04")),
 					})
 					return
 				}
@@ -4256,30 +4260,22 @@ func main() {
 				}
 			}
 
-			// 신고 누적으로 잠긴 글(wr_7='lock')이면 댓글 작성 차단. admin (level>=10) 만 예외.
-			// 잠금은 본문 블러·수정 차단까지는 있었으나 댓글 작성에는 강제가 없어,
-			// 잠긴 글에 댓글이 계속 달렸다. 글 수정 차단(#12420)과 동일한 패턴을 쓴다.
-			// wr_7 컬럼 없는 게시판에서는 Scan 실패하나 값이 "" 유지 → 차단 없이 통과 (defensive).
-			if middleware.GetUserLevel(c) < 10 {
-				var parentWrLock string
-				_ = db.Table("g5_write_"+slug).
-					Select("COALESCE(wr_7, '')").
-					Where("wr_id = ? AND wr_is_comment = 0", postID).
-					Scan(&parentWrLock).Error
-				if parentWrLock == "lock" {
-					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "신고 누적으로 잠긴 게시물에는 댓글을 작성할 수 없습니다."})
-					return
-				}
-			}
+			// 2026-08-23: 신고잠금(wr_7='lock') 글 댓글 작성 차단(be#576) 제거 — 사장님 결정 「완전 허용」.
+			// 잠금은 댓글 열람·작성을 막지 않는다. 제재중 회원은 mb_intercept_date(BanCheck)가 독립 차단하고,
+			// 냉각(아래 FrozenUntil)·wr_7 값·A형 신고버튼 재노출(#2101)은 그대로 둔다.
 
 			// 냉각(임시 제한) 강제 — 신고 누적 잠금 시 발행된다. admin(level>=10) 예외.
 			// ⛔제재가 아니라 냉각이므로 만료되면 자동 해제된다(별도 배치 불필요).
 			if middleware.GetUserLevel(c) < 10 {
 				if until := service.FrozenUntil(db, middleware.GetUserID(c)); !until.IsZero() {
+					mins := int(time.Until(until).Minutes()) + 1
+					if mins < 1 {
+						mins = 1
+					}
 					c.JSON(http.StatusForbidden, gin.H{
 						"success": false,
-						"error": fmt.Sprintf("신고 누적으로 %s까지 댓글 작성이 일시 제한되었습니다.",
-							until.Format("2006-01-02 15:04")),
+						"error": fmt.Sprintf("신고가 누적되어 잠시 댓글 작성이 멈췄습니다. 약 %d분 뒤(%s)부터 다시 작성하실 수 있어요. 자동 해제되는 임시 조치입니다.",
+							mins, until.Format("15:04")),
 					})
 					return
 				}
@@ -4680,20 +4676,9 @@ func main() {
 				return
 			}
 
-			// #12420: 신고 누적으로 자동 잠긴 글 수정 차단. admin (level>=10) 만 예외.
-			// G5Write struct 가 wr_7 컬럼을 직접 매핑하지 않으므로 raw select.
-			// wr_7 컬럼 없는 게시판에서는 Scan 실패하나 wrLock 이 "" 유지 → lock 체크 통과 (defensive).
-			if userLevel < 10 {
-				var wrLock string
-				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
-					Select("COALESCE(wr_7, '')").
-					Where("wr_id = ?", postID).
-					Scan(&wrLock).Error
-				if wrLock == "lock" {
-					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "신고 누적으로 잠긴 게시물은 수정할 수 없습니다"})
-					return
-				}
-			}
+			// 2026-08-23: 신고잠금(wr_7='lock') 글 수정 차단(#12420) 제거 — 사장님 결정 「글쓴이 잠금 해제」.
+			// 위 작성자/관리자 검사(post.MbID != userID && userLevel < 10)가 남아 있어 제3자는 여전히 차단된다.
+			// 수정 이력은 g5_da_content_history 가 보존한다. wr_7 값·A형 신고버튼(#2101)은 그대로 둔다.
 
 			// 요청 바디 파싱
 			var req struct {
@@ -5005,18 +4990,9 @@ func main() {
 				return
 			}
 
-			// #12420: 신고 누적으로 자동 잠긴 댓글 수정 차단. admin (level>=10) 만 예외.
-			if userLevel < 10 {
-				var wrLock string
-				_ = db.Table(fmt.Sprintf("g5_write_%s", slug)).
-					Select("COALESCE(wr_7, '')").
-					Where("wr_id = ?", commentID).
-					Scan(&wrLock).Error
-				if wrLock == "lock" {
-					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": "신고 누적으로 잠긴 댓글은 수정할 수 없습니다"})
-					return
-				}
-			}
+			// 2026-08-23: 신고잠금(wr_7='lock') 댓글 수정 차단(#12420) 제거 — 글쓴이 잠금 해제와 동일 원칙.
+			// 위 작성자 검사(comment.MbID != userID && userLevel < 10)가 남아 제3자는 차단된다.
+			// 수정 이력은 g5_da_content_history 가, 신고 증거는 g5_na_singo.target_content 가 보존한다.
 
 			// 자식 댓글(대댓글) 존재 여부 계산 — 차단하지 않고 포인트 차감 판단에 사용.
 			// 정책 (2026-05-25): 대댓글 없으면 무료 수정, 대댓글 있으면 cost 차감. 관리자 면제.
