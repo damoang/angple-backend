@@ -333,6 +333,27 @@ func isBugBoardHistoryLocked(boardID string, humanReplyCount int, userLevel int)
 	return humanReplyCount >= bugBoardLockCommentCount
 }
 
+// freezeRetryText 는 냉각 만료까지 남은 시간을 사람이 읽기 쉬운 문구와 만료 시각(KST)으로 돌려준다.
+// 냉각 상한이 최대 12시간(freezeMaxNight/Weekend)이라 분 단위만 쓰면 "약 720분"처럼 어색해지므로
+// 60분 이상은 시간 단위로 표기한다. 남은 시간은 time.Until(instant 연산)이라 tz 무관하고,
+// 시각은 DSN(loc=Asia/Seoul) 기준이라 until.Format 이 KST 벽시계를 준다.
+func freezeRetryText(until time.Time) (remain string, at string) {
+	mins := int(time.Until(until).Minutes()) + 1
+	if mins < 1 {
+		mins = 1
+	}
+	if mins >= 60 {
+		if m := mins % 60; m == 0 {
+			remain = fmt.Sprintf("약 %d시간", mins/60)
+		} else {
+			remain = fmt.Sprintf("약 %d시간 %d분", mins/60, m)
+		}
+	} else {
+		remain = fmt.Sprintf("약 %d분", mins)
+	}
+	return remain, until.Format("15:04")
+}
+
 func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, commentID int, deletedBy string, deletedAt time.Time) (bool, error) {
 	tableName := fmt.Sprintf("g5_write_%s", boardID)
 	// 삭제 직전 원본 스냅샷 — 이력(g5_da_content_history)에 남길 값. 같은 tx 로 읽어 정합 유지.
@@ -3811,14 +3832,11 @@ func main() {
 			// ⛔제재가 아니라 냉각이므로 만료되면 자동 해제된다(별도 배치 불필요).
 			if middleware.GetUserLevel(c) < 10 {
 				if until := service.FrozenUntil(db, middleware.GetUserID(c)); !until.IsZero() {
-					mins := int(time.Until(until).Minutes()) + 1
-					if mins < 1 {
-						mins = 1
-					}
+					remain, at := freezeRetryText(until)
 					c.JSON(http.StatusForbidden, gin.H{
 						"success": false,
-						"error": fmt.Sprintf("신고가 누적되어 잠시 글 작성이 멈췄습니다. 약 %d분 뒤(%s)부터 다시 작성하실 수 있어요. 자동 해제되는 임시 조치입니다.",
-							mins, until.Format("15:04")),
+						"error": fmt.Sprintf("신고가 누적되어 잠시 글 작성이 멈췄습니다. %s 뒤(%s)부터 다시 작성하실 수 있어요. 자동 해제되는 임시 조치입니다.",
+							remain, at),
 					})
 					return
 				}
@@ -4268,14 +4286,11 @@ func main() {
 			// ⛔제재가 아니라 냉각이므로 만료되면 자동 해제된다(별도 배치 불필요).
 			if middleware.GetUserLevel(c) < 10 {
 				if until := service.FrozenUntil(db, middleware.GetUserID(c)); !until.IsZero() {
-					mins := int(time.Until(until).Minutes()) + 1
-					if mins < 1 {
-						mins = 1
-					}
+					remain, at := freezeRetryText(until)
 					c.JSON(http.StatusForbidden, gin.H{
 						"success": false,
-						"error": fmt.Sprintf("신고가 누적되어 잠시 댓글 작성이 멈췄습니다. 약 %d분 뒤(%s)부터 다시 작성하실 수 있어요. 자동 해제되는 임시 조치입니다.",
-							mins, until.Format("15:04")),
+						"error": fmt.Sprintf("신고가 누적되어 잠시 댓글 작성이 멈췄습니다. %s 뒤(%s)부터 다시 작성하실 수 있어요. 자동 해제되는 임시 조치입니다.",
+							remain, at),
 					})
 					return
 				}
