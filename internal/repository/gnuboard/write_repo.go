@@ -1218,7 +1218,9 @@ func (r *writeRepository) DeletePost(boardID string, wrID int, deletedBy string)
 	return r.db.Table(table).Where("wr_id = ?", wrID).Delete(&gnuboard.G5Write{}).Error
 }
 
-// SoftDeletePost marks a post and its comments as deleted, and records revision history
+// SoftDeletePost marks a post as deleted and records revision history.
+// 자식 댓글은 보존한다(다른 앙님들의 댓글·추천이 얽힌 공동 기록 — bug/13675). 과거
+// 연쇄삭제로 타인 댓글이 함께 지워지던 동작은 제거됐고, 이 함수는 글 행만 건드린다.
 func (r *writeRepository) SoftDeletePost(boardID string, wrID int, deletedBy string) error {
 	r.invalidatePostCount(boardID)
 	table := tableName(boardID)
