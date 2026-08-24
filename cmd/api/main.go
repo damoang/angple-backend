@@ -384,6 +384,15 @@ func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, comment
 	if err := adjustPostCommentCount(tx, boardID, postID, -1); err != nil {
 		return false, err
 	}
+	// #13661: 삭제된 댓글의 알림 행도 같은 tx 에서 제거한다. 묶음 알림의 "외 N명·댓글 N"
+	// 카운트는 g5_na_noti 순수 집계(댓글 존재 조인 없음)라, 남겨두면 삭제분까지 세어
+	// 과대계상된다(알림엔 6명인데 실제 댓글 2개 등). comment 계열 알림의 wr_id 는
+	// 댓글 id 이므로 bo_table+wr_id 로 정확히 매칭된다.
+	if err := tx.Exec(
+		"DELETE FROM g5_na_noti WHERE bo_table = ? AND wr_id = ? AND ph_from_case IN ('comment','board','reply')",
+		boardID, commentID).Error; err != nil {
+		return false, err
+	}
 	// fail-closed: 이력 기록 실패 시 삭제 트랜잭션 전체 롤백(증거 누락 0).
 	if err := gnurepo.RecordContentHistory(tx, boardID, commentID, 1, snap.MbID, snap.WrName, "삭제", deletedBy, deletedAt,
 		gnurepo.CommentHistorySnapshot(snap.WrContent, snap.WrName, snap.MbID, snap.WrDatetime)); err != nil {
@@ -6058,6 +6067,12 @@ func main() {
 				"wr_deleted_at": now,
 				"wr_deleted_by": movedBy,
 			})
+			// #13661: 이동으로 소프트삭제된 원본 댓글들의 알림 행도 제거한다(묶음 알림 과대계상 방지).
+			// 이동 후 대상 보드에 새 wr_id 로 재생성되며 알림은 새로 만들지 않으므로, 원본 알림은 orphan 이 된다.
+			tx.Exec(
+				"DELETE FROM g5_na_noti WHERE bo_table = ? AND ph_from_case IN ('comment','board','reply') "+
+					"AND wr_id IN (SELECT wr_id FROM "+srcTable+" WHERE wr_parent = ? AND wr_is_comment = 1)",
+				srcBoard, postID)
 			tx.Table(srcTable).Where("wr_id = ?", postID).Updates(map[string]interface{}{
 				"wr_deleted_at": now,
 				"wr_deleted_by": movedBy,

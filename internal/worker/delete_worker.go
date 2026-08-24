@@ -103,6 +103,12 @@ func (w *DeleteWorker) processPending() {
 					Error; err != nil {
 					return err
 				}
+				// #13661: 삭제된 댓글의 알림 행 제거 (묶음 알림 과대계상 방지, softDeleteCommentAndAdjust 와 동일).
+				if err := tx.Exec(
+					"DELETE FROM g5_na_noti WHERE bo_table = ? AND wr_id = ? AND ph_from_case IN ('comment','board','reply')",
+					sd.BoTable, sd.WrID).Error; err != nil {
+					return err
+				}
 				if w.eventRepo != nil {
 					postID := comment.WrParent
 					if err := w.eventRepo.Create(tx, &gnudomain.WriteAfterEvent{
