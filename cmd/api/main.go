@@ -6067,6 +6067,12 @@ func main() {
 				"wr_deleted_at": now,
 				"wr_deleted_by": movedBy,
 			})
+			// #13661: 이동으로 소프트삭제된 원본 댓글들의 알림 행도 제거한다(묶음 알림 과대계상 방지).
+			// 이동 후 대상 보드에 새 wr_id 로 재생성되며 알림은 새로 만들지 않으므로, 원본 알림은 orphan 이 된다.
+			tx.Exec(
+				"DELETE FROM g5_na_noti WHERE bo_table = ? AND ph_from_case IN ('comment','board','reply') "+
+					"AND wr_id IN (SELECT wr_id FROM "+srcTable+" WHERE wr_parent = ? AND wr_is_comment = 1)",
+				srcBoard, postID)
 			tx.Table(srcTable).Where("wr_id = ?", postID).Updates(map[string]interface{}{
 				"wr_deleted_at": now,
 				"wr_deleted_by": movedBy,
