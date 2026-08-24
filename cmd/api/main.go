@@ -384,6 +384,15 @@ func softDeleteCommentAndAdjust(tx *gorm.DB, boardID string, postID int, comment
 	if err := adjustPostCommentCount(tx, boardID, postID, -1); err != nil {
 		return false, err
 	}
+	// #13661: 삭제된 댓글의 알림 행도 같은 tx 에서 제거한다. 묶음 알림의 "외 N명·댓글 N"
+	// 카운트는 g5_na_noti 순수 집계(댓글 존재 조인 없음)라, 남겨두면 삭제분까지 세어
+	// 과대계상된다(알림엔 6명인데 실제 댓글 2개 등). comment 계열 알림의 wr_id 는
+	// 댓글 id 이므로 bo_table+wr_id 로 정확히 매칭된다.
+	if err := tx.Exec(
+		"DELETE FROM g5_na_noti WHERE bo_table = ? AND wr_id = ? AND ph_from_case IN ('comment','board','reply')",
+		boardID, commentID).Error; err != nil {
+		return false, err
+	}
 	// fail-closed: 이력 기록 실패 시 삭제 트랜잭션 전체 롤백(증거 누락 0).
 	if err := gnurepo.RecordContentHistory(tx, boardID, commentID, 1, snap.MbID, snap.WrName, "삭제", deletedBy, deletedAt,
 		gnurepo.CommentHistorySnapshot(snap.WrContent, snap.WrName, snap.MbID, snap.WrDatetime)); err != nil {
