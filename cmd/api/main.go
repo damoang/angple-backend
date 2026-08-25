@@ -7402,7 +7402,6 @@ func main() {
 		cronGroup.POST("/digest-subscribe-notify", cronHandler.DigestSubscribeNotify)
 		cronGroup.POST("/noti-cleanup", cronHandler.NotiCleanup)
 		cronGroup.POST("/auto-dismiss-reports", cronHandler.AutoDismissReports)
-		cronGroup.POST("/withdrawal-grace-anonymize", cronHandler.WithdrawalGraceAnonymize)
 		cronGroup.POST("/verification-guide", cronHandler.VerificationGuide)
 		cronGroup.POST("/giving-draw-sweep", cronHandler.GivingDrawSweep)
 
