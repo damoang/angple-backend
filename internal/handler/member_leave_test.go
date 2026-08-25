@@ -107,25 +107,32 @@ func TestApplySelfLeaveDoesNotResetClock(t *testing.T) {
 	}
 }
 
-// 가드 #1: 취소는 mb_leave_date 만 지우고 mb_intercept_date 는 절대 건드리지 않는다(제재 세탁 방지).
-func TestCancelSelfLeavePreservesIntercept(t *testing.T) {
+// ⛔ 2026-08-25 숙려 폐지 — 취소는 어떤 경우에도 거부된다.
+// 예전에는 3일 전 신청이 "숙려중 → 취소 성공"이었다. 지금은 거부되고
+// mb_leave_date·mb_intercept_date 어느 쪽도 변하지 않아야 한다.
+func TestCancelSelfLeaveRefusedAndChangesNothing(t *testing.T) {
 	db := newLeaveTestDB(t)
 	db.Exec(`INSERT INTO g5_member (mb_id, mb_nick, mb_leave_date, mb_leave_reason, mb_intercept_date)
 		VALUES ('carol', '캐롤', ?, 'self', '20260615')`, leaveDateAgo(3))
+	before := leaveDateAgo(3)
 
-	if err := cancelSelfLeave(db, "carol", time.Now()); err != nil {
-		t.Fatalf("cancelSelfLeave: %v", err)
+	if err := cancelSelfLeave(db, "carol", time.Now()); err == nil {
+		t.Fatal("cancel must be refused after grace removal")
 	}
 	leave, reason, intercept, _ := getMember(t, db, "carol")
-	if leave != "" || reason != "" {
-		t.Errorf("leave_date/reason should be cleared, got leave=%q reason=%q", leave, reason)
+	if leave != before {
+		t.Errorf("leave_date must stay %q, got %q", before, leave)
 	}
+	if reason != "self" {
+		t.Errorf("leave_reason must stay, got %q", reason)
+	}
+	// 제재 세탁 방지 가드는 그대로 유효해야 한다.
 	if intercept != "20260615" {
 		t.Errorf("mb_intercept_date must be preserved (제재 유지), got %q", intercept)
 	}
 }
 
-// 숙려기간(30일) 경과 시 취소 불가.
+// 탈퇴 확정 상태면 취소 불가. 숙려 폐지 후에는 신청 즉시 이 상태가 된다.
 func TestCancelSelfLeaveGraceElapsed(t *testing.T) {
 	db := newLeaveTestDB(t)
 	db.Exec(`INSERT INTO g5_member (mb_id, mb_nick, mb_leave_date, mb_leave_reason) VALUES ('dave', '데이브', ?, 'self')`, leaveDateAgo(40))
@@ -141,13 +148,20 @@ func TestCancelSelfLeaveGraceElapsed(t *testing.T) {
 	}
 }
 
-// 이미 익명화 확정된 계정은 (숙려중이라도) 복구 불가.
+// 이미 익명화 확정된 계정은 복구 불가.
+// ⛔ 숙려 폐지 후에는 상태 검사(WithdrawalConfirmed)가 먼저 걸려 errGraceElapsed 가 난다.
+//
+//	어느 쪽이든 "거부"가 계약이므로 거부 여부만 본다.
 func TestCancelSelfLeaveAlreadyAnonymized(t *testing.T) {
 	db := newLeaveTestDB(t)
 	db.Exec(`INSERT INTO g5_member (mb_id, mb_nick, mb_leave_date) VALUES ('erin', '탈퇴회원_9', ?)`, leaveDateAgo(3))
 
-	if err := cancelSelfLeave(db, "erin", time.Now()); !errors.Is(err, errAlreadyAnonymize) {
-		t.Fatalf("expected errAlreadyAnonymize, got %v", err)
+	err := cancelSelfLeave(db, "erin", time.Now())
+	if err == nil {
+		t.Fatal("anonymized account must not be restorable")
+	}
+	if !errors.Is(err, errAlreadyAnonymize) && !errors.Is(err, errGraceElapsed) {
+		t.Fatalf("expected refusal (errAlreadyAnonymize or errGraceElapsed), got %v", err)
 	}
 }
 
@@ -186,8 +200,11 @@ func TestResolveMbID(t *testing.T) {
 	}
 }
 
-// HIGH-2 end-to-end(단위): 숫자 subject 로 들어온 grace 사용자가 취소에 성공해야 한다(404 아님).
-func TestGraceTokenCancelSucceeds(t *testing.T) {
+// HIGH-2 end-to-end(단위): 숫자 subject 해석은 계속 동작해야 한다.
+// ⛔ 숙려 폐지로 취소 자체는 거부된다. 여기서 지키려는 계약은
+//
+//	"404(사용자 못 찾음)가 아니라 정상적인 거부"라는 점이다 — 둘은 다르다.
+func TestGraceTokenCancelRefusedNotMissing(t *testing.T) {
 	db := newLeaveTestDB(t)
 	db.Exec(`CREATE TABLE v2_users (id INTEGER PRIMARY KEY, username TEXT)`)
 	db.Exec(`INSERT INTO v2_users (id, username) VALUES (7, 'grace7')`)
@@ -198,11 +215,15 @@ func TestGraceTokenCancelSucceeds(t *testing.T) {
 	if mbID != "grace7" {
 		t.Fatalf("resolveMbID should map 7 -> grace7, got %q", mbID)
 	}
-	if err := cancelSelfLeave(db, mbID, time.Now()); err != nil {
-		t.Fatalf("cancel should succeed for grace user, got %v", err)
+	err := cancelSelfLeave(db, mbID, time.Now())
+	if err == nil {
+		t.Fatal("cancel must be refused after grace removal")
+	}
+	if errors.Is(err, errNotWithdrawing) {
+		t.Fatal("must not be mistaken for a missing/active user — subject resolution broke")
 	}
 	leave, _, _, _ := getMember(t, db, "grace7")
-	if leave != "" {
-		t.Errorf("leave_date should be cleared after cancel, got %q", leave)
+	if leave == "" {
+		t.Error("leave_date must remain set when cancel refused")
 	}
 }

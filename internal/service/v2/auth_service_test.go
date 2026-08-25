@@ -168,20 +168,20 @@ func TestRefreshTokenWithdrawalGate(t *testing.T) {
 		t.Fatalf("confirmed account refresh should be blocked, got %v", err)
 	}
 
-	// 숙려중(5일 경과) → grace 상태 반환(차단 아님, 토큰은 발급)
+	// ⛔ 2026-08-25 숙려 폐지(WithdrawalGraceDays=0) — 신청 즉시 확정이므로 차단이다.
+	// 예전에는 5일 경과가 "숙려중 → 토큰 발급"이었다. 지금은 40일과 같아야 한다.
 	db.Exec(`UPDATE g5_member SET mb_leave_date = ? WHERE mb_id = 'zoe'`, time.Now().AddDate(0, 0, -5).Format("20060102"))
-	resp, err := svc.RefreshToken(refresh)
-	if err != nil {
-		t.Fatalf("grace refresh should not error, got %v", err)
-	}
-	if resp.WithdrawalGrace == nil {
-		t.Fatal("grace refresh should carry WithdrawalGrace info")
-	}
-	if resp.AccessToken == "" {
-		t.Error("grace refresh should still issue access token (for cancel)")
+	if _, err := svc.RefreshToken(refresh); !errors.Is(err, common.ErrAccountWithdrawn) {
+		t.Fatalf("leave 5 days ago should be blocked (no grace period), got %v", err)
 	}
 
-	// 정상(탈퇴 아님) → 정상 갱신
+	// 오늘 신청 → 즉시 차단. 숙려 폐지의 핵심 회귀 지점이다.
+	db.Exec(`UPDATE g5_member SET mb_leave_date = ? WHERE mb_id = 'zoe'`, time.Now().Format("20060102"))
+	if _, err := svc.RefreshToken(refresh); !errors.Is(err, common.ErrAccountWithdrawn) {
+		t.Fatalf("leave today should be blocked immediately, got %v", err)
+	}
+
+	// 정상(탈퇴 아님) → 정상 갱신. 탈퇴자 차단이 일반 회원까지 막으면 안 된다.
 	db.Exec(`UPDATE g5_member SET mb_leave_date = '' WHERE mb_id = 'zoe'`)
 	resp2, err := svc.RefreshToken(refresh)
 	if err != nil {
@@ -189,6 +189,9 @@ func TestRefreshTokenWithdrawalGate(t *testing.T) {
 	}
 	if resp2.WithdrawalGrace != nil {
 		t.Error("active account should not carry WithdrawalGrace")
+	}
+	if resp2.AccessToken == "" {
+		t.Error("active account should get an access token")
 	}
 }
 
