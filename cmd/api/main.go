@@ -1893,6 +1893,7 @@ func main() {
 		notiGroup.POST("/group/read", notiHandler.MarkGroupAsRead)
 		notiGroup.DELETE("/:id", notiHandler.Delete)
 		notiGroup.DELETE("/group", notiHandler.DeleteGroup)
+		notiGroup.DELETE("/all", notiHandler.DeleteAll)
 
 		// v2 미러 — 공식 앱은 v2 계약으로 알림을 부르는데(GET /api/v2/notifications/unread-count 등)
 		// 알림 라우트가 v1 에만 있어 전량 404 였다(운영 로그상 앱 요청의 48%). 동일 핸들러를 v2 로 별칭 등록.
@@ -1910,6 +1911,7 @@ func main() {
 		notiGroupV2.POST("/group/read", notiHandler.MarkGroupAsRead)
 		notiGroupV2.DELETE("/:id", notiHandler.Delete)
 		notiGroupV2.DELETE("/group", notiHandler.DeleteGroup)
+		notiGroupV2.DELETE("/all", notiHandler.DeleteAll)
 
 		// 관리자 전체 알림 방송(fan-out-on-read) — ops 콘솔이 Bearer 로 호출. RequireAdmin(level>=10).
 		adminNotiGroup := router.Group("/api/v1/admin/notifications", middleware.JWTAuth(jwtManager), middleware.RequireAdmin())

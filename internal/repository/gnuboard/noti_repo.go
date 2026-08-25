@@ -94,6 +94,8 @@ type NotiRepository interface {
 	DeleteMergedGroup(mbID, boTable, targetKey string) error
 	Delete(mbID string, phID int) error
 	DeleteGroup(mbID, boTable string, wrID int, fromCase string) error
+	// DeleteAll 은 사용자의 알림을 전부 삭제한다. onlyRead=true 면 읽은 것만(ph_readed='Y').
+	DeleteAll(mbID string, onlyRead bool) error
 	Create(noti *Notification) error
 	Exists(mbID, boTable string, wrID int, fromCase, relMbID string) (bool, error)
 	// 전 회원 방송(fan-out-on-read) — na_broadcast/na_broadcast_read. 상세는 broadcast.go.
@@ -209,6 +211,15 @@ func (r *notiRepository) MarkAllAsRead(mbID string) error {
 func (r *notiRepository) Delete(mbID string, phID int) error {
 	return r.db.Where("ph_id = ? AND mb_id = ?", phID, mbID).
 		Delete(&Notification{}).Error
+}
+
+// DeleteAll deletes all notifications for the user. onlyRead=true limits to read ones.
+func (r *notiRepository) DeleteAll(mbID string, onlyRead bool) error {
+	q := r.db.Where("mb_id = ?", mbID)
+	if onlyRead {
+		q = q.Where("ph_readed = 'Y'")
+	}
+	return q.Delete(&Notification{}).Error
 }
 
 // Create inserts a new notification

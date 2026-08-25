@@ -389,6 +389,23 @@ func (h *NotiHandler) Delete(c *gin.Context) {
 	common.V2Success(c, gin.H{"message": "삭제 완료"})
 }
 
+// DeleteAll handles DELETE /api/v1/notifications/all — 알림 전체 삭제.
+// 쿼리 read_only=true 면 읽은 알림만 삭제한다(bug/13692: 하나씩만 지울 수 있던 것 개선).
+func (h *NotiHandler) DeleteAll(c *gin.Context) {
+	mbID := middleware.GetUserID(c)
+	if mbID == "" {
+		common.V2ErrorResponse(c, http.StatusUnauthorized, "인증이 필요합니다", nil)
+		return
+	}
+
+	onlyRead := c.Query("read_only") == "true"
+	if err := h.repo.DeleteAll(mbID, onlyRead); err != nil {
+		common.V2ErrorResponse(c, http.StatusInternalServerError, "알림 삭제 실패", err)
+		return
+	}
+	common.V2Success(c, gin.H{"message": "삭제 완료"})
+}
+
 // groupedNotificationResponse is the response for a single grouped notification
 type groupedNotificationResponse struct {
 	Type          string   `json:"type"`
