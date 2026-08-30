@@ -7354,7 +7354,7 @@ func main() {
 		pkglogger.Info("Plugin Store & Marketplace initialized")
 
 		// Giving plugin API
-		givingHandler := handler.NewGivingHandler(db, gnuFileRepo, cfg.Storage.CDNURL, pointConfigRepo)
+		givingHandler := handler.NewGivingHandler(db, gnuFileRepo, cfg.Storage.CDNURL, pointConfigRepo, gnuMemoRepo)
 		givingGroup := router.Group("/api/plugins/giving")
 		{
 			givingGroup.GET("/list", givingHandler.List)

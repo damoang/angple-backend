@@ -30,18 +30,22 @@ type GivingHandler struct {
 	fileRepo        *gnurepo.FileRepository
 	cdnURL          string
 	pointConfigRepo v2repo.PointConfigRepository
+	memoRepo        gnurepo.MemoRepository
 }
 
 // NewGivingHandler creates a new GivingHandler.
 // fileRepo + cdnURL 는 thumbnail enrich (g5_board_file → CDN URL) 에 사용.
 // pointConfigRepo 는 유료 응모(lowest_unique) 수수료 지급 시 포인트 만료일 산정에 사용
 // (nil 이면 만료 없는 기본값으로 처리).
-func NewGivingHandler(db *gorm.DB, fileRepo *gnurepo.FileRepository, cdnURL string, pointConfigRepo v2repo.PointConfigRepository) *GivingHandler {
+// memoRepo 는 개표 완료 시 당첨자·주최자에게 자동 쪽지(g5_memo)를 보내는 데 사용
+// (nil 이면 쪽지 발송을 건너뛴다 — 알림 g5_na_noti 는 영향받지 않는다).
+func NewGivingHandler(db *gorm.DB, fileRepo *gnurepo.FileRepository, cdnURL string, pointConfigRepo v2repo.PointConfigRepository, memoRepo gnurepo.MemoRepository) *GivingHandler {
 	return &GivingHandler{
 		db:              db,
 		fileRepo:        fileRepo,
 		cdnURL:          strings.TrimRight(cdnURL, "/"),
 		pointConfigRepo: pointConfigRepo,
+		memoRepo:        memoRepo,
 	}
 }
 

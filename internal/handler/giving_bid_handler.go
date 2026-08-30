@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	givingdomain "github.com/damoang/angple-backend/internal/domain/giving"
@@ -1481,6 +1483,90 @@ func (h *GivingHandler) NotifyDrawResult(wrID int) {
 		h.notifyOnce(mb, "giving_result", wrID,
 			fmt.Sprintf("🎁 나눔 「%s」이 마감되었습니다. 이번엔 아쉽게 미당첨이에요. 참여해 주셔서 감사합니다!", subject))
 	}
+
+	// 자동 쪽지(g5_memo) 발송 — 알림(g5_na_noti)과 별개 채널로 당첨자·주최자에게만 보낸다.
+	// 낙첨자에게는 보내지 않는다(위 알림만). 모든 개표 경로(자동추첨·주최자 지정·강제종료·
+	// N-3 재추첨)가 NotifyDrawResult 로 수렴하므로 여기 한 곳이면 전 경로를 커버한다.
+	h.sendGivingDrawMemos(wrID, post, draw, winners)
+}
+
+// sendGivingDrawMemos 는 개표 완료 시 당첨자와 주최자에게 시스템 자동 쪽지(g5_memo)를 보낸다.
+// 발송자는 시스템 계정 adminMemberID 이며, 수신자가 admin 이면 건너뛴다(자기 자신 방지).
+// 당첨자가 없으면 "당첨자 없이 종료" 쪽지만 주최자에게 보내고, 당첨자 쪽지는 보내지 않는다.
+// 중복 방지는 sendGivingMemoOnce 의 마커 dedupe 로 보장한다(g5_memo 자체엔 dedupe 가 없다).
+func (h *GivingHandler) sendGivingDrawMemos(wrID int, post *givingPostRow, draw givingDrawRow, winners map[string]bool) {
+	if h.memoRepo == nil || post == nil {
+		return
+	}
+	subject := post.WrSubject
+	link := fmt.Sprintf("https://damoang.net/giving/%d", wrID)
+
+	// 당첨자별 축하 쪽지
+	nicks := h.givingDrawNicknames(draw)
+	for w := range winners {
+		msg := fmt.Sprintf(
+			"🎉 축하합니다! 「%s」 나눔에 당첨되셨습니다.\n당첨 확인 및 수령 안내: %s\n* 이 쪽지는 시스템이 자동 발송했습니다.",
+			subject, link)
+		h.sendGivingMemoOnce(w, "giving_win_memo", wrID, msg, "🎉 나눔 당첨 안내 쪽지가 도착했습니다.")
+	}
+
+	// 주최자 개표 완료 쪽지 — 당첨자 유무에 따라 문구가 갈린다.
+	var hostMsg string
+	if len(winners) == 0 {
+		hostMsg = fmt.Sprintf(
+			"「%s」 나눔이 당첨자 없이 종료되었습니다.\n글에서 확인: %s\n* 이 쪽지는 시스템이 자동 발송했습니다.",
+			subject, link)
+	} else {
+		names := make([]string, 0, len(winners))
+		for w := range winners {
+			if n, ok := nicks[w]; ok && n != "" {
+				names = append(names, n)
+			} else {
+				names = append(names, w) // 닉네임 조회 실패 시 mb_id 폴백
+			}
+		}
+		sort.Strings(names) // 발송 문구를 안정적으로(맵 순회 랜덤성 제거)
+		hostMsg = fmt.Sprintf(
+			"「%s」 나눔 추첨이 완료되었습니다.\n당첨자: %s\n글에서 확인: %s\n* 이 쪽지는 시스템이 자동 발송했습니다.",
+			subject, strings.Join(names, ", "), link)
+	}
+	h.sendGivingMemoOnce(post.MbID, "giving_host_memo", wrID, hostMsg, "📮 나눔 개표 결과 쪽지가 도착했습니다.")
+}
+
+// sendGivingMemoOnce 는 (수신자, 마커, 글) 조합의 dedupe 행이 g5_na_noti 에 없을 때만
+// 시스템 쪽지 1건을 보낸다. dedupe 행은 ph_readed='Y' 로 남겨 안읽음 배지를 올리지 않으면서
+// 스윕 재실행·재호출에도 재발송을 막는다(g5_memo 엔 dedupe 가 없어 이 마커가 유일한 방어선이다).
+// 마커 행을 쪽지 발송보다 먼저 확정해 발송이 부분 실패해도 두 번 보내지 않도록 한다.
+// 수신자가 비어있거나 시스템 관리자(adminMemberID)면 건너뛴다.
+func (h *GivingHandler) sendGivingMemoOnce(mbID, marker string, wrID int, memoContent, notiSummary string) {
+	if mbID == "" || mbID == adminMemberID || h.memoRepo == nil {
+		return
+	}
+	var cnt int64
+	h.db.Table("g5_na_noti").
+		Where("mb_id = ? AND bo_table = 'giving' AND wr_id = ? AND ph_from_case = ?", mbID, wrID, marker).
+		Count(&cnt)
+	if cnt > 0 {
+		return
+	}
+	guard := &gnurepo.Notification{
+		PhToCase:      "giving",
+		PhFromCase:    marker,
+		BoTable:       "giving",
+		WrID:          wrID,
+		MbID:          mbID,
+		RelMsg:        notiSummary,
+		RelURL:        fmt.Sprintf("/giving/%d", wrID),
+		PhReaded:      "Y",
+		PhDatetime:    time.Now(),
+		ParentSubject: notiSummary,
+		WrParent:      wrID,
+	}
+	if err := h.db.Create(guard).Error; err != nil {
+		return // dedupe 행 생성 실패 → 이번엔 보내지 않고 다음 스윕에서 재시도
+	}
+	// 쪽지 발송 실패는 개표 결과에 영향을 주면 안 되므로 흡수한다(NotifyDrawResult 정책).
+	_, _ = h.memoRepo.Send(adminMemberID, mbID, memoContent)
 }
 
 // notifyOnce 는 같은 (수신자, 종류, 글) 조합 알림이 없을 때만 1건 생성한다.
