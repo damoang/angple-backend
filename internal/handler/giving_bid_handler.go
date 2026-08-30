@@ -1395,6 +1395,9 @@ func (h *GivingHandler) redrawForfeited(wrID int) error { //nolint:gocyclo // �
 	}
 	h.notifyOnce(newWinner, "giving_win", wrID,
 		fmt.Sprintf("🎉 나눔 「%s」에 (재추첨) 당첨되셨습니다! 24시간 내 '수령 확인'을 눌러주세요.", subject))
+	// 재추첨으로 새로 뽑힌 당첨자에게도 축하 쪽지를 보낸다(최초 개표와 동일 helper·멱등).
+	// NotifyDrawResult 를 거치지 않는 경로라 여기서 직접 호출해야 쪽지가 발송된다.
+	h.sendWinnerMemo(post, wrID, newWinner)
 	if prevWinner != "" {
 		h.notifyOnce(prevWinner, "giving_forfeit", wrID,
 			fmt.Sprintf("⏰ 나눔 「%s」 수령 미확인(24시간)으로 재추첨되었습니다.", subject))
@@ -1498,16 +1501,13 @@ func (h *GivingHandler) sendGivingDrawMemos(wrID int, post *givingPostRow, draw 
 	if h.memoRepo == nil || post == nil {
 		return
 	}
-	subject := post.WrSubject
+	subject := givingTrim(post.WrSubject)
 	link := fmt.Sprintf("https://damoang.net/giving/%d", wrID)
 
-	// 당첨자별 축하 쪽지
+	// 당첨자별 축하 쪽지 — 재추첨 경로(redrawForfeited)와 공유하는 helper 로 발송.
 	nicks := h.givingDrawNicknames(draw)
 	for w := range winners {
-		msg := fmt.Sprintf(
-			"🎉 축하합니다! 「%s」 나눔에 당첨되셨습니다.\n당첨 확인 및 수령 안내: %s\n* 이 쪽지는 시스템이 자동 발송했습니다.",
-			subject, link)
-		h.sendGivingMemoOnce(w, "giving_win_memo", wrID, msg, "🎉 나눔 당첨 안내 쪽지가 도착했습니다.")
+		h.sendWinnerMemo(post, wrID, w)
 	}
 
 	// 주최자 개표 완료 쪽지 — 당첨자 유무에 따라 문구가 갈린다.
@@ -1531,6 +1531,22 @@ func (h *GivingHandler) sendGivingDrawMemos(wrID int, post *givingPostRow, draw 
 			subject, strings.Join(names, ", "), link)
 	}
 	h.sendGivingMemoOnce(post.MbID, "giving_host_memo", wrID, hostMsg, "📮 나눔 개표 결과 쪽지가 도착했습니다.")
+}
+
+// sendWinnerMemo 는 당첨자 1명에게 축하 쪽지(g5_memo)를 보낸다.
+// 최초 개표(sendGivingDrawMemos)와 N-3 재추첨(redrawForfeited) 양쪽에서 호출해
+// 문구·링크·멱등성 규칙을 한 곳에 모은다. 마커(giving_win_memo)는 당첨자 mb_id 로
+// 키잉되므로 기존 당첨자는 이미 마킹되어 skip 되고, 재추첨으로 새로 뽑힌 당첨자만 발송된다.
+func (h *GivingHandler) sendWinnerMemo(post *givingPostRow, wrID int, winnerMbID string) {
+	if h.memoRepo == nil || post == nil {
+		return
+	}
+	subject := givingTrim(post.WrSubject)
+	link := fmt.Sprintf("https://damoang.net/giving/%d", wrID)
+	msg := fmt.Sprintf(
+		"🎉 축하합니다! 「%s」 나눔에 당첨되셨습니다.\n당첨 확인 및 수령 안내: %s\n* 이 쪽지는 시스템이 자동 발송했습니다.",
+		subject, link)
+	h.sendGivingMemoOnce(winnerMbID, "giving_win_memo", wrID, msg, "🎉 나눔 당첨 안내 쪽지가 도착했습니다.")
 }
 
 // sendGivingMemoOnce 는 (수신자, 마커, 글) 조합의 dedupe 행이 g5_na_noti 에 없을 때만

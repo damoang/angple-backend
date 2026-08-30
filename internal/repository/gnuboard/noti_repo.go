@@ -123,7 +123,9 @@ func (r *notiRepository) GetNotifications(mbID string, page, limit int) ([]Notif
 	var notifications []Notification
 	var total int64
 
-	query := r.db.Model(&Notification{}).Where("mb_id = ?", mbID)
+	// giving_*_memo 는 쪽지(g5_memo) 발송 중복방지용 dedupe 마커일 뿐 사용자에게 노출하지 않는다.
+	query := r.db.Model(&Notification{}).Where("mb_id = ?", mbID).
+		Where("ph_from_case NOT IN ('giving_win_memo','giving_host_memo')")
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -147,7 +149,7 @@ func (r *notiRepository) GetNotifications(mbID string, page, limit int) ([]Notif
 func (r *notiRepository) CountUnread(mbID string) (int64, error) {
 	lastSeen := r.lastSeenPhID(mbID)
 	var count int64
-	q := r.db.Model(&Notification{}).Where("mb_id = ? AND ph_from_case != 'reaction'", mbID)
+	q := r.db.Model(&Notification{}).Where("mb_id = ? AND ph_from_case NOT IN ('reaction','giving_win_memo','giving_host_memo')", mbID)
 	if lastSeen > 0 {
 		// idx_mb_phid (mb_id, ph_id) 정확 적중 — ph_readed 스캔보다 빠르다.
 		q = q.Where("ph_id > ?", lastSeen)
@@ -242,7 +244,7 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 	// Build filter condition.
 	// 'reaction' 타입은 항상 제외 — 이모지 리액션 알림은 운영 정책상 비활성.
 	// ph_from_case='reaction' 행이 DB에 존재하지만 사용자에게 노출하지 않는다.
-	fromCaseFilter := "AND ph_from_case != 'reaction'"
+	fromCaseFilter := "AND ph_from_case NOT IN ('reaction','giving_win_memo','giving_host_memo')"
 	switch filterType {
 	case "comment":
 		fromCaseFilter = "AND ph_from_case IN ('board', 'comment', 'reply')"
@@ -524,7 +526,7 @@ type MergedNotification struct {
 // GetMergedNotifications — GetGroupedNotifications 와 같은 2-pass 구조에 키만 대상 단위다.
 // 기존 메서드는 손대지 않는다(구 소비자 보존). merge=target 파라미터로만 이 경로에 들어온다.
 func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, filterType string) ([]MergedNotification, int64, int64, error) {
-	fromCaseFilter := "AND ph_from_case != 'reaction'"
+	fromCaseFilter := "AND ph_from_case NOT IN ('reaction','giving_win_memo','giving_host_memo')"
 	switch filterType {
 	case "comment":
 		fromCaseFilter = "AND ph_from_case IN ('board', 'comment', 'reply')"
