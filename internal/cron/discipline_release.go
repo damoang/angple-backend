@@ -128,6 +128,7 @@ func runDisciplineRelease(db *gorm.DB) (*DisciplineReleaseResult, error) {
 		} else {
 			result.InterceptReleasedIDs = interceptIDs
 			result.InterceptReleasedCount = len(interceptIDs)
+			recordReleaseOnLog(db, interceptIDs)
 		}
 	}
 
@@ -147,4 +148,35 @@ func runDisciplineRelease(db *gorm.DB) (*DisciplineReleaseResult, error) {
 	}
 
 	return result, nil
+}
+
+// recordReleaseOnLog 은 해제된 회원의 **가장 최근 이용제한 기록**에 실제 해제 시각을 남긴다.
+//
+// ⛔2026-09-03 사고 — 회원이 「1일 처분인데 4월 30일까지 막혀 있다」고 제보했는데(claim/1614),
+//
+//	만료 시 mb_intercept_date 와 g5_da_member_discipline 이 **지워지기만 해서**
+//	나중에 「그때 실제로 언제 풀렸나」를 확인할 방법이 없었다. 146일 뒤에도 검증 불가였다.
+//
+// ⭐released_at 을 로그 JSON 에 남기면 penalty_date_from·penalty_period 와 대조해
+//
+//	기간 오류 제보를 사실로 확인할 수 있다.
+//
+// ⛔회원에게 보이는 member_reason 은 건드리지 않는다. 감사 기록일 뿐이다.
+func recordReleaseOnLog(db *gorm.DB, mbIDs []string) {
+	for _, mb := range mbIDs {
+		res := db.Exec(`
+			UPDATE g5_write_disciplinelog
+			   SET wr_content = JSON_SET(wr_content,
+			         '$.released_at', DATE_FORMAT(CONVERT_TZ(NOW(),'+00:00','+09:00'),'%Y-%m-%d %H:%i:%s'),
+			         '$.released_by', 'cron')
+			 WHERE JSON_VALID(wr_content)
+			   AND JSON_UNQUOTE(JSON_EXTRACT(wr_content,'$.penalty_mb_id')) = ?
+			   AND JSON_EXTRACT(wr_content,'$.released_at') IS NULL
+			   AND IFNULL(wr_4,'') <> 'void'
+			 ORDER BY wr_datetime DESC
+			 LIMIT 1`, mb)
+		if res.Error != nil {
+			log.Printf("[Cron:discipline-release] failed to stamp released_at for %s: %v", mb, res.Error)
+		}
+	}
 }
