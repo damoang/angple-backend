@@ -41,6 +41,10 @@ type MyPageRepository interface {
 	// FindRecentAcrossBoards 는 검색가능 게시판별 최신 perBoard개를 모은 시간순 후보 풀을 반환한다.
 	// 보드별 캡·인터리브(다양성)는 핸들러에서 적용. cursor 는 보드slug→wr_id 워터마크. excludeMbIDs 는 차단.
 	FindRecentAcrossBoards(perBoard int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error)
+	// FindHotAcrossBoards 는 최근 hours 시간 내 공감(wr_good>=1) 글을 공감순으로 모은
+	// 크로스보드 핫 피드다(GET /api/v2/feed/hot). 두 번째 반환값은 has_more.
+	// 보드당 최근 2000글(PK 역순)만 후보로 본다 — 구현·근거는 hot_feed_repo.go 참조.
+	FindHotAcrossBoards(hours, limit, offset int, excludeMbIDs []string) ([]gnuboard.FeedPost, bool, error)
 }
 
 type searchableBoard struct {

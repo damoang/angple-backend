@@ -42,6 +42,8 @@ func Setup(router *gin.Engine, h *v2handler.V2Handler, jwtManager *jwt.Manager, 
 
 	// Cross-board 통합 피드 (SNS 홈 타임라인) — OptionalJWTAuth 로 차단 사용자 필터 지원
 	api.GET("/feed", middleware.OptionalJWTAuth(jwtManager), h.ListRecentFeed)
+	// Cross-board 핫(공감) 피드 — 앱 공감 탭(구 v1 empathy: g5_write_empathy 부재로 항상 빈 목록) 대체
+	api.GET("/feed/hot", middleware.OptionalJWTAuth(jwtManager), h.ListHotFeed)
 
 	// Users
 	//
