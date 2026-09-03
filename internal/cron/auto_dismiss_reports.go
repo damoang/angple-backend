@@ -90,8 +90,8 @@ func runAutoDismissReports(db *gorm.DB) (*AutoDismissResult, error) {
 	note := fmt.Sprintf("자동 미처리 (유효 담당자 만장일치 %d명)", result.MinOpinions)
 	for _, cand := range candidates {
 		// 기각 처리 — UpdateStatus(dismissed, "system")와 동일한 컬럼 세트
-		//    종전에는 note 를 만들어 이력 테이블에만 넣고 신고 행에는 비워 두어,
-		//    「왜 각하했는지」가 기록에 없었다(2026-09 기준 8,875행).
+		//    종전에는 note 를 이력 테이블에만 넣고 대상 행에는 비워 두어
+		//    처리 사유가 기록에 남지 않았다.
 		//    이미 사유가 적힌 행은 덮어쓰지 않는다.
 		res := db.Exec(`
 			UPDATE g5_na_singo

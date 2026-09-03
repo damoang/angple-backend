@@ -150,18 +150,13 @@ func runDisciplineRelease(db *gorm.DB) (*DisciplineReleaseResult, error) {
 	return result, nil
 }
 
-// recordReleaseOnLog 은 해제된 회원의 **가장 최근 이용제한 기록**에 실제 해제 시각을 남긴다.
+// recordReleaseOnLog 은 해제된 회원의 가장 최근 이용제한 기록에 실제 해제 시각을 남긴다.
 //
-// ⛔2026-09-03 사고 — 회원이 「1일 처분인데 4월 30일까지 막혀 있다」고 제보했는데(claim/1614),
+// 만료 시 mb_intercept_date 와 g5_da_member_discipline 이 정리되기만 해서
+// 사후에 실제 해제 시점을 확인할 근거가 없었다. released_at 을 남기면
+// penalty_date_from·penalty_period 와 대조할 수 있다.
 //
-//	만료 시 mb_intercept_date 와 g5_da_member_discipline 이 **지워지기만 해서**
-//	나중에 「그때 실제로 언제 풀렸나」를 확인할 방법이 없었다. 146일 뒤에도 검증 불가였다.
-//
-// ⭐released_at 을 로그 JSON 에 남기면 penalty_date_from·penalty_period 와 대조해
-//
-//	기간 오류 제보를 사실로 확인할 수 있다.
-//
-// ⛔회원에게 보이는 member_reason 은 건드리지 않는다. 감사 기록일 뿐이다.
+// 이용자에게 노출되는 member_reason 은 변경하지 않는다. 감사 기록 용도다.
 func recordReleaseOnLog(db *gorm.DB, mbIDs []string) {
 	for _, mb := range mbIDs {
 		res := db.Exec(`
