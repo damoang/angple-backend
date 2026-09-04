@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
+	"github.com/damoang/angple-backend/internal/contentkind"
 	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -102,6 +103,7 @@ func (s *MemberActivitySyncService) syncPost(postID uint64, rebuildStats bool) e
 		IsDeleted:       row.Status == "deleted",
 		Title:           truncateForFeed(row.Title, 255),
 		ContentPreview:  buildContentPreview(row.Content, 200),
+		ContentKind:     contentkind.Classify(row.Content),
 		AuthorName:      row.Author,
 		WrOption:        wrOptionFromSecret(row.IsSecret),
 		ViewCount:       row.ViewCount,
@@ -192,6 +194,7 @@ func (s *MemberActivitySyncService) syncComment(commentID uint64, rebuildStats b
 		IsPublic:        isPublic,
 		IsDeleted:       row.Status == "deleted",
 		ContentPreview:  buildContentPreview(row.Content, 200),
+		ContentKind:     contentkind.Classify(row.Content),
 		ParentTitle:     truncateForFeed(row.PostTitle, 255),
 		AuthorName:      row.Author,
 		LikeCount:       row.LikeCount,
@@ -283,6 +286,7 @@ func (s *MemberActivitySyncService) syncLegacyPost(boardSlug string, wrID int, r
 		IsDeleted:       row.IsDeleted,
 		Title:           truncateForFeed(row.Title, 255),
 		ContentPreview:  buildContentPreview(row.Content, 200),
+		ContentKind:     contentkind.Classify(row.Content),
 		AuthorName:      row.Author,
 		WrOption:        truncateForFeed(row.WrOption, 255),
 		ViewCount:       row.ViewCount,
@@ -390,6 +394,7 @@ func (s *MemberActivitySyncService) syncLegacyComment(boardSlug string, wrID int
 		IsPublic:        isPublic,
 		IsDeleted:       row.IsDeleted,
 		ContentPreview:  buildContentPreview(row.Content, 200),
+		ContentKind:     contentkind.Classify(row.Content),
 		ParentTitle:     truncateForFeed(row.ParentTitle, 255),
 		AuthorName:      row.Author,
 		LikeCount:       row.LikeCount,
@@ -675,6 +680,7 @@ func (s *MemberActivitySyncService) upsertFeed(feed *gnudomain.MemberActivityFee
 			"is_deleted",
 			"title",
 			"content_preview",
+			"content_kind",
 			"parent_title",
 			"author_name",
 			"wr_option",

@@ -1162,6 +1162,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		`SELECT * FROM (
 		    (SELECT write_id AS wr_id,
 		            COALESCE(content_preview, '') AS wr_content,
+		            COALESCE(content_kind, '') AS content_kind,
 		            COALESCE(parent_write_id, 0) AS wr_parent,
 		            source_created_at AS wr_datetime,
 		            board_id,
@@ -1176,6 +1177,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		    UNION ALL
 		    (SELECT write_id AS wr_id,
 		            COALESCE(content_preview, '') AS wr_content,
+		            COALESCE(content_kind, '') AS content_kind,
 		            COALESCE(parent_write_id, 0) AS wr_parent,
 		            source_created_at AS wr_datetime,
 		            board_id,

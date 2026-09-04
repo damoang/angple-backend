@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS member_activity_feed (
   is_deleted TINYINT(1) NOT NULL DEFAULT 0,
   title VARCHAR(255) DEFAULT NULL,
   content_preview VARCHAR(255) DEFAULT NULL,
+  content_kind VARCHAR(16) DEFAULT NULL COMMENT 'text|emoticon|image|video|link|empty (preview 가 빈 이유)',
   parent_title VARCHAR(255) DEFAULT NULL,
   author_name VARCHAR(255) DEFAULT NULL,
   wr_option VARCHAR(255) DEFAULT NULL,
@@ -59,6 +60,8 @@ CREATE TABLE IF NOT EXISTS member_activity_stats (
 		"dislike_count": "ALTER TABLE member_activity_feed ADD COLUMN dislike_count INT NOT NULL DEFAULT 0",
 		"comment_count": "ALTER TABLE member_activity_feed ADD COLUMN comment_count INT NOT NULL DEFAULT 0",
 		"has_file":      "ALTER TABLE member_activity_feed ADD COLUMN has_file TINYINT(1) NOT NULL DEFAULT 0",
+		// preview 가 비었을 때 이미지/이모티콘/동영상/링크를 구분해 프론트에 알린다(#13095 후속).
+		"content_kind": "ALTER TABLE member_activity_feed ADD COLUMN content_kind VARCHAR(16) DEFAULT NULL",
 	}
 	for columnName, ddl := range alterDDLs {
 		exists, err := tableColumnExists(db, "member_activity_feed", columnName)
