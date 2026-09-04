@@ -6,7 +6,10 @@ import (
 )
 
 func TestParseInterceptDate(t *testing.T) {
-	now := time.Now()
+	// ⭐mb_intercept_date 는 KST 벽시계로 기록되고 parseInterceptDate 도 KST 로 읽는다.
+	//   입력 문자열을 만들 때도 같은 벽시계를 써야 한다(CI 는 UTC 라 time.Now() 그대로
+	//   쓰면 9시간 어긋난다).
+	now := time.Now().In(banCheckKST)
 
 	tests := []struct {
 		name      string
