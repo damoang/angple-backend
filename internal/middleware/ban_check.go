@@ -18,6 +18,13 @@ const (
 	claimBoardSlug           = "claim"
 )
 
+// banCheckKST 는 이용제한 종료 시각을 읽을 때 쓰는 로케이션이다.
+//
+// ⛔ 런타임의 time.Local 에 기대지 않는다. 컨테이너에 TZ 와 zoneinfo 가 모두 있는데도
+// 실측상 시각 판정이 정확히 9시간 어긋났다(2026-09-04). mb_intercept_date 는 KST
+// 벽시계로 기록되므로, 환경 설정에 의존하지 않도록 로케이션을 코드에 고정한다.
+var banCheckKST = time.FixedZone("KST", 9*60*60)
+
 // BanCheck checks if the authenticated user is banned (mb_intercept_date).
 // Banned users cannot create or update posts/comments.
 // Exception: banned users can only write/comment on the promotion board.
@@ -206,14 +213,14 @@ func ArchiveBoardCheck() gin.HandlerFunc {
 //   - "20060102" (short date, varchar(8) native)
 //   - "2006-01-" (truncated YYYY-MM-DD stored in varchar(8))
 func parseInterceptDate(s string) (time.Time, error) {
-	if t, err := time.ParseInLocation(interceptDateFormat, s, time.Local); err == nil {
+	if t, err := time.ParseInLocation(interceptDateFormat, s, banCheckKST); err == nil {
 		return t, nil
 	}
-	if t, err := time.ParseInLocation(interceptDateDashFormat, s, time.Local); err == nil {
+	if t, err := time.ParseInLocation(interceptDateDashFormat, s, banCheckKST); err == nil {
 		// YYYY-MM-DD format (no time component) — treat as end of day
 		return t.Add(24*time.Hour - time.Second), nil
 	}
-	if t, err := time.ParseInLocation(interceptDateShortFormat, s, time.Local); err == nil {
+	if t, err := time.ParseInLocation(interceptDateShortFormat, s, banCheckKST); err == nil {
 		// Short format has no time component — treat as end of day
 		return t.Add(24*time.Hour - time.Second), nil
 	}

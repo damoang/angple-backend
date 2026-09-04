@@ -3,6 +3,7 @@ package cron
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -14,18 +15,41 @@ const (
 	cronInterceptDateShortFormat = "20060102"
 )
 
+// cronKST 는 해제 판정에 쓰는 로케이션이다.
+//
+// ⛔ 런타임의 time.Local 에 기대지 않는다. 컨테이너에 TZ=Asia/Seoul 과 zoneinfo 가
+// 모두 있고 DSN 에도 loc=Asia/Seoul 이 있는데도, 실측상 해제가 **정확히 9시간**
+// 늦었다(2026-09-04). 만료 시각 + 9시간 직후 첫 정각에 풀리는 패턴이 전 건에서
+// 일관됐다 — 시각 값이 UTC 로 해석된다는 뜻이다.
+//
+// mb_intercept_date 와 penalty_date_from 은 모두 KST 벽시계로 기록되므로,
+// 환경 설정에 의존하지 않도록 로케이션을 코드에 고정한다.
+var cronKST = time.FixedZone("KST", 9*60*60)
+
 // parseInterceptDateForCron parses mb_intercept_date (YYYYMMDD or YYYY-MM-DD HH:MM:SS)
 func parseInterceptDateForCron(s string) (time.Time, error) {
-	if t, err := time.ParseInLocation(cronInterceptDateFormat, s, time.Local); err == nil {
+	if t, err := time.ParseInLocation(cronInterceptDateFormat, s, cronKST); err == nil {
 		return t, nil
 	}
-	if t, err := time.ParseInLocation(cronInterceptDateDashFormat, s, time.Local); err == nil {
+	if t, err := time.ParseInLocation(cronInterceptDateDashFormat, s, cronKST); err == nil {
 		return t.Add(24*time.Hour - time.Second), nil
 	}
-	if t, err := time.ParseInLocation(cronInterceptDateShortFormat, s, time.Local); err == nil {
+	if t, err := time.ParseInLocation(cronInterceptDateShortFormat, s, cronKST); err == nil {
 		return t.Add(24*time.Hour - time.Second), nil
 	}
 	return time.Time{}, fmt.Errorf("unknown date format: %s", s)
+}
+
+// parseBanEndKST 는 DB 가 돌려준 종료 시각 문자열을 KST 로 읽는다.
+// ⛔ time.Time 으로 바로 스캔하면 드라이버 설정에 따라 UTC 로 라벨링되어
+//
+//	같은 9시간 어긋남이 생긴다. 문자열로 받아 여기서만 해석한다.
+func parseBanEndKST(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, "."); i > 0 { // "2026-09-04 00:36:05.000000"
+		s = s[:i]
+	}
+	return time.ParseInLocation(cronInterceptDateFormat, s, cronKST)
 }
 
 // shouldReleaseIntercept 는 이용제한을 지금 풀어야 하는지 판정한다.
@@ -95,9 +119,11 @@ func runDisciplineRelease(db *gorm.DB) (*DisciplineReleaseResult, error) {
 	//
 	// ⛔ 정본이 없는 경우(수동 SQL 집행 등 discipline 행 부재)에는 종전처럼
 	//    mb_intercept_date 로 판정한다 — 정본이 없다고 풀어버리면 안 된다.
+	// ⛔ BanEnd 를 time.Time 으로 스캔하지 않는다 — 드라이버가 UTC 로 라벨링해
+	//    KST 벽시계 값이 9시간 어긋난다. 문자열로 받아 parseBanEndKST 로 읽는다.
 	type penaltyRow struct {
-		MbID   string    `gorm:"column:penalty_mb_id"`
-		BanEnd time.Time `gorm:"column:ban_end"`
+		MbID   string `gorm:"column:penalty_mb_id"`
+		BanEnd string `gorm:"column:ban_end"`
 	}
 	var penalties []penaltyRow
 	if err := db.Raw(`
@@ -109,7 +135,14 @@ func runDisciplineRelease(db *gorm.DB) (*DisciplineReleaseResult, error) {
 	}
 	authoritative := make(map[string]time.Time, len(penalties))
 	for _, p := range penalties {
-		authoritative[p.MbID] = p.BanEnd
+		end, parseErr := parseBanEndKST(p.BanEnd)
+		if parseErr != nil {
+			// 형식을 못 읽으면 정본으로 쓰지 않는다 — 파생값 판정으로 떨어진다.
+			// ⛔ 여기서 임의로 풀어주면 제재가 무력화된다.
+			log.Printf("[Cron:discipline-release] ban_end 파싱 실패 (%s): %v", p.MbID, parseErr)
+			continue
+		}
+		authoritative[p.MbID] = end
 	}
 
 	var interceptIDs []string

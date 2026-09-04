@@ -16,7 +16,7 @@ func TestParseInterceptDateForCron(t *testing.T) {
 			name:  "datetime format",
 			input: "2026-03-19 11:00:01",
 			checkFunc: func(t *testing.T, got time.Time) {
-				expected := time.Date(2026, 3, 19, 11, 0, 1, 0, time.Local)
+				expected := time.Date(2026, 3, 19, 11, 0, 1, 0, cronKST)
 				if !got.Equal(expected) {
 					t.Errorf("expected %v, got %v", expected, got)
 				}
@@ -67,7 +67,7 @@ func TestParseInterceptDateForCron(t *testing.T) {
 }
 
 func TestCronExpiredDetection(t *testing.T) {
-	now := time.Date(2026, 3, 19, 12, 0, 0, 0, time.Local)
+	now := time.Date(2026, 3, 19, 12, 0, 0, 0, cronKST)
 
 	// datetime 형식: 11시에 만료 → 12시 now 기준 만료됨
 	banEnd, _ := parseInterceptDateForCron("2026-03-19 11:00:01")
@@ -102,9 +102,9 @@ func TestCronExpiredDetection(t *testing.T) {
 // 회원이 "이용제한 시간이 지났는데 글을 쓸 수 없다"고 문의해 발견됐다.
 func TestShouldReleaseIntercept(t *testing.T) {
 	// 통보된 종료: 2026-08-16 23:05:15 (= penalty_date_from 08-11 23:05:15 + 5일)
-	notifiedEnd := time.Date(2026, 8, 16, 23, 5, 15, 0, time.Local)
-	justAfter := time.Date(2026, 8, 17, 0, 0, 14, 0, time.Local) // 실제 크론 실행 시각
-	justBefore := time.Date(2026, 8, 16, 22, 0, 0, 0, time.Local)
+	notifiedEnd := time.Date(2026, 8, 16, 23, 5, 15, 0, cronKST)
+	justAfter := time.Date(2026, 8, 17, 0, 0, 14, 0, cronKST) // 실제 크론 실행 시각
+	justBefore := time.Date(2026, 8, 16, 22, 0, 0, 0, cronKST)
 
 	tests := []struct {
 		name          string
