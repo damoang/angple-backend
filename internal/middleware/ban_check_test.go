@@ -104,13 +104,13 @@ func TestParseInterceptDateTimePrecision(t *testing.T) {
 	}
 
 	// 3/19 10:00에는 아직 제재 중
-	checkTime := time.Date(2026, 3, 19, 10, 0, 0, 0, time.Local)
+	checkTime := time.Date(2026, 3, 19, 10, 0, 0, 0, banCheckKST)
 	if checkTime.After(parsed) {
 		t.Error("10:00 should still be banned, but After returned true")
 	}
 
 	// 3/19 11:01에는 제재 해제
-	checkTime = time.Date(2026, 3, 19, 11, 1, 0, 0, time.Local)
+	checkTime = time.Date(2026, 3, 19, 11, 1, 0, 0, banCheckKST)
 	if !checkTime.After(parsed) {
 		t.Error("11:01 should be unbanned, but After returned false")
 	}
