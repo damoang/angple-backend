@@ -53,6 +53,36 @@ func BanCheckScoped(gnuDB *gorm.DB, scope string) gin.HandlerFunc {
 			}
 		}
 
+		// ⭐주의(penalty_period = 0)는 이용제한이 아니다.
+		//
+		// 회원에게는 「주의(이용제한 없음)」로 통보되는데, mb_intercept_date 에 날짜가
+		// 들어가 있으면 parseInterceptDate 가 그 날 23:59:59 까지로 읽어(varchar(8) 은
+		// 시각을 담지 못한다) 통보 내용과 달리 글쓰기가 막힌다.
+		//
+		// 정본은 g5_da_member_discipline 이다. 정본에 행이 있는데 활성 제재가 하나도
+		// 없으면(주의뿐이거나 이미 만료) 파생값을 믿지 않는다. 만료된 제재가 크론 주기
+		// 사이에 남아 있는 경우도 여기서 함께 걸러진다.
+		//
+		// ⛔정본 행이 아예 없는 경우는 종전대로 둔다 — 정본 없이 mb_intercept_date 만
+		//    설정하는 경로가 있고, 그것까지 무시하면 제재가 풀린다.
+		if !needsFallback {
+			var rowCount, activeCount int64
+			if scanErr := gnuDB.Raw(`
+				SELECT COUNT(*),
+				       IFNULL(SUM(CASE
+					       WHEN penalty_period = -1
+					         OR (penalty_period > 0
+					             AND DATE_ADD(penalty_date_from, INTERVAL penalty_period DAY) > NOW())
+					       THEN 1 ELSE 0 END), 0)
+				  FROM g5_da_member_discipline
+				 WHERE penalty_mb_id = ?`, mbID,
+			).Row().Scan(&rowCount, &activeCount); scanErr == nil &&
+				rowCount > 0 && activeCount == 0 {
+				c.Next()
+				return
+			}
+		}
+
 		if needsFallback {
 			// scope별 매칭: "all" scope는 모든 restriction_scope에 매칭,
 			// 특정 scope는 "all" 또는 해당 scope에 매칭
