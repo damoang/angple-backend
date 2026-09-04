@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/damoang/angple-backend/internal/common"
+	"github.com/damoang/angple-backend/internal/contentkind"
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"github.com/damoang/angple-backend/internal/middleware"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
@@ -162,52 +163,17 @@ var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
 var emoRe = regexp.MustCompile(`\{emo:[^}]+\}`)
 var whitespaceRe = regexp.MustCompile(`\s+`)
 
-// 콘텐츠 종류 상수 — preview 가 비었을 때 "무엇 때문에 비었는지"를 프론트에 알린다.
-// 텍스트 없는 댓글이 전부 "(내용 없음)" 으로 뭉개지던 문제(#13095, #13097) 해소용.
-const (
-	ContentKindText     = "text"
-	ContentKindEmoticon = "emoticon"
-	ContentKindImage    = "image"
-	ContentKindVideo    = "video"
-	ContentKindLink     = "link"
-	ContentKindEmpty    = "empty"
-)
-
-// 다모앙 이모티콘은 두 형식이 공존한다(2026-07-26 전수 실측):
+// activityContentKind 는 활동피드 댓글의 콘텐츠 종류를 돌려준다(빈 미리보기의 사유 표기용).
 //
-//	① {emo:파일명} 코드   ② <img src="/emoticons/...">
-//
-// 따라서 둘 다 검사해야 한다. 첨부 이미지(/data/editor/)와는 경로로 구분한다.
-var emoticonImgRe = regexp.MustCompile(`(?i)<img[^>]+src="[^"]*/emoticons/`)
-var imgTagRe = regexp.MustCompile(`(?i)<img\b`)
-var videoTagRe = regexp.MustCompile(`(?i)<(video|iframe)\b`)
-var anchorTagRe = regexp.MustCompile(`(?i)<a\b`)
-
-// classifyContent 는 본문의 종류를 판정한다.
-//
-// ⛔ 반드시 **원본** 문자열을 넘겨야 한다. stripHTMLPreview 는 태그와 {emo:} 를 지운 뒤 반환하므로,
-// 그 결과로 판정하면 이모티콘·이미지를 영영 구분할 수 없다.
-//
-// 판정 순서(전수 실측 기반, 첫 매치 확정):
-//
-//	텍스트 → 이모티콘 → 이미지 → 동영상 → 링크 → 빈 값(최종 폴백)
-//
-// 마지막이 폴백이라 미분류가 남지 않는다.
-func classifyContent(content string) string {
-	if stripHTMLPreview(content, 1) != "" {
-		return ContentKindText
+// 피드 경로는 적재 때 원문으로 판정해 저장한 값(ContentKind)을 그대로 쓴다 — 이 자리에서
+// 판정하면 이미 태그가 벗겨진 미리보기(content_preview)를 보게 되어 이미지·이모티콘을 영영
+// 구분할 수 없다(bug/13843 의 원인). 저장값이 없을 때(정본 UNION 폴백은 실제 원문이 실려온다)
+// 만 그 자리에서 판정한다. 판정 로직 정본은 contentkind 패키지 한 곳에 있다.
+func activityContentKind(cm gnuboard.ActivityComment) string {
+	if cm.ContentKind != "" {
+		return cm.ContentKind
 	}
-	switch {
-	case emoRe.MatchString(content), emoticonImgRe.MatchString(content):
-		return ContentKindEmoticon
-	case imgTagRe.MatchString(content):
-		return ContentKindImage
-	case videoTagRe.MatchString(content):
-		return ContentKindVideo
-	case anchorTagRe.MatchString(content):
-		return ContentKindLink
-	}
-	return ContentKindEmpty
+	return contentkind.Classify(cm.WrContent)
 }
 
 // stripHTMLPreview removes HTML tags, emoji codes, HTML entities and truncates
@@ -398,7 +364,7 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 				"wr_id":           cm.WrID,
 				"parent_wr_id":    cm.WrParent,
 				"preview":         stripHTMLPreview(cm.WrContent, 80),
-				"content_kind":    classifyContent(cm.WrContent),
+				"content_kind":    activityContentKind(cm),
 				"wr_datetime":     cm.WrDatetime.Format("2006-01-02 15:04:05"),
 				"deleted_at":      formatNullableTime(cm.DeletedAt),
 				"post_deleted_at": formatNullableTime(cm.ParentDeletedAt),

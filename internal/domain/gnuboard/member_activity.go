@@ -16,6 +16,7 @@ type MemberActivityFeed struct {
 	IsDeleted       bool       `gorm:"column:is_deleted" json:"is_deleted"`
 	Title           string     `gorm:"column:title" json:"title"`
 	ContentPreview  string     `gorm:"column:content_preview" json:"content_preview"`
+	ContentKind     string     `gorm:"column:content_kind" json:"content_kind"`
 	ParentTitle     string     `gorm:"column:parent_title" json:"parent_title,omitempty"`
 	AuthorName      string     `gorm:"column:author_name" json:"author_name"`
 	WrOption        string     `gorm:"column:wr_option" json:"wr_option"`

@@ -92,6 +92,7 @@ type ActivityPost struct {
 type ActivityComment struct {
 	WrID            int        `gorm:"column:wr_id" json:"wr_id"`
 	WrContent       string     `gorm:"column:wr_content" json:"wr_content"`
+	ContentKind     string     `gorm:"column:content_kind" json:"content_kind"`
 	WrParent        int        `gorm:"column:wr_parent" json:"wr_parent"`
 	WrDatetime      time.Time  `gorm:"column:wr_datetime" json:"wr_datetime"`
 	BoardID         string     `gorm:"column:board_id" json:"board_id"`
