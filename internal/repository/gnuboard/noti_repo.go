@@ -256,6 +256,13 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 		fromCaseFilter = "AND ph_from_case = 'memo'"
 	case "system":
 		fromCaseFilter = "AND ph_from_case IN ('write', 'inquire', 'answer')"
+	case "main":
+		// ⛔ 「새 글」(구독·팔로우)만 뺀 목록. 알림함의 기본값으로 쓴다.
+		//    자유게시판은 하루 1,127개 글이 올라온다. 구독자 87명이 하루 462~991개를
+		//    받고 읽힘률이 0.0% 다. 그리고 그것이 **댓글 알림까지 파묻는다** —
+		//    같은 사람들의 댓글 알림 읽힘률이 87.7%(일반) 대 11.9%(구독자)로 갈렸다.
+		//    ⭐ 구독 알림을 없애는 게 아니다. 「새 글」 탭에 그대로 있다.
+		fromCaseFilter = "AND ph_from_case NOT IN ('reaction','giving_win_memo','giving_host_memo','write','inquire','answer')"
 	}
 
 	// Count total unread (fast — uses idx_mb_readed index)
@@ -538,6 +545,13 @@ func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, fi
 		fromCaseFilter = "AND ph_from_case = 'memo'"
 	case "system":
 		fromCaseFilter = "AND ph_from_case IN ('write', 'inquire', 'answer')"
+	case "main":
+		// ⛔ 「새 글」(구독·팔로우)만 뺀 목록. 알림함의 기본값으로 쓴다.
+		//    자유게시판은 하루 1,127개 글이 올라온다. 구독자 87명이 하루 462~991개를
+		//    받고 읽힘률이 0.0% 다. 그리고 그것이 **댓글 알림까지 파묻는다** —
+		//    같은 사람들의 댓글 알림 읽힘률이 87.7%(일반) 대 11.9%(구독자)로 갈렸다.
+		//    ⭐ 구독 알림을 없애는 게 아니다. 「새 글」 탭에 그대로 있다.
+		fromCaseFilter = "AND ph_from_case NOT IN ('reaction','giving_win_memo','giving_host_memo','write','inquire','answer')"
 	}
 
 	var unreadCount int64
