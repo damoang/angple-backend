@@ -28,7 +28,12 @@ jobs:
         cache: true
 
     - name: Install govulncheck
-      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      # ⛔ @latest 를 쓰지 않는다. 2026-09-09 에 x/vuln v1.8.0 이 나오면서
+      #    "requires go >= 1.26.0 (running go 1.25.14)" 로 **설치 단계에서** 죽었고,
+      #    그 시점 이후 열린 모든 PR 이 이 검사에서 실패했다.
+      #    ⭐ 우리가 아무것도 안 바꿔도 남의 릴리스가 우리 CI 를 깬다.
+      #    러너 Go 를 올릴 때 이 버전도 같이 올린다(위 go-version 과 짝이다).
+      run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
     - name: Run govulncheck
       run: govulncheck ./... || true
