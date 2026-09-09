@@ -748,13 +748,22 @@ func sendDisciplineMemo(tx *gorm.DB, targetMbID, targetNick string, disciplineDa
 	return nil
 }
 
-// buildMemoContent generates the discipline notification memo content
+// buildMemoContent generates the discipline notification memo content.
+//
+// 주의(0일)와 이용제한(1일 이상)은 **서로 다른 안내문**을 쓴다.
+// 종전에는 하나뿐이라 주의를 받은 회원에게도 "이 기간 동안은 글쓰기, 댓글,
+// 쪽지 기능이 잠시 쉬어갑니다" 가 나갔다. 주의는 이용에 제한이 없으므로
+// 사실과 다르고, 받은 사람이 제한이 없는데도 글을 쓰지 않고 기다리게 된다.
+//
+// 호칭은 "회원님" 으로 고정한다. 안내문은 누구에게나 같은 문구로 나가야 하고,
+// 닉네임을 사유로 안내할 때 그 닉네임을 본문에서 부르면 안내문이 조롱처럼 읽힌다.
 func buildMemoContent(targetMbID, targetNick string, disciplineDays int, disciplineType string, sgTypes []int, disciplineDetail string, wrID int, now time.Time) string {
 	// 기간 텍스트
 	var penaltyDay string
+	isWarning := disciplineDays == 0
 	if disciplineDays < 0 || disciplineDays == 9999 {
 		penaltyDay = "영구"
-	} else if disciplineDays == 0 {
+	} else if isWarning {
 		penaltyDay = "주의(이용제한 없음)"
 	} else {
 		penaltyDay = fmt.Sprintf("%d일", disciplineDays)
@@ -789,21 +798,17 @@ func buildMemoContent(targetMbID, targetNick string, disciplineDays int, discipl
 		additionalInfo = "\n• 추가정보:\n" + detail
 	}
 
-	memo := fmt.Sprintf(`💌 [잠시 쉬어가기 안내] 💌
+	header := memoHeaderRestriction
+	closing := memoClosingRestriction
+	periodLabel := "기간"
+	if isWarning {
+		header = memoHeaderWarning
+		closing = memoClosingWarning
+		periodLabel = "구분"
+	}
 
-
-안녕하세요, %s님! 👋
-
-잠깐! 우리 %s님께서
-조금 쉬어가실 시간이 필요하신 것 같아요 🍀
-
-다모앙 가족 모두가 행복한 공간을 만들기 위해
-잠시만 충전의 시간을 가져보시는 건 어떨까요?
-
-곧 다시 만나요! 🌈
-
-📝 쉬어가기 상세 내용
-• 기간: %s%s
+	memo := fmt.Sprintf(`%s
+• %s: %s%s
 • 내 기록 확인: %s
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -813,20 +818,62 @@ func buildMemoContent(targetMbID, targetNick string, disciplineDays int, discipl
 • 제재사유 안내: https://damoang.net/content/operation_policy_add
 • 내 기록 확인: %s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 잠시만 기다려주세요!
-   이 기간 동안은 글쓰기, 댓글, 쪽지 기능이
-   잠시 쉬어갑니다 😊
+%s
 
 🌟 함께 더 좋은 커뮤니티를 만들어가요!
    서로를 배려하는 마음, 그것이 다모앙의 힘입니다 💪`,
-		targetNick, targetNick, penaltyDay, endDateStr, disciplineLink, profileLink)
+		header, periodLabel, penaltyDay, endDateStr, disciplineLink, profileLink, closing)
 
 	// 미사용 플레이스홀더 (향후 템플릿 확장 대비)
 	_ = reasonList
 	_ = additionalInfo
+	_ = targetNick
 
 	return memo
 }
+
+// 안내문 머리말·맺음말. 주의와 이용제한이 서로 다른 문구를 쓴다.
+const (
+	memoHeaderRestriction = `💌 [잠시 쉬어가기 안내] 💌
+
+
+안녕하세요, 회원님! 👋
+
+잠깐! 우리 회원님께서
+조금 쉬어가실 시간이 필요하신 것 같아요 🍀
+
+다모앙 가족 모두가 행복한 공간을 만들기 위해
+잠시만 충전의 시간을 가져보시는 건 어떨까요?
+
+곧 다시 만나요! 🌈
+
+📝 쉬어가기 상세 내용`
+
+	memoClosingRestriction = `💡 잠시만 기다려주세요!
+   이 기간 동안은 글쓰기, 댓글, 쪽지 기능이
+   잠시 쉬어갑니다 😊`
+
+	memoHeaderWarning = `📌 [주의 안내] 📌
+
+
+안녕하세요, 회원님! 👋
+
+회원님의 게시물에 대해
+주의를 안내드립니다 🍀
+
+다모앙 가족 모두가 행복한 공간을 만들기 위해
+잠시만 함께 살펴봐 주시면 좋겠습니다.
+
+앞으로도 잘 부탁드려요! 🌈
+
+📝 주의 상세 내용`
+
+	memoClosingWarning = `💡 이번 안내는 주의입니다.
+   글쓰기, 댓글, 쪽지 기능은
+   그대로 이용하실 수 있어요 😊
+   다만 같은 유형이 반복되면
+   이용제한이 적용될 수 있습니다.`
+)
 
 // processBulkReports processes additional reports embedded in BULK_REPORTS
 func processBulkReports(tx *gorm.DB, disciplineDetail string, wrID int) {
