@@ -22,8 +22,10 @@ type Menu struct {
 	ViewLevel     int       `gorm:"column:view_level" json:"view_level"`
 	ID            int64     `gorm:"column:id;primaryKey" json:"id"`
 	Depth         int       `gorm:"column:depth" json:"depth"`
+	TagnavOrder   int       `gorm:"column:tagnav_order" json:"tagnav_order"`
 	ShowInHeader  bool      `gorm:"column:show_in_header" json:"show_in_header"`
 	ShowInSidebar bool      `gorm:"column:show_in_sidebar" json:"show_in_sidebar"`
+	ShowInTagnav  bool      `gorm:"column:show_in_tagnav" json:"show_in_tagnav"`
 	IsActive      bool      `gorm:"column:is_active" json:"is_active"`
 }
 
@@ -46,8 +48,10 @@ type MenuResponse struct {
 	ID            int64          `json:"id"`
 	Depth         int            `json:"depth"`
 	OrderNum      int            `json:"order_num"`
+	TagnavOrder   int            `json:"tagnav_order"`
 	ShowInHeader  bool           `json:"show_in_header"`
 	ShowInSidebar bool           `json:"show_in_sidebar"`
+	ShowInTagnav  bool           `json:"show_in_tagnav"`
 }
 
 // ToResponse converts Menu to MenuResponse
@@ -63,9 +67,11 @@ func (m *Menu) ToResponse() MenuResponse {
 		PluginName:    m.PluginName,
 		Depth:         m.Depth,
 		OrderNum:      m.OrderNum,
+		TagnavOrder:   m.TagnavOrder,
 		Target:        m.Target,
 		ShowInHeader:  m.ShowInHeader,
 		ShowInSidebar: m.ShowInSidebar,
+		ShowInTagnav:  m.ShowInTagnav,
 		Children:      make([]MenuResponse, 0),
 	}
 
