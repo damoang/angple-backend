@@ -2104,7 +2104,29 @@ func main() {
 					result[m.TargetID] = m
 				}
 			}
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+
+			// has_any: 이 회원이 메모를 **하나라도** 갖고 있는가.
+			//
+			// ⭐ 왜 필요한가 — 메모를 한 번도 쓰지 않은 회원에게 이 응답은 **언제나** 빈 map 이다.
+			// 그런데 목록을 넘길 때마다 다시 묻는다. 결과를 미리 아는 질문이다.
+			// 클라이언트가 스스로 멈출 수 있게 신호를 준다.
+			//
+			// ⛔ 결과가 이미 있으면 물어볼 필요가 없다. **빈 경우에만** 확인한다.
+			// 조회는 unique_keys(member_id, target_member_id) 커버링 인덱스로 끝난다.
+			//
+			// ⛔ 이 키는 **추가**다. 기존 소비자는 data 만 읽으므로 그대로 동작한다.
+			// 프런트는 has_any === false 로 엄격 비교해야 한다 — 키가 없는 구버전
+			// 응답을 false 로 오해하면 메모가 안 보인다.
+			hasAny := len(result) > 0
+			if !hasAny {
+				var n int64
+				db.Table("g5_member_memo").
+					Where("member_id = ?", currentUserID).
+					Limit(1).Count(&n)
+				hasAny = n > 0
+			}
+
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": result, "has_any": hasAny})
 		})
 
 		// Admin member management + memo CRUD
