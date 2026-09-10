@@ -284,7 +284,7 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	if req.MbLeave != nil {
 		if *req.MbLeave {
 			updates["mb_leave_date"] = time.Now().Format("20060102")
-			reason := "self"
+			reason := leaveReasonSelf
 			if req.MbLeaveReason != nil && *req.MbLeaveReason != "" {
 				reason = *req.MbLeaveReason
 			}

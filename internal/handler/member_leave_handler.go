@@ -18,6 +18,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// leaveReasonSelf 는 회원 본인이 신청한 탈퇴의 기본 사유 값이다(g5_member.mb_leave_reason).
+// ⛔ 관리자 경로(admin_member_handler.go)도 같은 값을 쓴다. 한쪽만 바꾸면
+// 두 경로가 서로 다른 사유를 남기게 되므로 상수 하나로 묶는다.
+const leaveReasonSelf = "self"
+
 // MemberLeaveHandler 는 본인 계정 탈퇴 신청/취소(숙려기간) 셀프 서비스 엔드포인트를 담당한다.
 // 관리자 leave set/clear 로직(admin_member_handler.go)을 본인 세션 전용으로 미러링한다.
 type MemberLeaveHandler struct {
@@ -272,7 +277,7 @@ func applySelfLeave(db *gorm.DB, mbID, reason string, now time.Time) (withdrawal
 	if state, _ := common.ClassifyWithdrawal(member.MbLeaveDate, now); state == common.WithdrawalNone {
 		reason = strings.TrimSpace(reason)
 		if reason == "" {
-			reason = "self"
+			reason = leaveReasonSelf
 		}
 		updates := map[string]any{
 			"mb_leave_date":   now.Format("20060102"),
