@@ -1546,6 +1546,22 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 		})
 
+		// 상단 tag-nav 전용 메뉴 (플랫 목록, tagnav_order 정렬).
+		// show_in_tagnav 로 큐레이션하며, 프론트는 이걸 소비하되 실패 시 하드코딩으로 폴백한다.
+		router.GET("/api/v1/menus/tagnav", func(c *gin.Context) {
+			var menus []domain.Menu
+			if err := db.Where("is_active = ? AND show_in_tagnav = ?", true, true).
+				Order("tagnav_order ASC, id ASC").Find(&menus).Error; err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
+				return
+			}
+			result := make([]domain.MenuResponse, 0, len(menus))
+			for i := range menus {
+				result = append(result, menus[i].ToResponse())
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+		})
+
 		// ========== Admin Menu API ==========
 		adminMenus := router.Group("/api/v1/admin/menus")
 		adminMenus.Use(middleware.JWTAuth(jwtManager))
