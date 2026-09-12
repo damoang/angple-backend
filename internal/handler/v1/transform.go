@@ -515,6 +515,9 @@ func TransformToV1Board(b *gnuboard.G5Board) map[string]any {
 		"use_sns":        b.BoUseSns,
 		"post_count":     b.BoCountWrite,
 		"comment_count":  b.BoCountComment,
+		// 게시판별 글쓰기 안내(placeholder 등). 프런트 Board.insert_content 가 소비하는데
+		// 여기서 안 내려줘 지금까지 항상 빈 값이었다(post-form 커스텀 죽은 코드).
+		"insert_content": b.BoInsertContent,
 	}
 }
 
