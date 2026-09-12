@@ -1086,7 +1086,8 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		        AND EXISTS (SELECT 1 FROM g5_na_singo s
 		                     WHERE s.sg_table = f.board_id
 		                       AND s.sg_id = f.write_id
-		                       AND s.discipline_log_id IS NOT NULL)
+		                       AND s.discipline_log_id IS NOT NULL
+		                       AND s.admin_approved = 1)
 		      ORDER BY source_created_at DESC, id DESC
 		      LIMIT ?)
 		 ) AS t
@@ -1229,7 +1230,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		//    (글 경로 FindPublicPostsByMember 의 3번째 분기와 동형).
 		//    idx_singo_discipline(sg_table, discipline_log_id, sg_id) 가 있어 비싸지 않다.
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')) OR EXISTS (SELECT 1 FROM g5_na_singo s WHERE s.sg_table = '%s' AND s.sg_id = p.wr_id AND s.discipline_log_id IS NOT NULL)) WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
+			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')) OR EXISTS (SELECT 1 FROM g5_na_singo s WHERE s.sg_table = '%s' AND s.sg_id = p.wr_id AND s.discipline_log_id IS NOT NULL AND s.admin_approved = 1)) WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
 			b.BoTable, table, table, b.BoTable, limit))
 		args = append(args, mbID)
 	}
@@ -1318,7 +1319,7 @@ func DisciplinedIDs(db *gorm.DB, boardID string) (map[int]bool, error) {
 
 	var ids []int
 	if err := db.Raw(
-		"SELECT DISTINCT sg_id FROM g5_na_singo WHERE sg_table = ? AND discipline_log_id IS NOT NULL",
+		"SELECT DISTINCT sg_id FROM g5_na_singo WHERE sg_table = ? AND discipline_log_id IS NOT NULL AND admin_approved = 1",
 		boardID,
 	).Scan(&ids).Error; err != nil {
 		// ⛔ 실패를 캐시하지 않는다. DB 일시 장애가 TTL 동안 굳으면

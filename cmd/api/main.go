@@ -906,7 +906,7 @@ func enrichWithDisciplineRelated(db *gorm.DB, slug string, items []map[string]an
 		var rows []singoRow
 		if e2 := db.Table("g5_na_singo").
 			Select("DISTINCT sg_id").
-			Where("sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL", slug, targetIDs).
+			Where("sg_table = ? AND sg_id IN ? AND discipline_log_id IS NOT NULL AND admin_approved = 1", slug, targetIDs).
 			Find(&rows).Error; e2 != nil {
 			// ⛔ 두 실패를 함께 남긴다. 원인이 다를 수 있다
 			//    (예: 1단=커넥션 고갈, 2단=문법·권한). 하나만 남기면 다음 사람이 못 가른다.
