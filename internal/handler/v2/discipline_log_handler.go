@@ -280,6 +280,8 @@ type DisciplineLogListItem struct {
 	ViolationTitles []string `json:"violation_titles"`
 	Memo            string   `json:"memo,omitempty"`
 	Revoked         bool     `json:"revoked,omitempty"` // 소명 인용 등으로 회수된 제재 (목록 배지용)
+	// 회수 종류. "appeal"=소명 인용 해제, "admin"=운영진 검토·정정 회수. 회수자 ID 는 여전히 비공개.
+	RevokeKind string `json:"revoke_kind,omitempty"`
 	// 글마다 적용 사유가 다른 경우. violation_titles 는 합집합이라 그대로 보여주면
 	// 전건에 적용된 것처럼 읽힌다 — 화면이 "사유 여러 건"으로 대체한다.
 	ReasonsDifferByItem bool `json:"reasons_differ_by_item,omitempty"`
@@ -303,6 +305,9 @@ type DisciplineLogDetail struct {
 	ClaimPostID       *int            `json:"claim_post_id,omitempty"`
 	// 소명 인용 등으로 회수된 경우 회수 일시만 공개. ⛔ revoked_by(운영자ID)·admin_memo(회수사유)는 비공개.
 	RevokedAt *string `json:"revoked_at,omitempty"`
+	// 회수 종류만 공개한다. "appeal"=소명 인용 해제, "admin"=운영진 검토·정정 회수.
+	// 화면이 모든 회수를 "소명 인용"으로 적던 문제의 수정 — 회수자 ID 는 여전히 내리지 않는다.
+	RevokeKind string `json:"revoke_kind,omitempty"`
 	// 사유가 정정된 경우의 공개 이력. 회수와 같은 기준으로 **운영자 ID·내부 메모는 뺀다.**
 	ReasonCorrections []ReasonCorrection `json:"reason_corrections,omitempty"`
 	// 글마다 적용 사유가 다른 경우. violation_types 는 항목별 사유의 **합집합**이라,
@@ -504,6 +509,7 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 			ViolationTypes:  data.SgTypes,
 			ViolationTitles: titles,
 			Revoked:         data.RevokedAt != "",
+			RevokeKind:      revokeKind(data.RevokedAt, data.RevokedBy),
 			// ⛔ 목록은 wr_content 의 reported_items 만 본다(레거시 보강은 상세에서만 한다).
 			//    보강 전 값이라 판정이 보수적으로 나온다 — 애매하면 false, 즉 지금 표시 유지.
 			ReasonsDifferByItem: reasonsDifferByItem(data.ReportedItems),
@@ -679,6 +685,7 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 	// 소명 인용 등으로 회수된 제재는 회수 일시만 공개 (revoked_by·admin_memo는 비공개)
 	if data.RevokedAt != "" {
 		detail.RevokedAt = &data.RevokedAt
+		detail.RevokeKind = revokeKind(data.RevokedAt, data.RevokedBy)
 	}
 
 	// 사유 정정 이력 — 같은 기준으로 운영자 ID·내부 메모를 뺀 형태만 공개
@@ -711,4 +718,19 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 // GetViolationTypes handles GET /api/v1/discipline-logs/violation-types
 func (h *DisciplineLogHandler) GetViolationTypes(c *gin.Context) {
 	common.V2Success(c, ViolationTypes)
+}
+
+// revokeKind 는 회수 기록의 종류를 회원 공개용으로 줄인 값이다.
+//
+// 소명 인용으로 푼 회수는 revoked_by 를 "appeal" 로 기록하는 것이 관례다
+// (심판자와 제재자를 분리해 남기기 위해). 그 밖의 값은 운영진이 검토·정정으로
+// 되돌린 것이라 "admin" 으로 묶는다. 회수자 ID 자체는 여기서도 밖으로 나가지 않는다.
+func revokeKind(revokedAt, revokedBy string) string {
+	if revokedAt == "" {
+		return ""
+	}
+	if revokedBy == "appeal" {
+		return "appeal"
+	}
+	return "admin"
 }
