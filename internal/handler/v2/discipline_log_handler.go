@@ -44,6 +44,9 @@ type DisciplineLogContent struct {
 	RevokedAt string `json:"revoked_at,omitempty"`
 	RevokedBy string `json:"revoked_by,omitempty"`
 	AdminMemo string `json:"admin_memo,omitempty"`
+	// 수위 정정으로 다른 기록에 대체된 경우 그 기록 번호. 대체된 기록은 목록에서 빠지고
+	// 직접 열면 새 기록으로 안내한다. 삭제하지 않고 남기는 것은 감사 이력 때문이다.
+	SupersededBy int `json:"superseded_by,omitempty"`
 	// 사유가 정정된 경우 운영 콘솔이 기록. 최초 사유는 한 번만 쓰이고 덮이지 않는다.
 	SgTypesOriginal []int                `json:"sg_types_original,omitempty"`
 	ReasonHistory   []ReasonHistoryEntry `json:"reason_history,omitempty"`
@@ -308,6 +311,8 @@ type DisciplineLogDetail struct {
 	// 회수 종류만 공개한다. "appeal"=소명 인용 해제, "admin"=운영진 검토·정정 회수.
 	// 화면이 모든 회수를 "소명 인용"으로 적던 문제의 수정 — 회수자 ID 는 여전히 내리지 않는다.
 	RevokeKind string `json:"revoke_kind,omitempty"`
+	// 수위 정정으로 대체된 기록이면 새 기록 번호. 화면은 이 번호로 안내한다.
+	SupersededBy *int `json:"superseded_by,omitempty"`
 	// 사유가 정정된 경우의 공개 이력. 회수와 같은 기준으로 **운영자 ID·내부 메모는 뺀다.**
 	ReasonCorrections []ReasonCorrection `json:"reason_corrections,omitempty"`
 	// 글마다 적용 사유가 다른 경우. violation_types 는 항목별 사유의 **합집합**이라,
@@ -471,6 +476,10 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 	for _, post := range posts {
 		data, err := parseContentJSON(post.WrContent)
 		if err != nil || data == nil {
+			continue
+		}
+		// 수위 정정으로 대체된 기록은 목록에 두 줄로 보이지 않게 뺀다(새 기록만 보인다).
+		if data.SupersededBy > 0 {
 			continue
 		}
 
@@ -686,6 +695,10 @@ func (h *DisciplineLogHandler) GetDetail(c *gin.Context) {
 	if data.RevokedAt != "" {
 		detail.RevokedAt = &data.RevokedAt
 		detail.RevokeKind = revokeKind(data.RevokedAt, data.RevokedBy)
+	}
+	if data.SupersededBy > 0 {
+		sb := data.SupersededBy
+		detail.SupersededBy = &sb
 	}
 
 	// 사유 정정 이력 — 같은 기준으로 운영자 ID·내부 메모를 뺀 형태만 공개
