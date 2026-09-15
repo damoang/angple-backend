@@ -35,11 +35,11 @@ func (s *luckyService) RollLucky(cfg v2repo.LuckyConfig) (bool, int) {
 		return false, 0
 	}
 
-	max := cfg.PointMax
-	if max < 1 {
-		max = 1
+	maxAmount := cfg.PointMax
+	if maxAmount < 1 {
+		maxAmount = 1
 	}
-	amount := cryptoRandN(max) + 1 // 1..max
+	amount := cryptoRandN(maxAmount) + 1 // 1..maxAmount
 	return true, amount
 }
 
