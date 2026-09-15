@@ -1461,9 +1461,37 @@ func main() {
 		v2Handler.SetPointConfigRepository(pointConfigRepo)
 
 		// 나리야 럭키 포인트 (Phase1: 포인트 전용). 설정 enabled=false 가 기본이라
-		// 배선만으로는 지급 0 — 사장님이 site_settings 에서 켜야 발동.
-		v2Handler.SetLuckyRepository(v2repo.NewLuckyRepository(db))
-		v2Handler.SetLuckyService(v2svc.NewLuckyService())
+		// 배선만으로는 지급 0 — 사장님이 site_settings(전역 마스터) + 게시판별로 켜야 발동.
+		// 실제 발동은 라이브 작성 경로(createPostFn/createCommentFn)에서 아래 luckyRepo/luckyService 로.
+		luckyRepo := v2repo.NewLuckyRepository(db)
+		luckyService := v2svc.NewLuckyService()
+		// grantLuckyLive: 라이브 글/댓글 작성 직후 호출. 커밋된 wr_id 를 키로 best-effort 지급.
+		// (레거시 @lucky 와 동일하게 po_rel_table=slug, po_rel_id=wr_id 로 g5_point 에 남아 마이페이지·뱃지에서 함께 보인다.)
+		grantLuckyLive := func(mbID, slug string, wrID int) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[lucky] grant panic %s (%s/%d): %v", mbID, slug, wrID, r)
+				}
+			}()
+			if mbID == "" {
+				return
+			}
+			cfg, err := luckyRepo.GetLuckyConfig()
+			if err != nil || cfg == nil || !cfg.Enabled { // 전역 마스터 스위치
+				return
+			}
+			dice, maxAmount := luckyRepo.GetBoardLucky(slug) // 게시판별 확률·금액(안 켠 곳은 0,0)
+			if dice < 1 || maxAmount < 1 {
+				return
+			}
+			won, amount := luckyService.RollLucky(dice, maxAmount)
+			if !won || amount <= 0 {
+				return
+			}
+			if _, err := luckyRepo.Grant(mbID, slug, fmt.Sprintf("%d", wrID), "point", amount); err != nil {
+				log.Printf("[lucky] grant failed %s (%s/%d): %v", mbID, slug, wrID, err)
+			}
+		}
 
 		// Inject expRepo into V2Handler for write/comment XP
 		v2Handler.SetExpRepository(v2ExpRepo)
@@ -4275,6 +4303,10 @@ func main() {
 				}()
 			}
 
+			// 나리야 럭키 포인트 — 글 작성 시 확률 지급(게시판별 설정, 전역 마스터 스위치).
+			// 커밋된 wr_id 를 키로 best-effort. 기본 비활성이라 켜기 전엔 미발동.
+			go grantLuckyLive(mbID, slug, post.WrID)
+
 			// 첨부파일 레코드 생성 (g5_board_file)
 			if len(req.Files) > 0 {
 				var boardFiles []gnuboard.G5BoardFile
@@ -4666,6 +4698,9 @@ func main() {
 					}
 				}()
 			}
+
+			// 나리야 럭키 포인트 — 댓글 작성 시 확률 지급(게시판별 설정, 전역 마스터 스위치).
+			go grantLuckyLive(mbID, slug, comment.WrID)
 
 			// Admin sees full IP, others see masked
 			commentIP := v1handler.MaskIP(comment.WrIP)

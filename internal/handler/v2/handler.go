@@ -15,7 +15,6 @@ import (
 	"github.com/damoang/angple-backend/internal/middleware"
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
-	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	pkgredis "github.com/damoang/angple-backend/pkg/redis"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -38,10 +37,7 @@ type V2Handler struct {
 	pointConfigRepo   v2repo.PointConfigRepository
 	blockRepo         v2repo.BlockRepository
 	tagRepo           gnurepo.TagRepository
-	// 나리야 럭키 포인트 (nil-safe — 주입 시에만 발동, 설정 enabled=false 면 지급 0)
-	luckyRepo    v2repo.LuckyRepository
-	luckyService v2svc.LuckyService
-	cache        *pkgredis.Cache // 비인증 GET 응답 캐시 (nil-safe — 미주입 시 fallthrough)
+	cache             *pkgredis.Cache // 비인증 GET 응답 캐시 (nil-safe — 미주입 시 fallthrough)
 	// 라이브 브리지: 현세대 g5_ 스토어 읽기 리포 (nil-safe — 주입 시 게시글/댓글 읽기를 라이브로 서빙)
 	gnuWriteRepo gnurepo.WriteRepository
 	gnuBoardRepo gnurepo.BoardRepository
@@ -127,50 +123,10 @@ func (h *V2Handler) SetTagRepository(repo gnurepo.TagRepository) {
 	h.tagRepo = repo
 }
 
-// SetLuckyRepository sets the optional lucky repository for 나리야 럭키 포인트 grants
-func (h *V2Handler) SetLuckyRepository(repo v2repo.LuckyRepository) {
-	h.luckyRepo = repo
-}
-
-// SetLuckyService sets the optional lucky service for 나리야 럭키 포인트 roll logic
-func (h *V2Handler) SetLuckyService(svc v2svc.LuckyService) {
-	h.luckyService = svc
-}
-
-// grantLucky rolls "나리야 럭키 포인트" and, on a win, grants points idempotently.
-// 글/댓글 row 커밋 이후 best-effort goroutine 으로만 호출한다 — 글작성 트랜잭션에 영향 0.
-// enabled=false 거나 대상 게시판이 아니면 즉시 no-op. 미당첨/중복지급도 no-op.
-func (h *V2Handler) grantLucky(mbID, sourceTable, sourceID, boardSlug string) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[lucky] grant panic for %s (%s/%s): %v", mbID, sourceTable, sourceID, r)
-		}
-	}()
-
-	if h.luckyRepo == nil || h.luckyService == nil || mbID == "" {
-		return
-	}
-
-	// 1) 전역 마스터 스위치 (site_settings.lucky_config.enabled)
-	cfg, err := h.luckyRepo.GetLuckyConfig()
-	if err != nil || cfg == nil || !cfg.Enabled {
-		return
-	}
-	// 2) 게시판별 확률·금액 (v2_board_extended_settings.lucky) — 안 켠 게시판은 0,0 → 미발동
-	dice, maxAmount := h.luckyRepo.GetBoardLucky(boardSlug)
-	if dice < 1 || maxAmount < 1 {
-		return
-	}
-
-	won, amount := h.luckyService.RollLucky(dice, maxAmount)
-	if !won || amount <= 0 {
-		return
-	}
-
-	if _, err := h.luckyRepo.Grant(mbID, sourceTable, sourceID, "point", amount); err != nil {
-		log.Printf("[lucky] grant failed for %s (%s/%s): %v", mbID, sourceTable, sourceID, err)
-	}
-}
+// 나리야 럭키 포인트 지급은 라이브 작성 경로(cmd/api/main.go 의 createPostFn/createCommentFn)에서
+// wr_id 를 키로 처리한다. v2 CreatePost/CreateComment 라우트는 미등록(routes.go: 중복방지)이라
+// 이 핸들러에는 럭키 로직을 두지 않는다. (repo/service: internal/repository/v2/lucky_repo.go,
+// internal/service/v2/lucky_service.go)
 
 // getBlockedUserIDs returns blocked user IDs (as uint64) for the given mb_id
 func (h *V2Handler) getBlockedUserIDs(mbID string) []uint64 {
@@ -742,10 +698,8 @@ func (h *V2Handler) CreatePost(c *gin.Context) {
 		}()
 	}
 
-	// 나리야 럭키 포인트 (비동기, best-effort) — 글 row 커밋 이후에만 발동
-	if h.luckyRepo != nil && h.luckyService != nil {
-		go h.grantLucky(middleware.GetUserID(c), "v2_posts", fmt.Sprintf("%d", post.ID), slug)
-	}
+	// 럭키 포인트는 라이브 작성 경로(cmd/api/main.go createPostFn)에서 wr_id 키로 지급한다.
+	// 이 v2 CreatePost 라우트는 미등록(routes.go: 중복방지)이라 여기서 호출하지 않는다.
 
 	common.V2Created(c, post)
 }
@@ -1265,10 +1219,8 @@ func (h *V2Handler) CreateComment(c *gin.Context) {
 		}()
 	}
 
-	// 나리야 럭키 포인트 (비동기, best-effort) — 댓글 row 커밋 이후에만 발동
-	if h.luckyRepo != nil && h.luckyService != nil {
-		go h.grantLucky(mbID, "v2_comments_"+slug, fmt.Sprintf("%d", comment.ID), slug)
-	}
+	// 럭키 포인트는 라이브 작성 경로(cmd/api/main.go createCommentFn)에서 wr_id 키로 지급한다.
+	// 이 v2 CreateComment 라우트는 미등록(routes.go: 중복방지)이라 여기서 호출하지 않는다.
 
 	// FreeComment 형태로 응답 (프론트엔드 호환)
 
