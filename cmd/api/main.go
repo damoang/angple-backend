@@ -3048,6 +3048,26 @@ func main() {
 			// 나눔(giving) 상태 배지 재료 — 캐시 저장 전 적용 (cache hit 자동 포함).
 			items = enrichGivingExtras(db, slug, items)
 
+			// lucky_point 병합 — 각 글의 럭키 당첨 금액(🍀 배지). 소스 g5_point(@lucky)라
+			// 레거시 과거 당첨까지 포함. 페이지 글 wr_id 를 모아 1쿼리(per-item 반복 금지).
+			{
+				luckyIDs := make([]int, 0, len(items))
+				for _, item := range items {
+					if id, ok := item["id"].(int); ok {
+						luckyIDs = append(luckyIDs, id)
+					}
+				}
+				if lm, lerr := gnurepo.LuckyPointsByWrID(db, slug, luckyIDs); lerr != nil {
+					log.Printf("[lucky] 글 목록 당첨금액 조회 실패 board=%s: %v", slug, lerr)
+				} else {
+					for i, item := range items {
+						if id, ok := item["id"].(int); ok {
+							items[i]["lucky_point"] = lm[id]
+						}
+					}
+				}
+			}
+
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			// #12975 ①: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은
 			// 목록이 반복 노출된다(예: 2011·2012·2013 페이지 동일). 실제 도달 가능한
@@ -3203,6 +3223,11 @@ func main() {
 			// 나눔(giving) 상세 상태 배지 재료 — 목록과 동일 화이트리스트 보강.
 			single := []map[string]any{postDetail}
 			enrichGivingExtras(db, slug, single)
+
+			// lucky_point 병합 — 이 글의 럭키 당첨 금액(🍀 배지). g5_point(@lucky)라 레거시 포함.
+			if lm, lerr := gnurepo.LuckyPointsByWrID(db, slug, []int{id}); lerr == nil {
+				postDetail["lucky_point"] = lm[id]
+			}
 
 			postDetail["edit_count"] = post.WrEditCount
 			if post.WrLastEditedAt != nil {
