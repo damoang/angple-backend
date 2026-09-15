@@ -3,16 +3,15 @@ package v2
 import (
 	"crypto/rand"
 	"math/big"
-
-	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 )
 
 // LuckyService holds the pure "나리야 럭키 포인트" roll logic. 지급/설정/DB 접근은 일절 없고
 // 오직 확률 계산만 담당한다 — 훗날 플러그인으로 이관하기 쉽도록 부수효과를 뺐다.
 type LuckyService interface {
-	// RollLucky rolls a pair of dice. won = 두 눈이 같을 때(확률 1/PointDice).
-	// 당첨 시 amount = 1..PointMax 균등난수, 미당첨 시 amount = 0.
-	RollLucky(cfg v2repo.LuckyConfig) (won bool, amount int)
+	// RollLucky rolls a pair of dice. won = 두 눈이 같을 때(확률 1/dice).
+	// 당첨 시 amount = 1..maxAmount 균등난수, 미당첨 시 amount = 0.
+	// dice·maxAmount 는 게시판별 설정(v2_board_extended_settings.lucky)에서 온다.
+	RollLucky(dice, maxAmount int) (won bool, amount int)
 }
 
 type luckyService struct{}
@@ -23,8 +22,7 @@ func NewLuckyService() LuckyService {
 }
 
 // RollLucky implements the pair-of-dice draw using crypto/rand.
-func (s *luckyService) RollLucky(cfg v2repo.LuckyConfig) (bool, int) {
-	dice := cfg.PointDice
+func (s *luckyService) RollLucky(dice, maxAmount int) (bool, int) {
 	if dice < 1 {
 		dice = 1
 	}
@@ -35,7 +33,6 @@ func (s *luckyService) RollLucky(cfg v2repo.LuckyConfig) (bool, int) {
 		return false, 0
 	}
 
-	maxAmount := cfg.PointMax
 	if maxAmount < 1 {
 		maxAmount = 1
 	}

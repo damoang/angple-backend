@@ -28,25 +28,27 @@ var (
 
 const luckyConfigCacheTTL = 30 * time.Second
 
-// LuckyConfig represents the "나리야 럭키 포인트" configuration
+// LuckyConfig is the GLOBAL master switch for "나리야 럭키 포인트"
 // (stored in site_settings.settings_json under the "lucky_config" key).
 //
-// Enabled 이 킬스위치다. 기본값 false — 켜기 전에는 단 한 푼도 지급되지 않는다.
+// Enabled 이 전체 킬스위치다. 기본값 false — 켜기 전에는 어느 게시판에서도 지급되지 않는다.
+// 확률·금액은 전역이 아니라 **게시판별**(v2_board_extended_settings.lucky)로 정한다(GetBoardLucky).
 type LuckyConfig struct {
-	Enabled       bool     `json:"enabled"`        // 마스터 스위치 (default: false)
-	PointDice     int      `json:"point_dice"`     // 쌍주사위 눈금 수, 당첨확률 = 1/PointDice (default: 20)
-	PointMax      int      `json:"point_max"`      // 당첨 시 지급 포인트 상한 (1..PointMax, default: 500)
-	EnabledBoards []string `json:"enabled_boards"` // 발동 대상 게시판 슬러그 (default: 빈 목록 = 어디서도 발동 안 함)
+	Enabled bool `json:"enabled"` // 마스터 스위치 (default: false)
 }
 
-// DefaultLuckyConfig returns the default lucky configuration (disabled, no boards).
+// DefaultLuckyConfig returns the default lucky configuration (disabled).
 func DefaultLuckyConfig() *LuckyConfig {
-	return &LuckyConfig{
-		Enabled:       false,
-		PointDice:     20,
-		PointMax:      500,
-		EnabledBoards: []string{},
-	}
+	return &LuckyConfig{Enabled: false}
+}
+
+// BoardLucky is the PER-BOARD lucky setting read from v2_board_extended_settings.settings.lucky
+// (관리자가 게시판 편집 화면에서 설정). enabled=true 이고 odds>=1, points>=1 일 때만 발동한다 —
+// 그래서 게시판마다 다른 가중치(소모임은 크게 등)를 줄 수 있다.
+type BoardLucky struct {
+	Enabled bool `json:"enabled"` // 게시판별 사용 여부 (default: false → 미발동)
+	Points  int  `json:"points"`  // 당첨 시 1..Points 지급
+	Odds    int  `json:"odds"`    // 당첨확률 = 1/Odds (쌍주사위)
 }
 
 // LuckyGrant maps the g5_da_lucky_grant idempotency ledger row.
@@ -72,8 +74,11 @@ type LuckyRepository interface {
 	// granted=false (with nil error) means the (sourceTable, sourceID, kind) was already
 	// granted — a no-op — so this is safe to retry.
 	Grant(mbID, sourceTable, sourceID, kind string, amount int) (granted bool, err error)
-	// GetLuckyConfig returns the current lucky configuration (cached 30s).
+	// GetLuckyConfig returns the GLOBAL master switch (cached 30s).
 	GetLuckyConfig() (*LuckyConfig, error)
+	// GetBoardLucky returns the per-board lucky setting (odds/points) if the board has
+	// lucky enabled; otherwise dice=0, maxAmount=0 (=미발동). 확률·금액은 게시판별로 다르다.
+	GetBoardLucky(boardSlug string) (dice, maxAmount int)
 }
 
 type luckyRepository struct {
@@ -221,16 +226,30 @@ func (r *luckyRepository) getLuckyConfigFromDB() (*LuckyConfig, error) {
 		return DefaultLuckyConfig(), nil
 	}
 
-	// zero 값 방어 (설정 저장 시 일부 필드 누락 대비)
-	if wrapper.LuckyConfig.PointDice <= 0 {
-		wrapper.LuckyConfig.PointDice = 20
-	}
-	if wrapper.LuckyConfig.PointMax <= 0 {
-		wrapper.LuckyConfig.PointMax = 500
-	}
-	if wrapper.LuckyConfig.EnabledBoards == nil {
-		wrapper.LuckyConfig.EnabledBoards = []string{}
-	}
-
 	return wrapper.LuckyConfig, nil
+}
+
+// boardLuckyWrapper parses only the "lucky" key of v2_board_extended_settings.settings.
+type boardLuckyWrapper struct {
+	Lucky *BoardLucky `json:"lucky"`
+}
+
+// GetBoardLucky reads the per-board lucky setting. 게시판이 럭키를 켰고(odds>=1, points>=1)
+// 이면 (dice=odds, maxAmount=points) 를, 아니면 (0, 0) 을 돌려준다. 캐시 없음(호출 빈도=글/댓글 작성).
+func (r *luckyRepository) GetBoardLucky(boardSlug string) (dice, maxAmount int) {
+	var settingsJSON string
+	err := r.db.Table("v2_board_extended_settings").
+		Select("settings").Where("board_id = ?", boardSlug).
+		Scan(&settingsJSON).Error
+	if err != nil || settingsJSON == "" || settingsJSON == nullJSON {
+		return 0, 0
+	}
+	var w boardLuckyWrapper
+	if err := json.Unmarshal([]byte(settingsJSON), &w); err != nil || w.Lucky == nil {
+		return 0, 0
+	}
+	if !w.Lucky.Enabled || w.Lucky.Odds < 1 || w.Lucky.Points < 1 {
+		return 0, 0
+	}
+	return w.Lucky.Odds, w.Lucky.Points
 }
