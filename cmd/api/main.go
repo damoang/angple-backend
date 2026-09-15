@@ -2753,6 +2753,22 @@ func main() {
 			}
 			data["board_type"] = boardType
 
+			// 게시판별 글쓰기 안내(write_notice) — 관리자가 확장설정(v2_board_extended_settings)에
+			// 저장한 안내를 write 페이지가 board load 로 함께 받아 최초 렌더에 표시한다.
+			// 없으면 키 자체를 넣지 않아 안내 없는 게시판은 화면 무변화. 캐시 미스 때만 조회되고
+			// 결과는 아래 SetBoard 로 함께 캐시된다.
+			if es, esErr := v2ExtendedSettingsRepo.FindByBoardSlug(slug); esErr == nil && es != nil && es.Settings != "" {
+				var extMap map[string]json.RawMessage
+				if json.Unmarshal([]byte(es.Settings), &extMap) == nil {
+					if wn, ok := extMap["write_notice"]; ok {
+						var wnObj interface{}
+						if json.Unmarshal(wn, &wnObj) == nil {
+							data["write_notice"] = wnObj
+						}
+					}
+				}
+			}
+
 			response := gin.H{
 				"success": true,
 				"data":    data,
@@ -5888,6 +5904,12 @@ func main() {
 			if err := v2ExtendedSettingsRepo.Upsert(settings); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "설정 저장 실패"}})
 				return
+			}
+
+			// board GET 응답에 병합되는 write_notice 등 확장설정이 즉시 반영되도록
+			// 캐시된 board 응답을 무효화한다. (없으면 TTL 만큼 지연 반영)
+			if cacheService != nil {
+				_ = cacheService.InvalidateBoard(c.Request.Context(), slug)
 			}
 
 			// Regenerate nariya PHP files for PHP/gnuboard compatibility
