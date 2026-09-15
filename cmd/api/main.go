@@ -3565,6 +3565,27 @@ func main() {
 				gateDisciplinedComments(transformed, isAnonComment, false)
 			}
 
+			// lucky_point 병합 — 각 댓글의 럭키 당첨 금액(🍀 배지)을 실어 보낸다.
+			// 소스는 g5_point(po_rel_action='@lucky')라 레거시 과거 당첨까지 포함된다.
+			// 페이지 댓글 wr_id 를 모아 1쿼리로 조회한다(per-item 반복 금지). transformed 는
+			// discipline enrich 후에도 comments 와 인덱스 정렬이 유지된다.
+			luckyByID := make(map[int]int)
+			if len(comments) > 0 {
+				luckyIDs := make([]int, 0, len(comments))
+				for _, cm := range comments {
+					luckyIDs = append(luckyIDs, cm.WrID)
+				}
+				if m, lerr := gnurepo.LuckyPointsByWrID(db, slug, luckyIDs); lerr != nil {
+					// 배지 조회 실패는 목록을 막지 않는다 — 값 없이 0 으로 내려간다.
+					log.Printf("[lucky] 댓글 당첨금액 조회 실패 board=%s post=%d: %v", slug, id, lerr)
+				} else {
+					luckyByID = m
+				}
+			}
+			for i, cm := range comments {
+				transformed[i]["lucky_point"] = luckyByID[cm.WrID]
+			}
+
 			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
 			editCost, editGraceSeconds := getCommentEditPolicy()
 			c.JSON(http.StatusOK, gin.H{

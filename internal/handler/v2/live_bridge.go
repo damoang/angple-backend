@@ -294,6 +294,32 @@ func (h *V2Handler) toV2Comment(w *gnuboard.G5Write, authors map[string]liveAuth
 	return out
 }
 
+// injectLuckyPoints 는 v2 글 아이템에 lucky_point(럭키 당첨 금액, 없으면 0)를 병합한다.
+// 각 아이템의 "id"(=wr_id, toV2Post 가 int 로 채운다)를 모아 1쿼리로 조회한다(per-item 반복 금지).
+// 소스는 g5_point(po_rel_action='@lucky')라 레거시 과거 당첨까지 포함된다.
+// 조회 실패는 목록을 막지 않는다 — 값 없이 0 으로 내려간다.
+func (h *V2Handler) injectLuckyPoints(items []map[string]any, slug string) {
+	if h.gnuDB == nil || len(items) == 0 || slug == "" {
+		return
+	}
+	wrIDs := make([]int, 0, len(items))
+	for _, it := range items {
+		if id, ok := it["id"].(int); ok {
+			wrIDs = append(wrIDs, id)
+		}
+	}
+	lucky, err := gnurepo.LuckyPointsByWrID(h.gnuDB, slug, wrIDs)
+	if err != nil {
+		log.Printf("[lucky] v2 당첨금액 조회 실패 board=%s: %v", slug, err)
+		lucky = nil
+	}
+	for _, it := range items {
+		if id, ok := it["id"].(int); ok {
+			it["lucky_point"] = lucky[id]
+		}
+	}
+}
+
 // listPostsLive 는 GET /api/v2/boards/:slug/posts 를 라이브 g5_ 로 서빙한다.
 func (h *V2Handler) listPostsLive(c *gin.Context, slug string) {
 	// 가상 보드 "all"(태그 전체검색, /tags/*)은 g5_write_all 테이블이 없어 1146 을
@@ -361,6 +387,7 @@ func (h *V2Handler) listPostsLive(c *gin.Context, slug string) {
 	for i, p := range posts {
 		items[i] = h.toV2Post(p, boardID, slug, boardName, noticeIDs[p.WrID], authors, false)
 	}
+	h.injectLuckyPoints(items, slug)
 	common.V2SuccessWithMeta(c, items, common.NewV2Meta(page, perPage, total))
 }
 
@@ -399,7 +426,9 @@ func (h *V2Handler) getPostLive(c *gin.Context, slug string) {
 	authors := h.resolveLiveAuthors([]string{w.MbID})
 	// 리액션은 상세 응답에 임베드하지 않는다(목록의 reactions:{👍:good} 요약과 타입 충돌 방지).
 	// 앱은 전용 GET /boards/:slug/posts/:id/reactions 로 실제 da_reaction 을 따로 조회한다(웹과 동일 분리).
-	common.V2Success(c, h.toV2Post(w, boardID, slug, boardName, isNotice, authors, true))
+	post := h.toV2Post(w, boardID, slug, boardName, isNotice, authors, true)
+	h.injectLuckyPoints([]map[string]any{post}, slug)
+	common.V2Success(c, post)
 }
 
 // listCommentsLive 는 GET /api/v2/boards/:slug/posts/:id/comments 를 라이브 g5_ 로 서빙한다.
