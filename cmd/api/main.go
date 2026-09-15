@@ -1460,6 +1460,11 @@ func main() {
 		v2Handler.SetGnuboardPointWriteRepository(gnuPointWriteRepo)
 		v2Handler.SetPointConfigRepository(pointConfigRepo)
 
+		// 나리야 럭키 포인트 (Phase1: 포인트 전용). 설정 enabled=false 가 기본이라
+		// 배선만으로는 지급 0 — 사장님이 site_settings 에서 켜야 발동.
+		v2Handler.SetLuckyRepository(v2repo.NewLuckyRepository(db))
+		v2Handler.SetLuckyService(v2svc.NewLuckyService())
+
 		// Inject expRepo into V2Handler for write/comment XP
 		v2Handler.SetExpRepository(v2ExpRepo)
 		myPageRepo := gnurepo.NewMyPageRepository(db, gnuBoardRepo)

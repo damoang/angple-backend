@@ -335,6 +335,7 @@ func DefaultPointConfig() *PointConfig {
 type settingsJSONWrapper struct {
 	XPConfig    *XPConfig              `json:"xp_config,omitempty"`
 	PointConfig *PointConfig           `json:"point_config,omitempty"`
+	LuckyConfig *LuckyConfig           `json:"lucky_config,omitempty"`
 	Extra       map[string]interface{} `json:"-"`
 }
 

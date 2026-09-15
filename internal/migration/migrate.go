@@ -55,6 +55,7 @@ func Run(db *gorm.DB) error {
 		{"AddRestrictionScopeColumn", AddRestrictionScopeColumn},
 		{"ExpandSiteLogoRecurringDateColumn", ExpandSiteLogoRecurringDateColumn},
 		{"WidenCommentReplyColumns", WidenCommentReplyColumns},
+		{"CreateLuckyGrantTable", CreateLuckyGrantTable},
 	}
 	for _, s := range steps {
 		if err := s.fn(db); err != nil {
