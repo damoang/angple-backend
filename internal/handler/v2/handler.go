@@ -151,15 +151,18 @@ func (h *V2Handler) grantLucky(mbID, sourceTable, sourceID, boardSlug string) {
 		return
 	}
 
+	// 1) 전역 마스터 스위치 (site_settings.lucky_config.enabled)
 	cfg, err := h.luckyRepo.GetLuckyConfig()
 	if err != nil || cfg == nil || !cfg.Enabled {
 		return
 	}
-	if !slices.Contains(cfg.EnabledBoards, boardSlug) {
+	// 2) 게시판별 확률·금액 (v2_board_extended_settings.lucky) — 안 켠 게시판은 0,0 → 미발동
+	dice, maxAmount := h.luckyRepo.GetBoardLucky(boardSlug)
+	if dice < 1 || maxAmount < 1 {
 		return
 	}
 
-	won, amount := h.luckyService.RollLucky(*cfg)
+	won, amount := h.luckyService.RollLucky(dice, maxAmount)
 	if !won || amount <= 0 {
 		return
 	}
