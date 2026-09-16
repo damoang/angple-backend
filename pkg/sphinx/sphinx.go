@@ -2,12 +2,58 @@ package sphinx
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
 
 	_ "github.com/go-sql-driver/mysql"
 )
+
+// ErrUnknownIndex is wrapped into the error returned by Search when the target
+// full-text index does not exist on the Manticore/Sphinx server. Newly-created
+// boards (신규 소모미) have no g5_write_<slug>_dist index provisioned yet, so a
+// search request fails with an "unknown local index" error. Callers can detect
+// this case with IsUnknownIndexErr and fall back to a MySQL LIKE search.
+var ErrUnknownIndex = errors.New("sphinx: unknown index")
+
+// isUnknownIndexError reports whether a SphinxQL/Manticore error indicates the
+// target index does not exist. Manticore speaks the MySQL wire protocol, so the
+// signal is only available as text in err.Error(), e.g.:
+//
+//	"unknown local index 'g5_write_rockmetal_dist' in search request"
+//	"index 'g5_write_rockmetal_dist': not found"
+//	"no such index: g5_write_rockmetal_dist"
+//
+// Only index-absence errors match; connection/syntax errors do not, so the
+// caller never falls back on a transient outage.
+func isUnknownIndexError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "unknown local index"),
+		strings.Contains(msg, "unknown index"),
+		strings.Contains(msg, "no such index"),
+		strings.Contains(msg, "unknown table"),
+		strings.Contains(msg, "no such table"):
+		return true
+	case strings.Contains(msg, "index") && strings.Contains(msg, "not found"):
+		return true
+	case strings.Contains(msg, "table") && strings.Contains(msg, "absent"):
+		return true
+	default:
+		return false
+	}
+}
+
+// IsUnknownIndexErr reports whether err (or any error it wraps) is an
+// unknown-index error produced by Search — i.e. the board's full-text index is
+// not provisioned on the search server.
+func IsUnknownIndexErr(err error) bool {
+	return errors.Is(err, ErrUnknownIndex)
+}
 
 // Client wraps a SphinxQL connection (MySQL protocol on port 9306).
 type Client struct {
@@ -129,6 +175,10 @@ func (c *Client) Search(boardID, searchField, searchQuery string, page, limit in
 
 	rows, err := c.db.Query(query)
 	if err != nil {
+		// 인덱스 부재(신규 소모미 등)는 sentinel 로 감싸 호출부가 폴백을 태울 수 있게 한다.
+		if isUnknownIndexError(err) {
+			return nil, fmt.Errorf("sphinx query (%s): %v: %w", index, err, ErrUnknownIndex)
+		}
 		return nil, fmt.Errorf("sphinx query: %w", err)
 	}
 	defer rows.Close()
