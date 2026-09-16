@@ -177,7 +177,7 @@ func (c *Client) Search(boardID, searchField, searchQuery string, page, limit in
 	if err != nil {
 		// 인덱스 부재(신규 소모미 등)는 sentinel 로 감싸 호출부가 폴백을 태울 수 있게 한다.
 		if isUnknownIndexError(err) {
-			return nil, fmt.Errorf("sphinx query (%s): %v: %w", index, err, ErrUnknownIndex)
+			return nil, fmt.Errorf("sphinx query (%s): %s: %w", index, err.Error(), ErrUnknownIndex)
 		}
 		return nil, fmt.Errorf("sphinx query: %w", err)
 	}
