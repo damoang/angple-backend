@@ -897,6 +897,11 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit, sortBy...)
 	if err != nil {
+		// 전문검색 인덱스가 없는 게시판(신규 소모미 등)은 MySQL LIKE 로 폴백한다.
+		// 다른 sphinx 오류(연결 실패 등)는 그대로 전파해 무한 폴백/오작동을 막는다.
+		if sphinx.IsUnknownIndexErr(err) {
+			return r.searchPostsLike(boardID, searchField, searchQuery, page, limit)
+		}
 		return nil, 0, fmt.Errorf("검색 서비스 오류: %w", err)
 	}
 	if result == nil || len(result.IDs) == 0 {
@@ -928,6 +933,72 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 		}
 	}
 	return ordered, result.TotalFound, nil
+}
+
+// searchPostsLike is the MySQL LIKE fallback for boards whose Sphinx/Manticore
+// full-text index does not exist (신규 소모미 등). It scans the board's real
+// table g5_write_<slug> directly. This is a full scan bounded by LIMIT, which is
+// acceptable for the small, newly-created boards that lack an index; boards that
+// do have an index never reach this path.
+//
+// The sfl→column mapping mirrors pkg/sphinx buildMatchExpr so results are
+// consistent with the primary search path. All user values are bound as
+// parameters (? placeholders); only the validated board slug is interpolated
+// into the table name.
+func (r *writeRepository) searchPostsLike(boardID, searchField, searchQuery string, page, limit int) ([]*gnuboard.G5Write, int64, error) {
+	// slug 화이트리스트 검증 후에만 테이블명에 삽입 (SQL injection 방지).
+	if !activityBoardSlugRe.MatchString(boardID) {
+		return nil, 0, fmt.Errorf("검색 서비스 오류: invalid board id")
+	}
+	log.Printf("[search] sphinx unknown index for %s, MySQL LIKE fallback", boardID)
+
+	like := "%" + searchQuery + "%"
+
+	// sfl 값별 컬럼 매핑. cond 는 전부 상수 리터럴이고 검색어는 args 로 바인딩한다.
+	var cond string
+	var args []interface{}
+	switch searchField {
+	case "title":
+		cond, args = "wr_subject LIKE ?", []interface{}{like}
+	case "content", "comment":
+		cond, args = "wr_content LIKE ?", []interface{}{like}
+	case "author_nick", "comment_nick":
+		cond, args = "wr_name LIKE ?", []interface{}{like}
+	case "author_id", "comment_id":
+		cond, args = "mb_id LIKE ?", []interface{}{like}
+	case "author", "comment_author":
+		cond, args = "(wr_name LIKE ? OR mb_id LIKE ?)", []interface{}{like, like}
+	default: // title_content 및 미지정
+		cond, args = "(wr_subject LIKE ? OR wr_content LIKE ?)", []interface{}{like, like}
+	}
+
+	table := tableName(boardID)
+	whereClause := "wr_is_comment = 0 AND " + cond +
+		" AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')"
+
+	var total int64
+	if err := r.db.Table(table).
+		Where(whereClause, args...).
+		Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	var posts []*gnuboard.G5Write
+	offset := (page - 1) * limit
+	if err := r.db.Table(table).
+		Select(postSelectColumns(boardID, "")).
+		Where(whereClause, args...).
+		Order("wr_id DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return posts, total, nil
 }
 
 // SearchPostsByCategory retrieves posts matching search criteria filtered by ca_name (category).
