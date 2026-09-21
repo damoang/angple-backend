@@ -2,17 +2,21 @@ package gnuboard
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+
+	mysqldrv "github.com/go-sql-driver/mysql"
 )
 
 // hot_feed_query_test.go — 크로스보드 핫 피드 쿼리 빌더의 계약 테스트.
 //
 // 지키는 계약:
 //  1. hours 는 화이트리스트(6/12/24/72)로 정규화된다 — 임의 값이 SQL 창으로 새지 않는다.
-//  2. 보드별 분기는 반드시 2단 바운딩이다 — 내부 PK 역순 LIMIT 2000 이 보드당 스캔
-//     상한이고, 시간 창 필터는 그 캡 안에서만 적용된다(wr_datetime 인덱스 비의존).
+//  2. 보드별 분기는 반드시 2단 바운딩이다 — 내부 (wr_is_comment, wr_id) 인덱스 역순 LIMIT 2000
+//     (FORCE INDEX 로 고정)이 보드당 스캔 상한이고, 시간 창 필터는 그 캡 안에서만
+//     적용된다(wr_datetime 인덱스 비의존).
 //  3. 병합 정렬은 wr_good DESC, wr_id DESC + LIMIT ? OFFSET ? 다.
 //  4. 검증 안 된 slug 는 SQL 에 들어가지 않는다(인젝션 방지).
 
@@ -37,7 +41,7 @@ func TestBuildHotFeedQuery_Snapshot(t *testing.T) {
 		"(SELECT * FROM (" +
 		"SELECT wr_id, wr_subject, LEFT(wr_content, 1000) AS wr_content, wr_datetime, wr_10," +
 		" wr_hit, wr_good, wr_comment, mb_id, wr_name, wr_option, 'free' AS board_id" +
-		" FROM `g5_write_free`" +
+		" FROM `g5_write_free` FORCE INDEX (wr_is_comment)" +
 		" WHERE wr_is_comment = 0" +
 		" AND (wr_option NOT LIKE '%secret%' OR wr_option IS NULL)" +
 		" AND (wr_7 IS NULL OR wr_7 != 'lock')" +
@@ -59,12 +63,17 @@ func TestBuildHotFeedQuery_BoundingPerBoard(t *testing.T) {
 	boards := []string{"free", "qa", "new"}
 	sql, args := buildHotFeedQuery(boards, 6, 21, 20, nil)
 
-	// 보드 수만큼 UNION ALL 분기, 분기마다 내부 캡(PK 역순 LIMIT 2000)이 정확히 하나.
+	// 보드 수만큼 UNION ALL 분기, 분기마다 내부 캡(wr_id 역순 LIMIT 2000 + FORCE INDEX)이 정확히 하나.
 	if got := strings.Count(sql, " UNION ALL "); got != len(boards)-1 {
 		t.Errorf("UNION ALL 수 = %d, want %d", got, len(boards)-1)
 	}
 	if got := strings.Count(sql, "ORDER BY wr_id DESC LIMIT 2000"); got != len(boards) {
 		t.Errorf("내부 바운딩(ORDER BY wr_id DESC LIMIT 2000) 수 = %d, want %d — 캡 없는 분기는 풀스캔이 된다", got, len(boards))
+	}
+	// 분기마다 인덱스 힌트가 정확히 하나 — 힌트가 빠진 분기는 옵티마이저가 idx_comment_deleted 를
+	// 골라 157만 행 filesort 를 한다(2026-09-21 5xx 원인). 캡과 힌트는 한 쌍이다.
+	if got := strings.Count(sql, "FORCE INDEX (wr_is_comment)"); got != len(boards) {
+		t.Errorf("FORCE INDEX (wr_is_comment) 수 = %d, want %d — 힌트 없는 분기는 캡이 무력화된다", got, len(boards))
 	}
 	// 시간 창 필터는 분기마다 캡 밖(서브쿼리 바깥)에서 적용된다 — wr_datetime 인덱스 비의존.
 	if got := strings.Count(sql, "wr_datetime >= DATE_SUB(NOW(), INTERVAL ? HOUR)"); got != len(boards) {
@@ -155,5 +164,39 @@ func TestFindHotAcrossBoards_NonPositiveLimit(t *testing.T) {
 	rows, hasMore, err := r.FindHotAcrossBoards(24, 0, 0, nil)
 	if err != nil || rows != nil || hasMore {
 		t.Errorf("limit=0: got rows=%v hasMore=%v err=%v, want (nil, false, nil)", rows, hasMore, err)
+	}
+}
+
+// TestBuildHotFeedQueryWithHint_NoHintFallback 은 1176 폴백 변형이 힌트 없이 같은 구조를 내는지 고정한다.
+func TestBuildHotFeedQueryWithHint_NoHintFallback(t *testing.T) {
+	withHint, _ := buildHotFeedQuery([]string{"free", "qa"}, 24, 21, 0, nil)
+	noHint, _ := buildHotFeedQueryWithHint([]string{"free", "qa"}, 24, 21, 0, nil, "")
+	if strings.Contains(noHint, "FORCE INDEX") {
+		t.Errorf("폴백 SQL 에 힌트가 남아 있다: %s", noHint)
+	}
+	if strings.ReplaceAll(withHint, hotFeedIndexHint, "") != noHint {
+		t.Errorf("폴백 SQL 이 힌트만 제거한 형태가 아니다.\n with: %s\n no:   %s", withHint, noHint)
+	}
+}
+
+// TestIsMissingIndexErr 는 1176 판정이 드라이버 타입·문자열 두 경로 모두에서 맞고, 다른 오류에 오탐하지 않는지 본다.
+func TestIsMissingIndexErr(t *testing.T) {
+	if isMissingIndexErr(nil) {
+		t.Error("nil 은 false 여야 한다")
+	}
+	if !isMissingIndexErr(&mysqldrv.MySQLError{Number: 1176, Message: "Key 'wr_is_comment' doesn't exist in table 'g5_write_x'"}) {
+		t.Error("MySQLError 1176 을 못 잡는다")
+	}
+	if !isMissingIndexErr(fmt.Errorf("wrap: %w", &mysqldrv.MySQLError{Number: 1176, Message: "x"})) {
+		t.Error("래핑된 MySQLError 1176 을 못 잡는다(errors.As)")
+	}
+	if !isMissingIndexErr(errors.New("Error 1176 (42000): Key 'no_such_idx' doesn't exist in table 'g5_write_free'")) {
+		t.Error("문자열 형태 1176 을 못 잡는다")
+	}
+	if isMissingIndexErr(&mysqldrv.MySQLError{Number: 1146, Message: "Table 'damoang.g5_write_x' doesn't exist"}) {
+		t.Error("1146(테이블 없음)을 1176 으로 오탐한다 — 'doesn't exist in table' 이 아니라 안전해야 한다")
+	}
+	if isMissingIndexErr(errors.New("connection refused")) {
+		t.Error("무관한 오류를 오탐한다")
 	}
 }
