@@ -77,6 +77,9 @@ type WriteRepository interface {
 	FindPostsFilteredHasNextSummary(boardID string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsByCategoryFilteredHasNext(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
 	FindPostsByCategoryFilteredHasNextSummary(boardID string, category string, page, limit int, excludeMbIDs []string) ([]*gnuboard.G5Write, bool, error)
+	// FindPostsExcludingStatus: 처리 상태(g5_da_post_status)가 excludeStatus 인 글을 뺀 기본 목록.
+	// category·excludeMbIDs 는 비어 있으면 무시. 총건수 기반 페이지네이션(bug 게시판 경로).
+	FindPostsExcludingStatus(boardID, category, excludeStatus string, page, limit int, excludeMbIDs []string, includeContent bool) ([]*gnuboard.G5Write, int64, error)
 	FindMessagePostsByPeriod(period string, today time.Time, page, limit int) ([]*gnuboard.G5Write, int64, error)
 	FindPostsAfter(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
 	FindPostsAfterSummary(boardID string, limit int, cursorWrNum int, cursorWrReply string) ([]*gnuboard.G5Write, int64, error)
@@ -375,6 +378,43 @@ func (r *writeRepository) findPostsHasNext(boardID string, page, limit int, incl
 		Find(&posts).Error
 	trimmed, hasNext := trimHasNextPosts(posts, limit)
 	return trimmed, hasNext, err
+}
+
+// FindPostsExcludingStatus 는 처리 상태가 excludeStatus 인 글(예: 해결됨)을 뺀 목록이다.
+// 「해결됨 숨기기」 토글 전용 — 검색·요약·커서·날짜점프와는 조합하지 않는다(핸들러가 보장).
+// 총건수는 매번 센다(캐시 없음): 상태 필터가 붙은 목록은 작은 게시판(bug 수천 행)에서만 켠다.
+func (r *writeRepository) FindPostsExcludingStatus(boardID, category, excludeStatus string, page, limit int, excludeMbIDs []string, includeContent bool) ([]*gnuboard.G5Write, int64, error) {
+	var posts []*gnuboard.G5Write
+	var total int64
+
+	offset := (page - 1) * limit
+	if offset > maxPostOffset {
+		offset = maxPostOffset
+	}
+	table := tableName(boardID)
+	orderClause := r.getSortField(boardID)
+	selectCols := postSelectColumnsForList(boardID, "", includeContent)
+
+	where := r.db.Table(table).
+		Where("wr_is_comment = 0").
+		Where("wr_id NOT IN (SELECT wr_id FROM g5_da_post_status WHERE board_id = ? AND status = ?)", boardID, excludeStatus)
+	if category != "" {
+		where = where.Where("ca_name = ?", category)
+	}
+	if len(excludeMbIDs) > 0 {
+		where = where.Where("mb_id NOT IN ?", excludeMbIDs)
+	}
+
+	if err := where.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := where.Session(&gorm.Session{}).
+		Select(selectCols).
+		Order(orderClause).
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
+	return posts, total, err
 }
 
 // FindPostsByCategory retrieves posts filtered by ca_name (category) with pagination

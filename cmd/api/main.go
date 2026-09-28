@@ -2855,6 +2855,11 @@ func main() {
 			stx := c.Query("stx")           // search text
 			sortBy := c.Query("sort")       // search sort: "relevance" or default (date)
 			category := c.Query("category") // category filter (ca_name)
+			// 처리 상태 필터(「해결됨 숨기기」). 허용값만 받고, 검색·커서·날짜점프·요약과는 조합하지 않는다.
+			excludeStatus := c.Query("exclude_status")
+			if !postStatusAllowed(excludeStatus) {
+				excludeStatus = ""
+			}
 			isSearching := sfl != "" && stx != ""
 			summaryMode := c.Query("summary") == "1" && !isSearching
 			celebrationPeriod := c.Query("celebration_period")
@@ -2881,7 +2886,9 @@ func main() {
 			}
 
 			currentUserIDForMemo := middleware.GetUserID(c)
-			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" {
+			// ⛔ excludeStatus(해결됨 숨기기) 요청은 캐시를 읽지도 쓰지도 않는다 — 키에 그 차원이 없어
+			//    필터된 목록이 공유 캐시에 들어가면 전원이 30초간 해결 글을 못 보고, 반대면 토글이 헛돈다.
+			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && excludeStatus == "" {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
@@ -2952,7 +2959,11 @@ func main() {
 			var total int64
 			var hasNext bool
 			useHasNextPagination := !isSearching && !useCursor && !useDateJump && (slug == "free" || slug == "hello")
-			if isSearching && category != "" {
+			useStatusFilter := excludeStatus != "" && !isSearching && !useCursor && !useDateJump && celebrationPeriod == "" && !useHasNextPagination
+			if useStatusFilter {
+				// 상태 필터가 붙은 기본 목록(카테고리·차단목록 선택). 총건수 페이지네이션.
+				posts, total, err = gnuWriteRepo.FindPostsExcludingStatus(slug, category, excludeStatus, page, limit, blockedIDs, !summaryMode)
+			} else if isSearching && category != "" {
 				posts, total, err = gnuWriteRepo.SearchPostsByCategory(slug, sfl, stx, category, page, limit)
 			} else if isSearching && sortBy == "relevance" {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit, "relevance")
@@ -3096,6 +3107,9 @@ func main() {
 				}
 			}
 
+			// 처리 상태 배지(해결됨·진행중·보류) — 행이 있는 글에만 status 키. 캐시 저장 전 적용.
+			items = enrichWithPostStatus(db, slug, items)
+
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			// #12975 ①: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은
 			// 목록이 반복 노출된다(예: 2011·2012·2013 페이지 동일). 실제 도달 가능한
@@ -3137,7 +3151,7 @@ func main() {
 			//    그대로 나간다. 관리자 요청은 캐시에 쓰지 않는다(읽기는 그대로 히트).
 			// ⛔ disciplineOK 를 빼지 마라. 마스킹 실패분이 캐시에 들어가면
 			//    한 번의 DB 흔들림이 30초 × 전원 노출로 증폭된다.
-			if disciplineOK && !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && middleware.GetUserLevel(c) < 10 {
+			if disciplineOK && !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && excludeStatus == "" && middleware.GetUserLevel(c) < 10 {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
@@ -3256,6 +3270,9 @@ func main() {
 			if lm, lerr := gnurepo.LuckyPointsByWrID(db, slug, []int{id}); lerr == nil {
 				postDetail["lucky_point"] = lm[id]
 			}
+
+			// 처리 상태 배지 — 상세 캐시는 raw 행이고 transform 은 요청별이라 여기서 붙여도 캐시 오염 없음.
+			attachPostStatus(db, slug, id, postDetail)
 
 			postDetail["edit_count"] = post.WrEditCount
 			if post.WrLastEditedAt != nil {
@@ -3438,6 +3455,60 @@ func main() {
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/comments - Get comments from g5_write_{slug}
+		// 글 처리 상태(해결됨·진행중·보류) 지정/해제 — 관리자(level>=10) 전용. 카테고리는 건드리지 않는다.
+		// 경로를 process-status 로 한 이유: 웹의 `…/status` 는 중고장터 판매 상태(wr_2)라 이름이 겹친다.
+		// 목록 캐시(30초)는 InvalidateBoard 로 비워 배지가 바로 바뀌게 한다.
+		v1Boards.PUT("/:slug/posts/:id/process-status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+			slug := c.Param("slug")
+			id, err := strconv.Atoi(c.Param("id"))
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+			var req struct {
+				Status string `json:"status"`
+				Note   string `json:"note"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil || !postStatusAllowed(req.Status) {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "status must be one of resolved, in_progress, hold"})
+				return
+			}
+			if _, err := gnuWriteRepo.FindPostByID(slug, id); err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
+				return
+			}
+			// set_by 는 mb_id — Bearer 경로의 GetUserID 는 v2_users.id(숫자)라 GetUsername 을 쓴다.
+			if err := upsertPostStatus(db, slug, id, req.Status, middleware.GetUsername(c), "admin", req.Note); err != nil {
+				log.Printf("[post_status] 지정 실패 board=%s id=%d: %v", slug, id, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to set status"})
+				return
+			}
+			// 목록 캐시 무효화: Redis posts:<slug>:* + 프로세스 내 30초 캐시. (InvalidateBoard 는 게시판 메타만 지운다.)
+			if cacheService != nil {
+				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
+			}
+			purgePostMemCache(slug)
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"board_id": slug, "id": id, "status": req.Status}})
+		})
+		v1Boards.DELETE("/:slug/posts/:id/process-status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+			slug := c.Param("slug")
+			id, err := strconv.Atoi(c.Param("id"))
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+			if err := clearPostStatus(db, slug, id); err != nil {
+				log.Printf("[post_status] 해제 실패 board=%s id=%d: %v", slug, id, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to clear status"})
+				return
+			}
+			if cacheService != nil {
+				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
+			}
+			purgePostMemCache(slug)
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"board_id": slug, "id": id, "status": nil}})
+		})
+
 		v1Boards.GET("/:slug/posts/:id/comments", func(c *gin.Context) {
 			slug := c.Param("slug")
 			id, err := strconv.Atoi(c.Param("id"))
@@ -7766,4 +7837,142 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 	sqlDB.SetConnMaxIdleTime(2 * time.Minute)
 
 	return db, nil
+}
+
+// ─── 글 처리 상태(해결됨·진행중·보류) ────────────────────────────────────────────
+// ⛔ CI 가 `go build cmd/api/main.go`(단일 파일)로 빌드하므로 패키지 내 별도 파일에 두면 undefined 가 된다 — main.go 안에 둔다.
+
+// 글 처리 상태(해결됨·진행중·보류) — 카테고리(ca_name)와 **독립**인 표시.
+//
+// 버그 게시판은 지금까지 해결되면 ca_name 을 '완료' 로 덮어써 원래 종류(버그/기능제안)가
+// 사라지고 「버그」 탭에서 해결 건이 빠졌다. 상태는 g5_da_post_status 에 따로 두고
+// 목록·상세 응답에 status 로 실어 준다(설계: docs/2026-09-28-bug-status-badge-sprint.html).
+//
+// ⛔ 행이 없는 게시판은 응답 키가 생기지 않는다 — 다른 게시판 동작·응답 불변.
+// ⛔ 조회 실패는 배지만 못 그릴 뿐 목록을 막지 않는다(로그 1줄).
+
+const postStatusTable = "g5_da_post_status"
+
+// postStatusAllowed 는 허용 상태값인지 본다.
+func postStatusAllowed(status string) bool {
+	switch status {
+	case "resolved", "in_progress", "hold":
+		return true
+	}
+	return false
+}
+
+type postStatusRow struct {
+	WrID      int       `gorm:"column:wr_id"`
+	Status    string    `gorm:"column:status"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+// enrichWithPostStatus 는 목록 항목에 status / status_updated_at 을 붙인다(페이지 글 묶음 1쿼리).
+func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
+	if db == nil || len(items) == 0 {
+		return items
+	}
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		if id := itemIntID(item); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return items
+	}
+	var rows []postStatusRow
+	if err := db.Table(postStatusTable).
+		Select("wr_id, status, updated_at").
+		Where("board_id = ? AND wr_id IN ?", slug, ids).
+		Find(&rows).Error; err != nil {
+		// 테이블 부재(DDL 전 배포)·일시 오류 — 배지만 생략.
+		log.Printf("[post_status] 목록 상태 조회 실패 board=%s: %v", slug, err)
+		return items
+	}
+	if len(rows) == 0 {
+		return items
+	}
+	byID := make(map[int]postStatusRow, len(rows))
+	for _, r := range rows {
+		byID[r.WrID] = r
+	}
+	for i, item := range items {
+		if r, ok := byID[itemIntID(item)]; ok {
+			items[i]["status"] = r.Status
+			items[i]["status_updated_at"] = r.UpdatedAt.Format("2006-01-02 15:04:05")
+		}
+	}
+	return items
+}
+
+// attachPostStatus 는 상세 응답 한 건에 status 를 붙인다.
+func attachPostStatus(db *gorm.DB, slug string, id int, detail map[string]any) {
+	if db == nil || detail == nil {
+		return
+	}
+	var r postStatusRow
+	err := db.Table(postStatusTable).
+		Select("wr_id, status, updated_at").
+		Where("board_id = ? AND wr_id = ?", slug, id).
+		Take(&r).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("[post_status] 상세 상태 조회 실패 board=%s id=%d: %v", slug, id, err)
+		}
+		return
+	}
+	detail["status"] = r.Status
+	detail["status_updated_at"] = r.UpdatedAt.Format("2006-01-02 15:04:05")
+}
+
+// upsertPostStatus 는 상태를 지정한다(누가·어떤 경로로 바꿨는지 함께 기록).
+func upsertPostStatus(db *gorm.DB, slug string, id int, status, setBy, source, note string) error {
+	if !postStatusAllowed(status) {
+		return fmt.Errorf("invalid status: %s", status)
+	}
+	setBy = strings.TrimSpace(setBy)
+	if len(setBy) > 20 {
+		setBy = setBy[:20]
+	}
+	if len(note) > 255 {
+		note = note[:255]
+	}
+	return db.Exec(
+		"INSERT INTO "+postStatusTable+" (board_id, wr_id, status, set_by, source, note, created_at, updated_at) "+
+			"VALUES (?, ?, ?, ?, ?, ?, NOW(3), NOW(3)) "+
+			"ON DUPLICATE KEY UPDATE status = VALUES(status), set_by = VALUES(set_by), source = VALUES(source), note = VALUES(note), updated_at = NOW(3)",
+		slug, id, status, setBy, source, note,
+	).Error
+}
+
+// clearPostStatus 는 상태를 해제한다(행 삭제).
+func clearPostStatus(db *gorm.DB, slug string, id int) error {
+	return db.Exec("DELETE FROM "+postStatusTable+" WHERE board_id = ? AND wr_id = ?", slug, id).Error
+}
+
+// purgePostMemCache 는 이 게시판의 프로세스 내 목록 캐시(postMemCache, 30초)를 비운다.
+// 키 형식 "posts:{boardID}:…" — 페이지·limit·카테고리 변형 전부.
+func purgePostMemCache(slug string) {
+	prefix := "posts:" + slug + ":"
+	postMemCache.Range(func(k, _ any) bool {
+		if s, ok := k.(string); ok && strings.HasPrefix(s, prefix) {
+			postMemCache.Delete(k)
+		}
+		return true
+	})
+}
+
+// itemIntID 는 목록 항목의 id 를 int 로 읽는다(transform 이 int 로 넣지만 방어).
+func itemIntID(item map[string]any) int {
+	switch v := item["id"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	}
+	return 0
 }
