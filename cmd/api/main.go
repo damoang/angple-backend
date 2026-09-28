@@ -7853,6 +7853,9 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 
 const postStatusTable = "g5_da_post_status"
 
+// DB 는 UTC 로 저장되고 화면은 KST 날짜를 보인다 — 응답 시각은 KST 로 바꿔 내린다.
+var kstZone = time.FixedZone("KST", 9*60*60)
+
 // postStatusAllowed 는 허용 상태값인지 본다.
 func postStatusAllowed(status string) bool {
 	switch status {
@@ -7901,7 +7904,7 @@ func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []ma
 	for i, item := range items {
 		if r, ok := byID[itemIntID(item)]; ok {
 			items[i]["status"] = r.Status
-			items[i]["status_updated_at"] = r.UpdatedAt.Format("2006-01-02 15:04:05")
+			items[i]["status_updated_at"] = r.UpdatedAt.In(kstZone).Format("2006-01-02 15:04:05")
 		}
 	}
 	return items
@@ -7924,7 +7927,7 @@ func attachPostStatus(db *gorm.DB, slug string, id int, detail map[string]any) {
 		return
 	}
 	detail["status"] = r.Status
-	detail["status_updated_at"] = r.UpdatedAt.Format("2006-01-02 15:04:05")
+	detail["status_updated_at"] = r.UpdatedAt.In(kstZone).Format("2006-01-02 15:04:05")
 }
 
 // upsertPostStatus 는 상태를 지정한다(누가·어떤 경로로 바꿨는지 함께 기록).
