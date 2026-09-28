@@ -2855,6 +2855,11 @@ func main() {
 			stx := c.Query("stx")           // search text
 			sortBy := c.Query("sort")       // search sort: "relevance" or default (date)
 			category := c.Query("category") // category filter (ca_name)
+			// 처리 상태 필터(「해결됨 숨기기」). 허용값만 받고, 검색·커서·날짜점프·요약과는 조합하지 않는다.
+			excludeStatus := c.Query("exclude_status")
+			if !postStatusAllowed(excludeStatus) {
+				excludeStatus = ""
+			}
 			isSearching := sfl != "" && stx != ""
 			summaryMode := c.Query("summary") == "1" && !isSearching
 			celebrationPeriod := c.Query("celebration_period")
@@ -2952,7 +2957,11 @@ func main() {
 			var total int64
 			var hasNext bool
 			useHasNextPagination := !isSearching && !useCursor && !useDateJump && (slug == "free" || slug == "hello")
-			if isSearching && category != "" {
+			useStatusFilter := excludeStatus != "" && !isSearching && !useCursor && !useDateJump && celebrationPeriod == "" && !useHasNextPagination
+			if useStatusFilter {
+				// 상태 필터가 붙은 기본 목록(카테고리·차단목록 선택). 총건수 페이지네이션.
+				posts, total, err = gnuWriteRepo.FindPostsExcludingStatus(slug, category, excludeStatus, page, limit, blockedIDs)
+			} else if isSearching && category != "" {
 				posts, total, err = gnuWriteRepo.SearchPostsByCategory(slug, sfl, stx, category, page, limit)
 			} else if isSearching && sortBy == "relevance" {
 				posts, total, err = gnuWriteRepo.SearchPosts(slug, sfl, stx, page, limit, "relevance")
@@ -3095,6 +3104,9 @@ func main() {
 					}
 				}
 			}
+
+			// 처리 상태 배지(해결됨·진행중·보류) — 행이 있는 글에만 status 키. 캐시 저장 전 적용.
+			items = enrichWithPostStatus(db, slug, items)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			// #12975 ①: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은
@@ -3256,6 +3268,9 @@ func main() {
 			if lm, lerr := gnurepo.LuckyPointsByWrID(db, slug, []int{id}); lerr == nil {
 				postDetail["lucky_point"] = lm[id]
 			}
+
+			// 처리 상태 배지 — 상세 캐시는 raw 행이고 transform 은 요청별이라 여기서 붙여도 캐시 오염 없음.
+			attachPostStatus(db, slug, id, postDetail)
 
 			postDetail["edit_count"] = post.WrEditCount
 			if post.WrLastEditedAt != nil {
@@ -3438,6 +3453,55 @@ func main() {
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/comments - Get comments from g5_write_{slug}
+		// 글 처리 상태 지정/해제 — 관리자(level>=10) 전용. 카테고리는 건드리지 않는다.
+		// 목록 캐시(30초)는 InvalidateBoard 로 비워 배지가 바로 바뀌게 한다.
+		v1Boards.PUT("/:slug/posts/:id/status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+			slug := c.Param("slug")
+			id, err := strconv.Atoi(c.Param("id"))
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+			var req struct {
+				Status string `json:"status"`
+				Note   string `json:"note"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil || !postStatusAllowed(req.Status) {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "status must be one of resolved, in_progress, hold"})
+				return
+			}
+			if _, err := gnuWriteRepo.FindPostByID(slug, id); err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
+				return
+			}
+			if err := upsertPostStatus(db, slug, id, req.Status, middleware.GetUserID(c), "admin", req.Note); err != nil {
+				log.Printf("[post_status] 지정 실패 board=%s id=%d: %v", slug, id, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to set status"})
+				return
+			}
+			if cacheService != nil {
+				_ = cacheService.InvalidateBoard(c.Request.Context(), slug)
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"board_id": slug, "id": id, "status": req.Status}})
+		})
+		v1Boards.DELETE("/:slug/posts/:id/status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+			slug := c.Param("slug")
+			id, err := strconv.Atoi(c.Param("id"))
+			if err != nil || id <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
+				return
+			}
+			if err := clearPostStatus(db, slug, id); err != nil {
+				log.Printf("[post_status] 해제 실패 board=%s id=%d: %v", slug, id, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to clear status"})
+				return
+			}
+			if cacheService != nil {
+				_ = cacheService.InvalidateBoard(c.Request.Context(), slug)
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"board_id": slug, "id": id, "status": nil}})
+		})
+
 		v1Boards.GET("/:slug/posts/:id/comments", func(c *gin.Context) {
 			slug := c.Param("slug")
 			id, err := strconv.Atoi(c.Param("id"))
