@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -85,7 +86,7 @@ func attachPostStatus(db *gorm.DB, slug string, id int, detail map[string]any) {
 		Where("board_id = ? AND wr_id = ?", slug, id).
 		Take(&r).Error
 	if err != nil {
-		if err != gorm.ErrRecordNotFound {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			log.Printf("[post_status] 상세 상태 조회 실패 board=%s id=%d: %v", slug, id, err)
 		}
 		return
