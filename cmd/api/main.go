@@ -7853,9 +7853,6 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 
 const postStatusTable = "g5_da_post_status"
 
-// DB 는 UTC 로 저장되고 화면은 KST 날짜를 보인다 — 응답 시각은 KST 로 바꿔 내린다.
-var kstZone = time.FixedZone("KST", 9*60*60)
-
 // postStatusAllowed 는 허용 상태값인지 본다.
 func postStatusAllowed(status string) bool {
 	switch status {
@@ -7866,9 +7863,11 @@ func postStatusAllowed(status string) bool {
 }
 
 type postStatusRow struct {
-	WrID      int       `gorm:"column:wr_id"`
-	Status    string    `gorm:"column:status"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
+	WrID   int    `gorm:"column:wr_id"`
+	Status string `gorm:"column:status"`
+	// DB 는 UTC 로 저장, DSN 은 loc=Asia/Seoul 이라 time.Time 으로 받으면 UTC 숫자에 KST 라벨이 붙는다.
+	// 그래서 SQL 에서 KST 문자열로 변환해 받는다(CONVERT_TZ).
+	UpdatedKST string `gorm:"column:updated_kst"`
 }
 
 // enrichWithPostStatus 는 목록 항목에 status / status_updated_at 을 붙인다(페이지 글 묶음 1쿼리).
@@ -7887,7 +7886,7 @@ func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []ma
 	}
 	var rows []postStatusRow
 	if err := db.Table(postStatusTable).
-		Select("wr_id, status, updated_at").
+		Select("wr_id, status, DATE_FORMAT(CONVERT_TZ(updated_at, '+00:00', '+09:00'), '%Y-%m-%d %H:%i:%s') AS updated_kst").
 		Where("board_id = ? AND wr_id IN ?", slug, ids).
 		Find(&rows).Error; err != nil {
 		// 테이블 부재(DDL 전 배포)·일시 오류 — 배지만 생략.
@@ -7904,7 +7903,7 @@ func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []ma
 	for i, item := range items {
 		if r, ok := byID[itemIntID(item)]; ok {
 			items[i]["status"] = r.Status
-			items[i]["status_updated_at"] = r.UpdatedAt.In(kstZone).Format("2006-01-02 15:04:05")
+			items[i]["status_updated_at"] = r.UpdatedKST
 		}
 	}
 	return items
@@ -7917,7 +7916,7 @@ func attachPostStatus(db *gorm.DB, slug string, id int, detail map[string]any) {
 	}
 	var r postStatusRow
 	err := db.Table(postStatusTable).
-		Select("wr_id, status, updated_at").
+		Select("wr_id, status, DATE_FORMAT(CONVERT_TZ(updated_at, '+00:00', '+09:00'), '%Y-%m-%d %H:%i:%s') AS updated_kst").
 		Where("board_id = ? AND wr_id = ?", slug, id).
 		Take(&r).Error
 	if err != nil {
@@ -7927,7 +7926,7 @@ func attachPostStatus(db *gorm.DB, slug string, id int, detail map[string]any) {
 		return
 	}
 	detail["status"] = r.Status
-	detail["status_updated_at"] = r.UpdatedAt.In(kstZone).Format("2006-01-02 15:04:05")
+	detail["status_updated_at"] = r.UpdatedKST
 }
 
 // upsertPostStatus 는 상태를 지정한다(누가·어떤 경로로 바꿨는지 함께 기록).
