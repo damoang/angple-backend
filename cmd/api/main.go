@@ -3453,9 +3453,10 @@ func main() {
 		})
 
 		// GET /api/v1/boards/:slug/posts/:id/comments - Get comments from g5_write_{slug}
-		// 글 처리 상태 지정/해제 — 관리자(level>=10) 전용. 카테고리는 건드리지 않는다.
+		// 글 처리 상태(해결됨·진행중·보류) 지정/해제 — 관리자(level>=10) 전용. 카테고리는 건드리지 않는다.
+		// 경로를 process-status 로 한 이유: 웹의 `…/status` 는 중고장터 판매 상태(wr_2)라 이름이 겹친다.
 		// 목록 캐시(30초)는 InvalidateBoard 로 비워 배지가 바로 바뀌게 한다.
-		v1Boards.PUT("/:slug/posts/:id/status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+		v1Boards.PUT("/:slug/posts/:id/process-status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
 			slug := c.Param("slug")
 			id, err := strconv.Atoi(c.Param("id"))
 			if err != nil || id <= 0 {
@@ -3484,7 +3485,7 @@ func main() {
 			}
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"board_id": slug, "id": id, "status": req.Status}})
 		})
-		v1Boards.DELETE("/:slug/posts/:id/status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
+		v1Boards.DELETE("/:slug/posts/:id/process-status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
 			slug := c.Param("slug")
 			id, err := strconv.Atoi(c.Param("id"))
 			if err != nil || id <= 0 {
