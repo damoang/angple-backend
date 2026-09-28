@@ -1,7 +1,7 @@
 -- 005_post_status.sql — 글 처리 상태(해결됨·진행중·보류). 카테고리(ca_name)와 독립.
 -- 설계: docs/2026-09-28-bug-status-badge-sprint.html (angple web 저장소)
--- ⛔ k3s 는 마이그레이션을 자동 실행하지 않는다 → 라이브 DB 수동 적용(2026-09-28 적용 완료).
--- ⛔ 코드는 테이블이 없어도 배지만 생략하고 동작한다(enrichWithPostStatus fail-open).
+-- 마이그레이션은 자동 실행되지 않으므로 배포 전에 DB 에 직접 적용한다.
+-- 코드는 테이블이 없어도 배지만 생략하고 동작한다(enrichWithPostStatus fail-open).
 
 CREATE TABLE IF NOT EXISTS g5_da_post_status (
   board_id   VARCHAR(20)  NOT NULL,

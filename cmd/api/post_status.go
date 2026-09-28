@@ -119,6 +119,18 @@ func clearPostStatus(db *gorm.DB, slug string, id int) error {
 	return db.Exec("DELETE FROM "+postStatusTable+" WHERE board_id = ? AND wr_id = ?", slug, id).Error
 }
 
+// purgePostMemCache 는 이 게시판의 프로세스 내 목록 캐시(postMemCache, 30초)를 비운다.
+// 키 형식 "posts:{boardID}:…" — 페이지·limit·카테고리 변형 전부.
+func purgePostMemCache(slug string) {
+	prefix := "posts:" + slug + ":"
+	postMemCache.Range(func(k, _ any) bool {
+		if s, ok := k.(string); ok && strings.HasPrefix(s, prefix) {
+			postMemCache.Delete(k)
+		}
+		return true
+	})
+}
+
 // itemIntID 는 목록 항목의 id 를 int 로 읽는다(transform 이 int 로 넣지만 방어).
 func itemIntID(item map[string]any) int {
 	switch v := item["id"].(type) {

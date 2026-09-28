@@ -2886,7 +2886,9 @@ func main() {
 			}
 
 			currentUserIDForMemo := middleware.GetUserID(c)
-			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" {
+			// ⛔ excludeStatus(해결됨 숨기기) 요청은 캐시를 읽지도 쓰지도 않는다 — 키에 그 차원이 없어
+			//    필터된 목록이 공유 캐시에 들어가면 전원이 30초간 해결 글을 못 보고, 반대면 토글이 헛돈다.
+			if !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && excludeStatus == "" {
 				// Layer 1: In-memory cache (30s TTL)
 				if cached, ok := postMemCache.Load(memKey); ok {
 					mc := cached.(*memCachedPosts)
@@ -2960,7 +2962,7 @@ func main() {
 			useStatusFilter := excludeStatus != "" && !isSearching && !useCursor && !useDateJump && celebrationPeriod == "" && !useHasNextPagination
 			if useStatusFilter {
 				// 상태 필터가 붙은 기본 목록(카테고리·차단목록 선택). 총건수 페이지네이션.
-				posts, total, err = gnuWriteRepo.FindPostsExcludingStatus(slug, category, excludeStatus, page, limit, blockedIDs)
+				posts, total, err = gnuWriteRepo.FindPostsExcludingStatus(slug, category, excludeStatus, page, limit, blockedIDs, !summaryMode)
 			} else if isSearching && category != "" {
 				posts, total, err = gnuWriteRepo.SearchPostsByCategory(slug, sfl, stx, category, page, limit)
 			} else if isSearching && sortBy == "relevance" {
@@ -3149,7 +3151,7 @@ func main() {
 			//    그대로 나간다. 관리자 요청은 캐시에 쓰지 않는다(읽기는 그대로 히트).
 			// ⛔ disciplineOK 를 빼지 마라. 마스킹 실패분이 캐시에 들어가면
 			//    한 번의 DB 흔들림이 30초 × 전원 노출로 증폭된다.
-			if disciplineOK && !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && middleware.GetUserLevel(c) < 10 {
+			if disciplineOK && !summaryMode && !isSearching && !useCursor && !useDateJump && category == "" && celebrationPeriod == "" && excludeStatus == "" && middleware.GetUserLevel(c) < 10 {
 				if cacheService != nil {
 					_ = cacheService.SetPosts(ctx, slug, page, limit, response)
 				}
@@ -3475,14 +3477,17 @@ func main() {
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
 				return
 			}
-			if err := upsertPostStatus(db, slug, id, req.Status, middleware.GetUserID(c), "admin", req.Note); err != nil {
+			// set_by 는 mb_id — Bearer 경로의 GetUserID 는 v2_users.id(숫자)라 GetUsername 을 쓴다.
+			if err := upsertPostStatus(db, slug, id, req.Status, middleware.GetUsername(c), "admin", req.Note); err != nil {
 				log.Printf("[post_status] 지정 실패 board=%s id=%d: %v", slug, id, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to set status"})
 				return
 			}
+			// 목록 캐시 무효화: Redis posts:<slug>:* + 프로세스 내 30초 캐시. (InvalidateBoard 는 게시판 메타만 지운다.)
 			if cacheService != nil {
-				_ = cacheService.InvalidateBoard(c.Request.Context(), slug)
+				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 			}
+			purgePostMemCache(slug)
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"board_id": slug, "id": id, "status": req.Status}})
 		})
 		v1Boards.DELETE("/:slug/posts/:id/process-status", middleware.JWTAuth(jwtManager), middleware.RequireAdmin(), func(c *gin.Context) {
@@ -3498,8 +3503,9 @@ func main() {
 				return
 			}
 			if cacheService != nil {
-				_ = cacheService.InvalidateBoard(c.Request.Context(), slug)
+				_ = cacheService.InvalidatePosts(c.Request.Context(), slug)
 			}
+			purgePostMemCache(slug)
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"board_id": slug, "id": id, "status": nil}})
 		})
 
