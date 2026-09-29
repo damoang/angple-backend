@@ -1029,6 +1029,46 @@ func reportLockedIDs(db *gorm.DB, slug string, ids []int, isComment bool) (map[i
 	return locked, nil
 }
 
+// enrichWithReportLocked 는 게시판 목록 아이템에 신고잠금(wr_7='lock') 여부를
+// `is_report_locked` 불리언으로 붙인다.
+//
+// 목록 응답에는 wr_7 이 실리지 않아 목록 레이아웃이 잠금 아이콘을 그릴 수 없었다
+// (상세는 별도 조회로 표시). 이 필드는 **표시용**이다 — 제목·본문 가림은 바꾸지 않는다.
+//
+// 삭제글(tombstone)은 값을 중립(false)으로 둔다(#604 원칙: 모양 유지·값 중립화).
+// 조회 실패 시에는 키를 붙이지 않는다 — 「잠기지 않음」과 「모름」을 섞지 않기 위함이며,
+// 프런트는 키가 없으면 아이콘을 그리지 않는다. 목록 자체는 막지 않는다.
+// 캐시 저장 전에 호출되어 cache hit 에도 자동 포함된다.
+func enrichWithReportLocked(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return items
+	}
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		if item["deleted_at"] != nil {
+			continue
+		}
+		if id, ok := item["id"].(int); ok && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	locked, err := reportLockedIDs(db, slug, ids, false)
+	if err != nil {
+		log.Printf("[report-lock] 목록 신고잠금 조회 실패 board=%s: %v — is_report_locked 없이 서빙", slug, err)
+		return items
+	}
+	for _, item := range items {
+		isLocked := false
+		if item["deleted_at"] == nil {
+			if id, ok := item["id"].(int); ok {
+				_, isLocked = locked[id]
+			}
+		}
+		item["is_report_locked"] = isLocked
+	}
+	return items
+}
+
 // maskLockedContent 는 신고잠금 항목의 본문 계열 필드를 비운다.
 //
 // ⛔ 제목은 지우지 않는다. 목록 응답에는 본문이 없고 제목만 실리는데(2026-08-21 실측)
@@ -3086,6 +3126,9 @@ func main() {
 
 			// 나눔(giving) 상태 배지 재료 — 캐시 저장 전 적용 (cache hit 자동 포함).
 			items = enrichGivingExtras(db, slug, items)
+
+			// 신고잠금 아이콘 재료(is_report_locked) — 표시용. 캐시 저장 전 적용.
+			items = enrichWithReportLocked(db, slug, items)
 
 			// lucky_point 병합 — 각 글의 럭키 당첨 금액(🍀 배지). 소스 g5_point(@lucky)라
 			// 레거시 과거 당첨까지 포함. 페이지 글 wr_id 를 모아 1쿼리(per-item 반복 금지).
