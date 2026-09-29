@@ -346,6 +346,8 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 				"wr_datetime": p.WrDatetime.Format("2006-01-02 15:04:05"),
 				"deleted_at":  formatNullableTime(p.DeletedAt),
 				"href":        fmt.Sprintf("/%s/%d", p.BoardID, p.WrID),
+				// 신고잠금 글. 제목은 저장소에서 이미 [신고잠금 글]로 가려져 온다.
+				"is_locked": p.IsLocked,
 			})
 		}
 	}()
@@ -369,6 +371,8 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 				"deleted_at":      formatNullableTime(cm.DeletedAt),
 				"post_deleted_at": formatNullableTime(cm.ParentDeletedAt),
 				"href":            fmt.Sprintf("/%s/%d#c_%d", cm.BoardID, cm.WrParent, cm.WrID),
+				// 부모 글이 신고잠금. 내용은 저장소에서 이미 [신고잠금 글의 댓글]로 가려져 온다.
+				"is_locked": cm.ParentLocked,
 			})
 		}
 	}()

@@ -776,8 +776,9 @@ func (r *myPageRepository) searchableBoardSet() (map[string]bool, error) {
 //
 // 확인 조건은 정본 UNION 경로(아래 fallback)와 같게 맞춘다:
 //
-//	본인 글이고 · 댓글이 아니고 · 비밀글이 아니고 · 신고로 잠기지 않은 것.
+//	본인 글이고 · 댓글이 아니고 · 비밀글이 아닌 것.
 //
+// 신고잠금 글은 걸러내지 않는다 — 제목을 [신고잠금 글]로 가려 남긴다.
 // 삭제글은 걸러내지 않는다 — 자리표시자([삭제된 게시물])로 표시된다 (#13174).
 // 비밀글은 삭제 여부와 무관하게 제외한다(존재 자체 비노출).
 //
@@ -804,30 +805,35 @@ func (r *myPageRepository) verifyActivityPosts(
 		byBoard[c.BoardID] = append(byBoard[c.BoardID], c.WrID)
 	}
 
-	confirmed := make(map[string]map[int]*time.Time, len(byBoard))
+	// 삭제 여부도 정본에서 가져온다. 피드의 is_deleted 는 뒤처질 수 있고,
+	// 실제로 뒤처져 있었다: free 만 641건이 "피드는 살아있음 / 정본은 삭제됨" 이다.
+	// 제보자(#13109)가 바로 이 경우라, 지운 글이 프로필에 살아있는 것처럼 남아 있었다.
+	type verifiedRow struct {
+		WrID        int        `gorm:"column:wr_id"`
+		WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
+		IsLocked    bool       `gorm:"column:is_locked"`
+	}
+	confirmed := make(map[string]map[int]verifiedRow, len(byBoard))
 	for boardID, ids := range byBoard {
 		if !activityBoardSlugRe.MatchString(boardID) {
 			continue
 		}
-		// 삭제 여부도 정본에서 가져온다. 피드의 is_deleted 는 뒤처질 수 있고,
-		// 실제로 뒤처져 있었다: free 만 641건이 "피드는 살아있음 / 정본은 삭제됨" 이다.
-		// 제보자(#13109)가 바로 이 경우라, 지운 글이 프로필에 살아있는 것처럼 남아 있었다.
-		type verifiedRow struct {
-			WrID        int        `gorm:"column:wr_id"`
-			WrDeletedAt *time.Time `gorm:"column:wr_deleted_at"`
-		}
 		var okRows []verifiedRow
 		// #13512: 후보에 이용제한 근거 글(비밀 처리)이 들어와도, 아래 비밀글 제외에
 		//    다시 걸려 사라지면 마스킹을 태울 행이 없다. 근거로 등록된 wr_id 만 예외적으로
-		//    비밀·잠금 제외를 우회시킨다(정본에 실재하면 남긴다). 제목 마스킹은 핸들러가
+		//    비밀 제외를 우회시킨다(정본에 실재하면 남긴다). 제목 마스킹은 핸들러가
 		//    [이용제한 근거 글]로 덮는다. 일반 비밀글은 근거 집합에 없어 그대로 제외(무회귀).
 		//    근거 집합은 게시판 단위로 캐시돼 있어(loadDisciplinedIDs) 추가 DB 부하가 없다.
+		//
+		// 신고잠금 글(wr_7 = 'lock')은 더 이상 빼지 않는다. 게시판 목록에는 보이는 글이
+		// 활동 목록에서만 사라져 "글이 없어졌다"는 오해를 낳았다. 대신 잠금 여부를 함께 읽어
+		// 제목을 [신고잠금 글]로 가린다(링크 유지). `<=>` 는 NULL 에도 0/1 을 돌려준다.
 		var evidenceIDs []int
 		// ⛔ 여기서 조회가 실패하면 **우회를 붙이지 않는다.** 그러면 아래 엄격 필터가
-		//    그대로 적용돼 비밀·잠금 근거글이 목록에서 빠진다 — 원제목이 나가는 것보다 안전하다.
+		//    그대로 적용돼 비밀 근거글이 목록에서 빠진다 — 원제목이 나가는 것보다 안전하다.
 		//    (마스킹만이 보호막인 일반 근거글은 이 필터를 통과하므로 핸들러 쪽 방어가 따로 필요하다.)
 		if disciplined, derr := r.loadDisciplinedIDs(boardID); derr != nil {
-			log.Printf("[activity] 근거글 조회 실패 board=%s: %v — 비밀·잠금 근거글 우회를 붙이지 않는다", boardID, derr)
+			log.Printf("[activity] 근거글 조회 실패 board=%s: %v — 비밀 근거글 우회를 붙이지 않는다", boardID, derr)
 		} else {
 			for _, id := range ids {
 				if disciplined[id] {
@@ -837,24 +843,24 @@ func (r *myPageRepository) verifyActivityPosts(
 		}
 		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 		q := fmt.Sprintf(
-			"SELECT wr_id, wr_deleted_at FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
-				" AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL)"+
-				" AND (wr_7 IS NULL OR wr_7 != 'lock')", boardID)
+			"SELECT wr_id, wr_deleted_at, (wr_7 <=> 'lock') AS is_locked FROM `g5_write_%s`"+
+				" WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
+				" AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL)", boardID)
 		qArgs := []interface{}{ids, mbID}
 		if len(evidenceIDs) > 0 {
 			// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 			q = fmt.Sprintf(
-				"SELECT wr_id, wr_deleted_at FROM `g5_write_%s` WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
-					" AND (((wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL)"+
-					" AND (wr_7 IS NULL OR wr_7 != 'lock')) OR wr_id IN ?)", boardID)
+				"SELECT wr_id, wr_deleted_at, (wr_7 <=> 'lock') AS is_locked FROM `g5_write_%s`"+
+					" WHERE wr_id IN ? AND mb_id = ? AND wr_is_comment = 0"+
+					" AND ((wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL) OR wr_id IN ?)", boardID)
 			qArgs = []interface{}{ids, mbID, evidenceIDs}
 		}
 		if err := r.db.Raw(q, qArgs...).Scan(&okRows).Error; err != nil {
 			continue
 		}
-		m := make(map[int]*time.Time, len(okRows))
+		m := make(map[int]verifiedRow, len(okRows))
 		for _, row := range okRows {
-			m[row.WrID] = row.WrDeletedAt
+			m[row.WrID] = row
 		}
 		confirmed[boardID] = m
 	}
@@ -868,17 +874,20 @@ func (r *myPageRepository) verifyActivityPosts(
 		if !ok {
 			continue
 		}
-		deletedAt, found := m[c.WrID]
+		row, found := m[c.WrID]
 		if !found {
 			continue
 		}
-		// 피드 캐시가 아니라 정본의 삭제 시각을 싣는다.
-		c.DeletedAt = deletedAt
+		// 피드 캐시가 아니라 정본의 삭제 시각·잠금 여부를 싣는다.
+		c.DeletedAt = row.WrDeletedAt
+		c.IsLocked = row.IsLocked
 		// #13174: 삭제글 제목은 서버에서 비운다. 피드에 원제가 캐시돼 있어
 		// 여기서 지우지 않으면 자리표시자 옆으로 원제가 새어 나간다.
-		if deletedAt != nil {
+		if row.WrDeletedAt != nil {
 			c.WrSubject = ""
 		}
+		// 신고잠금 글은 원제 대신 [신고잠금 글]. 원제가 응답에 실리지 않도록 서버에서 덮는다.
+		c = gnuboard.MaskLockedActivityPost(c)
 		out = append(out, c)
 	}
 	return out
@@ -889,7 +898,10 @@ func (r *myPageRepository) verifyActivityPosts(
 // 피드의 is_public 은 자체삭제·부모삭제·부모비밀글·비검색보드가 한 비트로 뭉개져
 // 있어(멤버 activity sync 의 cascade), 후보 완화 후의 판정은 전적으로 정본이 한다:
 //
-//	본인 댓글이고 · 부모가 비밀글이 아니고 · 부모가 신고로 잠기지 않은 것.
+//	본인 댓글이고 · 부모가 비밀글이 아닌 것.
+//
+// 부모가 신고잠금인 댓글은 걸러내지 않는다 — 내용을 [신고잠금 글의 댓글]로 가려 남긴다.
+// 단, 부모가 이용제한 근거 글이면 가리지 않는다(근거글 아래 제3자 댓글의 기존 동작 유지).
 //
 // 삭제된 댓글([삭제된 댓글])과 부모가 삭제된 생존 댓글([삭제된 게시물] 배지)은
 // 남긴다 — 13103 확정 정책("글이 삭제돼도 댓글 스레드는 유지")의 활동 피드판.
@@ -925,8 +937,11 @@ func (r *myPageRepository) verifyActivityComments(
 		WrID            int        `gorm:"column:wr_id"`
 		WrDeletedAt     *time.Time `gorm:"column:wr_deleted_at"`
 		ParentDeletedAt *time.Time `gorm:"column:parent_deleted_at"`
+		ParentLocked    bool       `gorm:"column:parent_locked"`
 	}
 	confirmed := make(map[string]map[int]verifiedComment, len(byBoard))
+	// 부모가 근거글인 잠금 댓글은 가리지 않는다(기존 동작 유지) — 보드별로 기억해 둔다.
+	evidenceParentSet := make(map[string]map[int]bool, len(byBoard))
 	for boardID, ids := range byBoard {
 		if !activityBoardSlugRe.MatchString(boardID) {
 			continue
@@ -941,7 +956,7 @@ func (r *myPageRepository) verifyActivityComments(
 		//    글 경로는 #680 에서 이미 우회를 붙였는데 댓글 경로에는 없었다.
 		//
 		// ⭐ 우회 판정은 **부모 글**로 한다(댓글 자신이 아니라). 근거글로 등록된 부모만
-		//    비밀·잠금 제외를 우회시킨다 — 근거글이 아닌 일반 잠긴 글은 그대로 제외된다(무회귀).
+		//    비밀 제외를 우회시킨다. (신고잠금 부모는 이제 제외하지 않고 내용을 가린다.)
 		//
 		// ⛔ 제재당한 댓글 자체(2,322건)는 이 우회와 무관하다. 핸들러가 [이용제한 댓글] 로
 		//    마스킹하므로 내용은 안 나간다. 여기서 되살리는 것은 **무고한 제3자 댓글**뿐이다.
@@ -965,25 +980,34 @@ func (r *myPageRepository) verifyActivityComments(
 				}
 			}
 		}
+		if len(evidenceParents) > 0 {
+			set := make(map[int]bool, len(evidenceParents))
+			for _, pid := range evidenceParents {
+				set[pid] = true
+			}
+			evidenceParentSet[boardID] = set
+		}
 
+		// 부모가 신고잠금이어도 빼지 않는다 — 잠금 여부를 함께 읽어 아래에서 내용을 가린다.
+		// `<=>` 는 NULL 에도 0/1 을 돌려준다.
 		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 		q := fmt.Sprintf(
-			"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at"+
+			"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at,"+
+				" (p.wr_7 <=> 'lock') AS parent_locked"+
 				" FROM `g5_write_%s` c INNER JOIN `g5_write_%s` p"+
 				" ON p.wr_id = c.wr_parent AND p.wr_is_comment = 0"+
 				" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1"+
-				" AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL)"+
-				" AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')", boardID, boardID)
+				" AND (p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL)", boardID, boardID)
 		qArgs := []interface{}{ids, mbID}
 		if len(evidenceParents) > 0 {
 			// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 			q = fmt.Sprintf(
-				"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at"+
+				"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at,"+
+					" (p.wr_7 <=> 'lock') AS parent_locked"+
 					" FROM `g5_write_%s` c INNER JOIN `g5_write_%s` p"+
 					" ON p.wr_id = c.wr_parent AND p.wr_is_comment = 0"+
 					" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1"+
-					" AND (((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL)"+
-					" AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')) OR p.wr_id IN ?)", boardID, boardID)
+					" AND ((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) OR p.wr_id IN ?)", boardID, boardID)
 			qArgs = []interface{}{ids, mbID, evidenceParents}
 		}
 		if err := r.db.Raw(q, qArgs...).Scan(&okRows).Error; err != nil {
@@ -1012,10 +1036,13 @@ func (r *myPageRepository) verifyActivityComments(
 		// 피드 캐시가 아니라 정본의 삭제 시각을 싣는다.
 		c.DeletedAt = row.WrDeletedAt
 		c.ParentDeletedAt = row.ParentDeletedAt
+		c.ParentLocked = row.ParentLocked
 		// #13174: 삭제 댓글 원문은 서버에서 비운다(피드에 미리보기가 캐시돼 있다).
 		if row.WrDeletedAt != nil {
 			c.WrContent = ""
 		}
+		// 부모가 신고잠금이면 원문 대신 [신고잠금 글의 댓글]. 서버에서 덮는다.
+		c = gnuboard.MaskLockedParentActivityComment(c, evidenceParentSet[c.BoardID][c.WrParent])
 		out = append(out, c)
 	}
 	return out
@@ -1124,7 +1151,7 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 	for _, b := range boards {
 		table := fmt.Sprintf("g5_write_%s", b.BoTable)
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT wr_id, wr_subject, wr_datetime, '%s' as board_id, wr_deleted_at AS deleted_at FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL) AND (wr_7 IS NULL OR wr_7 != 'lock') ORDER BY wr_id DESC LIMIT %d)",
+			"(SELECT wr_id, wr_subject, wr_datetime, '%s' as board_id, wr_deleted_at AS deleted_at, (wr_7 <=> 'lock') AS is_locked FROM `%s` WHERE mb_id = ? AND wr_is_comment = 0 AND (wr_option NOT LIKE '%%secret%%' OR wr_option IS NULL) ORDER BY wr_id DESC LIMIT %d)",
 			b.BoTable, table, limit))
 		args = append(args, mbID)
 	}
@@ -1138,16 +1165,18 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		return nil, err
 	}
 	// #13174: 삭제글 원제는 어느 경로에서도 나가면 안 된다 (verify 경로와 동일).
+	// 신고잠금 글 원제도 마찬가지 — [신고잠금 글]로 덮는다.
 	for i := range posts {
 		if posts[i].DeletedAt != nil {
 			posts[i].WrSubject = ""
 		}
+		posts[i] = gnuboard.MaskLockedActivityPost(posts[i])
 	}
 	return posts, nil
 }
 
 // FindPublicCommentsByMember returns recent public comments by a member.
-// Uses UNION ALL + INNER JOIN to filter out comments on secret/locked/deleted parent posts.
+// Uses UNION ALL + INNER JOIN to filter out comments on secret parent posts (locked parents are kept and masked).
 func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([]gnuboard.ActivityComment, error) {
 	// #13174: 종전엔 is_public=1 로 좁혀 삭제 댓글은 물론, **삭제된 글에 달린 살아있는
 	// 댓글**까지 통째로 빠졌다(부모글 sync 가 산하 댓글 is_public 을 cascade 로 내림).
@@ -1225,12 +1254,12 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		// ⛔ verify 경로만 고치면 **확인된 게 0건일 때** 여기로 떨어지면서 다시 사라진다.
 		//    실제로 근거글만 있는 회원은 verify 가 0건이 되기 쉬워, 폴백이 오히려 주 경로다.
 		//
-		// ⭐ 우회 조건은 verify 와 같다 — **부모 글이 근거글로 등록된 경우만** 비밀·잠금 제외를 푼다.
+		// ⭐ 우회 조건은 verify 와 같다 — **부모 글이 근거글로 등록된 경우만** 비밀 제외를 푼다.
 		//    여기서는 id 목록을 미리 못 구하므로 EXISTS 서브쿼리로 같은 판정을 한다
 		//    (글 경로 FindPublicPostsByMember 의 3번째 분기와 동형).
 		//    idx_singo_discipline(sg_table, discipline_log_id, sg_id) 가 있어 비싸지 않다.
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND (((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) AND (p.wr_7 IS NULL OR p.wr_7 != 'lock')) OR EXISTS (SELECT 1 FROM g5_na_singo s WHERE s.sg_table = '%s' AND s.sg_id = p.wr_id AND s.discipline_log_id IS NOT NULL AND s.admin_approved = 1)) WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
+			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at, (p.wr_7 <=> 'lock') AS parent_locked FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND ((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) OR EXISTS (SELECT 1 FROM g5_na_singo s WHERE s.sg_table = '%s' AND s.sg_id = p.wr_id AND s.discipline_log_id IS NOT NULL AND s.admin_approved = 1)) WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
 			b.BoTable, table, table, b.BoTable, limit))
 		args = append(args, mbID)
 	}
@@ -1244,10 +1273,19 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		return nil, err
 	}
 	// #13174: 삭제 댓글 원문은 어느 경로에서도 나가면 안 된다 (verify 경로와 동일).
+	// 부모가 신고잠금인 댓글도 verify 경로와 같이 가린다. 근거글 판정은 게시판별 캐시로 한다.
+	// ⛔ 근거글 조회가 실패하면 가리는 쪽으로 간다(원문이 새는 것보다 안전하다).
 	for i := range comments {
 		if comments[i].DeletedAt != nil {
 			comments[i].WrContent = ""
 		}
+		parentIsEvidence := false
+		if comments[i].ParentLocked && comments[i].WrParent > 0 {
+			if disciplined, derr := r.loadDisciplinedIDs(comments[i].BoardID); derr == nil {
+				parentIsEvidence = disciplined[comments[i].WrParent]
+			}
+		}
+		comments[i] = gnuboard.MaskLockedParentActivityComment(comments[i], parentIsEvidence)
 	}
 	return comments, nil
 }

@@ -86,6 +86,8 @@ type ActivityPost struct {
 	WrDatetime time.Time  `gorm:"column:wr_datetime" json:"wr_datetime"`
 	BoardID    string     `gorm:"column:board_id" json:"board_id"`
 	DeletedAt  *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
+	// IsLocked 는 신고로 잠긴 글(wr_7 = 'lock')인지다. 정본에서 읽는다(피드에는 없다).
+	IsLocked bool `gorm:"column:is_locked" json:"is_locked"`
 }
 
 // ActivityComment represents a public comment for member activity API
@@ -98,6 +100,40 @@ type ActivityComment struct {
 	BoardID         string     `gorm:"column:board_id" json:"board_id"`
 	DeletedAt       *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
 	ParentDeletedAt *time.Time `gorm:"column:parent_deleted_at" json:"parent_deleted_at,omitempty"`
+	// ParentLocked 는 부모 글이 신고로 잠겼는지(wr_7 = 'lock')다. 정본에서 읽는다.
+	ParentLocked bool `gorm:"column:parent_locked" json:"parent_locked"`
+}
+
+// LockedPostSubjectMask 는 신고잠금 글의 제목 대신 활동 목록에 싣는 문구다.
+const LockedPostSubjectMask = "[신고잠금 글]"
+
+// LockedParentCommentMask 는 신고잠금 글에 달린 댓글의 내용 대신 활동 목록에 싣는 문구다.
+const LockedParentCommentMask = "[신고잠금 글의 댓글]"
+
+// MaskLockedActivityPost 는 신고잠금 글의 제목을 서버에서 가린다(링크는 유지).
+//
+// 삭제된 글은 제목이 이미 비워져 자리표시자로 나가므로 건드리지 않는다.
+// 이용제한 근거 글이기도 하면 핸들러가 뒤에서 근거 글 문구로 다시 덮는다.
+func MaskLockedActivityPost(p ActivityPost) ActivityPost {
+	if p.IsLocked && p.DeletedAt == nil {
+		p.WrSubject = LockedPostSubjectMask
+	}
+	return p
+}
+
+// MaskLockedParentActivityComment 는 부모 글이 신고잠금인 댓글의 내용을 서버에서 가린다.
+//
+// parentIsEvidence 가 참이면(부모가 이용제한 근거 글) 가리지 않는다 — 근거 글 아래
+// 제3자 댓글은 원래부터 내용이 보이던 기존 동작을 유지한다.
+// 삭제된 댓글은 내용이 이미 비워져 자리표시자로 나가므로 건드리지 않는다.
+func MaskLockedParentActivityComment(c ActivityComment, parentIsEvidence bool) ActivityComment {
+	if c.ParentLocked && !parentIsEvidence && c.DeletedAt == nil {
+		c.WrContent = LockedParentCommentMask
+		// 피드에 저장된 종류(이미지·이모티콘 등)가 남으면 화면이 문구 대신 종류 표기를 띄울 수 있다.
+		// 비워 두면 핸들러가 가린 문구로 다시 판정해 텍스트가 된다.
+		c.ContentKind = ""
+	}
+	return c
 }
 
 func formatOptionalTime(value *time.Time) interface{} {
