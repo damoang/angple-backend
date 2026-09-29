@@ -3926,8 +3926,13 @@ func main() {
 				return
 			}
 
-			// 글 존재 확인 (없는 wr_id 에 대한 유령 투표 방지)
-			if _, err := gnuWriteRepo.FindPostByIDIncludeDeleted(slug, postID); err != nil {
+			// 대상 확인 (없는 wr_id 에 대한 유령 투표 방지).
+			// 게시글 또는 리뷰 댓글(본인 작성·미삭제·부모 글 존재)을 허용한다.
+			if err := service.ValidateRatingTarget(gnuWriteRepo, slug, postID, mbID); err != nil {
+				if errors.Is(err, service.ErrRatingCommentNotOwner) {
+					c.JSON(http.StatusForbidden, gin.H{"success": false, "error": err.Error()})
+					return
+				}
 				c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Post not found"})
 				return
 			}
