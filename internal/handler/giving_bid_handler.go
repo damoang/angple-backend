@@ -486,7 +486,103 @@ func (h *GivingHandler) Detail(c *gin.Context) { //nolint:gocyclo // 응답 조�
 		resp["reveal_bids"] = reveal
 	}
 
+	// 주최자 지정형(큐레이션·직접 지정) 미개표 글: 당첨자 지정 입력의 후보 목록.
+	// 주최자·관리자에게만 내려준다 — 댓글 작성자까지 묶인 목록이라 다른 회원에게는
+	// 노출하지 않는다. 표시용 닉네임만 붙이고 제출 값은 여전히 mb_id 다.
+	if isHost, _ := resp["is_host"].(bool); isHost && resp["draw"] == nil &&
+		configured && givingdomain.IsHostDesignated(meta.Method) {
+		resp["candidates"] = h.givingWinnerCandidates(wrID, post.MbID, participantList)
+	}
+
 	givingOK(c, resp)
+}
+
+// givingCandidate is one winner candidate shown to the host in host-designated methods.
+type givingCandidate struct {
+	MbID string `json:"mb_id"`
+	Nick string `json:"nick"`
+}
+
+// givingCommenterRow is one distinct comment author on a giving post.
+type givingCommenterRow struct {
+	MbID   string `gorm:"column:mb_id"`
+	WrName string `gorm:"column:wr_name"`
+}
+
+// givingCandidateLimit caps the candidate list so a very busy post stays bounded.
+const givingCandidateLimit = 1000
+
+// givingWinnerCandidates returns participants and comment authors with display
+// nicknames, using one grouped comment query and one batched member lookup.
+func (h *GivingHandler) givingWinnerCandidates(wrID int, hostMbID string, participants []string) []givingCandidate {
+	var commenters []givingCommenterRow
+	if err := h.db.Table("g5_write_giving").
+		Select("mb_id, MAX(wr_name) AS wr_name, MIN(wr_id) AS first_id").
+		Where("wr_parent = ? AND wr_is_comment = 1 AND mb_id <> ''", wrID).
+		Where("wr_deleted_at IS NULL").
+		Group("mb_id").
+		Order("first_id").
+		Limit(givingCandidateLimit).
+		Find(&commenters).Error; err != nil {
+		commenters = nil
+	}
+
+	ids := make([]string, 0, len(participants)+len(commenters))
+	ids = append(ids, participants...)
+	for _, cm := range commenters {
+		ids = append(ids, cm.MbID)
+	}
+	nicks := map[string]string{}
+	if len(ids) > 0 {
+		var rows []struct {
+			MbID string `gorm:"column:mb_id"`
+			Nick string `gorm:"column:mb_nick"`
+		}
+		if h.db.Table("g5_member").Select("mb_id, mb_nick").
+			Where("mb_id IN ?", ids).Find(&rows).Error == nil {
+			for _, r := range rows {
+				nicks[r.MbID] = r.Nick
+			}
+		}
+	}
+	return mergeGivingCandidates(participants, commenters, hostMbID, nicks)
+}
+
+// mergeGivingCandidates builds the ordered, de-duplicated candidate list:
+// participants first (entry order), then comment authors (first comment order).
+// The host's own comments are skipped. Nickname priority: current mb_nick,
+// then the comment author name, else empty (the UI falls back to the mb_id).
+func mergeGivingCandidates(participants []string, commenters []givingCommenterRow, hostMbID string, nicks map[string]string) []givingCandidate {
+	commentName := make(map[string]string, len(commenters))
+	for _, cm := range commenters {
+		commentName[cm.MbID] = cm.WrName
+	}
+	out := make([]givingCandidate, 0, len(participants)+len(commenters))
+	seen := make(map[string]struct{}, len(participants)+len(commenters))
+	add := func(mb string) {
+		if mb == "" || len(out) >= givingCandidateLimit {
+			return
+		}
+		if _, ok := seen[mb]; ok {
+			return
+		}
+		seen[mb] = struct{}{}
+		nick := strings.TrimSpace(nicks[mb])
+		if nick == "" {
+			nick = strings.TrimSpace(commentName[mb])
+		}
+		out = append(out, givingCandidate{MbID: mb, Nick: nick})
+	}
+	for _, p := range participants {
+		add(p)
+	}
+	for _, cm := range commenters {
+		if cm.MbID == hostMbID {
+			continue
+		}
+		add(cm.MbID)
+	}
+	return out
 }
 
 func hasParticipant(set map[string]struct{}, mb string) bool {
