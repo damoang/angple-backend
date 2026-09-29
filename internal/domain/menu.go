@@ -55,8 +55,10 @@ type MenuResponse struct {
 }
 
 // ToResponse converts Menu to MenuResponse
+//
+//nolint:dupl // AdminMenuResponse 변환과 필드 목록이 닮았을 뿐 별개 DTO 다
 func (m *Menu) ToResponse() MenuResponse {
-	resp := MenuResponse{
+	return MenuResponse{
 		ID:            m.ID,
 		ParentID:      m.ParentID,
 		Title:         m.Title,
@@ -72,17 +74,8 @@ func (m *Menu) ToResponse() MenuResponse {
 		ShowInHeader:  m.ShowInHeader,
 		ShowInSidebar: m.ShowInSidebar,
 		ShowInTagnav:  m.ShowInTagnav,
-		Children:      make([]MenuResponse, 0),
+		Children:      convertMenuChildren(m.Children, (*Menu).ToResponse),
 	}
-
-	// Convert children recursively
-	if len(m.Children) > 0 {
-		for _, child := range m.Children {
-			resp.Children = append(resp.Children, child.ToResponse())
-		}
-	}
-
-	return resp
 }
 
 // MenuListResponse is the response for list of menus
@@ -158,8 +151,10 @@ type AdminMenuResponse struct {
 }
 
 // ToAdminResponse converts Menu to AdminMenuResponse
+//
+//nolint:dupl // MenuResponse 변환과 필드 목록이 닮았을 뿐 별개 DTO 다
 func (m *Menu) ToAdminResponse() AdminMenuResponse {
-	resp := AdminMenuResponse{
+	return AdminMenuResponse{
 		ID:            m.ID,
 		ParentID:      m.ParentID,
 		Title:         m.Title,
@@ -175,15 +170,16 @@ func (m *Menu) ToAdminResponse() AdminMenuResponse {
 		ShowInHeader:  m.ShowInHeader,
 		ShowInSidebar: m.ShowInSidebar,
 		IsActive:      m.IsActive,
-		Children:      make([]AdminMenuResponse, 0),
+		Children:      convertMenuChildren(m.Children, (*Menu).ToAdminResponse),
 	}
+}
 
-	// Convert children recursively
-	if len(m.Children) > 0 {
-		for _, child := range m.Children {
-			resp.Children = append(resp.Children, child.ToAdminResponse())
-		}
+// convertMenuChildren 는 하위 메뉴를 conv 로 재귀 변환한다.
+// 하위가 없어도 nil 이 아닌 빈 슬라이스를 돌려준다(기존 응답 모양 유지).
+func convertMenuChildren[T any](children []*Menu, conv func(*Menu) T) []T {
+	out := make([]T, 0, len(children))
+	for _, child := range children {
+		out = append(out, conv(child))
 	}
-
-	return resp
+	return out
 }

@@ -246,7 +246,7 @@ func (r *notiRepository) GetGroupedNotifications(mbID string, page, limit int, f
 	// ph_from_case='reaction' 행이 DB에 존재하지만 사용자에게 노출하지 않는다.
 	fromCaseFilter := "AND ph_from_case NOT IN ('reaction','giving_win_memo','giving_host_memo')"
 	switch filterType {
-	case "comment":
+	case notiFilterComment:
 		fromCaseFilter = "AND ph_from_case IN ('board', 'comment', 'reply')"
 	case "like":
 		fromCaseFilter = "AND ph_from_case = 'good'"
@@ -499,6 +499,9 @@ func (r *notiRepository) DeleteGroup(mbID, boTable string, wrID int, fromCase st
 // ⛔ 읽음 처리·삭제는 이 창과 무관하다 — 같은 그룹 키로 전체 행에 동작한다.
 const notiGroupWindow = 3000
 
+// notiFilterComment 는 알림 목록 필터 타입 중 「댓글」(글·댓글·답글 알림)이다.
+const notiFilterComment = "comment"
+
 const targetKeyExpr = `CASE
 	WHEN ph_to_case = 'comment_reply' THEN CONCAT('r:', SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(rel_url,'#',1),'?',1),'/',-1))
 	WHEN ph_from_case = 'good' AND LOCATE('#c_', rel_url) > 0 THEN CONCAT('cg:', wr_id)
@@ -535,7 +538,7 @@ type MergedNotification struct {
 func (r *notiRepository) GetMergedNotifications(mbID string, page, limit int, filterType string) ([]MergedNotification, int64, int64, error) {
 	fromCaseFilter := "AND ph_from_case NOT IN ('reaction','giving_win_memo','giving_host_memo')"
 	switch filterType {
-	case "comment":
+	case notiFilterComment:
 		fromCaseFilter = "AND ph_from_case IN ('board', 'comment', 'reply')"
 	case "like":
 		fromCaseFilter = "AND ph_from_case = 'good'"
