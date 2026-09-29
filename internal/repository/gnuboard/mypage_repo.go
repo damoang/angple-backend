@@ -901,7 +901,8 @@ func (r *myPageRepository) verifyActivityPosts(
 //	본인 댓글이고 · 부모가 비밀글이 아닌 것.
 //
 // 부모가 신고잠금인 댓글은 걸러내지 않는다 — 내용을 [신고잠금 글의 댓글]로 가려 남긴다.
-// 단, 부모가 이용제한 근거 글이면 가리지 않는다(근거글 아래 제3자 댓글의 기존 동작 유지).
+// 부모가 이용제한 근거 글이어도 예외 없이 가린다. 댓글 자신이 근거 댓글이면
+// 핸들러의 [이용제한 댓글] 마스킹이 뒤에서 덮어 그쪽이 우선한다.
 //
 // 삭제된 댓글([삭제된 댓글])과 부모가 삭제된 생존 댓글([삭제된 게시물] 배지)은
 // 남긴다 — 13103 확정 정책("글이 삭제돼도 댓글 스레드는 유지")의 활동 피드판.
@@ -940,8 +941,6 @@ func (r *myPageRepository) verifyActivityComments(
 		ParentLocked    bool       `gorm:"column:parent_locked"`
 	}
 	confirmed := make(map[string]map[int]verifiedComment, len(byBoard))
-	// 부모가 근거글인 잠금 댓글은 가리지 않는다(기존 동작 유지) — 보드별로 기억해 둔다.
-	evidenceParentSet := make(map[string]map[int]bool, len(byBoard))
 	for boardID, ids := range byBoard {
 		if !activityBoardSlugRe.MatchString(boardID) {
 			continue
@@ -979,13 +978,6 @@ func (r *myPageRepository) verifyActivityComments(
 					}
 				}
 			}
-		}
-		if len(evidenceParents) > 0 {
-			set := make(map[int]bool, len(evidenceParents))
-			for _, pid := range evidenceParents {
-				set[pid] = true
-			}
-			evidenceParentSet[boardID] = set
 		}
 
 		// 부모가 신고잠금이어도 빼지 않는다 — 잠금 여부를 함께 읽어 아래에서 내용을 가린다.
@@ -1041,8 +1033,8 @@ func (r *myPageRepository) verifyActivityComments(
 		if row.WrDeletedAt != nil {
 			c.WrContent = ""
 		}
-		// 부모가 신고잠금이면 원문 대신 [신고잠금 글의 댓글]. 서버에서 덮는다.
-		c = gnuboard.MaskLockedParentActivityComment(c, evidenceParentSet[c.BoardID][c.WrParent])
+		// 부모가 신고잠금이면 원문 대신 [신고잠금 글의 댓글]. 부모가 근거글이어도 예외 없다.
+		c = gnuboard.MaskLockedParentActivityComment(c)
 		out = append(out, c)
 	}
 	return out
@@ -1273,19 +1265,12 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		return nil, err
 	}
 	// #13174: 삭제 댓글 원문은 어느 경로에서도 나가면 안 된다 (verify 경로와 동일).
-	// 부모가 신고잠금인 댓글도 verify 경로와 같이 가린다. 근거글 판정은 게시판별 캐시로 한다.
-	// ⛔ 근거글 조회가 실패하면 가리는 쪽으로 간다(원문이 새는 것보다 안전하다).
+	// 부모가 신고잠금인 댓글도 verify 경로와 같이 가린다(부모가 근거글이어도 예외 없음).
 	for i := range comments {
 		if comments[i].DeletedAt != nil {
 			comments[i].WrContent = ""
 		}
-		parentIsEvidence := false
-		if comments[i].ParentLocked && comments[i].WrParent > 0 {
-			if disciplined, derr := r.loadDisciplinedIDs(comments[i].BoardID); derr == nil {
-				parentIsEvidence = disciplined[comments[i].WrParent]
-			}
-		}
-		comments[i] = gnuboard.MaskLockedParentActivityComment(comments[i], parentIsEvidence)
+		comments[i] = gnuboard.MaskLockedParentActivityComment(comments[i])
 	}
 	return comments, nil
 }

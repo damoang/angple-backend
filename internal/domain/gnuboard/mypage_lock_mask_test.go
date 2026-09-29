@@ -35,18 +35,18 @@ func TestMaskLockedParentActivityComment(t *testing.T) {
 	cases := []struct {
 		name        string
 		in          ActivityComment
-		evidence    bool
 		wantContent string
 		wantKind    string
 	}{
-		{"부모 잠금 아님 — 그대로", ActivityComment{WrContent: "원문", ContentKind: "text"}, false, "원문", "text"},
-		{"부모 잠금 — 내용을 가리고 종류를 비운다", ActivityComment{WrContent: "<img src=x>", ContentKind: "image", ParentLocked: true}, false, LockedParentCommentMask, ""},
-		{"부모 잠금이지만 근거글 — 기존 동작 유지", ActivityComment{WrContent: "원문", ContentKind: "text", ParentLocked: true}, true, "원문", "text"},
-		{"부모 잠금이지만 댓글 삭제됨 — 자리표시자 유지", ActivityComment{WrContent: "", ContentKind: "empty", ParentLocked: true, DeletedAt: &deleted}, false, "", "empty"},
+		{"부모 잠금 아님 — 그대로", ActivityComment{WrContent: "원문", ContentKind: "text"}, "원문", "text"},
+		{"부모 잠금 — 내용을 가리고 종류를 비운다", ActivityComment{WrContent: "<img src=x>", ContentKind: "image", ParentLocked: true}, LockedParentCommentMask, ""},
+		// 부모가 근거글이어도 예외가 없다 — 마스킹 판정에 근거글 여부가 들어가지 않는다.
+		{"부모 근거글+잠금 — 예외 없이 가린다", ActivityComment{WrContent: "원문", ContentKind: "text", WrParent: 10, ParentLocked: true}, LockedParentCommentMask, ""},
+		{"부모 잠금이지만 댓글 삭제됨 — 자리표시자 유지", ActivityComment{WrContent: "", ContentKind: "empty", ParentLocked: true, DeletedAt: &deleted}, "", "empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := MaskLockedParentActivityComment(tc.in, tc.evidence)
+			got := MaskLockedParentActivityComment(tc.in)
 			if got.WrContent != tc.wantContent {
 				t.Fatalf("WrContent = %q, want %q", got.WrContent, tc.wantContent)
 			}

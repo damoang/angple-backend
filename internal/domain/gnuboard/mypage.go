@@ -123,11 +123,11 @@ func MaskLockedActivityPost(p ActivityPost) ActivityPost {
 
 // MaskLockedParentActivityComment 는 부모 글이 신고잠금인 댓글의 내용을 서버에서 가린다.
 //
-// parentIsEvidence 가 참이면(부모가 이용제한 근거 글) 가리지 않는다 — 근거 글 아래
-// 제3자 댓글은 원래부터 내용이 보이던 기존 동작을 유지한다.
+// 부모가 이용제한 근거 글이어도 예외 없이 가린다(잠긴 글에 단 댓글은 가린다).
+// 댓글 자신이 근거 댓글이면 핸들러가 뒤에서 [이용제한 댓글]로 다시 덮어 그쪽이 우선한다.
 // 삭제된 댓글은 내용이 이미 비워져 자리표시자로 나가므로 건드리지 않는다.
-func MaskLockedParentActivityComment(c ActivityComment, parentIsEvidence bool) ActivityComment {
-	if c.ParentLocked && !parentIsEvidence && c.DeletedAt == nil {
+func MaskLockedParentActivityComment(c ActivityComment) ActivityComment {
+	if c.ParentLocked && c.DeletedAt == nil {
 		c.WrContent = LockedParentCommentMask
 		// 피드에 저장된 종류(이미지·이모티콘 등)가 남으면 화면이 문구 대신 종류 표기를 띄울 수 있다.
 		// 비워 두면 핸들러가 가린 문구로 다시 판정해 텍스트가 된다.
