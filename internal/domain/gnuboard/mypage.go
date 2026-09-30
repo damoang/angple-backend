@@ -102,6 +102,8 @@ type ActivityComment struct {
 	ParentDeletedAt *time.Time `gorm:"column:parent_deleted_at" json:"parent_deleted_at,omitempty"`
 	// ParentLocked 는 부모 글이 신고로 잠겼는지(wr_7 = 'lock')다. 정본에서 읽는다.
 	ParentLocked bool `gorm:"column:parent_locked" json:"parent_locked"`
+	// SelfLocked 는 댓글 자신이 신고로 잠겼는지(댓글 행의 wr_7 = 'lock')다. 정본에서 읽는다.
+	SelfLocked bool `gorm:"column:self_locked" json:"self_locked"`
 }
 
 // LockedPostSubjectMask 는 신고잠금 글의 제목 대신 활동 목록에 싣는 문구다.
@@ -109,6 +111,9 @@ const LockedPostSubjectMask = "[신고잠금 글]"
 
 // LockedParentCommentMask 는 신고잠금 글에 달린 댓글의 내용 대신 활동 목록에 싣는 문구다.
 const LockedParentCommentMask = "[신고잠금 글의 댓글]"
+
+// LockedCommentMask 는 댓글 자신이 신고잠금일 때 내용 대신 활동 목록에 싣는 문구다.
+const LockedCommentMask = "[신고잠금 댓글]"
 
 // MaskLockedActivityPost 는 신고잠금 글의 제목을 서버에서 가린다(링크는 유지).
 //
@@ -121,19 +126,38 @@ func MaskLockedActivityPost(p ActivityPost) ActivityPost {
 	return p
 }
 
-// MaskLockedParentActivityComment 는 부모 글이 신고잠금인 댓글의 내용을 서버에서 가린다.
+// MaskLockedParentActivityComment 는 신고잠금과 얽힌 댓글의 내용을 서버에서 가린다.
+//
+//   - 댓글 자신이 신고잠금이면 [신고잠금 댓글] (부모도 잠겼어도 이쪽 문구가 우선한다)
+//   - 부모 글만 신고잠금이면 [신고잠금 글의 댓글]
 //
 // 부모가 이용제한 근거 글이어도 예외 없이 가린다(잠긴 글에 단 댓글은 가린다).
 // 댓글 자신이 근거 댓글이면 핸들러가 뒤에서 [이용제한 댓글]로 다시 덮어 그쪽이 우선한다.
 // 삭제된 댓글은 내용이 이미 비워져 자리표시자로 나가므로 건드리지 않는다.
 func MaskLockedParentActivityComment(c ActivityComment) ActivityComment {
-	if c.ParentLocked && c.DeletedAt == nil {
-		c.WrContent = LockedParentCommentMask
-		// 피드에 저장된 종류(이미지·이모티콘 등)가 남으면 화면이 문구 대신 종류 표기를 띄울 수 있다.
-		// 비워 두면 핸들러가 가린 문구로 다시 판정해 텍스트가 된다.
-		c.ContentKind = ""
+	if c.DeletedAt != nil {
+		return c
 	}
+	switch {
+	case c.SelfLocked:
+		c.WrContent = LockedCommentMask
+	case c.ParentLocked:
+		c.WrContent = LockedParentCommentMask
+	default:
+		return c
+	}
+	// 피드에 저장된 종류(이미지·이모티콘 등)가 남으면 화면이 문구 대신 종류 표기를 띄울 수 있다.
+	// 비워 두면 핸들러가 가린 문구로 다시 판정해 텍스트가 된다.
+	c.ContentKind = ""
 	return c
+}
+
+// ShowsLockBadge 는 활동 목록에서 이 댓글에 「신고잠금」 배지를 붙일지다.
+//
+// ⛔ 댓글 자신이 잠긴 경우만이다. 부모 글이 잠겼다는 이유로 붙이면 잠긴 글에
+// 댓글을 단 것뿐인 회원의 프로필에 신고잠금 표시가 붙어 문제를 일으킨 사람처럼 보인다.
+func (c ActivityComment) ShowsLockBadge() bool {
+	return c.SelfLocked
 }
 
 func formatOptionalTime(value *time.Time) interface{} {
