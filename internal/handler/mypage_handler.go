@@ -371,8 +371,11 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 				"deleted_at":      formatNullableTime(cm.DeletedAt),
 				"post_deleted_at": formatNullableTime(cm.ParentDeletedAt),
 				"href":            fmt.Sprintf("/%s/%d#c_%d", cm.BoardID, cm.WrParent, cm.WrID),
-				// 부모 글이 신고잠금. 내용은 저장소에서 이미 [신고잠금 글의 댓글]로 가려져 온다.
-				"is_locked": cm.ParentLocked,
+				// 배지는 댓글 자신이 신고잠금일 때만 붙인다(#14041). 부모 글만 잠긴 댓글은
+				// 내용만 [신고잠금 글의 댓글]로 가려져 오고 배지는 붙이지 않는다 —
+				// 잠긴 글에 댓글을 단 것뿐인 회원이 문제를 일으킨 것처럼 보이면 안 된다.
+				"is_locked":     cm.ShowsLockBadge(),
+				"parent_locked": cm.ParentLocked,
 			})
 		}
 	}()

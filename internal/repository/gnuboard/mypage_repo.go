@@ -939,6 +939,7 @@ func (r *myPageRepository) verifyActivityComments(
 		WrDeletedAt     *time.Time `gorm:"column:wr_deleted_at"`
 		ParentDeletedAt *time.Time `gorm:"column:parent_deleted_at"`
 		ParentLocked    bool       `gorm:"column:parent_locked"`
+		SelfLocked      bool       `gorm:"column:self_locked"`
 	}
 	confirmed := make(map[string]map[int]verifiedComment, len(byBoard))
 	for boardID, ids := range byBoard {
@@ -985,7 +986,7 @@ func (r *myPageRepository) verifyActivityComments(
 		// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 		q := fmt.Sprintf(
 			"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at,"+
-				" (p.wr_7 <=> 'lock') AS parent_locked"+
+				" (p.wr_7 <=> 'lock') AS parent_locked, (c.wr_7 <=> 'lock') AS self_locked"+
 				" FROM `g5_write_%s` c INNER JOIN `g5_write_%s` p"+
 				" ON p.wr_id = c.wr_parent AND p.wr_is_comment = 0"+
 				" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1"+
@@ -995,7 +996,7 @@ func (r *myPageRepository) verifyActivityComments(
 			// #nosec G201 -- boardID 는 activityBoardSlugRe 로 검증된 슬러그다.
 			q = fmt.Sprintf(
 				"SELECT c.wr_id, c.wr_deleted_at, p.wr_deleted_at AS parent_deleted_at,"+
-					" (p.wr_7 <=> 'lock') AS parent_locked"+
+					" (p.wr_7 <=> 'lock') AS parent_locked, (c.wr_7 <=> 'lock') AS self_locked"+
 					" FROM `g5_write_%s` c INNER JOIN `g5_write_%s` p"+
 					" ON p.wr_id = c.wr_parent AND p.wr_is_comment = 0"+
 					" WHERE c.wr_id IN ? AND c.mb_id = ? AND c.wr_is_comment = 1"+
@@ -1029,11 +1030,13 @@ func (r *myPageRepository) verifyActivityComments(
 		c.DeletedAt = row.WrDeletedAt
 		c.ParentDeletedAt = row.ParentDeletedAt
 		c.ParentLocked = row.ParentLocked
+		c.SelfLocked = row.SelfLocked
 		// #13174: 삭제 댓글 원문은 서버에서 비운다(피드에 미리보기가 캐시돼 있다).
 		if row.WrDeletedAt != nil {
 			c.WrContent = ""
 		}
-		// 부모가 신고잠금이면 원문 대신 [신고잠금 글의 댓글]. 부모가 근거글이어도 예외 없다.
+		// 댓글 자신이 신고잠금이면 [신고잠금 댓글], 부모만 잠금이면 [신고잠금 글의 댓글].
+		// 부모가 근거글이어도 예외 없다.
 		c = gnuboard.MaskLockedParentActivityComment(c)
 		out = append(out, c)
 	}
@@ -1251,7 +1254,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		//    (글 경로 FindPublicPostsByMember 의 3번째 분기와 동형).
 		//    idx_singo_discipline(sg_table, discipline_log_id, sg_id) 가 있어 비싸지 않다.
 		unions = append(unions, fmt.Sprintf(
-			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at, (p.wr_7 <=> 'lock') AS parent_locked FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND ((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) OR EXISTS (SELECT 1 FROM g5_na_singo s WHERE s.sg_table = '%s' AND s.sg_id = p.wr_id AND s.discipline_log_id IS NOT NULL AND s.admin_approved = 1)) WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
+			"(SELECT c.wr_id, c.wr_content, c.wr_parent, c.wr_datetime, '%s' as board_id, c.wr_deleted_at AS deleted_at, p.wr_deleted_at AS parent_deleted_at, (p.wr_7 <=> 'lock') AS parent_locked, (c.wr_7 <=> 'lock') AS self_locked FROM `%s` c INNER JOIN `%s` p ON c.wr_parent = p.wr_id AND p.wr_is_comment = 0 AND ((p.wr_option NOT LIKE '%%secret%%' OR p.wr_option IS NULL) OR EXISTS (SELECT 1 FROM g5_na_singo s WHERE s.sg_table = '%s' AND s.sg_id = p.wr_id AND s.discipline_log_id IS NOT NULL AND s.admin_approved = 1)) WHERE c.mb_id = ? AND c.wr_is_comment = 1 ORDER BY c.wr_id DESC LIMIT %d)",
 			b.BoTable, table, table, b.BoTable, limit))
 		args = append(args, mbID)
 	}
@@ -1265,7 +1268,7 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 		return nil, err
 	}
 	// #13174: 삭제 댓글 원문은 어느 경로에서도 나가면 안 된다 (verify 경로와 동일).
-	// 부모가 신고잠금인 댓글도 verify 경로와 같이 가린다(부모가 근거글이어도 예외 없음).
+	// 신고잠금 댓글·부모가 신고잠금인 댓글도 verify 경로와 같이 가린다(부모가 근거글이어도 예외 없음).
 	for i := range comments {
 		if comments[i].DeletedAt != nil {
 			comments[i].WrContent = ""
