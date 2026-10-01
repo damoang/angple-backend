@@ -2218,6 +2218,12 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": result, "has_any": hasAny})
 		})
 
+		// GET /api/v1/members/me/memo-targets — 내가 메모를 단 상대 ID 목록(세션당 1회 조회용)
+		// 클라이언트는 목록 작성자와 겹칠 때만 batch/memo 를 부른다. 상한 초과(truncated) 시 기존 방식으로 폴백.
+		// 정적 세그먼트 me 는 /api/v1/members/me/leave 와 같이 :id 파라미터 라우트와 공존한다.
+		memoTargetsHandler := handler.NewMemberMemoTargetsHandler(db)
+		router.GET("/api/v1/members/me/memo-targets", middleware.JWTAuth(jwtManager), memoTargetsHandler.GetMemoTargets)
+
 		// Admin member management + memo CRUD
 		adminMemberHandler := handler.NewAdminMemberHandler(db)
 		// ── 관리자 대시보드 통계 ─────────────────────────────────────────
