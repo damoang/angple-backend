@@ -116,7 +116,7 @@ func TestGrantPrize_ExpOnly(t *testing.T) {
 		t.Errorf("경험치만이면 g5_point 를 쓰지 않는다, got %d", n)
 	}
 	rows := prizeXPRows(t, db)
-	want := prizeXPRow{MbID: "member_a", XpPoint: 37, XpContent: "단계A 럭키 경험치", XpRelTable: "free", XpRelID: "12", XpRelAction: "@lucky"}
+	want := prizeXPRow{MbID: "member_a", XpPoint: 37, XpContent: "단계A 럭키 경험치", XpRelTable: "free", XpRelID: "12", XpRelAction: luckyRelAction}
 	if len(rows) != 1 || rows[0] != want {
 		t.Fatalf("g5_na_xp 1행 %+v 이어야 한다, got %+v", want, rows)
 	}
@@ -149,7 +149,7 @@ func TestGrantPrize_Both_Comment(t *testing.T) {
 	}
 	rows := prizeXPRows(t, db)
 	if len(rows) != 1 || rows[0].XpPoint != 41 || rows[0].XpContent != "단계B 럭키 경험치(댓글)" ||
-		rows[0].XpRelTable != "free" || rows[0].XpRelID != "13" || rows[0].XpRelAction != "@lucky" {
+		rows[0].XpRelTable != "free" || rows[0].XpRelID != "13" || rows[0].XpRelAction != luckyRelAction {
 		t.Fatalf("g5_na_xp 1행(댓글 문구), got %+v", rows)
 	}
 	m := prizeMember(t, db, "member_a")

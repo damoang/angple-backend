@@ -24,7 +24,9 @@ import (
 
 func newLuckyTestRepo(t *testing.T) (*luckyRepository, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard})
+	// TranslateError: sqlite 의 UNIQUE 위반(확장 코드 2067)을 gorm.ErrDuplicatedKey 로 바꿔 준다.
+	// isDuplicateKeyErr 는 운영(MySQL 1062)과 이 에러를 둘 다 알아보므로, 테스트에서도 중복 지급이 no-op 으로 판정된다.
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard, TranslateError: true})
 	if err != nil {
 		t.Fatalf("sqlite 열기 실패: %v", err)
 	}
