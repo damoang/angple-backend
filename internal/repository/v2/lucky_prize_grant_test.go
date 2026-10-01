@@ -15,6 +15,9 @@ import (
 //   - 같은 (source_table, source_id, kind) 두 번째 지급은 포인트·경험치 모두 0 이다(C17).
 //   - 경험치 기록이 실패하면 원장·포인트도 함께 롤백된다(반쯤 쓰고 멈추지 않는다).
 
+// testLuckySlug 는 이 파일 테스트의 게시판 슬러그(원장 source_table·g5_na_xp xp_rel_table)다.
+const testLuckySlug = "free"
+
 type prizeMemberRow struct {
 	MbPoint int `gorm:"column:mb_point"`
 	MbLevel int `gorm:"column:mb_level"`
@@ -75,7 +78,7 @@ func TestGrantPrize_PointsOnly(t *testing.T) {
 	r, db := newLuckyTestRepo(t)
 	seedPrizeMember(t, db, "member_a", 3, 120, 1)
 
-	out, err := r.GrantWithOptions("member_a", "free", "11", LuckyKindPost, 73, GrantOptions{TierName: "단계A", Now: prizeNow})
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "11", LuckyKindPost, 73, GrantOptions{TierName: "단계A", Now: prizeNow})
 	if err != nil || out != GrantOutcomeGranted {
 		t.Fatalf("지급돼야 한다: out=%s err=%v", out, err)
 	}
@@ -103,7 +106,7 @@ func TestGrantPrize_ExpOnly(t *testing.T) {
 	// levelExp(2)=1000 — 990 에서 37 을 받으면 1027 로 레벨 2 가 된다.
 	seedPrizeMember(t, db, "member_a", 3, 990, 1)
 
-	out, err := r.GrantWithOptions("member_a", "free", "12", LuckyKindPost, 0, GrantOptions{TierName: "단계A", Now: prizeNow, Exp: 37})
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "12", LuckyKindPost, 0, GrantOptions{TierName: "단계A", Now: prizeNow, Exp: 37})
 	if err != nil || out != GrantOutcomeGranted {
 		t.Fatalf("지급돼야 한다: out=%s err=%v", out, err)
 	}
@@ -116,7 +119,7 @@ func TestGrantPrize_ExpOnly(t *testing.T) {
 		t.Errorf("경험치만이면 g5_point 를 쓰지 않는다, got %d", n)
 	}
 	rows := prizeXPRows(t, db)
-	want := prizeXPRow{MbID: "member_a", XpPoint: 37, XpContent: "단계A 럭키 경험치", XpRelTable: "free", XpRelID: "12", XpRelAction: luckyRelAction}
+	want := prizeXPRow{MbID: "member_a", XpPoint: 37, XpContent: "단계A 럭키 경험치", XpRelTable: testLuckySlug, XpRelID: "12", XpRelAction: luckyRelAction}
 	if len(rows) != 1 || rows[0] != want {
 		t.Fatalf("g5_na_xp 1행 %+v 이어야 한다, got %+v", want, rows)
 	}
@@ -135,7 +138,7 @@ func TestGrantPrize_Both_Comment(t *testing.T) {
 	r, db := newLuckyTestRepo(t)
 	seedPrizeMember(t, db, "member_a", 5, 0, 1)
 
-	out, err := r.GrantWithOptions("member_a", "free", "13", LuckyKindComment, 58, GrantOptions{TierName: "단계B", Now: prizeNow, Exp: 41})
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "13", LuckyKindComment, 58, GrantOptions{TierName: "단계B", Now: prizeNow, Exp: 41})
 	if err != nil || out != GrantOutcomeGranted {
 		t.Fatalf("지급돼야 한다: out=%s err=%v", out, err)
 	}
@@ -149,7 +152,7 @@ func TestGrantPrize_Both_Comment(t *testing.T) {
 	}
 	rows := prizeXPRows(t, db)
 	if len(rows) != 1 || rows[0].XpPoint != 41 || rows[0].XpContent != "단계B 럭키 경험치(댓글)" ||
-		rows[0].XpRelTable != "free" || rows[0].XpRelID != "13" || rows[0].XpRelAction != luckyRelAction {
+		rows[0].XpRelTable != testLuckySlug || rows[0].XpRelID != "13" || rows[0].XpRelAction != luckyRelAction {
 		t.Fatalf("g5_na_xp 1행(댓글 문구), got %+v", rows)
 	}
 	m := prizeMember(t, db, "member_a")
@@ -174,14 +177,14 @@ func TestGrantPrize_NoDoublePay(t *testing.T) {
 			seedPrizeMember(t, db, "member_a", 2, 0, 1)
 			opt := GrantOptions{TierName: "단계A", Now: prizeNow, Exp: tc.exp}
 
-			if out, err := r.GrantWithOptions("member_a", "free", "21", LuckyKindPost, tc.amount, opt); err != nil || out != GrantOutcomeGranted {
+			if out, err := r.GrantWithOptions("member_a", testLuckySlug, "21", LuckyKindPost, tc.amount, opt); err != nil || out != GrantOutcomeGranted {
 				t.Fatalf("첫 지급: out=%s err=%v", out, err)
 			}
 			before := prizeMember(t, db, "member_a")
 
 			// 다른 금액·경험치로 다시 와도(재시도·동시 요청) 아무것도 쓰지 않는다.
 			opt.Exp = tc.exp * 3
-			out, err := r.GrantWithOptions("member_a", "free", "21", LuckyKindPost, tc.amount*3, opt)
+			out, err := r.GrantWithOptions("member_a", testLuckySlug, "21", LuckyKindPost, tc.amount*3, opt)
 			if err != nil || out != GrantOutcomeDuplicate {
 				t.Fatalf("두 번째는 duplicate no-op: out=%s err=%v", out, err)
 			}
@@ -213,7 +216,7 @@ func TestGrantPrize_NoDoublePay(t *testing.T) {
 func TestGrantPrize_ExpFailureRollsBackAll(t *testing.T) {
 	r, db := newLuckyTestRepo(t)
 	// 회원 행을 만들지 않는다 — addExpTx 의 회원 조회가 실패한다.
-	if _, err := r.GrantWithOptions("ghost", "free", "31", LuckyKindPost, 19, GrantOptions{Now: prizeNow, Exp: 37}); err == nil {
+	if _, err := r.GrantWithOptions("ghost", testLuckySlug, "31", LuckyKindPost, 19, GrantOptions{Now: prizeNow, Exp: 37}); err == nil {
 		t.Fatal("경험치 기록 실패는 에러여야 한다")
 	}
 	for _, table := range []string{"g5_da_lucky_grant", "g5_point", "g5_na_xp"} {
@@ -227,7 +230,7 @@ func TestGrantPrize_ExpFailureRollsBackAll(t *testing.T) {
 func TestGrantPrize_NothingToGrant(t *testing.T) {
 	r, db := newLuckyTestRepo(t)
 	seedPrizeMember(t, db, "member_a", 2, 0, 1)
-	if _, err := r.GrantWithOptions("member_a", "free", "41", LuckyKindPost, 0, GrantOptions{Now: prizeNow}); err == nil {
+	if _, err := r.GrantWithOptions("member_a", testLuckySlug, "41", LuckyKindPost, 0, GrantOptions{Now: prizeNow}); err == nil {
 		t.Fatal("줄 것이 없으면 에러여야 한다")
 	}
 	if n := countRows(t, db, "g5_da_lucky_grant"); n != 0 {
@@ -241,7 +244,7 @@ func TestGrantPrize_HighLevelFollowsAddExpRule(t *testing.T) {
 	r, db := newLuckyTestRepo(t)
 	seedPrizeMember(t, db, "member_a", 4, levelExp(80), 80)
 
-	out, err := r.GrantWithOptions("member_a", "free", "51", LuckyKindPost, 19, GrantOptions{Now: prizeNow, Exp: 37})
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "51", LuckyKindPost, 19, GrantOptions{Now: prizeNow, Exp: 37})
 	if err != nil || out != GrantOutcomeGranted {
 		t.Fatalf("지급(포인트)은 돼야 한다: out=%s err=%v", out, err)
 	}
@@ -258,7 +261,7 @@ func TestGrantPrize_HighLevelFollowsAddExpRule(t *testing.T) {
 func TestGrantPrize_LegacyGrantUnchanged(t *testing.T) {
 	r, db := newLuckyTestRepo(t)
 	seedPrizeMember(t, db, "member_a", 2, 0, 1)
-	if ok, err := r.Grant("member_a", "free", "61", LuckyKindPost, 23); err != nil || !ok {
+	if ok, err := r.Grant("member_a", testLuckySlug, "61", LuckyKindPost, 23); err != nil || !ok {
 		t.Fatalf("레거시 Grant: ok=%v err=%v", ok, err)
 	}
 	if n := countRows(t, db, "g5_point"); n != 1 {
@@ -315,7 +318,7 @@ func TestGrantPrize_ExpBlocked_ExpOnlyFallsBackToPoints(t *testing.T) {
 	gotN := 0
 	opt := GrantOptions{TierName: "단계A", Now: prizeNow, Exp: 37, ExpFallbackPoints: 23,
 		RandN: func(n int) int { gotN = n; return 6 }} // → 7P
-	out, err := r.GrantWithOptions("member_a", "free", "71", LuckyKindPost, 0, opt)
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "71", LuckyKindPost, 0, opt)
 	if err != nil || out != GrantOutcomeGranted {
 		t.Fatalf("대체 포인트로 지급돼야 한다: out=%s err=%v", out, err)
 	}
@@ -348,7 +351,7 @@ func TestGrantPrize_ExpBlocked_BothGivesPointsOnly(t *testing.T) {
 	seedPrizeMember(t, db, "member_a", 4, levelExp(expBlockedLevel), expBlockedLevel)
 	opt := GrantOptions{TierName: "단계B", Now: prizeNow, Exp: 41, ExpFallbackPoints: 23,
 		RandN: func(int) int { t.Fatal("「둘 다」는 대체 포인트를 뽑지 않는다"); return 0 }}
-	out, err := r.GrantWithOptions("member_a", "free", "72", LuckyKindComment, 19, opt)
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "72", LuckyKindComment, 19, opt)
 	if err != nil || out != GrantOutcomeGranted {
 		t.Fatalf("포인트는 지급돼야 한다: out=%s err=%v", out, err)
 	}
@@ -367,7 +370,7 @@ func TestGrantPrize_ExpBlocked_BothGivesPointsOnly(t *testing.T) {
 func TestGrantPrize_ExpBlocked_NoFallbackWritesNothing(t *testing.T) {
 	r, db := newLuckyTestRepo(t)
 	seedPrizeMember(t, db, "member_a", 4, levelExp(expBlockedLevel), expBlockedLevel)
-	out, err := r.GrantWithOptions("member_a", "free", "73", LuckyKindPost, 0, GrantOptions{Now: prizeNow, Exp: 37})
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "73", LuckyKindPost, 0, GrantOptions{Now: prizeNow, Exp: 37})
 	if err != nil || out != GrantOutcomeNothing {
 		t.Fatalf("지급 없음(nothing)이어야 한다: out=%s err=%v", out, err)
 	}
@@ -384,7 +387,7 @@ func TestGrantPrize_NormalMemberIgnoresFallback(t *testing.T) {
 	seedPrizeMember(t, db, "member_a", 3, 0, 1)
 	opt := GrantOptions{Now: prizeNow, Exp: 37, ExpFallbackPoints: 23,
 		RandN: func(int) int { t.Fatal("일반 회원은 대체 포인트를 뽑지 않는다"); return 0 }}
-	out, err := r.GrantWithOptions("member_a", "free", "74", LuckyKindPost, 0, opt)
+	out, err := r.GrantWithOptions("member_a", testLuckySlug, "74", LuckyKindPost, 0, opt)
 	if err != nil || out != GrantOutcomeGranted {
 		t.Fatalf("지급돼야 한다: out=%s err=%v", out, err)
 	}
@@ -401,10 +404,10 @@ func TestGrantPrize_NormalMemberIgnoresFallback(t *testing.T) {
 
 // TestExpAccrualBlocked — 럭키(게시판 슬러그 rel_table)는 고레벨·최대 레벨에서 막히고, 그 아래는 열린다.
 func TestExpAccrualBlocked(t *testing.T) {
-	if expAccrualBlocked(expBlockedLevel-1, 37, "free") {
+	if expAccrualBlocked(expBlockedLevel-1, 37, testLuckySlug) {
 		t.Error("고레벨 미만은 적립 가능")
 	}
-	if !expAccrualBlocked(expBlockedLevel, 37, "free") || !expAccrualBlocked(maxXPLevel, 37, "free") {
+	if !expAccrualBlocked(expBlockedLevel, 37, testLuckySlug) || !expAccrualBlocked(maxXPLevel, 37, testLuckySlug) {
 		t.Error("고레벨·최대 레벨은 럭키 적립 불가")
 	}
 	if expAccrualBlocked(expBlockedLevel, 37, "@login") {
