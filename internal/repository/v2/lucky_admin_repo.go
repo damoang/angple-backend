@@ -81,7 +81,7 @@ func NewLuckyAdminRepository(db *gorm.DB) LuckyAdminRepository {
 // luckyJSONParam 은 바인딩한 JSON 문자열을 문자열이 아닌 JSON 값으로 넣는 SQL 조각이다.
 // MySQL 은 CAST(? AS JSON), 테스트용 sqlite 는 json(?) 이다 — 그냥 ? 로 넣으면 JSON 안에 따옴표 문자열로 들어간다.
 func luckyJSONParam(db *gorm.DB) string {
-	if db.Dialector != nil && db.Dialector.Name() == "sqlite" {
+	if db.Dialector != nil && db.Name() == "sqlite" {
 		return "json(?)"
 	}
 	return "CAST(? AS JSON)"
@@ -106,7 +106,11 @@ func (r *luckyAdminRepository) GetStoredLuckyConfig() (*LuckyConfig, []LuckyConf
 	top := parseSettingsTop(rows[0].SettingsJSON)
 	cfg := DefaultLuckyConfig()
 	if raw, ok := top["lucky_config"]; ok && len(raw) > 0 && string(raw) != nullJSON {
-		_ = json.Unmarshal(raw, cfg) // UnmarshalJSON 은 실패해도 에러 없이 기본값(꺼짐)으로 둔다
+		if err := json.Unmarshal(raw, cfg); err != nil {
+			// 저장값이 JSON 으로도 깨졌으면 지급 경로(getLuckyConfigFromDB)와 같게 기본값(꺼짐)으로 보여 준다.
+			// 에러로 돌려주면 관리자 화면이 열리지 않아 고쳐 저장할 길이 막힌다.
+			cfg = DefaultLuckyConfig()
+		}
 	}
 	var hist []LuckyConfigHistoryEntry
 	if raw, ok := top["lucky_config_history"]; ok {
