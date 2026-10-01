@@ -16,9 +16,21 @@ import (
 // 나리야 럭키 포인트 상수. 지급 로그(g5_point)의 rel_action 은 레거시 @lucky 와 동일하게
 // 맞춰 마이페이지 포인트 내역에서 기존 럭키 지급과 함께 묶여 보이도록 한다.
 const (
-	luckyKindPoint    = "point"
 	luckyRelAction    = "@lucky"
 	luckyPointContent = "나리야 럭키 포인트"
+	// luckyCommentContentSuffix 는 댓글 당첨 내역 문구 끝에 붙는다(「<단계> 럭키 포인트(댓글)」).
+	luckyCommentContentSuffix = "(댓글)"
+	// luckyNeverExpireDate 는 만료 없는 포인트의 po_expire_date 다(그누보드 관례, 만료 크론이 건너뛴다).
+	luckyNeverExpireDate = "9999-12-31"
+)
+
+// 원장(g5_da_lucky_grant.kind) 종류. 사이트 하루 상한은 종류별로 따로 세고, 회원 하루 상한은 종류를 합쳐 센다.
+// 둘 다 g5_point 지급을 동반한다. UNIQUE(source_table, source_id, kind) 가 종류별 이중지급을 막는다.
+const (
+	// LuckyKindPost 는 글 당첨이다(기존 행은 모두 이 값).
+	LuckyKindPost = "point"
+	// LuckyKindComment 는 댓글 당첨이다.
+	LuckyKindComment = "cpoint"
 )
 
 // luckyConfigCache caches LuckyConfig to avoid hitting site_settings on every post/comment.
@@ -36,14 +48,21 @@ const luckyConfigCacheTTL = 30 * time.Second
 // Enabled 이 전체 킬스위치다. 기본값 false — 켜기 전에는 어느 게시판에서도 지급되지 않는다.
 // 평소(앙복타임) 확률·금액은 전역이 아니라 **게시판별**(v2_board_extended_settings.lucky)로 정한다(GetBoardLucky).
 //
-// ⛔ 키가 없으면 「무제한」이 아니라 DefaultLuckyConfig 의 값(댓글 제외·회원 1·사이트 10·시간대 없음)이다.
+// ⛔ 키가 없으면 「무제한」이 아니라 DefaultLuckyConfig 의 값(댓글 제외·회원 1·글 10·댓글 20·댓글 10자·만료 365일·시간대 없음)이다.
 // 그래서 정수 필드는 0 과 「키 없음」을 구분해야 하고, 그 구분은 UnmarshalJSON 이 기본값을 먼저 깔아 둔다.
 // 0 은 「명시적으로 무제한」이다. 저장 시 0 이 사라지면 다음 읽기에서 기본값으로 바뀌므로 omitempty 를 달지 않는다.
 type LuckyConfig struct {
 	Enabled         bool `json:"enabled"`          // 마스터 스위치 (default: false)
 	IncludeComments bool `json:"include_comments"` // 댓글에도 발동할지 (default: false=글만)
-	MemberDailyCap  int  `json:"member_daily_cap"` // 회원당 KST 하루 당첨 상한 (default: 1, 0=무제한)
-	DailyCap        int  `json:"daily_cap"`        // 사이트 전체 KST 하루 당첨 상한 (default: 10, 0=무제한)
+	MemberDailyCap  int  `json:"member_daily_cap"` // 회원당 KST 하루 당첨 상한, 글+댓글 합산 (default: 1, 0=무제한)
+	// DailyCap 은 예전 키다. daily_cap_post 가 없을 때만 글 상한으로 쓴다(하위호환).
+	DailyCap        int `json:"daily_cap"`         // (default: 10, 0=무제한)
+	DailyCapPost    int `json:"daily_cap_post"`    // 사이트 전체 KST 하루 글 당첨 상한 (default: daily_cap 또는 10, 0=무제한)
+	DailyCapComment int `json:"daily_cap_comment"` // 사이트 전체 KST 하루 댓글 당첨 상한 (default: 20, 0=무제한)
+	// MinCommentChars 는 댓글이 발동 대상이 되는 최소 길이(정리 후 글자 수)다. 글에는 적용하지 않는다.
+	MinCommentChars int `json:"min_comment_chars"` // (default: 10, 0=제한 없음)
+	// ExpireDays 는 당첨 포인트의 유효기간(일)이다. 만료일 = 지급 시각의 KST 날짜 + ExpireDays.
+	ExpireDays int `json:"expire_days"` // (default: 365, 0=만료 없음 9999-12-31)
 	// 시간대 단계(앙팡타임 등)를 놓을 수 있는 KST 시 범위 [WindowStartHour, WindowEndHour).
 	WindowStartHour int `json:"window_start_hour"` // default: 9
 	WindowEndHour   int `json:"window_end_hour"`   // default: 23
@@ -58,24 +77,35 @@ type LuckyWindow struct {
 	Name    string `json:"name"`    // 단계 이름. 당첨 포인트 내역 문구에 들어간다
 	Minutes int    `json:"minutes"` // 열려 있는 길이(분)
 	Odds    int    `json:"odds"`    // 당첨확률 = 1/Odds (쌍주사위)
-	Points  int    `json:"points"`  // 당첨 시 1..Points 지급
+	Points  int    `json:"points"`  // 당첨 시 1..Points 지급(글·댓글 공통)
+	// CommentOdds 는 이 단계의 댓글 당첨확률 분모다. 없거나 1 미만이면 이 단계에서 댓글은 발동하지 않는다.
+	CommentOdds int `json:"comment_odds"`
 }
 
 // 기본값. 「설정 키 없음」이 무제한으로 읽히지 않도록 한곳에 모은다.
 const (
 	defaultLuckyMemberDailyCap  = 1
 	defaultLuckyDailyCap        = 10
+	defaultLuckyDailyCapPost    = 10
+	defaultLuckyDailyCapComment = 20
+	defaultLuckyMinCommentChars = 10
+	defaultLuckyExpireDays      = 365
 	defaultLuckyWindowStartHour = 9
 	defaultLuckyWindowEndHour   = 23
 )
 
-// DefaultLuckyConfig returns the default lucky configuration (disabled, 글만, 회원 1·사이트 10, 시간대 없음).
+// DefaultLuckyConfig returns the default lucky configuration
+// (disabled, 글만, 회원 1·글 10·댓글 20, 댓글 10자 이상, 만료 365일, 시간대 없음).
 func DefaultLuckyConfig() *LuckyConfig {
 	return &LuckyConfig{
 		Enabled:         false,
 		IncludeComments: false,
 		MemberDailyCap:  defaultLuckyMemberDailyCap,
 		DailyCap:        defaultLuckyDailyCap,
+		DailyCapPost:    defaultLuckyDailyCapPost,
+		DailyCapComment: defaultLuckyDailyCapComment,
+		MinCommentChars: defaultLuckyMinCommentChars,
+		ExpireDays:      defaultLuckyExpireDays,
 		WindowStartHour: defaultLuckyWindowStartHour,
 		WindowEndHour:   defaultLuckyWindowEndHour,
 	}
@@ -100,17 +130,46 @@ func (c *LuckyConfig) UnmarshalJSON(b []byte) error {
 	if v.DailyCap < 0 {
 		v.DailyCap = defaultLuckyDailyCap
 	}
+	// daily_cap_post 가 없으면 예전 daily_cap 을 글 상한으로 쓴다(둘 다 없으면 기본값이 남아 있다).
+	var present struct {
+		DailyCapPost *int `json:"daily_cap_post"`
+		DailyCap     *int `json:"daily_cap"`
+	}
+	_ = json.Unmarshal(b, &present) // 위에서 같은 입력이 이미 파싱됐다
+	if present.DailyCapPost == nil && present.DailyCap != nil {
+		v.DailyCapPost = v.DailyCap
+	}
+	if v.DailyCapPost < 0 {
+		v.DailyCapPost = defaultLuckyDailyCapPost
+	}
+	if v.DailyCapComment < 0 {
+		v.DailyCapComment = defaultLuckyDailyCapComment
+	}
+	if v.MinCommentChars < 0 {
+		v.MinCommentChars = defaultLuckyMinCommentChars
+	}
+	if v.ExpireDays < 0 {
+		v.ExpireDays = defaultLuckyExpireDays
+	}
 	*c = LuckyConfig(v)
 	return nil
 }
 
 // BoardLucky is the PER-BOARD lucky setting read from v2_board_extended_settings.settings.lucky
-// (관리자가 게시판 편집 화면에서 설정). enabled=true 이고 odds>=1, points>=1 일 때만 발동한다 —
-// 그래서 게시판마다 다른 가중치(소모임은 크게 등)를 줄 수 있다.
+// (관리자가 게시판 편집 화면에서 설정). enabled=true 이고 points>=1 이며 그 종류의 확률(글 odds,
+// 댓글 comment_odds)이 1 이상일 때만 그 종류가 발동한다 — 그래서 게시판마다 다른 가중치를 줄 수 있다.
 type BoardLucky struct {
-	Enabled bool `json:"enabled"` // 게시판별 사용 여부 (default: false → 미발동)
-	Points  int  `json:"points"`  // 당첨 시 1..Points 지급
-	Odds    int  `json:"odds"`    // 당첨확률 = 1/Odds (쌍주사위)
+	Enabled     bool `json:"enabled"`      // 게시판별 사용 여부 (default: false → 미발동)
+	Points      int  `json:"points"`       // 당첨 시 1..Points 지급(글·댓글 공통)
+	Odds        int  `json:"odds"`         // 글 당첨확률 = 1/Odds (쌍주사위)
+	CommentOdds int  `json:"comment_odds"` // 댓글 당첨확률 = 1/CommentOdds. 없거나 1 미만이면 댓글 미발동
+}
+
+// BoardLuckyOdds 는 GetBoardLucky 결과다. 0 은 「그 종류는 이 게시판에서 발동하지 않음」이다.
+type BoardLuckyOdds struct {
+	Odds        int // 글 확률 분모(앙복타임)
+	CommentOdds int // 댓글 확률 분모(앙복타임)
+	Points      int // 최대 금액(글·댓글 공통)
 }
 
 // LuckyGrant maps the g5_da_lucky_grant idempotency ledger row.
@@ -141,9 +200,9 @@ type LuckyRepository interface {
 	GrantWithOptions(mbID, sourceTable, sourceID, kind string, amount int, opt GrantOptions) (GrantOutcome, error)
 	// GetLuckyConfig returns the GLOBAL master switch (cached 30s).
 	GetLuckyConfig() (*LuckyConfig, error)
-	// GetBoardLucky returns the per-board lucky setting (odds/points) if the board has
-	// lucky enabled; otherwise dice=0, maxAmount=0 (=미발동). 확률·금액은 게시판별로 다르다.
-	GetBoardLucky(boardSlug string) (dice, maxAmount int)
+	// GetBoardLucky returns the per-board lucky setting (글·댓글 확률, 금액) if the board has
+	// lucky enabled; otherwise the zero value (=미발동). 확률·금액은 게시판별로 다르다.
+	GetBoardLucky(boardSlug string) BoardLuckyOdds
 }
 
 type luckyRepository struct {
@@ -159,12 +218,14 @@ func NewLuckyRepository(db *gorm.DB) LuckyRepository {
 type GrantOptions struct {
 	// MemberDailyCap 은 같은 회원의 KST 하루 지급 상한이다. 0 이하 = 확인 안 함.
 	MemberDailyCap int
-	// DailyCap 은 사이트 전체 KST 하루 지급 상한이다. 0 이하 = 확인 안 함.
+	// DailyCap 은 사이트 전체 KST 하루 지급 상한이다. 같은 kind 끼리만 센다(글·댓글 상한이 서로 독립). 0 이하 = 확인 안 함.
 	DailyCap int
 	// TierName 은 단계 이름(앙복타임·앙팡타임 등)이다. 포인트 내역 문구 앞에 붙는다. 비면 기존 문구.
 	TierName string
 	// Now 는 판정·기록 기준 시각이다. zero 면 time.Now(). 테스트가 하루 경계를 고정하려고 둔다.
 	Now time.Time
+	// ExpireDays 는 g5_point 만료일 = Now 의 KST 날짜 + ExpireDays 일이다. 0 이하 = 만료 없음(9999-12-31, 기존 Grant 동작).
+	ExpireDays int
 }
 
 // GrantOutcome 은 GrantWithOptions 의 결과 종류다. 호출부가 상한 로그를 남길 수 있게 「왜 안 줬는지」를 구분한다.
@@ -209,6 +270,7 @@ func (r *luckyRepository) Grant(mbID, sourceTable, sourceID, kind string, amount
 
 // GrantWithOptions 는 Grant 와 같은 단일 트랜잭션 안에서 먼저 하루 상한을 센다.
 //
+// 회원 상한은 종류(kind)를 합쳐 세고, 사이트 상한은 같은 kind 만 센다.
 // 상한 확인은 오늘(KST 0시 이후) 원장 행을 SELECT ... FOR UPDATE 로 잠그고 센다. 당첨자만 여기까지
 // 오므로(하루 수십 건 이하) 잠금 경합은 사실상 없고, 동시에 두 당첨이 들어와도 범위 잠금 때문에
 // 한쪽이 기다렸다가 늘어난 건수를 보고 멈춘다 — 상한을 넘겨 쓰는 일이 없다.
@@ -227,7 +289,7 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 	outcome := GrantOutcomeDuplicate
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		if opt.MemberDailyCap > 0 {
-			n, err := countLuckyGrantsLocked(tx, mbID, dayStart)
+			n, err := countLuckyGrantsLocked(tx, mbID, "", dayStart) // 글+댓글 합산
 			if err != nil {
 				return err
 			}
@@ -237,7 +299,7 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 			}
 		}
 		if opt.DailyCap > 0 {
-			n, err := countLuckyGrantsLocked(tx, "", dayStart)
+			n, err := countLuckyGrantsLocked(tx, "", kind, dayStart) // 종류별
 			if err != nil {
 				return err
 			}
@@ -263,8 +325,9 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 			return err
 		}
 
-		if kind == luckyKindPoint {
-			poID, err := insertLuckyPoint(tx, mbID, amount, sourceTable, sourceID, luckyPointContentFor(opt.TierName), now)
+		if kind == LuckyKindPost || kind == LuckyKindComment {
+			content := luckyPointContentFor(opt.TierName, kind == LuckyKindComment)
+			poID, err := insertLuckyPoint(tx, mbID, amount, sourceTable, sourceID, content, now, luckyExpireDate(now, opt.ExpireDays))
 			if err != nil {
 				return err
 			}
@@ -284,14 +347,17 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 	return outcome, nil
 }
 
-// countLuckyGrantsLocked 는 since 이후 원장 행 수를 FOR UPDATE 로 잠그며 센다. mbID 가 비면 사이트 전체.
-// 회원별은 idx_mb, 전체는 idx_created 를 탄다(DDL 추가 없음).
-func countLuckyGrantsLocked(tx *gorm.DB, mbID string, since time.Time) (int, error) {
+// countLuckyGrantsLocked 는 since 이후 원장 행 수를 FOR UPDATE 로 잠그며 센다. mbID 가 비면 모든 회원,
+// kind 가 비면 모든 종류. 회원별은 idx_mb, 전체는 idx_created 를 탄다(DDL 추가 없음).
+func countLuckyGrantsLocked(tx *gorm.DB, mbID, kind string, since time.Time) (int, error) {
 	q := tx.Model(&LuckyGrant{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("created_at >= ?", since)
 	if mbID != "" {
 		q = q.Where("mb_id = ?", mbID)
+	}
+	if kind != "" {
+		q = q.Where("kind = ?", kind)
 	}
 	var ids []int64
 	if err := q.Pluck("id", &ids).Error; err != nil {
@@ -300,21 +366,35 @@ func countLuckyGrantsLocked(tx *gorm.DB, mbID string, since time.Time) (int, err
 	return len(ids), nil
 }
 
-// luckyPointContentFor 는 g5_point.po_content 문구를 만든다. 단계 이름이 있으면 「<단계> 럭키 포인트」.
-// 당첨자가 마이페이지 내역에서 어느 단계였는지 보게 하려는 것이다. 배지·내역 조인은 po_rel_action(@lucky)
-// 기준이라 문구가 바뀌어도 영향이 없다. 시각은 넣지 않는다.
-func luckyPointContentFor(tierName string) string {
-	tierName = strings.TrimSpace(tierName)
-	if tierName == "" {
-		return luckyPointContent
+// luckyPointContentFor 는 g5_point.po_content 문구를 만든다. 단계 이름이 있으면 「<단계> 럭키 포인트」,
+// 댓글이면 끝에 「(댓글)」을 붙인다. 당첨자가 마이페이지 내역에서 어느 단계였는지 보게 하려는 것이다.
+// 배지·내역 조인은 po_rel_action(@lucky)·po_rel_table·po_rel_id 기준이라 문구가 바뀌어도 영향이 없다. 시각은 넣지 않는다.
+func luckyPointContentFor(tierName string, isComment bool) string {
+	content := luckyPointContent
+	if tierName = strings.TrimSpace(tierName); tierName != "" {
+		content = tierName + " 럭키 포인트"
 	}
-	return tierName + " 럭키 포인트"
+	if isComment {
+		content += luckyCommentContentSuffix
+	}
+	return content
+}
+
+// luckyExpireDate 는 g5_point.po_expire_date(YYYY-MM-DD) 를 만든다 — now 의 KST 날짜 + days 일.
+// days <= 0 이면 만료 없음(9999-12-31). 컨테이너 TZ 와 무관하게 KST 날짜로 계산한다
+// (예: UTC 14:59 = KST 23:59 는 그 KST 날짜, UTC 15:00 = KST 다음날 00:00 은 다음 날짜가 기준).
+func luckyExpireDate(now time.Time, days int) string {
+	if days <= 0 {
+		return luckyNeverExpireDate
+	}
+	k := now.In(luckyKST)
+	return time.Date(k.Year(), k.Month(), k.Day(), 0, 0, 0, 0, luckyKST).AddDate(0, 0, days).Format("2006-01-02")
 }
 
 // insertLuckyPoint credits the member balance and writes a g5_point credit log within tx.
-// Lucky points never expire (po_expire_date = 9999-12-31). Returns the new po_id for audit.
-// content 는 단계 이름이 들어간 내역 문구, now 는 원장과 같은 기준 시각이다.
-func insertLuckyPoint(tx *gorm.DB, mbID string, amount int, sourceTable, sourceID, content string, now time.Time) (int64, error) {
+// Returns the new po_id for audit. content 는 단계 이름이 들어간 내역 문구, now 는 원장과 같은 기준 시각,
+// expireDate 는 luckyExpireDate 결과(YYYY-MM-DD, 만료 없음이면 9999-12-31)다.
+func insertLuckyPoint(tx *gorm.DB, mbID string, amount int, sourceTable, sourceID, content string, now time.Time, expireDate string) (int64, error) {
 	// 회원 잔액 증가
 	if err := tx.Table("g5_member").
 		Where("mb_id = ?", mbID).
@@ -335,7 +415,7 @@ func insertLuckyPoint(tx *gorm.DB, mbID string, amount int, sourceTable, sourceI
 		PoPoint:      amount,
 		PoUsePoint:   0,
 		PoExpired:    0,
-		PoExpireDate: "9999-12-31",
+		PoExpireDate: expireDate,
 		PoRelTable:   sourceTable,
 		PoRelID:      sourceID,
 		PoRelAction:  luckyRelAction,
@@ -413,22 +493,34 @@ type boardLuckyWrapper struct {
 	Lucky *BoardLucky `json:"lucky"`
 }
 
-// GetBoardLucky reads the per-board lucky setting. 게시판이 럭키를 켰고(odds>=1, points>=1)
-// 이면 (dice=odds, maxAmount=points) 를, 아니면 (0, 0) 을 돌려준다. 캐시 없음(호출 빈도=글/댓글 작성).
-func (r *luckyRepository) GetBoardLucky(boardSlug string) (dice, maxAmount int) {
+// GetBoardLucky reads the per-board lucky setting. 캐시 없음(호출 빈도=글/댓글 작성).
+func (r *luckyRepository) GetBoardLucky(boardSlug string) BoardLuckyOdds {
 	var settingsJSON string
 	err := r.db.Table("v2_board_extended_settings").
 		Select("settings").Where("board_id = ?", boardSlug).
 		Scan(&settingsJSON).Error
 	if err != nil || settingsJSON == "" || settingsJSON == nullJSON {
-		return 0, 0
+		return BoardLuckyOdds{}
 	}
 	var w boardLuckyWrapper
 	if err := json.Unmarshal([]byte(settingsJSON), &w); err != nil || w.Lucky == nil {
-		return 0, 0
+		return BoardLuckyOdds{}
 	}
-	if !w.Lucky.Enabled || w.Lucky.Odds < 1 || w.Lucky.Points < 1 {
-		return 0, 0
+	return boardLuckyOddsOf(w.Lucky)
+}
+
+// boardLuckyOddsOf 는 게시판 설정을 판정용 값으로 줄인다. 꺼졌거나 points<1 이면 전부 0,
+// 확률이 1 미만인 종류는 0(그 종류는 이 게시판에서 발동하지 않음)이다.
+func boardLuckyOddsOf(b *BoardLucky) BoardLuckyOdds {
+	if b == nil || !b.Enabled || b.Points < 1 {
+		return BoardLuckyOdds{}
 	}
-	return w.Lucky.Odds, w.Lucky.Points
+	out := BoardLuckyOdds{Points: b.Points}
+	if b.Odds >= 1 {
+		out.Odds = b.Odds
+	}
+	if b.CommentOdds >= 1 {
+		out.CommentOdds = b.CommentOdds
+	}
+	return out
 }

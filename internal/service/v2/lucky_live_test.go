@@ -19,6 +19,7 @@ import (
 type fakeLuckyStore struct {
 	cfg        *v2repo.LuckyConfig
 	boardOdds  int
+	boardCOdds int // 게시판 comment_odds
 	boardPts   int
 	boardCalls int
 	grants     []fakeGrantCall
@@ -33,9 +34,9 @@ type fakeGrantCall struct {
 
 func (f *fakeLuckyStore) GetLuckyConfig() (*v2repo.LuckyConfig, error) { return f.cfg, nil }
 
-func (f *fakeLuckyStore) GetBoardLucky(string) (int, int) {
+func (f *fakeLuckyStore) GetBoardLucky(string) v2repo.BoardLuckyOdds {
 	f.boardCalls++
-	return f.boardOdds, f.boardPts
+	return v2repo.BoardLuckyOdds{Odds: f.boardOdds, CommentOdds: f.boardCOdds, Points: f.boardPts}
 }
 
 func (f *fakeLuckyStore) GrantWithOptions(mbID, table, id, kind string, amount int, opt v2repo.GrantOptions) (v2repo.GrantOutcome, error) {
@@ -81,7 +82,7 @@ var testNow = time.Date(2026, 10, 1, 12, 0, 0, 0, luckyKST)
 func TestLuckyLive_MasterOff(t *testing.T) {
 	store := &fakeLuckyStore{cfg: v2repo.DefaultLuckyConfig(), boardOdds: 1, boardPts: 100}
 	roller := &fakeRoller{win: true}
-	res := newTestLive(store, roller, []byte("k"), testNow).Process("member_a", "free", 1, false)
+	res := newTestLive(store, roller, []byte("k"), testNow).Process("member_a", "free", 1, false, 0)
 	if res.Rolled || roller.calls != 0 || len(store.grants) != 0 || store.boardCalls != 0 {
 		t.Fatalf("꺼져 있으면 아무것도 안 해야 한다: res=%+v roller=%d grants=%d board=%d",
 			res, roller.calls, len(store.grants), store.boardCalls)
@@ -90,24 +91,24 @@ func TestLuckyLive_MasterOff(t *testing.T) {
 
 // TestLuckyLive_CommentsExcludedByDefault — C1: include_comments=false 면 댓글은 지급 0.
 func TestLuckyLive_CommentsExcludedByDefault(t *testing.T) {
-	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 1, boardPts: 100}
+	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 1, boardCOdds: 1, boardPts: 100}
 	roller := &fakeRoller{win: true}
 	l := newTestLive(store, roller, []byte("k"), testNow)
 
-	res := l.Process("member_a", "free", 1, true)
+	res := l.Process("member_a", "free", 1, true, 50)
 	if res.Rolled || roller.calls != 0 || len(store.grants) != 0 {
 		t.Fatalf("댓글은 기본 제외: res=%+v grants=%d", res, len(store.grants))
 	}
 
 	// 같은 조건에서 글은 지급된다(대조).
-	res = l.Process("member_a", "free", 2, false)
+	res = l.Process("member_a", "free", 2, false, 0)
 	if !res.Won || len(store.grants) != 1 {
 		t.Fatalf("글은 지급돼야 한다: res=%+v grants=%d", res, len(store.grants))
 	}
 
 	// include_comments=true 면 댓글도 진행.
 	store.cfg.IncludeComments = true
-	res = l.Process("member_a", "free", 3, true)
+	res = l.Process("member_a", "free", 3, true, 50)
 	if !res.Won || len(store.grants) != 2 {
 		t.Fatalf("include_comments=true 면 댓글도 진행: res=%+v grants=%d", res, len(store.grants))
 	}
@@ -120,7 +121,7 @@ func TestLuckyLive_BoardOffIgnoresWindows(t *testing.T) {
 	cfg.Windows = []v2repo.LuckyWindow{{Name: "온종일", Minutes: 24 * 60, Odds: 1, Points: 9}}
 	store := &fakeLuckyStore{cfg: cfg} // 게시판 0,0
 	roller := &fakeRoller{win: true}
-	res := newTestLive(store, roller, []byte("k"), testNow).Process("member_a", "promotion", 1, false)
+	res := newTestLive(store, roller, []byte("k"), testNow).Process("member_a", "promotion", 1, false, 0)
 	if res.Rolled || roller.calls != 0 || len(store.grants) != 0 {
 		t.Fatalf("게시판이 꺼져 있으면 시간대와 무관하게 미발동: res=%+v", res)
 	}
@@ -130,7 +131,7 @@ func TestLuckyLive_BoardOffIgnoresWindows(t *testing.T) {
 func TestLuckyLive_PassesCapsAndTier(t *testing.T) {
 	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 13, boardPts: 90, outcome: v2repo.GrantOutcomeCappedMember}
 	roller := &fakeRoller{win: true}
-	res := newTestLive(store, roller, nil, testNow).Process("member_a", "free", 42, false)
+	res := newTestLive(store, roller, nil, testNow).Process("member_a", "free", 42, false, 0)
 	if len(store.grants) != 1 {
 		t.Fatalf("당첨이면 지급 시도 1회, got %d", len(store.grants))
 	}
@@ -156,7 +157,7 @@ func TestLuckyLive_PassesCapsAndTier(t *testing.T) {
 func TestLuckyLive_LostRollDoesNotGrant(t *testing.T) {
 	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 13, boardPts: 90}
 	roller := &fakeRoller{win: false}
-	res := newTestLive(store, roller, nil, testNow).Process("member_a", "free", 1, false)
+	res := newTestLive(store, roller, nil, testNow).Process("member_a", "free", 1, false, 0)
 	if !res.Rolled || res.Won || len(store.grants) != 0 {
 		t.Fatalf("꽝이면 지급 없음: res=%+v grants=%d", res, len(store.grants))
 	}
@@ -278,7 +279,7 @@ func TestLuckyWindows_OffWithoutSecretOrConfig(t *testing.T) {
 	l := newTestLive(store, roller, nil, testNow)
 	for m := 0; m < 24*60; m += 7 {
 		l.now = func() time.Time { return day.Add(time.Duration(m) * time.Minute) }
-		res := l.Process("member_a", "free", m, false)
+		res := l.Process("member_a", "free", m, false, 0)
 		if res.Tier != LuckyBaseTierName || roller.odds != 13 || roller.points != 90 {
 			t.Fatalf("키 없음 → 항상 앙복타임: %+v", res)
 		}
@@ -302,7 +303,7 @@ func TestLuckyLive_WindowPicksTierOddsPoints(t *testing.T) {
 	check := func(at time.Time, wantTier string, wantOdds, wantPts int) {
 		t.Helper()
 		l.now = func() time.Time { return at }
-		res := l.Process("member_a", "free", 1, false)
+		res := l.Process("member_a", "free", 1, false, 0)
 		if res.Tier != wantTier || roller.odds != wantOdds || roller.points != wantPts {
 			t.Errorf("단계 판정: got tier=%q odds=%d pts=%d, want %q %d %d",
 				res.Tier, roller.odds, roller.points, wantTier, wantOdds, wantPts)
@@ -336,4 +337,171 @@ func TestLuckyLive_WindowPicksTierOddsPoints(t *testing.T) {
 	// 범위 밖(새벽)은 항상 앙복타임.
 	check(day.Add(3*time.Hour), LuckyBaseTierName, 13, 90)
 	check(day.Add(23*time.Hour+30*time.Minute), LuckyBaseTierName, 13, 90)
+}
+
+// ── 댓글 발동(L8~L12) ──────────────────────────────────────────────────────────
+
+func commentCfg() *v2repo.LuckyConfig {
+	c := enabledCfg()
+	c.IncludeComments = true
+	c.DailyCapPost, c.DailyCapComment = 3, 4
+	c.ExpireDays = 7
+	return c
+}
+
+// TestLuckyCommentChars — L10/C12: HTML 태그·이모티콘 숏코드·앞뒤 공백을 빼고 rune 수를 센다.
+func TestLuckyCommentChars(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"   ", 0},
+		{"가나다라마바사아자차", 10},
+		{"  가나다라마바사아자차  ", 10},
+		{"<p>가나다</p>", 3},
+		{"<p><b>가나</b> 다</p>", 4}, // 안쪽 공백은 센다
+		{"{emo:smile.gif}", 0},    // 이모티콘만
+		{"{이모티콘:하트}{emo:a.png}  ", 0},
+		{"<p>{emo:x.gif}</p>", 0},
+		{"좋아요{emo:x.gif}", 3},
+		{"abc&nbsp;", 3}, // 엔티티 공백은 앞뒤에서 지워진다
+		{"&lt;3", 2},
+		{"{emoji:x}", 9}, // 다른 중괄호는 숏코드가 아니다
+		{"<img src=\"a.png\">", 0},
+	}
+	for _, c := range cases {
+		if got := LuckyCommentChars(c.in); got != c.want {
+			t.Errorf("LuckyCommentChars(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// TestLuckyLive_CommentMinChars — C12: 정리 길이가 min_comment_chars 미만이면 댓글은 주사위까지 가지 않는다. 글은 길이 무관.
+func TestLuckyLive_CommentMinChars(t *testing.T) {
+	cfg := commentCfg()
+	cfg.MinCommentChars = 6
+	store := &fakeLuckyStore{cfg: cfg, boardOdds: 1, boardCOdds: 1, boardPts: 60}
+	roller := &fakeRoller{win: true}
+	l := newTestLive(store, roller, nil, testNow)
+
+	if res := l.Process("member_a", "free", 1, true, 5); res.Rolled || len(store.grants) != 0 {
+		t.Fatalf("5자 댓글은 제외(하한 6): res=%+v", res)
+	}
+	if res := l.Process("member_a", "free", 2, true, LuckyCommentChars("{emo:x.gif}{emo:y.gif}")); res.Rolled || len(store.grants) != 0 {
+		t.Fatalf("이모티콘만 댓글은 제외: res=%+v", res)
+	}
+	if res := l.Process("member_a", "free", 3, true, 6); !res.Won || len(store.grants) != 1 {
+		t.Fatalf("하한과 같은 길이면 진행: res=%+v grants=%d", res, len(store.grants))
+	}
+	if res := l.Process("member_a", "free", 4, false, 0); !res.Won || len(store.grants) != 2 {
+		t.Fatalf("글은 길이 제한 없음: res=%+v grants=%d", res, len(store.grants))
+	}
+
+	// 설정에 키가 없으면 기본 하한(10) — 9자는 제외, 10자는 진행.
+	def := enabledCfg()
+	def.IncludeComments = true
+	store2 := &fakeLuckyStore{cfg: def, boardOdds: 1, boardCOdds: 1, boardPts: 60}
+	l2 := newTestLive(store2, &fakeRoller{win: true}, nil, testNow)
+	if res := l2.Process("member_a", "free", 1, true, 9); res.Rolled {
+		t.Fatalf("기본 하한 미만은 제외: res=%+v", res)
+	}
+	if res := l2.Process("member_a", "free", 2, true, 10); !res.Won {
+		t.Fatalf("기본 하한 이상은 진행: res=%+v", res)
+	}
+}
+
+// TestLuckyLive_CommentOddsMissing — C13/L9: 게시판 comment_odds 가 없으면 댓글 미발동(글은 그대로).
+func TestLuckyLive_CommentOddsMissing(t *testing.T) {
+	store := &fakeLuckyStore{cfg: commentCfg(), boardOdds: 1, boardPts: 60} // comment_odds 없음
+	roller := &fakeRoller{win: true}
+	l := newTestLive(store, roller, nil, testNow)
+
+	if res := l.Process("member_a", "free", 1, true, 50); res.Rolled || roller.calls != 0 || len(store.grants) != 0 {
+		t.Fatalf("comment_odds 없으면 댓글 미발동: res=%+v", res)
+	}
+	if res := l.Process("member_a", "free", 2, false, 0); !res.Won || len(store.grants) != 1 {
+		t.Fatalf("글은 그대로 발동: res=%+v", res)
+	}
+}
+
+// TestLuckyLive_WindowWithoutCommentOdds — C13/L9: 시간대 단계에 comment_odds 가 없으면 그 단계 안에서 댓글은 미발동,
+// comment_odds 가 있는 단계는 그 확률을 쓰고 금액은 단계 points 를 같이 쓴다.
+func TestLuckyLive_WindowWithoutCommentOdds(t *testing.T) {
+	key := DeriveLuckyWindowKey("test-secret")
+	cfg := commentCfg()
+	cfg.Windows = []v2repo.LuckyWindow{
+		{Name: "단계A", Minutes: 45, Odds: 7, Points: 50},                  // 댓글 확률 없음
+		{Name: "단계B", Minutes: 20, Odds: 3, CommentOdds: 11, Points: 70}, // 댓글 확률 있음
+	}
+	day := kstDay(2026, 10, 1)
+	ws := luckyWindowsForDay(key, day, cfg)
+	if len(ws) != 2 {
+		t.Fatalf("단계 2개가 열려야 한다, got %d", len(ws))
+	}
+	store := &fakeLuckyStore{cfg: cfg, boardOdds: 13, boardCOdds: 17, boardPts: 90}
+	roller := &fakeRoller{win: true}
+	l := newTestLive(store, roller, key, testNow)
+
+	for _, w := range ws {
+		l.now = func() time.Time { return w.start }
+		roller.calls = 0
+		before := len(store.grants)
+		res := l.Process("member_a", "free", 1, true, 50)
+		switch w.name {
+		case "단계A":
+			if res.Rolled || roller.calls != 0 || len(store.grants) != before {
+				t.Errorf("단계A 안에서 댓글은 미발동: res=%+v", res)
+			}
+			// 같은 단계에서 글은 발동(대조).
+			if res := l.Process("member_a", "free", 2, false, 0); !res.Won || roller.odds != 7 {
+				t.Errorf("단계A 안에서 글은 단계 확률로 발동: res=%+v odds=%d", res, roller.odds)
+			}
+		case "단계B":
+			if !res.Won || roller.odds != 11 || roller.points != 70 || res.Tier != "단계B" {
+				t.Errorf("단계B 댓글은 comment_odds·단계 points: res=%+v odds=%d pts=%d", res, roller.odds, roller.points)
+			}
+		}
+	}
+
+	// 시간대 밖(새벽)은 게시판 comment_odds·points.
+	l.now = func() time.Time { return day.Add(3 * time.Hour) }
+	if res := l.Process("member_a", "free", 3, true, 50); !res.Won || roller.odds != 17 || roller.points != 90 || res.Tier != LuckyBaseTierName {
+		t.Errorf("앙복타임 댓글은 게시판 comment_odds: res=%+v odds=%d", res, roller.odds)
+	}
+}
+
+// TestLuckyLive_KindCapsAndExpiryPassed — L8/L13: 글은 kind=point·글 상한, 댓글은 kind=cpoint·댓글 상한.
+// 회원 상한(합산)과 만료 일수는 둘 다 같은 값이 넘어간다.
+func TestLuckyLive_KindCapsAndExpiryPassed(t *testing.T) {
+	store := &fakeLuckyStore{cfg: commentCfg(), boardOdds: 1, boardCOdds: 1, boardPts: 60}
+	l := newTestLive(store, &fakeRoller{win: true}, nil, testNow)
+
+	l.Process("member_a", "free", 10, false, 0)
+	l.Process("member_a", "free", 11, true, 50)
+	if len(store.grants) != 2 {
+		t.Fatalf("지급 시도 2회, got %d", len(store.grants))
+	}
+	post, cmt := store.grants[0], store.grants[1]
+	if post.kind != v2repo.LuckyKindPost || post.opt.DailyCap != 3 {
+		t.Errorf("글: kind=point·글 상한, got kind=%s cap=%d", post.kind, post.opt.DailyCap)
+	}
+	if cmt.kind != v2repo.LuckyKindComment || cmt.opt.DailyCap != 4 || cmt.id != "11" {
+		t.Errorf("댓글: kind=cpoint·댓글 상한·댓글 wr_id, got kind=%s cap=%d id=%s", cmt.kind, cmt.opt.DailyCap, cmt.id)
+	}
+	for _, g := range store.grants {
+		if g.opt.MemberDailyCap != 1 {
+			t.Errorf("회원 상한(합산)은 종류 무관 같은 값, got %d", g.opt.MemberDailyCap)
+		}
+		if g.opt.ExpireDays != 7 {
+			t.Errorf("만료 일수가 넘어가야 한다, got %d", g.opt.ExpireDays)
+		}
+	}
+
+	// 설정에 키가 없으면 만료 기본(365일)이 넘어간다.
+	store2 := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 1, boardPts: 60}
+	newTestLive(store2, &fakeRoller{win: true}, nil, testNow).Process("member_a", "free", 1, false, 0)
+	if len(store2.grants) != 1 || store2.grants[0].opt.ExpireDays != 365 {
+		t.Errorf("만료 기본 365일, got %+v", store2.grants)
+	}
 }

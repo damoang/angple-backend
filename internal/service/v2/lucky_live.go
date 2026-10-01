@@ -4,9 +4,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
+	"html"
 	"log"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 )
@@ -28,13 +32,13 @@ var luckyKST = time.FixedZone("KST", 9*60*60)
 // 테스트에서 가짜로 바꿔 끼우려고 인터페이스로 둔다.
 type LuckyLiveStore interface {
 	GetLuckyConfig() (*v2repo.LuckyConfig, error)
-	GetBoardLucky(boardSlug string) (dice, maxAmount int)
+	GetBoardLucky(boardSlug string) v2repo.BoardLuckyOdds
 	GrantWithOptions(mbID, sourceTable, sourceID, kind string, amount int, opt v2repo.GrantOptions) (v2repo.GrantOutcome, error)
 }
 
 // LuckyLiveResult 는 한 번의 판정 결과다. 테스트·호출부용이며 단계 시각은 일부러 담지 않는다.
 type LuckyLiveResult struct {
-	Rolled  bool                // 주사위까지 갔는가(스위치·댓글·게시판 조건 통과)
+	Rolled  bool                // 주사위까지 갔는가(스위치·댓글·길이·게시판·단계 확률 조건 통과)
 	Won     bool                // 주사위 당첨
 	Tier    string              // 적용된 단계 이름
 	Odds    int                 // 적용된 확률 분모
@@ -71,10 +75,13 @@ func DeriveLuckyWindowKey(baseSecret string) []byte {
 }
 
 // Process 는 한 건(글 또는 댓글)을 판정하고 당첨이면 지급한다. best-effort 라 에러는 로그로만 남긴다.
+// commentChars 는 댓글 본문의 정리 길이(LuckyCommentChars)다. 글이면 쓰지 않는다(글은 길이 제한 없음).
 //
-// 순서: 마스터 스위치 → 댓글 여부 → 게시판 lucky.enabled → 단계 선택(시간대 안이면 그 단계) → 주사위 → 지급(상한 포함).
+// 순서: 마스터 스위치 → 댓글 여부·길이 → 게시판(그 종류의 확률) → 단계 선택(시간대 안이면 그 단계)
+// → 그 단계의 그 종류 확률 → 주사위 → 지급(상한 포함).
 // ⛔ 게시판이 꺼져 있으면 시간대와 무관하게 발동하지 않는다 — 운영 기록·광고 게시판에 시간대가 새면 안 된다.
-func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool) LuckyLiveResult {
+// 댓글도 같다: 게시판 comment_odds 가 없으면 시간대 안이어도 댓글은 발동하지 않는다.
+func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool, commentChars int) LuckyLiveResult {
 	var res LuckyLiveResult
 	if mbID == "" {
 		return res
@@ -83,16 +90,32 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool) LuckyLi
 	if err != nil || cfg == nil || !cfg.Enabled { // 전역 마스터 스위치
 		return res
 	}
-	if isComment && !cfg.IncludeComments { // 기본은 글만
-		return res
+	if isComment {
+		if !cfg.IncludeComments { // 기본은 글만
+			return res
+		}
+		if cfg.MinCommentChars > 0 && commentChars < cfg.MinCommentChars { // 짧은 댓글 제외
+			return res
+		}
 	}
-	dice, maxAmount := l.store.GetBoardLucky(slug) // 게시판별 앙복타임 확률·금액(안 켠 곳은 0,0)
-	if dice < 1 || maxAmount < 1 {
+	board := l.store.GetBoardLucky(slug) // 게시판별 앙복타임 확률·금액(안 켠 곳은 0)
+	boardOdds := board.Odds
+	if isComment {
+		boardOdds = board.CommentOdds
+	}
+	if boardOdds < 1 || board.Points < 1 {
 		return res
 	}
 
 	now := l.now()
-	res.Tier, res.Odds, res.Points = l.pickTier(cfg, now, dice, maxAmount)
+	tier := l.pickTier(cfg, now, board)
+	res.Tier, res.Odds, res.Points = tier.name, tier.odds, tier.points
+	if isComment {
+		res.Odds = tier.commentOdds
+	}
+	if res.Odds < 1 { // 이 단계에는 댓글 확률이 없다 — 이 단계에서 댓글은 발동하지 않는다
+		return res
+	}
 	res.Rolled = true
 
 	won, amount := l.roller.RollLucky(res.Odds, res.Points)
@@ -101,11 +124,16 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool) LuckyLi
 	}
 	res.Won, res.Amount = true, amount
 
-	outcome, err := l.store.GrantWithOptions(mbID, slug, strconv.Itoa(wrID), "point", amount, v2repo.GrantOptions{
-		MemberDailyCap: cfg.MemberDailyCap,
-		DailyCap:       cfg.DailyCap,
+	kind, dailyCap := v2repo.LuckyKindPost, cfg.DailyCapPost
+	if isComment {
+		kind, dailyCap = v2repo.LuckyKindComment, cfg.DailyCapComment
+	}
+	outcome, err := l.store.GrantWithOptions(mbID, slug, strconv.Itoa(wrID), kind, amount, v2repo.GrantOptions{
+		MemberDailyCap: cfg.MemberDailyCap, // 글+댓글 합산
+		DailyCap:       dailyCap,           // 종류별
 		TierName:       res.Tier,
 		Now:            now,
+		ExpireDays:     cfg.ExpireDays,
 	})
 	res.Outcome, res.Err = outcome, err
 	logLuckyOutcome(mbID, slug, wrID, res.Tier, outcome, err)
@@ -125,24 +153,33 @@ func logLuckyOutcome(mbID, slug string, wrID int, tier string, outcome v2repo.Gr
 	}
 }
 
-// pickTier 는 now 가 오늘의 어느 시간대 단계 안이면 그 단계의 (이름, 확률, 금액)을, 아니면 앙복타임(게시판 값)을 돌려준다.
-func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, boardOdds, boardPoints int) (string, int, int) {
+// luckyTier 는 판정에 쓰는 단계 하나의 이름·확률(글/댓글)·금액이다.
+type luckyTier struct {
+	name        string
+	odds        int // 글 확률 분모
+	commentOdds int // 댓글 확률 분모(0 = 이 단계에서 댓글 미발동)
+	points      int
+}
+
+// pickTier 는 now 가 오늘의 어느 시간대 단계 안이면 그 단계를, 아니면 앙복타임(게시판 값)을 돌려준다.
+func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, board v2repo.BoardLuckyOdds) luckyTier {
 	k := now.In(luckyKST)
 	dayStart := time.Date(k.Year(), k.Month(), k.Day(), 0, 0, 0, 0, luckyKST)
 	for _, s := range luckyWindowsForDay(l.windowKey, dayStart, cfg) {
 		if !k.Before(s.start) && k.Before(s.end) {
-			return s.name, s.odds, s.points
+			return luckyTier{name: s.name, odds: s.odds, commentOdds: s.commentOdds, points: s.points}
 		}
 	}
-	return LuckyBaseTierName, boardOdds, boardPoints
+	return luckyTier{name: LuckyBaseTierName, odds: board.Odds, commentOdds: board.CommentOdds, points: board.Points}
 }
 
 // luckyWindowSlot 은 그날 열리는 단계 구간 하나다. ⛔ 패키지 밖(응답·로그·API)으로 내보내지 않는다.
 type luckyWindowSlot struct {
-	name       string
-	start, end time.Time // KST
-	odds       int
-	points     int
+	name        string
+	start, end  time.Time // KST
+	odds        int
+	commentOdds int // 1 미만이면 0(이 단계에서 댓글 미발동)
+	points      int
 }
 
 // luckyWindowsForDay 는 dayStart(KST 0시) 날짜의 단계 구간들을 결정적으로 계산한다.
@@ -176,12 +213,17 @@ func luckyWindowsForDay(key []byte, dayStart time.Time, cfg *v2repo.LuckyConfig)
 		}
 		placed = append(placed, luckySpan{start, start + w.Minutes})
 		s := day.Add(time.Duration(start) * time.Minute)
+		commentOdds := w.CommentOdds
+		if commentOdds < 1 {
+			commentOdds = 0
+		}
 		out = append(out, luckyWindowSlot{
-			name:   w.Name,
-			start:  s,
-			end:    s.Add(time.Duration(w.Minutes) * time.Minute),
-			odds:   w.Odds,
-			points: w.Points,
+			name:        w.Name,
+			start:       s,
+			end:         s.Add(time.Duration(w.Minutes) * time.Minute),
+			odds:        w.Odds,
+			commentOdds: commentOdds,
+			points:      w.Points,
 		})
 	}
 	return out
@@ -243,4 +285,20 @@ func luckyWindowHash(key []byte, date string, index, attempt int) uint64 {
 	m := hmac.New(sha256.New, key)
 	m.Write([]byte(msg))
 	return binary.BigEndian.Uint64(m.Sum(nil)[:8])
+}
+
+// 댓글 길이 계산용 패턴. HTML 태그와 이모티콘 숏코드({emo:...}, {이모티콘:...})를 지운다.
+var (
+	luckyHTMLTagRe  = regexp.MustCompile(`<[^>]*>`)
+	luckyEmoticonRe = regexp.MustCompile(`\{(?:emo|이모티콘):[^}]*\}`)
+)
+
+// LuckyCommentChars 는 댓글 본문의 「정리 길이」를 돌려준다(min_comment_chars 판정용, 순수 함수).
+// 정리 = HTML 태그 제거 → HTML 엔티티 풀기(&nbsp; 등이 글자로 세지지 않게) → 이모티콘 숏코드 제거 → 앞뒤 공백 제거,
+// 길이는 rune 수다. 이모티콘·공백만 있는 댓글은 0 이다.
+func LuckyCommentChars(content string) int {
+	s := luckyHTMLTagRe.ReplaceAllString(content, "")
+	s = html.UnescapeString(s)
+	s = luckyEmoticonRe.ReplaceAllString(s, "")
+	return utf8.RuneCountInString(strings.TrimSpace(s))
 }

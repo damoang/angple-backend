@@ -349,3 +349,294 @@ func TestLuckyConfig_MalformedIsOffAndIsolated(t *testing.T) {
 		t.Error("잘못된 설정이면 꺼져야 한다")
 	}
 }
+
+// ── 댓글 발동(종류별 상한)·포인트 만료 ──────────────────────────────────────────
+
+// TestGrant_PostAndCommentDailyCapsIndependent — C10: 글 상한과 댓글 상한은 서로 독립(같은 kind 끼리만 센다).
+func TestGrant_PostAndCommentDailyCapsIndependent(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	now := time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC) // KST 12:00
+	postOpt := GrantOptions{MemberDailyCap: 1, DailyCap: 3, Now: now}
+	commentOpt := GrantOptions{MemberDailyCap: 1, DailyCap: 4, Now: now}
+
+	// 글 3건으로 글 상한을 채운다.
+	for i := 1; i <= 3; i++ {
+		mb := fmt.Sprintf("post_%02d", i)
+		addLuckyMember(t, db, mb)
+		if out, err := r.GrantWithOptions(mb, "free", fmt.Sprintf("%d", i), LuckyKindPost, 10, postOpt); err != nil || out != GrantOutcomeGranted {
+			t.Fatalf("글 %d번째는 지급돼야 한다: out=%s err=%v", i, out, err)
+		}
+	}
+	addLuckyMember(t, db, "post_04")
+	if out, _ := r.GrantWithOptions("post_04", "free", "4", LuckyKindPost, 10, postOpt); out != GrantOutcomeCappedDaily {
+		t.Fatalf("글 상한을 넘는 글은 capped_daily, got %s", out)
+	}
+
+	// 글 상한이 찼어도 댓글은 댓글 상한(4)까지 받는다.
+	for i := 1; i <= 4; i++ {
+		mb := fmt.Sprintf("cmt_%02d", i)
+		addLuckyMember(t, db, mb)
+		if out, err := r.GrantWithOptions(mb, "free", fmt.Sprintf("%d", 100+i), LuckyKindComment, 10, commentOpt); err != nil || out != GrantOutcomeGranted {
+			t.Fatalf("댓글 %d번째는 글 상한과 무관하게 지급돼야 한다: out=%s err=%v", i, out, err)
+		}
+	}
+	addLuckyMember(t, db, "cmt_05")
+	if out, _ := r.GrantWithOptions("cmt_05", "free", "105", LuckyKindComment, 10, commentOpt); out != GrantOutcomeCappedDaily {
+		t.Fatalf("댓글 상한을 넘는 댓글은 capped_daily, got %s", out)
+	}
+
+	// 반대 방향: 댓글 상한이 찼어도(글 상한도 찼지만) 글 상한을 크게 하면 글은 다시 받는다 — 댓글 건수가 글 상한에 섞이지 않는다.
+	postOpt.DailyCap = 4
+	if out, err := r.GrantWithOptions("post_04", "free", "4", LuckyKindPost, 10, postOpt); err != nil || out != GrantOutcomeGranted {
+		t.Fatalf("글 상한 4 면 네 번째 글은 지급(댓글 4건은 세지 않음): out=%s err=%v", out, err)
+	}
+
+	if n := countRows(t, db, "g5_da_lucky_grant"); n != 8 {
+		t.Errorf("원장은 글 4 + 댓글 4 = 8행, got %d", n)
+	}
+	if n := countRows(t, db, "g5_point"); n != 8 {
+		t.Errorf("포인트 내역도 8행(댓글도 g5_point 지급), got %d", n)
+	}
+}
+
+// TestGrant_MemberCapCountsPostsAndComments — C11/L11: 회원 하루 상한은 글+댓글 합산 — 글 당첨 뒤 같은 날 댓글 당첨은 막힌다.
+func TestGrant_MemberCapCountsPostsAndComments(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	addLuckyMember(t, db, "member_a")
+	now := time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC)
+
+	if out, err := r.GrantWithOptions("member_a", "free", "1", LuckyKindPost, 60, GrantOptions{MemberDailyCap: 1, DailyCap: 3, Now: now}); err != nil || out != GrantOutcomeGranted {
+		t.Fatalf("글 당첨은 지급: out=%s err=%v", out, err)
+	}
+	out, err := r.GrantWithOptions("member_a", "free", "2", LuckyKindComment, 80, GrantOptions{MemberDailyCap: 1, DailyCap: 4, Now: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("상한은 에러가 아니다: %v", err)
+	}
+	if out != GrantOutcomeCappedMember {
+		t.Fatalf("글 당첨 뒤 댓글 당첨은 capped_member 여야 한다, got %s", out)
+	}
+	if n := countRows(t, db, "g5_point"); n != 1 {
+		t.Errorf("포인트 내역은 글 1행뿐이어야 한다, got %d", n)
+	}
+	if p := memberPoint(t, db, "member_a"); p != 60 {
+		t.Errorf("잔액은 글 당첨분(60)만, got %d", p)
+	}
+
+	// 반대 순서(댓글 먼저)도 같다.
+	addLuckyMember(t, db, "member_b")
+	if out, _ := r.GrantWithOptions("member_b", "free", "3", LuckyKindComment, 80, GrantOptions{MemberDailyCap: 1, DailyCap: 4, Now: now}); out != GrantOutcomeGranted {
+		t.Fatalf("댓글 당첨은 지급, got %s", out)
+	}
+	if out, _ := r.GrantWithOptions("member_b", "free", "4", LuckyKindPost, 60, GrantOptions{MemberDailyCap: 1, DailyCap: 3, Now: now}); out != GrantOutcomeCappedMember {
+		t.Fatalf("댓글 당첨 뒤 글 당첨은 capped_member, got %s", out)
+	}
+}
+
+// TestGrant_CommentPointContentAndBadgeKeys — L12: 댓글 내역 문구는 「<단계> 럭키 포인트(댓글)」, 배지 조인 키는 그대로.
+func TestGrant_CommentPointContentAndBadgeKeys(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	addLuckyMember(t, db, "member_a")
+	addLuckyMember(t, db, "member_b")
+	now := time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC)
+
+	if _, err := r.GrantWithOptions("member_a", "free", "777", LuckyKindComment, 80, GrantOptions{TierName: "단계B", Now: now}); err != nil {
+		t.Fatalf("지급 실패: %v", err)
+	}
+	if _, err := r.GrantWithOptions("member_b", "free", "778", LuckyKindComment, 80, GrantOptions{Now: now}); err != nil {
+		t.Fatalf("지급 실패: %v", err)
+	}
+
+	type row struct {
+		PoContent   string
+		PoRelTable  string
+		PoRelID     string
+		PoRelAction string
+	}
+	var rows []row
+	if err := db.Table("g5_point").Select("po_content, po_rel_table, po_rel_id, po_rel_action").Order("po_id").Scan(&rows).Error; err != nil {
+		t.Fatalf("내역 조회 실패: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("내역 2행이어야 한다, got %d", len(rows))
+	}
+	if rows[0].PoContent != "단계B 럭키 포인트(댓글)" {
+		t.Errorf("댓글 문구, got %q", rows[0].PoContent)
+	}
+	if rows[1].PoContent != luckyPointContent+"(댓글)" {
+		t.Errorf("단계 이름이 없을 때 댓글 문구, got %q", rows[1].PoContent)
+	}
+	if rows[0].PoRelAction != "@lucky" || rows[0].PoRelTable != "free" || rows[0].PoRelID != "777" {
+		t.Errorf("배지 조인 키(@lucky, 게시판 slug, 댓글 wr_id)가 그대로여야 한다: %+v", rows[0])
+	}
+
+	var kind string
+	if err := db.Table("g5_da_lucky_grant").Select("kind").Where("source_id = ?", "777").Scan(&kind).Error; err != nil {
+		t.Fatalf("원장 조회 실패: %v", err)
+	}
+	if kind != "cpoint" {
+		t.Errorf("댓글 원장 kind 는 cpoint, got %q", kind)
+	}
+}
+
+// TestLuckyExpireDate — L13: 만료일 = 지급 시각의 KST 날짜 + days, 0 이하는 9999-12-31.
+func TestLuckyExpireDate(t *testing.T) {
+	cases := []struct {
+		name string
+		now  time.Time
+		days int
+		want string
+	}{
+		{"KST 23:59:59(UTC 14:59:59) → 그 KST 날짜 기준",
+			time.Date(2026, 10, 1, 14, 59, 59, 0, time.UTC), 365, "2027-10-01"},
+		{"KST 00:00(UTC 15:00) → 다음 KST 날짜 기준",
+			time.Date(2026, 10, 1, 15, 0, 0, 0, time.UTC), 365, "2027-10-02"},
+		{"UTC 날짜와 KST 날짜가 다른 새벽(UTC 전날)",
+			time.Date(2026, 9, 30, 16, 0, 0, 0, time.UTC), 30, "2026-10-31"},
+		{"KST 로 들어와도 같은 순간이면 같은 답",
+			time.Date(2026, 10, 2, 0, 0, 0, 0, luckyKST), 365, "2027-10-02"},
+		{"윤년 넘김", time.Date(2027, 3, 1, 3, 0, 0, 0, time.UTC), 365, "2028-02-29"},
+		{"0 = 만료 없음", time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC), 0, "9999-12-31"},
+		{"음수도 만료 없음(설정 단에서 기본값으로 바뀐다)", time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC), -3, "9999-12-31"},
+	}
+	for _, c := range cases {
+		if got := luckyExpireDate(c.now, c.days); got != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+// TestGrant_ExpireDateWritten — L13: 지급 행의 po_expire_date 가 옵션대로 기록된다(기존 Grant 는 만료 없음 유지).
+func TestGrant_ExpireDateWritten(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	addLuckyMember(t, db, "member_a")
+	now := time.Date(2026, 10, 1, 14, 59, 59, 0, time.UTC) // KST 10/01 23:59:59
+
+	if _, err := r.GrantWithOptions("member_a", "free", "1", LuckyKindPost, 5, GrantOptions{Now: now, ExpireDays: 365}); err != nil {
+		t.Fatalf("지급 실패: %v", err)
+	}
+	if _, err := r.GrantWithOptions("member_a", "free", "2", LuckyKindComment, 5, GrantOptions{Now: now.Add(time.Second), ExpireDays: 365}); err != nil {
+		t.Fatalf("지급 실패: %v", err)
+	}
+	if ok, err := r.Grant("member_a", "free", "3", LuckyKindPost, 5); err != nil || !ok {
+		t.Fatalf("기존 Grant 지급 실패: ok=%v err=%v", ok, err)
+	}
+
+	var dates []string
+	if err := db.Table("g5_point").Order("po_id").Pluck("po_expire_date", &dates).Error; err != nil {
+		t.Fatalf("만료일 조회 실패: %v", err)
+	}
+	want := []string{"2027-10-01", "2027-10-02", "9999-12-31"}
+	if len(dates) != len(want) {
+		t.Fatalf("내역 %d행이어야 한다, got %d", len(want), len(dates))
+	}
+	for i := range want {
+		if dates[i] != want[i] {
+			t.Errorf("%d번째 만료일: got %s, want %s", i, dates[i], want[i])
+		}
+	}
+}
+
+// TestLuckyConfig_CommentAndExpiryDefaults — C5 확장: 새 키가 없으면 기본값(글 10·댓글 20·댓글 10자·만료 365일).
+func TestLuckyConfig_CommentAndExpiryDefaults(t *testing.T) {
+	var c LuckyConfig
+	if err := json.Unmarshal([]byte(`{"enabled": true}`), &c); err != nil {
+		t.Fatalf("파싱 실패: %v", err)
+	}
+	if c.IncludeComments {
+		t.Error("include_comments 기본은 false 유지")
+	}
+	if c.DailyCapPost != 10 || c.DailyCapComment != 20 {
+		t.Errorf("종류별 상한 기본, got %d/%d", c.DailyCapPost, c.DailyCapComment)
+	}
+	if c.MinCommentChars != 10 {
+		t.Errorf("min_comment_chars 기본, got %d", c.MinCommentChars)
+	}
+	if c.ExpireDays != 365 {
+		t.Errorf("expire_days 기본, got %d", c.ExpireDays)
+	}
+	d := DefaultLuckyConfig()
+	if d.DailyCapPost != 10 || d.DailyCapComment != 20 || d.MinCommentChars != 10 || d.ExpireDays != 365 {
+		t.Errorf("DefaultLuckyConfig 새 기본값: %+v", *d)
+	}
+}
+
+// TestLuckyConfig_DailyCapPostFallback — L8: daily_cap_post 가 없을 때만 예전 daily_cap 을 글 상한으로 쓴다.
+func TestLuckyConfig_DailyCapPostFallback(t *testing.T) {
+	cases := []struct {
+		raw      string
+		wantPost int
+	}{
+		{`{"daily_cap":3}`, 3},                      // 예전 키만 → 글 상한
+		{`{"daily_cap":3,"daily_cap_post":5}`, 5},   // 새 키 우선
+		{`{"daily_cap_post":0,"daily_cap":3}`, 0},   // 새 키 0 = 명시적 무제한
+		{`{"daily_cap":0}`, 0},                      // 예전 키 0 도 그대로
+		{`{"daily_cap":-2}`, 10},                    // 음수 → 기본
+		{`{"daily_cap_post":-1,"daily_cap":3}`, 10}, // 새 키 음수 → 기본
+		{`{}`, 10},
+	}
+	for _, c := range cases {
+		var cfg LuckyConfig
+		if err := json.Unmarshal([]byte(c.raw), &cfg); err != nil {
+			t.Fatalf("파싱 실패 %s: %v", c.raw, err)
+		}
+		if cfg.DailyCapPost != c.wantPost {
+			t.Errorf("%s: daily_cap_post got %d want %d", c.raw, cfg.DailyCapPost, c.wantPost)
+		}
+		if cfg.DailyCapComment != 20 {
+			t.Errorf("%s: 댓글 상한은 daily_cap 과 무관하게 기본, got %d", c.raw, cfg.DailyCapComment)
+		}
+	}
+}
+
+// TestLuckyConfig_CommentExplicitAndNegative 는 새 키의 명시값·0·음수 처리를 본다.
+func TestLuckyConfig_CommentExplicitAndNegative(t *testing.T) {
+	var c LuckyConfig
+	raw := `{"enabled":true,"daily_cap_comment":4,"min_comment_chars":6,"expire_days":0,
+		"windows":[{"name":"단계A","minutes":45,"odds":7,"comment_odds":17,"points":60}]}`
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatalf("파싱 실패: %v", err)
+	}
+	if c.DailyCapComment != 4 || c.MinCommentChars != 6 || c.ExpireDays != 0 {
+		t.Errorf("명시값(만료 0=없음 포함), got %+v", c)
+	}
+	if len(c.Windows) != 1 || c.Windows[0].CommentOdds != 17 {
+		t.Errorf("windows[].comment_odds 파싱, got %+v", c.Windows)
+	}
+
+	var neg LuckyConfig
+	if err := json.Unmarshal([]byte(`{"daily_cap_comment":-1,"min_comment_chars":-1,"expire_days":-30}`), &neg); err != nil {
+		t.Fatalf("파싱 실패: %v", err)
+	}
+	if neg.DailyCapComment != 20 || neg.MinCommentChars != 10 || neg.ExpireDays != 365 {
+		t.Errorf("음수는 기본값으로, got %d/%d/%d", neg.DailyCapComment, neg.MinCommentChars, neg.ExpireDays)
+	}
+}
+
+// TestBoardLuckyOddsOf — L9: 게시판 comment_odds 가 없거나 1 미만이면 댓글 0(미발동), 꺼진 게시판은 전부 0.
+func TestBoardLuckyOddsOf(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *BoardLucky
+		want BoardLuckyOdds
+	}{
+		{"nil", nil, BoardLuckyOdds{}},
+		{"꺼짐", &BoardLucky{Enabled: false, Odds: 7, CommentOdds: 11, Points: 60}, BoardLuckyOdds{}},
+		{"금액 없음", &BoardLucky{Enabled: true, Odds: 7, CommentOdds: 11}, BoardLuckyOdds{}},
+		{"글만(comment_odds 없음)", &BoardLucky{Enabled: true, Odds: 7, Points: 60}, BoardLuckyOdds{Odds: 7, Points: 60}},
+		{"comment_odds 음수", &BoardLucky{Enabled: true, Odds: 7, CommentOdds: -1, Points: 60}, BoardLuckyOdds{Odds: 7, Points: 60}},
+		{"둘 다", &BoardLucky{Enabled: true, Odds: 7, CommentOdds: 11, Points: 60}, BoardLuckyOdds{Odds: 7, CommentOdds: 11, Points: 60}},
+	}
+	for _, c := range cases {
+		if got := boardLuckyOddsOf(c.in); got != c.want {
+			t.Errorf("%s: got %+v want %+v", c.name, got, c.want)
+		}
+	}
+
+	var w boardLuckyWrapper
+	if err := json.Unmarshal([]byte(`{"lucky":{"enabled":true,"odds":7,"comment_odds":11,"points":60}}`), &w); err != nil || w.Lucky == nil {
+		t.Fatalf("게시판 설정 파싱 실패: %v", err)
+	}
+	if got := boardLuckyOddsOf(w.Lucky); got.CommentOdds != 11 {
+		t.Errorf("lucky.comment_odds 파싱, got %+v", got)
+	}
+}
