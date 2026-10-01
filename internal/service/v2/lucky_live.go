@@ -125,12 +125,15 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool, comment
 	if !won {
 		return res
 	}
-	exp := 0
+	exp, expFallback := 0, 0
 	if prize, ok := pickPrize(tier.prizes, l.randN); ok {
 		// 상품 표가 있으면 주사위 금액 대신 고른 줄로 준다(포인트 1..Points 균등, 경험치 고정).
 		amount, exp = prizeAmount(prize, l.randN), prize.Exp
 		if exp < 0 {
 			exp = 0
+		}
+		if exp > 0 {
+			expFallback = prizeFallbackPoints(tier.prizes, tier.points)
 		}
 	}
 	if amount <= 0 && exp <= 0 { // 꽝 줄(포인트·경험치 모두 0) 또는 금액 없음
@@ -149,6 +152,9 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool, comment
 		Now:            now,
 		ExpireDays:     cfg.ExpireDays,
 		Exp:            exp,
+		// 경험치를 받을 수 없는 회원이면 저장소가 tx 안에서 「경험치만」을 1..expFallback 포인트로 바꾼다.
+		ExpFallbackPoints: expFallback,
+		RandN:             l.randN,
 	})
 	res.Outcome, res.Err = outcome, err
 	logLuckyOutcome(mbID, slug, wrID, res.Tier, outcome, err)
@@ -165,6 +171,8 @@ func logLuckyOutcome(mbID, slug string, wrID int, tier string, outcome v2repo.Gr
 		log.Printf("[lucky] capped member %s (%s/%d) tier=%s", mbID, slug, wrID, tier)
 	case outcome == v2repo.GrantOutcomeCappedDaily:
 		log.Printf("[lucky] capped daily %s (%s/%d) tier=%s", mbID, slug, wrID, tier)
+	case outcome == v2repo.GrantOutcomeNothing:
+		log.Printf("[lucky] exp-only prize without fallback points %s (%s/%d) tier=%s", mbID, slug, wrID, tier)
 	}
 }
 
@@ -215,6 +223,24 @@ func prizeAmount(p v2repo.LuckyPrize, rng func(n int) int) int {
 		return 0
 	}
 	return rng(p.Points) + 1
+}
+
+// prizeFallbackPoints 는 경험치를 받을 수 없는 회원의 「경험치만」 당첨을 대신할 포인트 최대 금액이다.
+// 그 단계 상품 표(weight>0 인 줄)의 points 최댓값, 없으면 레거시 points, 그것도 없으면 0(지급 없음).
+func prizeFallbackPoints(prizes []v2repo.LuckyPrize, legacyPoints int) int {
+	maxPts := 0
+	for _, p := range prizes {
+		if p.Weight > 0 && p.Points > maxPts {
+			maxPts = p.Points
+		}
+	}
+	if maxPts > 0 {
+		return maxPts
+	}
+	if legacyPoints > 0 {
+		return legacyPoints
+	}
+	return 0
 }
 
 // pickTier 는 now 가 오늘의 어느 시간대 단계 안이면 그 단계를, 아니면 앙복타임(게시판 값)을 돌려준다.

@@ -302,3 +302,112 @@ func TestBoardLuckyOddsOf_Prizes(t *testing.T) {
 		t.Errorf("줄 게 없는 표·points 없음 = 꺼짐, got %+v", empty)
 	}
 }
+
+// expBlockedLevel 은 AddExp 규칙상 일반 적립이 막히는 as_level 이다(로그인 외 적립 불가 구간).
+const expBlockedLevel = 80
+
+// TestGrantPrize_ExpBlocked_ExpOnlyFallsBackToPoints — 경험치를 받을 수 없는 회원의 「경험치만」 당첨은
+// 대체 포인트(1..ExpFallbackPoints)로 바뀐다: 원장 1행(amount=대체 포인트, po_id 연결)·g5_point 1행(포인트 문구)·g5_na_xp 0행.
+func TestGrantPrize_ExpBlocked_ExpOnlyFallsBackToPoints(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	seedPrizeMember(t, db, "member_a", 4, levelExp(expBlockedLevel), expBlockedLevel)
+
+	gotN := 0
+	opt := GrantOptions{TierName: "단계A", Now: prizeNow, Exp: 37, ExpFallbackPoints: 23,
+		RandN: func(n int) int { gotN = n; return 6 }} // → 7P
+	out, err := r.GrantWithOptions("member_a", "free", "71", LuckyKindPost, 0, opt)
+	if err != nil || out != GrantOutcomeGranted {
+		t.Fatalf("대체 포인트로 지급돼야 한다: out=%s err=%v", out, err)
+	}
+	if gotN != 23 {
+		t.Errorf("대체 포인트 rng 상한=23, got %d", gotN)
+	}
+	ledger := prizeLedger(t, db)
+	if len(ledger) != 1 || ledger[0].Amount != 7 || ledger[0].PoID == nil {
+		t.Fatalf("원장 1행·amount=대체 포인트 7·po_id 연결, got %+v", ledger)
+	}
+	var content string
+	if err := db.Table("g5_point").Select("po_content").Scan(&content).Error; err != nil {
+		t.Fatalf("g5_point 조회 실패: %v", err)
+	}
+	if content != "단계A 럭키 포인트" {
+		t.Errorf("내역 문구는 포인트 기준, got %q", content)
+	}
+	if n := countRows(t, db, "g5_na_xp"); n != 0 {
+		t.Errorf("g5_na_xp 0행, got %d", n)
+	}
+	m := prizeMember(t, db, "member_a")
+	if m.MbPoint != 7 || m.AsExp != levelExp(expBlockedLevel) || m.AsLevel != expBlockedLevel || m.MbLevel != 4 {
+		t.Errorf("포인트 7·as_exp/as_level/mb_level 불변, got %+v", m)
+	}
+}
+
+// TestGrantPrize_ExpBlocked_BothGivesPointsOnly — 경험치를 받을 수 없는 회원의 「둘 다」 당첨은 포인트만(대체 rng 미사용).
+func TestGrantPrize_ExpBlocked_BothGivesPointsOnly(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	seedPrizeMember(t, db, "member_a", 4, levelExp(expBlockedLevel), expBlockedLevel)
+	opt := GrantOptions{TierName: "단계B", Now: prizeNow, Exp: 41, ExpFallbackPoints: 23,
+		RandN: func(int) int { t.Fatal("「둘 다」는 대체 포인트를 뽑지 않는다"); return 0 }}
+	out, err := r.GrantWithOptions("member_a", "free", "72", LuckyKindComment, 19, opt)
+	if err != nil || out != GrantOutcomeGranted {
+		t.Fatalf("포인트는 지급돼야 한다: out=%s err=%v", out, err)
+	}
+	if ledger := prizeLedger(t, db); len(ledger) != 1 || ledger[0].Amount != 19 {
+		t.Fatalf("원장 1행·amount=19, got %+v", ledger)
+	}
+	if n := countRows(t, db, "g5_na_xp"); n != 0 {
+		t.Errorf("g5_na_xp 0행, got %d", n)
+	}
+	if m := prizeMember(t, db, "member_a"); m.MbPoint != 19 || m.AsExp != levelExp(expBlockedLevel) || m.MbLevel != 4 {
+		t.Errorf("포인트만, got %+v", m)
+	}
+}
+
+// TestGrantPrize_ExpBlocked_NoFallbackWritesNothing — 대체 포인트가 없으면(0) 원장·포인트·경험치 모두 쓰지 않는다.
+func TestGrantPrize_ExpBlocked_NoFallbackWritesNothing(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	seedPrizeMember(t, db, "member_a", 4, levelExp(expBlockedLevel), expBlockedLevel)
+	out, err := r.GrantWithOptions("member_a", "free", "73", LuckyKindPost, 0, GrantOptions{Now: prizeNow, Exp: 37})
+	if err != nil || out != GrantOutcomeNothing {
+		t.Fatalf("지급 없음(nothing)이어야 한다: out=%s err=%v", out, err)
+	}
+	for _, table := range []string{"g5_da_lucky_grant", "g5_point", "g5_na_xp"} {
+		if n := countRows(t, db, table); n != 0 {
+			t.Errorf("%s 0행이어야 한다, got %d", table, n)
+		}
+	}
+}
+
+// TestGrantPrize_NormalMemberIgnoresFallback — 일반 회원은 대체 설정이 있어도 그대로 경험치를 받는다(포인트 없음, rng 미사용).
+func TestGrantPrize_NormalMemberIgnoresFallback(t *testing.T) {
+	r, db := newLuckyTestRepo(t)
+	seedPrizeMember(t, db, "member_a", 3, 0, 1)
+	opt := GrantOptions{Now: prizeNow, Exp: 37, ExpFallbackPoints: 23,
+		RandN: func(int) int { t.Fatal("일반 회원은 대체 포인트를 뽑지 않는다"); return 0 }}
+	out, err := r.GrantWithOptions("member_a", "free", "74", LuckyKindPost, 0, opt)
+	if err != nil || out != GrantOutcomeGranted {
+		t.Fatalf("지급돼야 한다: out=%s err=%v", out, err)
+	}
+	if n := countRows(t, db, "g5_point"); n != 0 {
+		t.Errorf("g5_point 0행, got %d", n)
+	}
+	if n := countRows(t, db, "g5_na_xp"); n != 1 {
+		t.Errorf("g5_na_xp 1행, got %d", n)
+	}
+	if m := prizeMember(t, db, "member_a"); m.MbPoint != 0 || m.AsExp != 37 || m.MbLevel != 3 {
+		t.Errorf("경험치만, got %+v", m)
+	}
+}
+
+// TestExpAccrualBlocked — 럭키(게시판 슬러그 rel_table)는 고레벨·최대 레벨에서 막히고, 그 아래는 열린다.
+func TestExpAccrualBlocked(t *testing.T) {
+	if expAccrualBlocked(expBlockedLevel-1, 37, "free") {
+		t.Error("고레벨 미만은 적립 가능")
+	}
+	if !expAccrualBlocked(expBlockedLevel, 37, "free") || !expAccrualBlocked(maxXPLevel, 37, "free") {
+		t.Error("고레벨·최대 레벨은 럭키 적립 불가")
+	}
+	if expAccrualBlocked(expBlockedLevel, 37, "@login") {
+		t.Error("로그인 적립은 고레벨에서도 가능(기존 규칙)")
+	}
+}

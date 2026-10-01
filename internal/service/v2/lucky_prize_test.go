@@ -235,3 +235,59 @@ func TestLuckyLive_WindowPrizes(t *testing.T) {
 		t.Errorf("단계 상품 표(41)가 쓰여야 한다, res=%+v grants=%+v", res, store.grants)
 	}
 }
+
+// TestPrizeFallbackPoints — 「경험치만」 대체 포인트 상한: 표(weight>0)의 points 최댓값 → 레거시 points → 0.
+func TestPrizeFallbackPoints(t *testing.T) {
+	cases := []struct {
+		name   string
+		prizes []v2repo.LuckyPrize
+		legacy int
+		want   int
+	}{
+		{"표 최댓값", []v2repo.LuckyPrize{{Weight: 3, Points: 17}, {Weight: 5, Exp: 37}, {Weight: 2, Points: 29, Exp: 41}}, 90, 29},
+		{"weight 0 줄은 제외", []v2repo.LuckyPrize{{Weight: 0, Points: 99}, {Weight: 5, Exp: 37}, {Weight: 1, Points: 13}}, 90, 13},
+		{"표에 포인트 없음 → 레거시", []v2repo.LuckyPrize{{Weight: 5, Exp: 37}}, 90, 90},
+		{"둘 다 없음 → 0", []v2repo.LuckyPrize{{Weight: 5, Exp: 37}}, 0, 0},
+	}
+	for _, c := range cases {
+		if got := prizeFallbackPoints(c.prizes, c.legacy); got != c.want {
+			t.Errorf("%s: got %d want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestLuckyLive_PassesExpFallback — 경험치가 있는 상품이면 대체 포인트 상한·rng 를 넘기고, 포인트만 상품이면 넘기지 않는다.
+func TestLuckyLive_PassesExpFallback(t *testing.T) {
+	prizes := []v2repo.LuckyPrize{{Weight: 3, Points: 17}, {Weight: 5, Exp: 37}, {Weight: 2, Points: 29, Exp: 41}}
+	for _, c := range []struct {
+		name string
+		pick int
+		want int
+	}{
+		{"포인트만", 0, 0},
+		{"경험치만", 4, 29},
+		{"둘 다", 9, 29},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 13, boardPts: 90, boardPrize: prizes}
+			l := newTestLive(store, &fakeRoller{win: true}, nil, testNow)
+			l.randN = func(n int) int {
+				if n == 10 {
+					return c.pick
+				}
+				return 0
+			}
+			l.Process("member_a", "free", 7, false, 0)
+			if len(store.grants) != 1 {
+				t.Fatalf("지급 1회, got %d", len(store.grants))
+			}
+			g := store.grants[0]
+			if g.opt.ExpFallbackPoints != c.want {
+				t.Errorf("ExpFallbackPoints got %d want %d", g.opt.ExpFallbackPoints, c.want)
+			}
+			if c.want > 0 && g.opt.RandN == nil {
+				t.Error("대체 포인트용 rng 가 넘어가야 한다")
+			}
+		})
+	}
+}

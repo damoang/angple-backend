@@ -1,8 +1,10 @@
 package v2
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -260,6 +262,12 @@ type GrantOptions struct {
 	// Exp 는 같은 트랜잭션에서 함께 줄 경험치(g5_na_xp + as_exp/as_level)다. 0 이하 = 경험치 없음(기존 동작).
 	// 포인트(amount)와 경험치는 원장 1행으로 묶인다 — amount 가 0 이고 Exp 만 있어도 원장은 1행이다.
 	Exp int
+	// ExpFallbackPoints 는 회원이 경험치를 받을 수 없을 때(AddExp 규칙상 적립 0) 「경험치만」 상품을 대신할
+	// 포인트 최대 금액 N 이다(1..N 균등). 0 이하이면 대체하지 않고 지급 없이 끝난다(GrantOutcomeNothing).
+	// 「둘 다」 상품이면 대체 없이 포인트만 준다.
+	ExpFallbackPoints int
+	// RandN 은 대체 포인트 금액에 쓰는 [0, n) 균등 난수다. nil 이면 crypto/rand.
+	RandN func(n int) int
 }
 
 // errLuckyNothingToGrant 는 포인트도 경험치도 없는 지급 요청이다. 원장을 쓰지 않는다.
@@ -278,6 +286,8 @@ const (
 	GrantOutcomeCappedMember GrantOutcome = "capped_member"
 	// GrantOutcomeCappedDaily 는 사이트 하루 상한에 닿아 아무것도 쓰지 않았다는 뜻이다.
 	GrantOutcomeCappedDaily GrantOutcome = "capped_daily"
+	// GrantOutcomeNothing 은 경험치를 받을 수 없는 회원의 「경험치만」 당첨인데 대체 포인트도 없어 아무것도 쓰지 않았다는 뜻이다.
+	GrantOutcomeNothing GrantOutcome = "nothing"
 )
 
 // luckyKST 는 「하루」의 기준 시간대다. time.Local·LoadLocation 에 기대지 않고 코드에 고정한다
@@ -357,12 +367,32 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 			}
 		}
 
+		// 경험치 가능 여부는 상한 확인 뒤, 원장 INSERT 전에 tx 안에서 회원 행을 읽어 정한다(addExpTx 와 같은 조건).
+		// 받을 수 없으면 「경험치만」은 대체 포인트(1..ExpFallbackPoints)로, 「둘 다」는 포인트만으로 바꾼다.
+		payPoints, payExp := amount, opt.Exp
+		if payExp > 0 {
+			blocked, err := luckyExpBlocked(tx, mbID, payExp, sourceTable)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				payExp = 0
+				if payPoints == 0 {
+					if opt.ExpFallbackPoints < 1 {
+						outcome = GrantOutcomeNothing
+						return nil
+					}
+					payPoints = luckyRandN(opt.RandN, opt.ExpFallbackPoints) + 1
+				}
+			}
+		}
+
 		ledger := &LuckyGrant{
 			MbID:        mbID,
 			SourceTable: sourceTable,
 			SourceID:    sourceID,
 			Kind:        kind,
-			Amount:      amount,
+			Amount:      payPoints,
 			CreatedAt:   now,
 		}
 		if err := tx.Create(ledger).Error; err != nil {
@@ -375,9 +405,9 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 
 		if kind == LuckyKindPost || kind == LuckyKindComment {
 			isComment := kind == LuckyKindComment
-			if amount > 0 {
+			if payPoints > 0 {
 				content := luckyPointContentFor(opt.TierName, isComment)
-				poID, err := insertLuckyPoint(tx, mbID, amount, sourceTable, sourceID, content, now, luckyExpireDate(now, opt.ExpireDays))
+				poID, err := insertLuckyPoint(tx, mbID, payPoints, sourceTable, sourceID, content, now, luckyExpireDate(now, opt.ExpireDays))
 				if err != nil {
 					return err
 				}
@@ -387,10 +417,10 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 					return err
 				}
 			}
-			if opt.Exp > 0 {
+			if payExp > 0 {
 				// 기존 AddExp 와 같은 규칙(최대 레벨·고레벨 제한·as_level 재계산)을 같은 tx 로 적용한다.
 				content := luckyExpContentFor(opt.TierName, isComment)
-				if _, err := addExpTx(tx, mbID, opt.Exp, content, sourceTable, sourceID, luckyRelAction, now); err != nil {
+				if _, err := addExpTx(tx, mbID, payExp, content, sourceTable, sourceID, luckyRelAction, now); err != nil {
 					return err
 				}
 			}
@@ -437,6 +467,28 @@ func luckyPointContentFor(tierName string, isComment bool) string {
 		content += luckyCommentContentSuffix
 	}
 	return content
+}
+
+// luckyExpBlocked 는 tx 안에서 회원 as_level 을 읽어, 이 경험치가 AddExp 규칙상 적립되지 않는지 본다
+// (판정은 addExpTx 와 같은 expAccrualBlocked). 회원 행이 없으면 에러다(지급 전체 롤백).
+func luckyExpBlocked(tx *gorm.DB, mbID string, point int, relTable string) (bool, error) {
+	var member gnuboard.G5Member
+	if err := tx.Select("as_exp, as_level").Where("mb_id = ?", mbID).First(&member).Error; err != nil {
+		return false, err
+	}
+	return expAccrualBlocked(member.AsLevel, point, relTable), nil
+}
+
+// luckyRandN 은 [0, n) 균등 난수다. rng 가 nil 이면 crypto/rand 를 쓴다. n 은 1 이상이어야 한다.
+func luckyRandN(rng func(int) int, n int) int {
+	if rng != nil {
+		return rng(n)
+	}
+	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(v.Int64())
 }
 
 // luckyExpContentFor 는 g5_na_xp.xp_content 문구를 만든다. 「<단계> 럭키 경험치」, 댓글이면 끝에 「(댓글)」.

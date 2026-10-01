@@ -213,6 +213,20 @@ func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID,
 	return result, nil
 }
 
+// expAccrualBlocked 는 AddExp 규칙상 이 적립이 막히는지 본다(막히면 아무것도 쓰지 않는다).
+// 럭키 지급도 같은 판정을 쓴다 — 한곳에서만 바꾸도록 둘이 이 함수를 공유한다.
+func expAccrualBlocked(asLevel, point int, relTable string) bool {
+	// 최대 레벨 도달 시 자동 적립(양수) 차단 — 관리자 수동 지급/차감은 허용
+	if asLevel >= maxXPLevel && point > 0 && relTable != "@admin" {
+		return true
+	}
+	// 레벨 80 이상: 로그인(출석)으로만 XP 적립 가능
+	if asLevel >= 80 && point > 0 && relTable != "@login" && relTable != "@admin" {
+		return true
+	}
+	return false
+}
+
 // addExpTx 는 AddExp 의 본체를 호출부가 연 트랜잭션 tx 안에서 실행한다(다른 기록과 한 tx 로 묶을 때 쓴다).
 // 규칙: 최대 레벨·고레벨 제한에 걸리면 아무것도 쓰지 않고 돌려준다. 아니면 as_exp 증가 → 레벨이 오르면
 // as_level 갱신 → g5_na_xp 1행(xp_datetime=now). ⛔ mb_level 은 건드리지 않는다(as_level 만).
@@ -226,14 +240,8 @@ func addExpTx(tx *gorm.DB, mbID string, point int, content, relTable, relID, act
 	result.OldLevel = member.AsLevel
 	result.NewLevel = member.AsLevel
 
-	// 최대 레벨 도달 시 자동 적립(양수) 차단 — 관리자 수동 지급/차감은 허용
-	if member.AsLevel >= maxXPLevel && point > 0 && relTable != "@admin" {
+	if expAccrualBlocked(member.AsLevel, point, relTable) {
 		return result, nil // 적립 없이 조용히 반환
-	}
-
-	// 레벨 80 이상: 로그인(출석)으로만 XP 적립 가능
-	if member.AsLevel >= 80 && point > 0 && relTable != "@login" && relTable != "@admin" {
-		return result, nil
 	}
 
 	// Update member exp
