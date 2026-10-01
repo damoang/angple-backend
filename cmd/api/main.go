@@ -1511,13 +1511,14 @@ func main() {
 		// grantLuckyLive: 라이브 글/댓글 작성 직후 호출. 커밋된 wr_id 를 키로 best-effort 지급.
 		// (레거시 @lucky 와 동일하게 po_rel_table=slug, po_rel_id=wr_id 로 g5_point 에 남아 마이페이지·뱃지에서 함께 보인다.)
 		// isComment=true 면 lucky_config.include_comments 가 켜졌을 때만 진행한다(기본 글만).
-		grantLuckyLive := func(mbID, slug string, wrID int, isComment bool) {
+		// commentChars 는 댓글 본문 정리 길이(v2svc.LuckyCommentChars) — min_comment_chars 판정용, 글이면 0.
+		grantLuckyLive := func(mbID, slug string, wrID int, isComment bool, commentChars int) {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("[lucky] grant panic %s (%s/%d): %v", mbID, slug, wrID, r)
 				}
 			}()
-			luckyLive.Process(mbID, slug, wrID, isComment)
+			luckyLive.Process(mbID, slug, wrID, isComment, commentChars)
 		}
 
 		// Inject expRepo into V2Handler for write/comment XP
@@ -4463,7 +4464,7 @@ func main() {
 
 			// 나리야 럭키 포인트 — 글 작성 시 확률 지급(게시판별 설정, 전역 마스터 스위치).
 			// 커밋된 wr_id 를 키로 best-effort. 기본 비활성이라 켜기 전엔 미발동.
-			go grantLuckyLive(mbID, slug, post.WrID, false)
+			go grantLuckyLive(mbID, slug, post.WrID, false, 0)
 
 			// 첨부파일 레코드 생성 (g5_board_file)
 			if len(req.Files) > 0 {
@@ -4858,7 +4859,8 @@ func main() {
 			}
 
 			// 나리야 럭키 포인트 — 댓글은 lucky_config.include_comments 가 켜졌을 때만(기본 글만).
-			go grantLuckyLive(mbID, slug, comment.WrID, true)
+			// 길이는 저장된 본문 기준(HTML·이모티콘 숏코드 제외)으로 여기서 계산해 넘긴다.
+			go grantLuckyLive(mbID, slug, comment.WrID, true, v2svc.LuckyCommentChars(comment.WrContent))
 
 			// Admin sees full IP, others see masked
 			commentIP := v1handler.MaskIP(comment.WrIP)
