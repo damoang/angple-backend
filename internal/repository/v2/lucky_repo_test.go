@@ -3,6 +3,7 @@ package v2
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -23,7 +24,9 @@ import (
 
 func newLuckyTestRepo(t *testing.T) (*luckyRepository, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard})
+	// TranslateError: sqlite 의 UNIQUE 위반(확장 코드 2067)을 gorm.ErrDuplicatedKey 로 바꿔 준다.
+	// isDuplicateKeyErr 는 운영(MySQL 1062)과 이 에러를 둘 다 알아보므로, 테스트에서도 중복 지급이 no-op 으로 판정된다.
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard, TranslateError: true})
 	if err != nil {
 		t.Fatalf("sqlite 열기 실패: %v", err)
 	}
@@ -45,7 +48,18 @@ func newLuckyTestRepo(t *testing.T) (*luckyRepository, *gorm.DB) {
 			po_id INTEGER NULL,
 			created_at DATETIME NOT NULL,
 			UNIQUE (source_table, source_id, kind))`,
-		`CREATE TABLE g5_member (mb_id TEXT PRIMARY KEY, mb_point INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE g5_member (
+			mb_no INTEGER NULL,
+			mb_id TEXT PRIMARY KEY,
+			mb_point INTEGER NOT NULL DEFAULT 0,
+			mb_level INTEGER NOT NULL DEFAULT 2,
+			as_exp INTEGER NOT NULL DEFAULT 0,
+			as_level INTEGER NOT NULL DEFAULT 1)`,
+		`CREATE TABLE g5_na_xp (
+			xp_id INTEGER PRIMARY KEY AUTOINCREMENT,
+			mb_id TEXT NOT NULL DEFAULT '', xp_datetime DATETIME, xp_content TEXT NOT NULL DEFAULT '',
+			xp_point INTEGER NOT NULL DEFAULT 0, xp_rel_table TEXT NOT NULL DEFAULT '',
+			xp_rel_id TEXT NOT NULL DEFAULT '', xp_rel_action TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE g5_point (
 			po_id INTEGER PRIMARY KEY AUTOINCREMENT,
 			mb_id TEXT, po_datetime DATETIME, po_content TEXT, po_point INTEGER,
@@ -627,7 +641,7 @@ func TestBoardLuckyOddsOf(t *testing.T) {
 		{"둘 다", &BoardLucky{Enabled: true, Odds: 7, CommentOdds: 11, Points: 60}, BoardLuckyOdds{Odds: 7, CommentOdds: 11, Points: 60}},
 	}
 	for _, c := range cases {
-		if got := boardLuckyOddsOf(c.in); got != c.want {
+		if got := boardLuckyOddsOf(c.in); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: got %+v want %+v", c.name, got, c.want)
 		}
 	}

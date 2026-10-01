@@ -294,10 +294,11 @@ func (h *V2Handler) toV2Comment(w *gnuboard.G5Write, authors map[string]liveAuth
 	return out
 }
 
-// injectLuckyPoints 는 v2 글 아이템에 lucky_point(럭키 당첨 금액, 없으면 0)를 병합한다.
-// 각 아이템의 "id"(=wr_id, toV2Post 가 int 로 채운다)를 모아 1쿼리로 조회한다(per-item 반복 금지).
-// 소스는 g5_point(po_rel_action='@lucky')라 레거시 과거 당첨까지 포함된다.
-// 조회 실패는 목록을 막지 않는다 — 값 없이 0 으로 내려간다.
+// injectLuckyPoints 는 v2 글 아이템에 lucky_point(럭키 당첨 포인트)·lucky_exp(경험치, 없으면 0)와
+// lucky_tier·lucky_at(단계·지급 시각, 레거시 당첨이면 생략)을 병합한다.
+// 각 아이템의 "id"(=wr_id, toV2Post 가 int 로 채운다)를 모아 2쿼리 고정으로 조회한다(per-item 반복 금지).
+// 소스는 g5_point·g5_na_xp(@lucky)라 레거시 과거 당첨까지 포함된다.
+// 조회 실패는 목록을 막지 않는다 — 받은 값만 싣고 나머지는 0 으로 내려간다.
 func (h *V2Handler) injectLuckyPoints(items []map[string]any, slug string) {
 	if h.gnuDB == nil || len(items) == 0 || slug == "" {
 		return
@@ -308,14 +309,13 @@ func (h *V2Handler) injectLuckyPoints(items []map[string]any, slug string) {
 			wrIDs = append(wrIDs, id)
 		}
 	}
-	lucky, err := gnurepo.LuckyPointsByWrID(h.gnuDB, slug, wrIDs)
+	lucky, err := gnurepo.LuckyBadgesByWrID(h.gnuDB, slug, wrIDs)
 	if err != nil {
-		log.Printf("[lucky] v2 당첨금액 조회 실패 board=%s: %v", slug, err)
-		lucky = nil
+		log.Printf("[lucky] v2 당첨 조회 실패 board=%s: %v", slug, err)
 	}
 	for _, it := range items {
 		if id, ok := it["id"].(int); ok {
-			it["lucky_point"] = lucky[id]
+			lucky[id].ApplyTo(it)
 		}
 	}
 }

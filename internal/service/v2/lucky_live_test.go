@@ -21,6 +21,7 @@ type fakeLuckyStore struct {
 	boardOdds  int
 	boardCOdds int // 게시판 comment_odds
 	boardPts   int
+	boardPrize []v2repo.LuckyPrize // 게시판 상품 표(앙복타임)
 	boardCalls int
 	grants     []fakeGrantCall
 	outcome    v2repo.GrantOutcome
@@ -36,7 +37,7 @@ func (f *fakeLuckyStore) GetLuckyConfig() (*v2repo.LuckyConfig, error) { return 
 
 func (f *fakeLuckyStore) GetBoardLucky(string) v2repo.BoardLuckyOdds {
 	f.boardCalls++
-	return v2repo.BoardLuckyOdds{Odds: f.boardOdds, CommentOdds: f.boardCOdds, Points: f.boardPts}
+	return v2repo.BoardLuckyOdds{Odds: f.boardOdds, CommentOdds: f.boardCOdds, Points: f.boardPts, Prizes: f.boardPrize}
 }
 
 func (f *fakeLuckyStore) GrantWithOptions(mbID, table, id, kind string, amount int, opt v2repo.GrantOptions) (v2repo.GrantOutcome, error) {
