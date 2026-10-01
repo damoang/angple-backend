@@ -1,8 +1,8 @@
 package gnuboard
 
 import (
-	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -11,9 +11,13 @@ import (
 // luckyRelAction 은 럭키 당첨 기록(g5_point.po_rel_action, g5_na_xp.xp_rel_action)의 값이다.
 const luckyRelAction = "@lucky"
 
-// luckyTierContentRe 는 지급 내역 문구(「<단계> 럭키 포인트」「<단계> 럭키 경험치(댓글)」 등)에서 단계 이름을 뽑는다.
-// 이 목록에 있는 단계로 시작하는 문구만 인정한다 — 레거시 「나리야 럭키 포인트」 등은 단계·시각을 비운다(배지만).
-var luckyTierContentRe = regexp.MustCompile(`^(앙복타임|앙팡타임|앙팡팡타임) `)
+// luckyBuiltinTierNames 는 설정과 무관하게 항상 단계로 인정하는 이름이다. 설정에서 단계를 지우거나 이름을 바꿔도
+// 이미 지급된 당첨의 배지 단계가 사라지지 않게 하려는 것이다.
+var luckyBuiltinTierNames = []string{"앙복타임", "앙팡타임", "앙팡팡타임"}
+
+// luckyTierContentSep 는 지급 내역 문구(「<단계> 럭키 포인트」「<단계> 럭키 경험치(댓글)」)에서 단계 이름 뒤에 오는 부분이다.
+// 이 구분자까지 포함한 접두사로만 비교한다 — 레거시 「나리야 럭키 포인트」나 설정에 없는 이름은 단계·시각을 비운다(배지만).
+const luckyTierContentSep = " 럭키 "
 
 // luckyAtLayout 은 lucky_at 형식이다. po_datetime·xp_datetime 은 KST 벽시계로 저장되므로
 // (DSN loc=Asia/Seoul 로 쓰고 읽는다) 벽시계 숫자에 +09:00 만 붙인다.
@@ -63,9 +67,12 @@ type luckyBadgeRow struct {
 // 단계·시각은 단계 문구가 있는 행 중 가장 이른 행에서 가져온다(포인트·경험치가 같은 지급이면 같은 값).
 // 시각은 이미 지급된 행의 시각뿐이다 — 단계가 열리는 시각과는 무관하다.
 //
+// tierNames 는 설정에 있는 단계 이름(무작위 window·고정 시간대)이다. 기본 3개(luckyBuiltinTierNames)는 항상 인정하므로
+// nil 이어도 된다. 이름 비교는 접두사 문자열 비교라 이름에 정규식 메타문자가 있어도 안전하고, 쿼리 수도 그대로다.
+//
 // 부분 실패: 포인트 조회가 실패하면 빈 맵과 에러, 경험치 조회만 실패하면 포인트만 채운 맵과 에러를 돌려준다
 // (경험치 조회 실패가 기존 포인트 배지까지 지우지 않게). 호출부는 에러를 로그로 남기고 맵은 그대로 쓴다.
-func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int) (map[int]LuckyBadge, error) {
+func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int, tierNames []string) (map[int]LuckyBadge, error) {
 	out := make(map[int]LuckyBadge)
 	if db == nil || slug == "" {
 		return out, nil
@@ -84,7 +91,7 @@ func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int) (map[int]LuckyBadg
 		return out, err
 	}
 	for _, r := range pointRows {
-		mergeLuckyBadgeRow(out, earliest, r, false)
+		mergeLuckyBadgeRow(out, earliest, r, false, tierNames)
 	}
 
 	var expRows []luckyBadgeRow
@@ -95,13 +102,13 @@ func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int) (map[int]LuckyBadg
 		return out, err
 	}
 	for _, r := range expRows {
-		mergeLuckyBadgeRow(out, earliest, r, true)
+		mergeLuckyBadgeRow(out, earliest, r, true, tierNames)
 	}
 	return out, nil
 }
 
 // mergeLuckyBadgeRow 는 한 행을 배지 맵에 합친다. 금액은 MAX, 단계·시각은 단계 문구가 있는 가장 이른 행.
-func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r luckyBadgeRow, isExp bool) {
+func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r luckyBadgeRow, isExp bool, tierNames []string) {
 	wrID, err := strconv.Atoi(r.RelID)
 	if err != nil {
 		return
@@ -114,7 +121,7 @@ func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r lu
 	} else if r.Amount > b.Points {
 		b.Points = r.Amount
 	}
-	if tier, ok := LuckyTierFromContent(r.Content); ok && !r.Datetime.IsZero() {
+	if tier, ok := LuckyTierFromContent(r.Content, tierNames); ok && !r.Datetime.IsZero() {
 		if prev, seen := earliest[wrID]; !seen || r.Datetime.Before(prev) {
 			earliest[wrID] = r.Datetime
 			b.Tier = tier
@@ -124,14 +131,28 @@ func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r lu
 	out[wrID] = b
 }
 
-// LuckyTierFromContent 는 지급 내역 문구에서 단계 이름을 뽑는다. 정해진 단계로 시작하지 않으면 ok=false.
+// LuckyTierFromContent 는 지급 내역 문구에서 단계 이름을 뽑는다. 「<이름> 럭키 」로 시작해야 하고, 이름은
+// 기본 3개(앙복타임·앙팡타임·앙팡팡타임) 또는 tierNames(설정된 이름) 중 하나여야 한다. 아니면 ok=false.
 // 예) 「앙팡타임 럭키 포인트(댓글)」→ 앙팡타임, 「나리야 럭키 포인트」→ 없음.
-func LuckyTierFromContent(content string) (string, bool) {
-	m := luckyTierContentRe.FindStringSubmatch(content)
-	if m == nil {
-		return "", false
+// 여러 이름이 맞으면 가장 긴 이름을 쓴다(구분자까지 비교하므로 실제로는 하나만 맞는다).
+func LuckyTierFromContent(content string, tierNames []string) (string, bool) {
+	best := ""
+	try := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || len(name) <= len(best) {
+			return
+		}
+		if strings.HasPrefix(content, name+luckyTierContentSep) {
+			best = name
+		}
 	}
-	return m[1], true
+	for _, n := range luckyBuiltinTierNames {
+		try(n)
+	}
+	for _, n := range tierNames {
+		try(n)
+	}
+	return best, best != ""
 }
 
 // FormatLuckyAt 은 KST 벽시계로 저장된 시각을 「YYYY-MM-DDTHH:mm:ss+09:00」로 만든다.

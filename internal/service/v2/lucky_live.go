@@ -80,7 +80,7 @@ func DeriveLuckyWindowKey(baseSecret string) []byte {
 // Process 는 한 건(글 또는 댓글)을 판정하고 당첨이면 지급한다. best-effort 라 에러는 로그로만 남긴다.
 // commentChars 는 댓글 본문의 정리 길이(LuckyCommentChars)다. 글이면 쓰지 않는다(글은 길이 제한 없음).
 //
-// 순서: 마스터 스위치 → 댓글 여부·길이 → 게시판(그 종류의 확률) → 단계 선택(시간대 안이면 그 단계)
+// 순서: 마스터 스위치 → 댓글 여부·길이 → 게시판(그 종류의 확률) → 단계 선택(무작위 window > 고정 시간대 > 앙복타임)
 // → 그 단계의 그 종류 확률 → 주사위 → 지급(상한 포함).
 // ⛔ 게시판이 꺼져 있으면 시간대와 무관하게 발동하지 않는다 — 운영 기록·광고 게시판에 시간대가 새면 안 된다.
 // 댓글도 같다: 게시판 comment_odds 가 없으면 시간대 안이어도 댓글은 발동하지 않는다.
@@ -243,7 +243,8 @@ func prizeFallbackPoints(prizes []v2repo.LuckyPrize, legacyPoints int) int {
 	return 0
 }
 
-// pickTier 는 now 가 오늘의 어느 시간대 단계 안이면 그 단계를, 아니면 앙복타임(게시판 값)을 돌려준다.
+// pickTier 는 now 에 적용할 단계를 고른다. 우선순위: 무작위 window(앙팡 등) > 고정 시간대 > 앙복타임(게시판 값).
+// 무작위 window 가 가장 드물고 가장 후한 이벤트라 고정 시간대가 그것을 가리면 안 된다.
 func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, board v2repo.BoardLuckyOdds) luckyTier {
 	k := now.In(luckyKST)
 	dayStart := time.Date(k.Year(), k.Month(), k.Day(), 0, 0, 0, 0, luckyKST)
@@ -252,7 +253,67 @@ func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, board v2rep
 			return luckyTier{name: s.name, odds: s.odds, commentOdds: s.commentOdds, points: s.points, prizes: s.prizes}
 		}
 	}
+	if f, ok := activeFixedWindow(cfg, k); ok {
+		commentOdds := f.CommentOdds
+		if commentOdds < 1 {
+			commentOdds = 0
+		}
+		return luckyTier{name: strings.TrimSpace(f.Name), odds: f.Odds, commentOdds: commentOdds, points: f.Points, prizes: f.Prizes}
+	}
 	return luckyTier{name: LuckyBaseTierName, odds: board.Odds, commentOdds: board.CommentOdds, points: board.Points, prizes: board.Prizes}
+}
+
+// activeFixedWindow 는 now(KST) 를 포함하는 첫 고정 시간대를 돌려준다(겹치면 배열 앞쪽).
+// 형식이 틀렸거나 이름·확률·지급할 것이 없는 줄은 건너뛴다 — 저장 시 검증하지만, DB 를 직접 고친 값이
+// 들어와도 엉뚱한 단계로 지급하지 않게 여기서 한 번 더 거른다.
+func activeFixedWindow(cfg *v2repo.LuckyConfig, now time.Time) (v2repo.LuckyFixedWindow, bool) {
+	if cfg == nil || len(cfg.FixedWindows) == 0 {
+		return v2repo.LuckyFixedWindow{}, false
+	}
+	k := now.In(luckyKST)
+	minute := k.Hour()*60 + k.Minute()
+	for _, f := range cfg.FixedWindows {
+		if strings.TrimSpace(f.Name) == "" || f.Odds < 1 || (f.Points < 1 && !v2repo.HasPayablePrize(f.Prizes)) {
+			continue
+		}
+		start, ok1 := ParseLuckyClock(f.Start)
+		end, ok2 := ParseLuckyClock(f.End)
+		if !ok1 || !ok2 {
+			continue
+		}
+		if fixedWindowContains(start, end, minute) {
+			return f, true
+		}
+	}
+	return v2repo.LuckyFixedWindow{}, false
+}
+
+// fixedWindowContains 는 KST 0시 기준 분 minute 이 [start, end) 안인지 본다. end<start 면 자정을 넘는 구간이다.
+// start==end 는 빈 구간이다(24시간짜리를 뜻하려면 00:00~23:59 처럼 명시해야 한다 — 실수로 하루 종일 열리는 일을 막는다).
+func fixedWindowContains(start, end, minute int) bool {
+	switch {
+	case start < end:
+		return minute >= start && minute < end
+	case start > end:
+		return minute >= start || minute < end
+	default:
+		return false
+	}
+}
+
+// luckyClockRe 는 "HH:MM"(00:00~23:59, 두 자리 고정) 형식이다.
+var luckyClockRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
+
+// ParseLuckyClock 은 KST "HH:MM" 을 0시 기준 분으로 바꾼다. 형식이 다르면 ok=false.
+// "9:00"·"24:00" 처럼 애매한 값을 받지 않는 것은 관리자 화면과 판정이 같은 시각을 보게 하려는 것이다.
+func ParseLuckyClock(s string) (int, bool) {
+	m := luckyClockRe.FindStringSubmatch(s)
+	if m == nil {
+		return 0, false
+	}
+	h, _ := strconv.Atoi(m[1])
+	mm, _ := strconv.Atoi(m[2])
+	return h*60 + mm, true
 }
 
 // luckyWindowSlot 은 그날 열리는 단계 구간 하나다. ⛔ 패키지 밖(응답·로그·API)으로 내보내지 않는다.

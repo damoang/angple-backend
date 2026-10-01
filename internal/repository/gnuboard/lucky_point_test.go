@@ -120,7 +120,7 @@ func newLuckyBadgeTestDB(t *testing.T, withXP bool) (*gorm.DB, *sqlCountingLogge
 // TestLuckyBadgesByWrID_Values — 포인트만·경험치만·둘 다·없음이 정확히 나뉘고, 다른 action·게시판은 섞이지 않는다.
 func TestLuckyBadgesByWrID_Values(t *testing.T) {
 	db, _ := newLuckyBadgeTestDB(t, true)
-	got, err := LuckyBadgesByWrID(db, "free", []int{101, 102, 103, 104, 105, 106})
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 102, 103, 104, 105, 106}, nil)
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 	}
 	for _, ids := range [][]int{{101}, {101, 102, 103, 104, 105}, big} {
 		counter.reset()
-		if _, err := LuckyBadgesByWrID(db, "free", ids); err != nil {
+		if _, err := LuckyBadgesByWrID(db, "free", ids, nil); err != nil {
 			t.Fatalf("조회 실패: %v", err)
 		}
 		sqls := counter.snapshot()
@@ -163,7 +163,7 @@ func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 
 	for _, ids := range [][]int{nil, {}, {0, -3}} {
 		counter.reset()
-		if _, err := LuckyBadgesByWrID(db, "free", ids); err != nil {
+		if _, err := LuckyBadgesByWrID(db, "free", ids, nil); err != nil {
 			t.Fatalf("조회 실패: %v", err)
 		}
 		if n := len(counter.snapshot()); n != 0 {
@@ -175,7 +175,7 @@ func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 // TestLuckyBadgesByWrID_ExpFailureKeepsPoints — 경험치 조회만 실패하면 에러와 함께 포인트 배지는 남긴다.
 func TestLuckyBadgesByWrID_ExpFailureKeepsPoints(t *testing.T) {
 	db, _ := newLuckyBadgeTestDB(t, false) // g5_na_xp 없음 → 경험치 조회 실패
-	got, err := LuckyBadgesByWrID(db, "free", []int{101, 103})
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 103}, nil)
 	if err == nil {
 		t.Fatal("경험치 조회 실패는 에러로 알려야 한다")
 	}
@@ -202,7 +202,7 @@ func TestLuckyTierFromContent(t *testing.T) {
 		{"", "", false},
 	}
 	for _, c := range cases {
-		got, ok := LuckyTierFromContent(c.content)
+		got, ok := LuckyTierFromContent(c.content, nil)
 		if got != c.want || ok != c.ok {
 			t.Errorf("LuckyTierFromContent(%q) = %q,%v want %q,%v", c.content, got, ok, c.want, c.ok)
 		}
@@ -252,5 +252,68 @@ func TestLuckyBadgeApplyTo(t *testing.T) {
 		if tiered[k] != v {
 			t.Errorf("%s: got %v want %v", k, tiered[k], v)
 		}
+	}
+}
+
+// TestLuckyTierFromContent_ConfiguredNames — F3: 설정된 이름(고정 시간대 등)으로 시작하는 문구는 그 이름이 단계가 된다.
+// 이름에 정규식 메타문자가 있어도 글자 그대로 비교하고, 목록에 없는 이름·레거시 문구는 여전히 미표시다.
+func TestLuckyTierFromContent_ConfiguredNames(t *testing.T) {
+	names := []string{"테스트구간", "a.b(c)*", "테스트"}
+	cases := []struct {
+		content string
+		want    string
+		ok      bool
+	}{
+		{"테스트구간 럭키 포인트", "테스트구간", true},
+		{"테스트구간 럭키 경험치(댓글)", "테스트구간", true},
+		{"테스트 럭키 포인트", "테스트", true},         // 짧은 이름도 구분자까지 맞아야만
+		{"a.b(c)* 럭키 포인트", "a.b(c)*", true}, // 메타문자는 글자 그대로
+		{"aXb(c)* 럭키 포인트", "", false},       // 정규식처럼 해석되면 안 된다
+		{"테스트구간럭키 포인트", "", false},          // 구분자 없음
+		{"테스트구간 포인트", "", false},            // 「 럭키 」 없음
+		{"앙팡타임 럭키 포인트", "앙팡타임", true},       // 기본 이름은 목록과 무관하게 인정
+		{"나리야 럭키 포인트", "", false},           // 레거시는 미표시 유지
+		{"다른구간 럭키 포인트", "", false},          // 설정에 없는 이름
+	}
+	for _, c := range cases {
+		got, ok := LuckyTierFromContent(c.content, names)
+		if got != c.want || ok != c.ok {
+			t.Errorf("LuckyTierFromContent(%q) = %q,%v want %q,%v", c.content, got, ok, c.want, c.ok)
+		}
+	}
+	// 목록을 안 주면 설정 이름은 인정하지 않는다(기본 3개만).
+	if _, ok := LuckyTierFromContent("테스트구간 럭키 포인트", nil); ok {
+		t.Error("이름 목록이 없으면 설정 이름은 단계가 아니어야 한다")
+	}
+}
+
+// TestLuckyBadgesByWrID_ConfiguredTier — F3: 설정 이름으로 지급된 행은 배지 tier·시각이 실리고, 쿼리 수는 그대로 2다.
+func TestLuckyBadgesByWrID_ConfiguredTier(t *testing.T) {
+	db, counter := newLuckyBadgeTestDB(t, true)
+	if err := db.Exec(`INSERT INTO g5_point (mb_id, po_datetime, po_content, po_point, po_rel_table, po_rel_id, po_rel_action)
+		VALUES ('m7', '2026-10-01 03:10:00', '테스트구간 럭키 포인트(댓글)', 21, 'free', '107', '@lucky')`).Error; err != nil {
+		t.Fatalf("시드 실패: %v", err)
+	}
+	counter.reset()
+
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 107}, []string{"테스트구간"})
+	if err != nil {
+		t.Fatalf("조회 실패: %v", err)
+	}
+	if n := len(counter.snapshot()); n != 2 {
+		t.Errorf("이름 목록을 받아도 2쿼리여야 한다, got %d", n)
+	}
+	b := got[107]
+	if b.Tier != "테스트구간" || b.At != "2026-10-01T03:10:00+09:00" || b.Points != 21 {
+		t.Errorf("설정 이름 tier 가 실려야 한다: %+v", b)
+	}
+	if got[101].Tier != "" || got[101].At != "" {
+		t.Errorf("레거시 문구는 여전히 tier 미표시: %+v", got[101])
+	}
+
+	// 이름 목록 없이 보면 같은 행이 tier 없이(포인트만) 나온다.
+	got, _ = LuckyBadgesByWrID(db, "free", []int{107}, nil)
+	if got[107].Tier != "" || got[107].Points != 21 {
+		t.Errorf("목록에 없는 이름은 tier 미표시·포인트는 유지: %+v", got[107])
 	}
 }
