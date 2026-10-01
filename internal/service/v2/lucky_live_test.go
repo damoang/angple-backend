@@ -1,0 +1,339 @@
+package v2
+
+import (
+	"testing"
+	"time"
+
+	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+)
+
+// ⛔ 이 파일이 지키는 계약 (럭키 포인트 라이브 판정):
+//
+//   - 마스터 스위치가 꺼지면 아무것도 안 한다(C6). 게시판이 꺼지면 시간대와 무관하게 안 한다.
+//   - 댓글은 include_comments=true 일 때만(C1).
+//   - 시간대 단계 시각은 키·KST 날짜로 결정적이고, [start,end) 안에 통째로, 서로 겹치지 않는다(C8).
+//   - 시간대 안이면 그 단계의 확률·금액, 밖이면 게시판 값(C9).
+//
+// 주사위·시각·저장소는 모두 주입해 결정적으로 돈다.
+
+type fakeLuckyStore struct {
+	cfg        *v2repo.LuckyConfig
+	boardOdds  int
+	boardPts   int
+	boardCalls int
+	grants     []fakeGrantCall
+	outcome    v2repo.GrantOutcome
+}
+
+type fakeGrantCall struct {
+	mbID, table, id, kind string
+	amount                int
+	opt                   v2repo.GrantOptions
+}
+
+func (f *fakeLuckyStore) GetLuckyConfig() (*v2repo.LuckyConfig, error) { return f.cfg, nil }
+
+func (f *fakeLuckyStore) GetBoardLucky(string) (int, int) {
+	f.boardCalls++
+	return f.boardOdds, f.boardPts
+}
+
+func (f *fakeLuckyStore) GrantWithOptions(mbID, table, id, kind string, amount int, opt v2repo.GrantOptions) (v2repo.GrantOutcome, error) {
+	f.grants = append(f.grants, fakeGrantCall{mbID, table, id, kind, amount, opt})
+	if f.outcome != "" {
+		return f.outcome, nil
+	}
+	return v2repo.GrantOutcomeGranted, nil
+}
+
+// fakeRoller 는 항상 당첨(또는 항상 꽝)이고, 받은 확률·금액을 기록한다.
+type fakeRoller struct {
+	win    bool
+	calls  int
+	odds   int
+	points int
+}
+
+func (r *fakeRoller) RollLucky(dice, maxAmount int) (bool, int) {
+	r.calls++
+	r.odds, r.points = dice, maxAmount
+	if !r.win {
+		return false, 0
+	}
+	return true, maxAmount
+}
+
+func enabledCfg() *v2repo.LuckyConfig {
+	c := v2repo.DefaultLuckyConfig()
+	c.Enabled = true
+	return c
+}
+
+func newTestLive(store *fakeLuckyStore, roller *fakeRoller, key []byte, now time.Time) *LuckyLive {
+	l := NewLuckyLive(store, roller, key)
+	l.now = func() time.Time { return now }
+	return l
+}
+
+var testNow = time.Date(2026, 10, 1, 12, 0, 0, 0, luckyKST)
+
+// TestLuckyLive_MasterOff — C6: 마스터 스위치 off 면 게시판 조회·주사위·지급 모두 없음.
+func TestLuckyLive_MasterOff(t *testing.T) {
+	store := &fakeLuckyStore{cfg: v2repo.DefaultLuckyConfig(), boardOdds: 1, boardPts: 100}
+	roller := &fakeRoller{win: true}
+	res := newTestLive(store, roller, []byte("k"), testNow).Process("member_a", "free", 1, false)
+	if res.Rolled || roller.calls != 0 || len(store.grants) != 0 || store.boardCalls != 0 {
+		t.Fatalf("꺼져 있으면 아무것도 안 해야 한다: res=%+v roller=%d grants=%d board=%d",
+			res, roller.calls, len(store.grants), store.boardCalls)
+	}
+}
+
+// TestLuckyLive_CommentsExcludedByDefault — C1: include_comments=false 면 댓글은 지급 0.
+func TestLuckyLive_CommentsExcludedByDefault(t *testing.T) {
+	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 1, boardPts: 100}
+	roller := &fakeRoller{win: true}
+	l := newTestLive(store, roller, []byte("k"), testNow)
+
+	res := l.Process("member_a", "free", 1, true)
+	if res.Rolled || roller.calls != 0 || len(store.grants) != 0 {
+		t.Fatalf("댓글은 기본 제외: res=%+v grants=%d", res, len(store.grants))
+	}
+
+	// 같은 조건에서 글은 지급된다(대조).
+	res = l.Process("member_a", "free", 2, false)
+	if !res.Won || len(store.grants) != 1 {
+		t.Fatalf("글은 지급돼야 한다: res=%+v grants=%d", res, len(store.grants))
+	}
+
+	// include_comments=true 면 댓글도 진행.
+	store.cfg.IncludeComments = true
+	res = l.Process("member_a", "free", 3, true)
+	if !res.Won || len(store.grants) != 2 {
+		t.Fatalf("include_comments=true 면 댓글도 진행: res=%+v grants=%d", res, len(store.grants))
+	}
+}
+
+// TestLuckyLive_BoardOffIgnoresWindows 는 게시판 lucky 가 꺼져 있으면 시간대 안이어도 발동하지 않는지 본다.
+func TestLuckyLive_BoardOffIgnoresWindows(t *testing.T) {
+	cfg := enabledCfg()
+	cfg.WindowStartHour, cfg.WindowEndHour = 0, 24
+	cfg.Windows = []v2repo.LuckyWindow{{Name: "온종일", Minutes: 24 * 60, Odds: 1, Points: 9}}
+	store := &fakeLuckyStore{cfg: cfg} // 게시판 0,0
+	roller := &fakeRoller{win: true}
+	res := newTestLive(store, roller, []byte("k"), testNow).Process("member_a", "promotion", 1, false)
+	if res.Rolled || roller.calls != 0 || len(store.grants) != 0 {
+		t.Fatalf("게시판이 꺼져 있으면 시간대와 무관하게 미발동: res=%+v", res)
+	}
+}
+
+// TestLuckyLive_PassesCapsAndTier 는 설정의 상한·단계 이름·글 키가 지급에 그대로 넘어가는지(C5 연결), 상한 결과를 돌려주는지 본다.
+func TestLuckyLive_PassesCapsAndTier(t *testing.T) {
+	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 13, boardPts: 90, outcome: v2repo.GrantOutcomeCappedMember}
+	roller := &fakeRoller{win: true}
+	res := newTestLive(store, roller, nil, testNow).Process("member_a", "free", 42, false)
+	if len(store.grants) != 1 {
+		t.Fatalf("당첨이면 지급 시도 1회, got %d", len(store.grants))
+	}
+	g := store.grants[0]
+	if g.opt.MemberDailyCap != 1 || g.opt.DailyCap != 10 {
+		t.Errorf("기본 상한 1/10 이 넘어가야 한다, got %d/%d", g.opt.MemberDailyCap, g.opt.DailyCap)
+	}
+	if g.opt.TierName != LuckyBaseTierName || res.Tier != LuckyBaseTierName {
+		t.Errorf("평소 단계 이름은 앙복타임, got %q", g.opt.TierName)
+	}
+	if g.table != "free" || g.id != "42" || g.kind != "point" || g.amount != 90 {
+		t.Errorf("지급 키·금액: %+v", g)
+	}
+	if !g.opt.Now.Equal(testNow) {
+		t.Errorf("판정 시각이 그대로 넘어가야 한다(경계 일관성), got %s", g.opt.Now)
+	}
+	if res.Outcome != v2repo.GrantOutcomeCappedMember || res.Err != nil {
+		t.Errorf("상한 결과를 돌려줘야 한다: %+v", res)
+	}
+}
+
+// TestLuckyLive_LostRollDoesNotGrant 는 꽝이면 지급을 부르지 않는지 본다(상한 확인은 당첨일 때만).
+func TestLuckyLive_LostRollDoesNotGrant(t *testing.T) {
+	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 13, boardPts: 90}
+	roller := &fakeRoller{win: false}
+	res := newTestLive(store, roller, nil, testNow).Process("member_a", "free", 1, false)
+	if !res.Rolled || res.Won || len(store.grants) != 0 {
+		t.Fatalf("꽝이면 지급 없음: res=%+v grants=%d", res, len(store.grants))
+	}
+}
+
+func angpangCfg() *v2repo.LuckyConfig {
+	c := enabledCfg()
+	c.Windows = []v2repo.LuckyWindow{
+		{Name: "앙팡타임", Minutes: 45, Odds: 7, Points: 50},
+		{Name: "앙팡팡타임", Minutes: 20, Odds: 3, Points: 70},
+	}
+	return c
+}
+
+func kstDay(y int, m time.Month, d int) time.Time {
+	return time.Date(y, m, d, 0, 0, 0, 0, luckyKST)
+}
+
+// TestLuckyWindows_Deterministic — C8: 같은 키·날짜면 몇 번을 계산해도(파드·재시작 무관) 같은 구간.
+func TestLuckyWindows_Deterministic(t *testing.T) {
+	key := DeriveLuckyWindowKey("test-secret")
+	cfg := angpangCfg()
+	day := kstDay(2026, 10, 1)
+	a := luckyWindowsForDay(key, day, cfg)
+	b := luckyWindowsForDay(DeriveLuckyWindowKey("test-secret"), day, angpangCfg())
+	if len(a) != 2 || len(b) != 2 {
+		t.Fatalf("단계 2개가 열려야 한다, got %d/%d", len(a), len(b))
+	}
+	for i := range a {
+		if !a[i].start.Equal(b[i].start) || !a[i].end.Equal(b[i].end) || a[i].name != b[i].name {
+			t.Errorf("결정적이어야 한다: %d번 단계가 다르다", i)
+		}
+	}
+	// 같은 순간을 UTC 로 줘도(날짜 문자열은 KST 기준) 같아야 한다.
+	c := luckyWindowsForDay(key, day.UTC(), cfg)
+	for i := range a {
+		if !a[i].start.Equal(c[i].start) {
+			t.Errorf("입력 시간대와 무관해야 한다: %d번", i)
+		}
+	}
+	// 다른 키면 (거의 항상) 다른 시각 — 키가 실제로 쓰이는지 확인.
+	d := luckyWindowsForDay(DeriveLuckyWindowKey("other-secret"), day, cfg)
+	if a[0].start.Equal(d[0].start) && a[1].start.Equal(d[1].start) {
+		t.Error("키가 바뀌었는데 두 단계 시각이 모두 같다 — 키가 반영되지 않는 것 같다")
+	}
+}
+
+// TestLuckyWindows_RangeAndNoOverlap — C8: 365일 동안 매일 [09:00, 23:00) 안에 통째로, 서로 겹치지 않음. 날짜별로 퍼짐.
+func TestLuckyWindows_RangeAndNoOverlap(t *testing.T) {
+	key := DeriveLuckyWindowKey("test-secret")
+	cfg := angpangCfg()
+	distinct := map[int]bool{}
+	for i := 0; i < 365; i++ {
+		day := kstDay(2026, 1, 1).AddDate(0, 0, i)
+		ws := luckyWindowsForDay(key, day, cfg)
+		if len(ws) != 2 {
+			t.Fatalf("%s: 단계 2개가 열려야 한다, got %d", day.Format("2006-01-02"), len(ws))
+		}
+		lo := day.Add(9 * time.Hour)
+		hi := day.Add(23 * time.Hour)
+		for _, w := range ws {
+			if w.start.Before(lo) || w.end.After(hi) {
+				t.Errorf("%s: %s 범위 밖", day.Format("2006-01-02"), w.name)
+			}
+			if w.end.Sub(w.start) != time.Duration(map[string]int{"앙팡타임": 45, "앙팡팡타임": 20}[w.name])*time.Minute {
+				t.Errorf("%s: %s 길이가 다르다", day.Format("2006-01-02"), w.name)
+			}
+		}
+		if ws[0].start.Before(ws[1].end) && ws[1].start.Before(ws[0].end) {
+			t.Errorf("%s: 두 단계가 겹친다", day.Format("2006-01-02"))
+		}
+		distinct[int(ws[0].start.Sub(day).Minutes())] = true
+	}
+	// 가능한 시작 분은 796개. 365일이면 서로 다른 값이 충분히 많아야 한다(쏠림 감지용 느슨한 하한).
+	if len(distinct) < 200 {
+		t.Errorf("시작 시각이 날짜별로 고르게 퍼지지 않는다: 서로 다른 값 %d개", len(distinct))
+	}
+}
+
+// TestLuckyWindows_TightRangeNeverOverlaps 는 자리가 모자라면 겹쳐 열지 않고 뒤 단계를 건너뛰는지 본다.
+func TestLuckyWindows_TightRangeNeverOverlaps(t *testing.T) {
+	key := DeriveLuckyWindowKey("test-secret")
+	cfg := enabledCfg()
+	cfg.WindowStartHour, cfg.WindowEndHour = 9, 11
+	cfg.Windows = []v2repo.LuckyWindow{
+		{Name: "꽉참", Minutes: 120, Odds: 2, Points: 10},
+		{Name: "자리없음", Minutes: 20, Odds: 2, Points: 10},
+	}
+	for i := 0; i < 50; i++ {
+		ws := luckyWindowsForDay(key, kstDay(2026, 10, 1).AddDate(0, 0, i), cfg)
+		if len(ws) != 1 || ws[0].name != "꽉참" {
+			t.Fatalf("범위를 꽉 채운 첫 단계만 열려야 한다, got %d", len(ws))
+		}
+	}
+}
+
+// TestLuckyWindows_OffWithoutSecretOrConfig — C8: 키가 없거나, 단계가 없거나, 시 범위가 잘못되면 시간대 없음.
+func TestLuckyWindows_OffWithoutSecretOrConfig(t *testing.T) {
+	if DeriveLuckyWindowKey("") != nil {
+		t.Error("시크릿이 비면 키도 nil 이어야 한다")
+	}
+	day := kstDay(2026, 10, 1)
+	if ws := luckyWindowsForDay(nil, day, angpangCfg()); ws != nil {
+		t.Error("키가 없으면 단계 없음")
+	}
+	key := DeriveLuckyWindowKey("test-secret")
+	if ws := luckyWindowsForDay(key, day, enabledCfg()); ws != nil {
+		t.Error("windows 가 비면 단계 없음(앙복만)")
+	}
+	bad := angpangCfg()
+	bad.WindowStartHour, bad.WindowEndHour = 23, 9
+	if ws := luckyWindowsForDay(key, day, bad); ws != nil {
+		t.Error("시작 >= 끝이면 단계 없음")
+	}
+
+	// 키가 없으면 단계 설정이 있어도 언제나 앙복타임(게시판 값)으로 판정.
+	store := &fakeLuckyStore{cfg: angpangCfg(), boardOdds: 13, boardPts: 90}
+	roller := &fakeRoller{win: true}
+	l := newTestLive(store, roller, nil, testNow)
+	for m := 0; m < 24*60; m += 7 {
+		l.now = func() time.Time { return day.Add(time.Duration(m) * time.Minute) }
+		res := l.Process("member_a", "free", m, false)
+		if res.Tier != LuckyBaseTierName || roller.odds != 13 || roller.points != 90 {
+			t.Fatalf("키 없음 → 항상 앙복타임: %+v", res)
+		}
+	}
+}
+
+// TestLuckyLive_WindowPicksTierOddsPoints — C9: 시간대 안이면 그 단계의 확률·금액·이름, 바로 밖이면 게시판 값.
+func TestLuckyLive_WindowPicksTierOddsPoints(t *testing.T) {
+	key := DeriveLuckyWindowKey("test-secret")
+	cfg := angpangCfg()
+	day := kstDay(2026, 10, 1)
+	ws := luckyWindowsForDay(key, day, cfg)
+	if len(ws) != 2 {
+		t.Fatalf("단계 2개가 열려야 한다, got %d", len(ws))
+	}
+
+	store := &fakeLuckyStore{cfg: cfg, boardOdds: 13, boardPts: 90}
+	roller := &fakeRoller{win: true}
+	l := newTestLive(store, roller, key, testNow)
+
+	check := func(at time.Time, wantTier string, wantOdds, wantPts int) {
+		t.Helper()
+		l.now = func() time.Time { return at }
+		res := l.Process("member_a", "free", 1, false)
+		if res.Tier != wantTier || roller.odds != wantOdds || roller.points != wantPts {
+			t.Errorf("단계 판정: got tier=%q odds=%d pts=%d, want %q %d %d",
+				res.Tier, roller.odds, roller.points, wantTier, wantOdds, wantPts)
+		}
+		last := store.grants[len(store.grants)-1]
+		if last.opt.TierName != wantTier {
+			t.Errorf("지급 단계 이름: got %q want %q", last.opt.TierName, wantTier)
+		}
+	}
+
+	for _, w := range ws {
+		// 시작 순간(포함), 끝 1초 전(포함) → 그 단계
+		check(w.start, w.name, w.odds, w.points)
+		check(w.end.Add(-time.Second), w.name, w.odds, w.points)
+		// UTC 로 들어와도 같은 판정
+		check(w.start.UTC(), w.name, w.odds, w.points)
+	}
+	// 두 단계 어디에도 안 걸리는 시각을 찾아 앙복타임인지 본다(끝 순간은 제외 구간).
+	for _, w := range ws {
+		at := w.end
+		inOther := false
+		for _, o := range ws {
+			if !at.Before(o.start) && at.Before(o.end) {
+				inOther = true
+			}
+		}
+		if !inOther {
+			check(at, LuckyBaseTierName, 13, 90)
+		}
+	}
+	// 범위 밖(새벽)은 항상 앙복타임.
+	check(day.Add(3*time.Hour), LuckyBaseTierName, 13, 90)
+	check(day.Add(23*time.Hour+30*time.Minute), LuckyBaseTierName, 13, 90)
+}

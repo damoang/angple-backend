@@ -1,0 +1,246 @@
+package v2
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
+	"log"
+	"strconv"
+	"time"
+
+	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+)
+
+// LuckyBaseTierName 은 시간대 단계 밖(평소)의 단계 이름이다. 확률·금액은 게시판 설정을 쓴다.
+const LuckyBaseTierName = "앙복타임"
+
+// luckyWindowKeyLabel 은 기존 백엔드 시크릿에서 시간대 전용 키를 뽑을 때 붙이는 라벨이다.
+// 라벨을 붙여 파생하므로 시간대 키가 새어도 원래 시크릿(서명 키)은 되짚을 수 없다.
+const luckyWindowKeyLabel = "angple/lucky-window/v1"
+
+// luckyWindowMaxAttempts 는 겹침 시 해시로 다음 후보를 뽑는 횟수다. 다 겹치면 결정적 선형 탐색으로 넘어간다.
+const luckyWindowMaxAttempts = 32
+
+// luckyKST 는 단계 시각·날짜 계산의 기준 시간대다. 컨테이너 TZ 에 기대지 않고 고정한다.
+var luckyKST = time.FixedZone("KST", 9*60*60)
+
+// LuckyLiveStore 는 LuckyLive 가 쓰는 저장소 기능만 뽑은 것이다(v2repo.LuckyRepository 가 만족한다).
+// 테스트에서 가짜로 바꿔 끼우려고 인터페이스로 둔다.
+type LuckyLiveStore interface {
+	GetLuckyConfig() (*v2repo.LuckyConfig, error)
+	GetBoardLucky(boardSlug string) (dice, maxAmount int)
+	GrantWithOptions(mbID, sourceTable, sourceID, kind string, amount int, opt v2repo.GrantOptions) (v2repo.GrantOutcome, error)
+}
+
+// LuckyLiveResult 는 한 번의 판정 결과다. 테스트·호출부용이며 단계 시각은 일부러 담지 않는다.
+type LuckyLiveResult struct {
+	Rolled  bool                // 주사위까지 갔는가(스위치·댓글·게시판 조건 통과)
+	Won     bool                // 주사위 당첨
+	Tier    string              // 적용된 단계 이름
+	Odds    int                 // 적용된 확률 분모
+	Points  int                 // 적용된 최대 금액
+	Amount  int                 // 당첨 금액(미당첨 0)
+	Outcome v2repo.GrantOutcome // 지급 결과(당첨일 때만)
+	Err     error               // 지급 실패
+}
+
+// LuckyLive 는 라이브 글/댓글 작성 직후 럭키 포인트 판정·지급을 한다.
+// main 의 grantLuckyLive 에 있던 분기를 옮겨 와 단위 테스트할 수 있게 했다(주사위·시각·저장소 주입).
+type LuckyLive struct {
+	store     LuckyLiveStore
+	roller    LuckyService
+	windowKey []byte
+	now       func() time.Time
+}
+
+// NewLuckyLive 는 LuckyLive 를 만든다. windowKey 가 비면 시간대 단계를 끈다(앙복타임만).
+func NewLuckyLive(store LuckyLiveStore, roller LuckyService, windowKey []byte) *LuckyLive {
+	return &LuckyLive{store: store, roller: roller, windowKey: windowKey, now: time.Now}
+}
+
+// DeriveLuckyWindowKey 는 기존 백엔드 시크릿에서 라벨을 붙여 시간대 전용 키를 만든다.
+// 새 환경변수를 두지 않으려는 것이다. 모든 파드가 같은 시크릿을 받으므로 같은 키가 나오고, 재시작에도 바뀌지 않는다.
+// 시크릿이 비면 nil — 시간대 단계가 꺼진다.
+func DeriveLuckyWindowKey(baseSecret string) []byte {
+	if baseSecret == "" {
+		return nil
+	}
+	m := hmac.New(sha256.New, []byte(baseSecret))
+	m.Write([]byte(luckyWindowKeyLabel))
+	return m.Sum(nil)
+}
+
+// Process 는 한 건(글 또는 댓글)을 판정하고 당첨이면 지급한다. best-effort 라 에러는 로그로만 남긴다.
+//
+// 순서: 마스터 스위치 → 댓글 여부 → 게시판 lucky.enabled → 단계 선택(시간대 안이면 그 단계) → 주사위 → 지급(상한 포함).
+// ⛔ 게시판이 꺼져 있으면 시간대와 무관하게 발동하지 않는다 — 운영 기록·광고 게시판에 시간대가 새면 안 된다.
+func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool) LuckyLiveResult {
+	var res LuckyLiveResult
+	if mbID == "" {
+		return res
+	}
+	cfg, err := l.store.GetLuckyConfig()
+	if err != nil || cfg == nil || !cfg.Enabled { // 전역 마스터 스위치
+		return res
+	}
+	if isComment && !cfg.IncludeComments { // 기본은 글만
+		return res
+	}
+	dice, maxAmount := l.store.GetBoardLucky(slug) // 게시판별 앙복타임 확률·금액(안 켠 곳은 0,0)
+	if dice < 1 || maxAmount < 1 {
+		return res
+	}
+
+	now := l.now()
+	res.Tier, res.Odds, res.Points = l.pickTier(cfg, now, dice, maxAmount)
+	res.Rolled = true
+
+	won, amount := l.roller.RollLucky(res.Odds, res.Points)
+	if !won || amount <= 0 {
+		return res
+	}
+	res.Won, res.Amount = true, amount
+
+	outcome, err := l.store.GrantWithOptions(mbID, slug, strconv.Itoa(wrID), "point", amount, v2repo.GrantOptions{
+		MemberDailyCap: cfg.MemberDailyCap,
+		DailyCap:       cfg.DailyCap,
+		TierName:       res.Tier,
+		Now:            now,
+	})
+	res.Outcome, res.Err = outcome, err
+	logLuckyOutcome(mbID, slug, wrID, res.Tier, outcome, err)
+	return res
+}
+
+// logLuckyOutcome 은 지급 실패·상한 차단을 한 줄로 남긴다.
+// ⛔ 단계 이름은 남겨도 단계 시각(구간)은 남기지 않는다 — 로그를 보는 사람에게도 시각이 새면 안 된다.
+func logLuckyOutcome(mbID, slug string, wrID int, tier string, outcome v2repo.GrantOutcome, err error) {
+	switch {
+	case err != nil:
+		log.Printf("[lucky] grant failed %s (%s/%d): %v", mbID, slug, wrID, err)
+	case outcome == v2repo.GrantOutcomeCappedMember:
+		log.Printf("[lucky] capped member %s (%s/%d) tier=%s", mbID, slug, wrID, tier)
+	case outcome == v2repo.GrantOutcomeCappedDaily:
+		log.Printf("[lucky] capped daily %s (%s/%d) tier=%s", mbID, slug, wrID, tier)
+	}
+}
+
+// pickTier 는 now 가 오늘의 어느 시간대 단계 안이면 그 단계의 (이름, 확률, 금액)을, 아니면 앙복타임(게시판 값)을 돌려준다.
+func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, boardOdds, boardPoints int) (string, int, int) {
+	k := now.In(luckyKST)
+	dayStart := time.Date(k.Year(), k.Month(), k.Day(), 0, 0, 0, 0, luckyKST)
+	for _, s := range luckyWindowsForDay(l.windowKey, dayStart, cfg) {
+		if !k.Before(s.start) && k.Before(s.end) {
+			return s.name, s.odds, s.points
+		}
+	}
+	return LuckyBaseTierName, boardOdds, boardPoints
+}
+
+// luckyWindowSlot 은 그날 열리는 단계 구간 하나다. ⛔ 패키지 밖(응답·로그·API)으로 내보내지 않는다.
+type luckyWindowSlot struct {
+	name       string
+	start, end time.Time // KST
+	odds       int
+	points     int
+}
+
+// luckyWindowsForDay 는 dayStart(KST 0시) 날짜의 단계 구간들을 결정적으로 계산한다.
+//
+// 각 단계의 시작 분은 HMAC-SHA256(key, "lucky-window|YYYY-MM-DD|index") 로 뽑는다 — 같은 키·날짜면
+// 어느 파드·언제 계산해도 같다. 구간은 [start_hour, end_hour) 안에 통째로 들어가고, 앞 단계와 겹치면
+// "…|index|attempt" 로 다음 후보를 뽑는다. 그래도 다 겹치면 첫 후보부터 1분씩 밀며 찾고, 들어갈 자리가
+// 없으면 그 단계는 그날 열지 않는다(겹쳐서 여는 일은 없다).
+// key 가 비거나 단계가 없거나 시 범위가 잘못되면 nil(앙복타임만).
+func luckyWindowsForDay(key []byte, dayStart time.Time, cfg *v2repo.LuckyConfig) []luckyWindowSlot {
+	if len(key) == 0 || cfg == nil || len(cfg.Windows) == 0 {
+		return nil
+	}
+	sh, eh := cfg.WindowStartHour, cfg.WindowEndHour
+	if sh < 0 || eh > 24 || sh >= eh {
+		return nil
+	}
+	rangeStart, rangeEnd := sh*60, eh*60
+	day := dayStart.In(luckyKST)
+	date := day.Format("2006-01-02")
+
+	var placed []luckySpan
+	var out []luckyWindowSlot
+	for i, w := range cfg.Windows {
+		if w.Minutes < 1 || w.Odds < 1 || w.Points < 1 {
+			continue
+		}
+		start, ok := placeLuckyWindow(key, date, i, w.Minutes, rangeStart, rangeEnd, placed)
+		if !ok {
+			continue // 자리가 없다 — 겹쳐서 열지 않는다
+		}
+		placed = append(placed, luckySpan{start, start + w.Minutes})
+		s := day.Add(time.Duration(start) * time.Minute)
+		out = append(out, luckyWindowSlot{
+			name:   w.Name,
+			start:  s,
+			end:    s.Add(time.Duration(w.Minutes) * time.Minute),
+			odds:   w.Odds,
+			points: w.Points,
+		})
+	}
+	return out
+}
+
+// luckySpan 은 KST 0시 기준 분 단위 반열린 구간 [a, b) 다.
+type luckySpan struct{ a, b int }
+
+// luckySpansOverlap 은 [a, b) 가 이미 놓인 구간 중 하나와 겹치는지 본다.
+func luckySpansOverlap(placed []luckySpan, a, b int) bool {
+	for _, p := range placed {
+		if a < p.b && p.a < b {
+			return true
+		}
+	}
+	return false
+}
+
+// placeLuckyWindow 는 index 번 단계(길이 minutes 분)의 시작 분을 [rangeStart, rangeEnd) 안에서 결정적으로 고른다.
+// 해시 후보 luckyWindowMaxAttempts 개를 차례로 보고, 다 겹치면 첫 후보부터 1분씩 민다. 자리가 없으면 ok=false.
+func placeLuckyWindow(key []byte, date string, index, minutes, rangeStart, rangeEnd int, placed []luckySpan) (start int, ok bool) {
+	slots := rangeEnd - rangeStart - minutes + 1 // 가능한 시작 분 개수
+	if slots < 1 {
+		return 0, false
+	}
+	first := luckyHashMod(luckyWindowHash(key, date, index, 0), slots)
+	for attempt := 0; attempt < luckyWindowMaxAttempts; attempt++ {
+		off := first
+		if attempt > 0 {
+			off = luckyHashMod(luckyWindowHash(key, date, index, attempt), slots)
+		}
+		if !luckySpansOverlap(placed, rangeStart+off, rangeStart+off+minutes) {
+			return rangeStart + off, true
+		}
+	}
+	for k := 1; k < slots; k++ {
+		off := (first + k) % slots
+		if !luckySpansOverlap(placed, rangeStart+off, rangeStart+off+minutes) {
+			return rangeStart + off, true
+		}
+	}
+	return 0, false
+}
+
+// luckyHashMod 는 해시값을 [0, slots) 의 시작 분 후보로 줄인다. slots<1 이면 0.
+func luckyHashMod(h uint64, slots int) int {
+	if slots < 1 {
+		return 0
+	}
+	return int(h % uint64(slots)) // #nosec G115 -- h % uint64(slots) < slots 이므로 int 범위 안
+}
+
+// luckyWindowHash 는 단계 시작 후보 하나를 뽑는 결정적 해시다(HMAC 앞 8바이트).
+func luckyWindowHash(key []byte, date string, index, attempt int) uint64 {
+	msg := "lucky-window|" + date + "|" + strconv.Itoa(index)
+	if attempt > 0 {
+		msg += "|" + strconv.Itoa(attempt)
+	}
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(msg))
+	return binary.BigEndian.Uint64(m.Sum(nil)[:8])
+}

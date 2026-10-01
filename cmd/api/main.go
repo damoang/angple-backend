@@ -1505,32 +1505,19 @@ func main() {
 		// 실제 발동은 라이브 작성 경로(createPostFn/createCommentFn)에서 아래 luckyRepo/luckyService 로.
 		luckyRepo := v2repo.NewLuckyRepository(db)
 		luckyService := v2svc.NewLuckyService()
+		// 시간대 단계(앙팡타임 등)의 그날 시각은 이미 주입된 JWT 시크릿에서 라벨을 붙여 파생한 키로 정한다.
+		// 새 환경변수 없이 모든 파드가 같은 값을 얻는다. 시크릿이 비면 시간대 단계는 꺼진다(앙복타임만).
+		luckyLive := v2svc.NewLuckyLive(luckyRepo, luckyService, v2svc.DeriveLuckyWindowKey(cfg.JWT.Secret))
 		// grantLuckyLive: 라이브 글/댓글 작성 직후 호출. 커밋된 wr_id 를 키로 best-effort 지급.
 		// (레거시 @lucky 와 동일하게 po_rel_table=slug, po_rel_id=wr_id 로 g5_point 에 남아 마이페이지·뱃지에서 함께 보인다.)
-		grantLuckyLive := func(mbID, slug string, wrID int) {
+		// isComment=true 면 lucky_config.include_comments 가 켜졌을 때만 진행한다(기본 글만).
+		grantLuckyLive := func(mbID, slug string, wrID int, isComment bool) {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("[lucky] grant panic %s (%s/%d): %v", mbID, slug, wrID, r)
 				}
 			}()
-			if mbID == "" {
-				return
-			}
-			cfg, err := luckyRepo.GetLuckyConfig()
-			if err != nil || cfg == nil || !cfg.Enabled { // 전역 마스터 스위치
-				return
-			}
-			dice, maxAmount := luckyRepo.GetBoardLucky(slug) // 게시판별 확률·금액(안 켠 곳은 0,0)
-			if dice < 1 || maxAmount < 1 {
-				return
-			}
-			won, amount := luckyService.RollLucky(dice, maxAmount)
-			if !won || amount <= 0 {
-				return
-			}
-			if _, err := luckyRepo.Grant(mbID, slug, fmt.Sprintf("%d", wrID), "point", amount); err != nil {
-				log.Printf("[lucky] grant failed %s (%s/%d): %v", mbID, slug, wrID, err)
-			}
+			luckyLive.Process(mbID, slug, wrID, isComment)
 		}
 
 		// Inject expRepo into V2Handler for write/comment XP
@@ -4476,7 +4463,7 @@ func main() {
 
 			// 나리야 럭키 포인트 — 글 작성 시 확률 지급(게시판별 설정, 전역 마스터 스위치).
 			// 커밋된 wr_id 를 키로 best-effort. 기본 비활성이라 켜기 전엔 미발동.
-			go grantLuckyLive(mbID, slug, post.WrID)
+			go grantLuckyLive(mbID, slug, post.WrID, false)
 
 			// 첨부파일 레코드 생성 (g5_board_file)
 			if len(req.Files) > 0 {
@@ -4870,8 +4857,8 @@ func main() {
 				}()
 			}
 
-			// 나리야 럭키 포인트 — 댓글 작성 시 확률 지급(게시판별 설정, 전역 마스터 스위치).
-			go grantLuckyLive(mbID, slug, comment.WrID)
+			// 나리야 럭키 포인트 — 댓글은 lucky_config.include_comments 가 켜졌을 때만(기본 글만).
+			go grantLuckyLive(mbID, slug, comment.WrID, true)
 
 			// Admin sees full IP, others see masked
 			commentIP := v1handler.MaskIP(comment.WrIP)
