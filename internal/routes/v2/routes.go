@@ -140,6 +140,16 @@ func SetupAdmin(router *gin.Engine, h *v2handler.AdminHandler, jwtManager *jwt.M
 	admin.GET("/dashboard/stats", h.GetDashboardStats)
 }
 
+// SetupAdminLucky 는 앙팡(럭키 포인트) 관리자 API 를 등록한다. 다른 관리자 API 와 같은 JWT + RequireAdmin(mb_level>=10) 아래다.
+func SetupAdminLucky(router *gin.Engine, h *v2handler.LuckyAdminHandler, jwtManager *jwt.Manager) {
+	admin := router.Group("/api/v2/admin/lucky")
+	admin.Use(middleware.JWTAuth(jwtManager), middleware.RequireAdmin())
+	admin.GET("/config", h.GetConfig)
+	admin.PUT("/config", h.PutConfig)
+	admin.PUT("/boards", h.PutBoards)
+	admin.GET("/stats", h.GetStats)
+}
+
 // SetupAdminXP configures admin XP management routes
 func SetupAdminXP(router *gin.Engine, h *v2handler.ExpHandler, jwtManager *jwt.Manager) {
 	admin := router.Group("/api/v2/admin/xp")

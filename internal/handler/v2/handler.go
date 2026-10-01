@@ -43,6 +43,8 @@ type V2Handler struct {
 	gnuBoardRepo gnurepo.BoardRepository
 	// 크로스보드 통합 피드용 (nil-safe — 주입 시 GET /api/v2/feed 활성)
 	feedRepo gnurepo.MyPageRepository
+	// 럭키 배지 단계로 인정할 설정 이름 목록을 돌려준다(nil-safe — 미주입이면 기본 단계 이름만 인정).
+	luckyTierNames func() []string
 }
 
 const claimBoardSlug = "claim"
@@ -65,6 +67,12 @@ func NewV2Handler(
 		boardRepo:   boardRepo,
 		permChecker: permChecker,
 	}
+}
+
+// SetLuckyTierNames 는 럭키 배지가 원장 문구에서 단계를 읽을 때 인정할 설정 이름 공급자를 주입한다.
+// 고정 시간대처럼 관리자가 정한 이름도 v2 목록 배지에 단계로 보이게 하려는 것이다.
+func (h *V2Handler) SetLuckyTierNames(fn func() []string) {
+	h.luckyTierNames = fn
 }
 
 // SetCache sets the optional Redis cache for anonymous GET responses.

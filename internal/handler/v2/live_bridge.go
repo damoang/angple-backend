@@ -309,7 +309,11 @@ func (h *V2Handler) injectLuckyPoints(items []map[string]any, slug string) {
 			wrIDs = append(wrIDs, id)
 		}
 	}
-	lucky, err := gnurepo.LuckyBadgesByWrID(h.gnuDB, slug, wrIDs)
+	var tierNames []string
+	if h.luckyTierNames != nil {
+		tierNames = h.luckyTierNames()
+	}
+	lucky, err := gnurepo.LuckyBadgesByWrID(h.gnuDB, slug, wrIDs, tierNames)
 	if err != nil {
 		log.Printf("[lucky] v2 당첨 조회 실패 board=%s: %v", slug, err)
 	}

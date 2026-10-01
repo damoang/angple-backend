@@ -73,6 +73,60 @@ type LuckyConfig struct {
 	// Windows 는 하루 한 번씩 무작위(서버 비밀값으로 결정적) 시각에 열리는 단계들이다.
 	// 비어 있으면 앙복타임(게시판 설정)만 쓴다.
 	Windows []LuckyWindow `json:"windows"`
+	// FixedWindows 는 매일 같은 KST 시각에 열리는 고정 시간대다(예: 저트래픽 시간 가중치).
+	// 무작위 window 와 달리 시각이 설정에 그대로 있다 — 공개돼도 되는 값이라서다.
+	// 무작위 window 에 걸리면 그쪽이 먼저고, 고정 시간대끼리 겹치면 배열 앞쪽이 이긴다. 비어 있으면 기존과 같다.
+	FixedWindows []LuckyFixedWindow `json:"fixed_windows"`
+}
+
+// LuckyFixedWindow 는 고정 시간대 하나다. Start·End 는 KST "HH:MM" 이고 [Start, End) 이다(시작 포함·끝 제외).
+// End 가 Start 보다 이르면 자정을 넘는 구간으로 본다(예: 23:00~01:00). Start==End 는 빈 구간이라 열지 않는다.
+type LuckyFixedWindow struct {
+	Name        string       `json:"name"`         // 단계 이름. 내역 문구·배지 tier 에 그대로 쓰인다
+	Start       string       `json:"start"`        // KST "HH:MM" (포함)
+	End         string       `json:"end"`          // KST "HH:MM" (제외)
+	Odds        int          `json:"odds"`         // 글 당첨확률 분모. 1 미만이면 이 시간대를 열지 않는다
+	CommentOdds int          `json:"comment_odds"` // 댓글 당첨확률 분모. 1 미만이면 이 시간대에서 댓글 미발동
+	Points      int          `json:"points"`       // 상품 표가 없을 때 1..Points 포인트
+	Prizes      []LuckyPrize `json:"prizes"`       // 상품 표(비면 Points 로 포인트만)
+}
+
+// TierNames 는 이 설정에서 정한 단계 이름(무작위 window + 고정 시간대)을 중복 없이 돌려준다.
+// 배지가 원장 문구에서 단계를 읽을 때 쓰는 허용 목록이다 — 설정에 없는 이름으로 시작하는 문구(레거시 등)는
+// 단계로 인정하지 않으려는 것이다. 기본 단계 이름(앙복타임 등)은 배지 쪽이 항상 따로 인정한다.
+func (c *LuckyConfig) TierNames() []string {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(c.Windows)+len(c.FixedWindows))
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, dup := seen[name]; dup {
+			return
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	for _, w := range c.Windows {
+		add(w.Name)
+	}
+	for _, f := range c.FixedWindows {
+		add(f.Name)
+	}
+	return out
+}
+
+// InvalidateLuckyConfigCache 는 이 파드의 lucky_config 30초 캐시를 비운다.
+// 관리자 저장 직후 이 파드에서는 바로 새 값이 보이게 하려는 것이다. 다른 파드는 TTL(30초) 안에 따라온다.
+func InvalidateLuckyConfigCache() {
+	luckyConfigCacheMu.Lock()
+	luckyConfigCacheVal = nil
+	luckyConfigCacheExpAt = time.Time{}
+	luckyConfigCacheMu.Unlock()
 }
 
 // LuckyWindow 는 하루 한 번 열리는 시간대 단계 하나다. 길이·확률·금액은 설정에서 정한다.
@@ -236,6 +290,19 @@ type LuckyRepository interface {
 	// GetBoardLucky returns the per-board lucky setting (글·댓글 확률, 금액) if the board has
 	// lucky enabled; otherwise the zero value (=미발동). 확률·금액은 게시판별로 다르다.
 	GetBoardLucky(boardSlug string) BoardLuckyOdds
+}
+
+// LuckyTierNamesFrom 는 설정 읽기 함수에서 배지용 단계 이름 목록을 뽑는다(캐시된 설정을 쓰므로 요청마다 DB 를 치지 않는다).
+// 읽기에 실패하면 nil — 배지는 기본 단계 이름만 인정하게 된다(표시만 줄 뿐 지급과는 무관하다).
+func LuckyTierNamesFrom(get func() (*LuckyConfig, error)) []string {
+	if get == nil {
+		return nil
+	}
+	cfg, err := get()
+	if err != nil || cfg == nil {
+		return nil
+	}
+	return cfg.TierNames()
 }
 
 type luckyRepository struct {
