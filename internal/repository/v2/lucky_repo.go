@@ -18,6 +18,8 @@ import (
 const (
 	luckyRelAction    = "@lucky"
 	luckyPointContent = "나리야 럭키 포인트"
+	// luckyExpContent 는 단계 이름이 없을 때의 경험치 내역(g5_na_xp.xp_content) 문구다.
+	luckyExpContent = "나리야 럭키 경험치"
 	// luckyCommentContentSuffix 는 댓글 당첨 내역 문구 끝에 붙는다(「<단계> 럭키 포인트(댓글)」).
 	luckyCommentContentSuffix = "(댓글)"
 	// luckyNeverExpireDate 는 만료 없는 포인트의 po_expire_date 다(그누보드 관례, 만료 크론이 건너뛴다).
@@ -80,6 +82,27 @@ type LuckyWindow struct {
 	Points  int    `json:"points"`  // 당첨 시 1..Points 지급(글·댓글 공통)
 	// CommentOdds 는 이 단계의 댓글 당첨확률 분모다. 없거나 1 미만이면 이 단계에서 댓글은 발동하지 않는다.
 	CommentOdds int `json:"comment_odds"`
+	// Prizes 는 이 단계의 상품 표다. 비어 있으면 Points 로 포인트만 준다(하위호환).
+	Prizes []LuckyPrize `json:"prizes"`
+}
+
+// LuckyPrize 는 상품 표의 한 줄이다. 당첨되면 Weight 비율로 한 줄을 고른다(weight<=0 인 줄은 무시).
+// Points 는 최대 금액이고 실제 지급은 1..Points 균등이다(0 이하 = 포인트 없음).
+// Exp 는 고정 경험치다(0 이하 = 경험치 없음). 둘 다 0 인 줄은 「꽝」이다.
+type LuckyPrize struct {
+	Weight int `json:"weight"`
+	Points int `json:"points"`
+	Exp    int `json:"exp"`
+}
+
+// HasPayablePrize 는 상품 표에 무언가를 주는 줄(weight>0 이고 포인트나 경험치가 있는 줄)이 있는지 본다.
+func HasPayablePrize(prizes []LuckyPrize) bool {
+	for _, p := range prizes {
+		if p.Weight > 0 && (p.Points > 0 || p.Exp > 0) {
+			return true
+		}
+	}
+	return false
 }
 
 // 기본값. 「설정 키 없음」이 무제한으로 읽히지 않도록 한곳에 모은다.
@@ -156,20 +179,28 @@ func (c *LuckyConfig) UnmarshalJSON(b []byte) error {
 }
 
 // BoardLucky is the PER-BOARD lucky setting read from v2_board_extended_settings.settings.lucky
-// (관리자가 게시판 편집 화면에서 설정). enabled=true 이고 points>=1 이며 그 종류의 확률(글 odds,
-// 댓글 comment_odds)이 1 이상일 때만 그 종류가 발동한다 — 그래서 게시판마다 다른 가중치를 줄 수 있다.
+// (관리자가 게시판 편집 화면에서 설정). enabled=true 이고 지급할 것(points>=1 또는 주는 줄이 있는 prizes)이
+// 있으며 그 종류의 확률(글 odds, 댓글 comment_odds)이 1 이상일 때만 그 종류가 발동한다.
 type BoardLucky struct {
 	Enabled     bool `json:"enabled"`      // 게시판별 사용 여부 (default: false → 미발동)
-	Points      int  `json:"points"`       // 당첨 시 1..Points 지급(글·댓글 공통)
+	Points      int  `json:"points"`       // 당첨 시 1..Points 지급(글·댓글 공통, prizes 가 없을 때)
 	Odds        int  `json:"odds"`         // 글 당첨확률 = 1/Odds (쌍주사위)
 	CommentOdds int  `json:"comment_odds"` // 댓글 당첨확률 = 1/CommentOdds. 없거나 1 미만이면 댓글 미발동
+	// Prizes 는 앙복타임 상품 표다. 비어 있으면 Points 로 포인트만 준다(하위호환).
+	Prizes []LuckyPrize `json:"prizes"`
 }
 
 // BoardLuckyOdds 는 GetBoardLucky 결과다. 0 은 「그 종류는 이 게시판에서 발동하지 않음」이다.
 type BoardLuckyOdds struct {
-	Odds        int // 글 확률 분모(앙복타임)
-	CommentOdds int // 댓글 확률 분모(앙복타임)
-	Points      int // 최대 금액(글·댓글 공통)
+	Odds        int          // 글 확률 분모(앙복타임)
+	CommentOdds int          // 댓글 확률 분모(앙복타임)
+	Points      int          // 최대 금액(글·댓글 공통, Prizes 가 없을 때)
+	Prizes      []LuckyPrize // 앙복타임 상품 표(없으면 Points 로 포인트만)
+}
+
+// Payable 은 이 게시판 설정에 지급할 것이 있는지(레거시 points 또는 상품 표) 본다.
+func (b BoardLuckyOdds) Payable() bool {
+	return b.Points >= 1 || HasPayablePrize(b.Prizes)
 }
 
 // LuckyGrant maps the g5_da_lucky_grant idempotency ledger row.
@@ -226,7 +257,13 @@ type GrantOptions struct {
 	Now time.Time
 	// ExpireDays 는 g5_point 만료일 = Now 의 KST 날짜 + ExpireDays 일이다. 0 이하 = 만료 없음(9999-12-31, 기존 Grant 동작).
 	ExpireDays int
+	// Exp 는 같은 트랜잭션에서 함께 줄 경험치(g5_na_xp + as_exp/as_level)다. 0 이하 = 경험치 없음(기존 동작).
+	// 포인트(amount)와 경험치는 원장 1행으로 묶인다 — amount 가 0 이고 Exp 만 있어도 원장은 1행이다.
+	Exp int
 }
+
+// errLuckyNothingToGrant 는 포인트도 경험치도 없는 지급 요청이다. 원장을 쓰지 않는다.
+var errLuckyNothingToGrant = errors.New("lucky: nothing to grant (amount<=0 and exp<=0)")
 
 // GrantOutcome 은 GrantWithOptions 의 결과 종류다. 호출부가 상한 로그를 남길 수 있게 「왜 안 줬는지」를 구분한다.
 type GrantOutcome string
@@ -277,7 +314,18 @@ func (r *luckyRepository) Grant(mbID, sourceTable, sourceID, kind string, amount
 //
 // ⭐ 시각 비교는 created_at 에 쓰는 값(Now)과 같은 time.Time 바인딩 경로로 한다. DSN 의 loc 이 무엇이든
 // 쓰기와 비교가 같은 변환을 거치므로 둘이 9시간 어긋나지 않는다.
+//
+// 지급 내용: amount>0 이면 g5_point(+mb_point), opt.Exp>0 이면 g5_na_xp(+as_exp, as_level 재계산).
+// 둘 다 원장 INSERT 와 같은 트랜잭션이라 원장 UNIQUE 하나가 포인트·경험치 이중지급을 함께 막는다.
+// 원장 amount 는 포인트 금액이다(경험치만이면 0). 경험치의 근거는 g5_na_xp(xp_rel_action=@lucky)다.
+// ⛔ mb_level 은 건드리지 않는다 — as_level 만 바뀐다.
 func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind string, amount int, opt GrantOptions) (GrantOutcome, error) {
+	if amount < 0 {
+		amount = 0
+	}
+	if amount == 0 && opt.Exp <= 0 {
+		return "", errLuckyNothingToGrant
+	}
 	now := opt.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -326,15 +374,25 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 		}
 
 		if kind == LuckyKindPost || kind == LuckyKindComment {
-			content := luckyPointContentFor(opt.TierName, kind == LuckyKindComment)
-			poID, err := insertLuckyPoint(tx, mbID, amount, sourceTable, sourceID, content, now, luckyExpireDate(now, opt.ExpireDays))
-			if err != nil {
-				return err
+			isComment := kind == LuckyKindComment
+			if amount > 0 {
+				content := luckyPointContentFor(opt.TierName, isComment)
+				poID, err := insertLuckyPoint(tx, mbID, amount, sourceTable, sourceID, content, now, luckyExpireDate(now, opt.ExpireDays))
+				if err != nil {
+					return err
+				}
+				if err := tx.Model(&LuckyGrant{}).
+					Where("id = ?", ledger.ID).
+					UpdateColumn("po_id", poID).Error; err != nil {
+					return err
+				}
 			}
-			if err := tx.Model(&LuckyGrant{}).
-				Where("id = ?", ledger.ID).
-				UpdateColumn("po_id", poID).Error; err != nil {
-				return err
+			if opt.Exp > 0 {
+				// 기존 AddExp 와 같은 규칙(최대 레벨·고레벨 제한·as_level 재계산)을 같은 tx 로 적용한다.
+				content := luckyExpContentFor(opt.TierName, isComment)
+				if _, err := addExpTx(tx, mbID, opt.Exp, content, sourceTable, sourceID, luckyRelAction, now); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -368,11 +426,26 @@ func countLuckyGrantsLocked(tx *gorm.DB, mbID, kind string, since time.Time) (in
 
 // luckyPointContentFor 는 g5_point.po_content 문구를 만든다. 단계 이름이 있으면 「<단계> 럭키 포인트」,
 // 댓글이면 끝에 「(댓글)」을 붙인다. 당첨자가 마이페이지 내역에서 어느 단계였는지 보게 하려는 것이다.
-// 배지·내역 조인은 po_rel_action(@lucky)·po_rel_table·po_rel_id 기준이라 문구가 바뀌어도 영향이 없다. 시각은 넣지 않는다.
+// 배지·내역 조인은 po_rel_action(@lucky)·po_rel_table·po_rel_id 기준이다. 단, 배지의 단계 표시(lucky_tier)는 이 문구의
+// 「<단계> 」 접두어에서 읽으므로 접두어 형식을 바꾸면 배지 쪽도 같이 바꿔야 한다. 시각은 넣지 않는다.
 func luckyPointContentFor(tierName string, isComment bool) string {
 	content := luckyPointContent
 	if tierName = strings.TrimSpace(tierName); tierName != "" {
 		content = tierName + " 럭키 포인트"
+	}
+	if isComment {
+		content += luckyCommentContentSuffix
+	}
+	return content
+}
+
+// luckyExpContentFor 는 g5_na_xp.xp_content 문구를 만든다. 「<단계> 럭키 경험치」, 댓글이면 끝에 「(댓글)」.
+// 단계 이름이 없으면 기본 문구다. 배지 조인은 xp_rel_action(@lucky)·xp_rel_table·xp_rel_id 기준이고,
+// 배지의 단계 표시(lucky_tier)는 이 문구의 「<단계> 」 접두어에서 읽는다 — 접두어 형식을 바꾸면 배지 쪽도 같이 바꿔야 한다.
+func luckyExpContentFor(tierName string, isComment bool) string {
+	content := luckyExpContent
+	if tierName = strings.TrimSpace(tierName); tierName != "" {
+		content = tierName + " 럭키 경험치"
 	}
 	if isComment {
 		content += luckyCommentContentSuffix
@@ -512,10 +585,13 @@ func (r *luckyRepository) GetBoardLucky(boardSlug string) BoardLuckyOdds {
 // boardLuckyOddsOf 는 게시판 설정을 판정용 값으로 줄인다. 꺼졌거나 points<1 이면 전부 0,
 // 확률이 1 미만인 종류는 0(그 종류는 이 게시판에서 발동하지 않음)이다.
 func boardLuckyOddsOf(b *BoardLucky) BoardLuckyOdds {
-	if b == nil || !b.Enabled || b.Points < 1 {
+	if b == nil || !b.Enabled || (b.Points < 1 && !HasPayablePrize(b.Prizes)) {
 		return BoardLuckyOdds{}
 	}
-	out := BoardLuckyOdds{Points: b.Points}
+	out := BoardLuckyOdds{Points: b.Points, Prizes: b.Prizes}
+	if out.Points < 0 {
+		out.Points = 0
+	}
 	if b.Odds >= 1 {
 		out.Odds = b.Odds
 	}

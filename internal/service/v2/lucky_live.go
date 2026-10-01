@@ -42,8 +42,9 @@ type LuckyLiveResult struct {
 	Won     bool                // 주사위 당첨
 	Tier    string              // 적용된 단계 이름
 	Odds    int                 // 적용된 확률 분모
-	Points  int                 // 적용된 최대 금액
-	Amount  int                 // 당첨 금액(미당첨 0)
+	Points  int                 // 적용된 최대 금액(상품 표가 없을 때)
+	Amount  int                 // 당첨 포인트(미당첨·경험치만 0)
+	Exp     int                 // 당첨 경험치(미당첨·포인트만 0)
 	Outcome v2repo.GrantOutcome // 지급 결과(당첨일 때만)
 	Err     error               // 지급 실패
 }
@@ -55,11 +56,13 @@ type LuckyLive struct {
 	roller    LuckyService
 	windowKey []byte
 	now       func() time.Time
+	// randN 은 상품 표 선택·상품 금액에 쓰는 [0, n) 균등 난수다. 주사위와 같은 crypto/rand 를 쓰고, 테스트에서 바꿔 낀다.
+	randN func(n int) int
 }
 
 // NewLuckyLive 는 LuckyLive 를 만든다. windowKey 가 비면 시간대 단계를 끈다(앙복타임만).
 func NewLuckyLive(store LuckyLiveStore, roller LuckyService, windowKey []byte) *LuckyLive {
-	return &LuckyLive{store: store, roller: roller, windowKey: windowKey, now: time.Now}
+	return &LuckyLive{store: store, roller: roller, windowKey: windowKey, now: time.Now, randN: cryptoRandN}
 }
 
 // DeriveLuckyWindowKey 는 기존 백엔드 시크릿에서 라벨을 붙여 시간대 전용 키를 만든다.
@@ -103,7 +106,7 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool, comment
 	if isComment {
 		boardOdds = board.CommentOdds
 	}
-	if boardOdds < 1 || board.Points < 1 {
+	if boardOdds < 1 || !board.Payable() {
 		return res
 	}
 
@@ -119,10 +122,21 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool, comment
 	res.Rolled = true
 
 	won, amount := l.roller.RollLucky(res.Odds, res.Points)
-	if !won || amount <= 0 {
+	if !won {
 		return res
 	}
-	res.Won, res.Amount = true, amount
+	exp := 0
+	if prize, ok := pickPrize(tier.prizes, l.randN); ok {
+		// 상품 표가 있으면 주사위 금액 대신 고른 줄로 준다(포인트 1..Points 균등, 경험치 고정).
+		amount, exp = prizeAmount(prize, l.randN), prize.Exp
+		if exp < 0 {
+			exp = 0
+		}
+	}
+	if amount <= 0 && exp <= 0 { // 꽝 줄(포인트·경험치 모두 0) 또는 금액 없음
+		return res
+	}
+	res.Won, res.Amount, res.Exp = true, amount, exp
 
 	kind, dailyCap := v2repo.LuckyKindPost, cfg.DailyCapPost
 	if isComment {
@@ -134,6 +148,7 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool, comment
 		TierName:       res.Tier,
 		Now:            now,
 		ExpireDays:     cfg.ExpireDays,
+		Exp:            exp,
 	})
 	res.Outcome, res.Err = outcome, err
 	logLuckyOutcome(mbID, slug, wrID, res.Tier, outcome, err)
@@ -159,6 +174,47 @@ type luckyTier struct {
 	odds        int // 글 확률 분모
 	commentOdds int // 댓글 확률 분모(0 = 이 단계에서 댓글 미발동)
 	points      int
+	prizes      []v2repo.LuckyPrize // 상품 표(비면 points 로 포인트만)
+}
+
+// pickPrize 는 상품 표에서 가중치 비율로 한 줄을 고른다(순수 함수, rng 주입).
+// weight<=0 인 줄은 무시한다. 고를 줄이 없으면(빈 표·가중치 합 0) ok=false — 호출부는 레거시 points 를 쓴다.
+// rng(n) 은 [0, n) 균등 난수여야 한다.
+func pickPrize(prizes []v2repo.LuckyPrize, rng func(n int) int) (v2repo.LuckyPrize, bool) {
+	total := 0
+	for _, p := range prizes {
+		if p.Weight > 0 {
+			total += p.Weight
+		}
+	}
+	if total <= 0 || rng == nil {
+		return v2repo.LuckyPrize{}, false
+	}
+	r := rng(total)
+	for _, p := range prizes {
+		if p.Weight <= 0 {
+			continue
+		}
+		if r < p.Weight {
+			return p, true
+		}
+		r -= p.Weight
+	}
+	// rng 가 범위를 벗어난 값을 줘도 마지막 유효 줄로 떨어진다(도달하지 않아야 정상).
+	for i := len(prizes) - 1; i >= 0; i-- {
+		if prizes[i].Weight > 0 {
+			return prizes[i], true
+		}
+	}
+	return v2repo.LuckyPrize{}, false
+}
+
+// prizeAmount 는 상품 줄의 포인트를 1..Points 균등으로 뽑는다. Points<=0 이면 0(포인트 없음).
+func prizeAmount(p v2repo.LuckyPrize, rng func(n int) int) int {
+	if p.Points <= 0 {
+		return 0
+	}
+	return rng(p.Points) + 1
 }
 
 // pickTier 는 now 가 오늘의 어느 시간대 단계 안이면 그 단계를, 아니면 앙복타임(게시판 값)을 돌려준다.
@@ -167,10 +223,10 @@ func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, board v2rep
 	dayStart := time.Date(k.Year(), k.Month(), k.Day(), 0, 0, 0, 0, luckyKST)
 	for _, s := range luckyWindowsForDay(l.windowKey, dayStart, cfg) {
 		if !k.Before(s.start) && k.Before(s.end) {
-			return luckyTier{name: s.name, odds: s.odds, commentOdds: s.commentOdds, points: s.points}
+			return luckyTier{name: s.name, odds: s.odds, commentOdds: s.commentOdds, points: s.points, prizes: s.prizes}
 		}
 	}
-	return luckyTier{name: LuckyBaseTierName, odds: board.Odds, commentOdds: board.CommentOdds, points: board.Points}
+	return luckyTier{name: LuckyBaseTierName, odds: board.Odds, commentOdds: board.CommentOdds, points: board.Points, prizes: board.Prizes}
 }
 
 // luckyWindowSlot 은 그날 열리는 단계 구간 하나다. ⛔ 패키지 밖(응답·로그·API)으로 내보내지 않는다.
@@ -180,6 +236,7 @@ type luckyWindowSlot struct {
 	odds        int
 	commentOdds int // 1 미만이면 0(이 단계에서 댓글 미발동)
 	points      int
+	prizes      []v2repo.LuckyPrize
 }
 
 // luckyWindowsForDay 는 dayStart(KST 0시) 날짜의 단계 구간들을 결정적으로 계산한다.
@@ -204,7 +261,7 @@ func luckyWindowsForDay(key []byte, dayStart time.Time, cfg *v2repo.LuckyConfig)
 	var placed []luckySpan
 	var out []luckyWindowSlot
 	for i, w := range cfg.Windows {
-		if w.Minutes < 1 || w.Odds < 1 || w.Points < 1 {
+		if w.Minutes < 1 || w.Odds < 1 || (w.Points < 1 && !v2repo.HasPayablePrize(w.Prizes)) {
 			continue
 		}
 		start, ok := placeLuckyWindow(key, date, i, w.Minutes, rangeStart, rangeEnd, placed)
@@ -224,6 +281,7 @@ func luckyWindowsForDay(key []byte, dayStart time.Time, cfg *v2repo.LuckyConfig)
 			odds:        w.Odds,
 			commentOdds: commentOdds,
 			points:      w.Points,
+			prizes:      w.Prizes,
 		})
 	}
 	return out

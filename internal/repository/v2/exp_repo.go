@@ -201,59 +201,72 @@ func (r *expRepository) GetHistory(mbID string, page, limit int) ([]gnuboard.Exp
 var maxXPLevel = maxLevel
 
 func (r *expRepository) AddExp(mbID string, point int, content, relTable, relID, action string) (*AddExpResult, error) {
-	result := &AddExpResult{}
+	var result *AddExpResult
 	err := r.db.Transaction(func(tx *gorm.DB) error {
-		// Get current level before update
-		var member gnuboard.G5Member
-		if err := tx.Select("as_exp, as_level").Where("mb_id = ?", mbID).First(&member).Error; err != nil {
-			return err
-		}
-		result.OldLevel = member.AsLevel
-		result.NewLevel = member.AsLevel
-
-		// 최대 레벨 도달 시 자동 적립(양수) 차단 — 관리자 수동 지급/차감은 허용
-		if member.AsLevel >= maxXPLevel && point > 0 && relTable != "@admin" {
-			return nil // 적립 없이 조용히 반환
-		}
-
-		// 레벨 80 이상: 로그인(출석)으로만 XP 적립 가능
-		if member.AsLevel >= 80 && point > 0 && relTable != "@login" && relTable != "@admin" {
-			return nil
-		}
-
-		// Update member exp
-		if err := tx.Model(&gnuboard.G5Member{}).
-			Where("mb_id = ?", mbID).
-			UpdateColumn("as_exp", gorm.Expr("as_exp + ?", point)).Error; err != nil {
-			return err
-		}
-
-		// Check if level up is needed
-		newExp := member.AsExp + point
-		newLevel, _, _, _, _ := calculateLevelInfo(newExp)
-		result.NewLevel = newLevel
-		if newLevel > member.AsLevel {
-			result.LevelUp = true
-			if err := tx.Model(&gnuboard.G5Member{}).
-				Where("mb_id = ?", mbID).
-				UpdateColumn("as_level", newLevel).Error; err != nil {
-				return err
-			}
-		}
-
-		// Insert exp log
-		log := &gnuboard.G5NaXP{
-			MbID:        mbID,
-			XpDatetime:  time.Now(),
-			XpPoint:     point,
-			XpContent:   content,
-			XpRelTable:  relTable,
-			XpRelID:     relID,
-			XpRelAction: action,
-		}
-		return tx.Create(log).Error
+		var err error
+		result, err = addExpTx(tx, mbID, point, content, relTable, relID, action, time.Now())
+		return err
 	})
 	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// addExpTx 는 AddExp 의 본체를 호출부가 연 트랜잭션 tx 안에서 실행한다(다른 기록과 한 tx 로 묶을 때 쓴다).
+// 규칙: 최대 레벨·고레벨 제한에 걸리면 아무것도 쓰지 않고 돌려준다. 아니면 as_exp 증가 → 레벨이 오르면
+// as_level 갱신 → g5_na_xp 1행(xp_datetime=now). ⛔ mb_level 은 건드리지 않는다(as_level 만).
+func addExpTx(tx *gorm.DB, mbID string, point int, content, relTable, relID, action string, now time.Time) (*AddExpResult, error) {
+	result := &AddExpResult{}
+	// Get current level before update
+	var member gnuboard.G5Member
+	if err := tx.Select("as_exp, as_level").Where("mb_id = ?", mbID).First(&member).Error; err != nil {
+		return nil, err
+	}
+	result.OldLevel = member.AsLevel
+	result.NewLevel = member.AsLevel
+
+	// 최대 레벨 도달 시 자동 적립(양수) 차단 — 관리자 수동 지급/차감은 허용
+	if member.AsLevel >= maxXPLevel && point > 0 && relTable != "@admin" {
+		return result, nil // 적립 없이 조용히 반환
+	}
+
+	// 레벨 80 이상: 로그인(출석)으로만 XP 적립 가능
+	if member.AsLevel >= 80 && point > 0 && relTable != "@login" && relTable != "@admin" {
+		return result, nil
+	}
+
+	// Update member exp
+	if err := tx.Model(&gnuboard.G5Member{}).
+		Where("mb_id = ?", mbID).
+		UpdateColumn("as_exp", gorm.Expr("as_exp + ?", point)).Error; err != nil {
+		return nil, err
+	}
+
+	// Check if level up is needed
+	newExp := member.AsExp + point
+	newLevel, _, _, _, _ := calculateLevelInfo(newExp)
+	result.NewLevel = newLevel
+	if newLevel > member.AsLevel {
+		result.LevelUp = true
+		if err := tx.Model(&gnuboard.G5Member{}).
+			Where("mb_id = ?", mbID).
+			UpdateColumn("as_level", newLevel).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	// Insert exp log
+	log := &gnuboard.G5NaXP{
+		MbID:        mbID,
+		XpDatetime:  now,
+		XpPoint:     point,
+		XpContent:   content,
+		XpRelTable:  relTable,
+		XpRelID:     relID,
+		XpRelAction: action,
+	}
+	if err := tx.Create(log).Error; err != nil {
 		return nil, err
 	}
 	return result, nil

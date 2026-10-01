@@ -3124,8 +3124,8 @@ func main() {
 			// 신고잠금 아이콘 재료(is_report_locked) — 표시용. 캐시 저장 전 적용.
 			items = enrichWithReportLocked(db, slug, items)
 
-			// lucky_point 병합 — 각 글의 럭키 당첨 금액(🍀 배지). 소스 g5_point(@lucky)라
-			// 레거시 과거 당첨까지 포함. 페이지 글 wr_id 를 모아 1쿼리(per-item 반복 금지).
+			// lucky_point·lucky_exp·lucky_tier·lucky_at 병합 — 각 글의 럭키 당첨 포인트·경험치·단계·시각(🍀 배지). 소스 g5_point·g5_na_xp(@lucky)라
+			// 레거시 과거 당첨까지 포함. 페이지 글 wr_id 를 모아 2쿼리 고정(per-item 반복 금지).
 			{
 				luckyIDs := make([]int, 0, len(items))
 				for _, item := range items {
@@ -3133,13 +3133,14 @@ func main() {
 						luckyIDs = append(luckyIDs, id)
 					}
 				}
-				if lm, lerr := gnurepo.LuckyPointsByWrID(db, slug, luckyIDs); lerr != nil {
-					log.Printf("[lucky] 글 목록 당첨금액 조회 실패 board=%s: %v", slug, lerr)
-				} else {
-					for i, item := range items {
-						if id, ok := item["id"].(int); ok {
-							items[i]["lucky_point"] = lm[id]
-						}
+				lm, lerr := gnurepo.LuckyBadgesByWrID(db, slug, luckyIDs)
+				if lerr != nil {
+					// 부분 실패여도 받은 값은 싣는다(경험치 조회만 실패하면 포인트 배지는 남는다).
+					log.Printf("[lucky] 글 목록 당첨 조회 실패 board=%s: %v", slug, lerr)
+				}
+				for i, item := range items {
+					if id, ok := item["id"].(int); ok {
+						lm[id].ApplyTo(items[i])
 					}
 				}
 			}
@@ -3303,9 +3304,14 @@ func main() {
 			single := []map[string]any{postDetail}
 			enrichGivingExtras(db, slug, single)
 
-			// lucky_point 병합 — 이 글의 럭키 당첨 금액(🍀 배지). g5_point(@lucky)라 레거시 포함.
-			if lm, lerr := gnurepo.LuckyPointsByWrID(db, slug, []int{id}); lerr == nil {
-				postDetail["lucky_point"] = lm[id]
+			// lucky_point·lucky_exp·lucky_tier·lucky_at 병합 — 이 글의 럭키 당첨 포인트·경험치·단계·시각(🍀 배지). g5_point·g5_na_xp(@lucky)라 레거시 포함.
+			if lm, lerr := gnurepo.LuckyBadgesByWrID(db, slug, []int{id}); lerr != nil {
+				log.Printf("[lucky] 글 상세 당첨 조회 실패 board=%s post=%d: %v", slug, id, lerr)
+				if b, ok := lm[id]; ok { // 부분 실패 — 받은 값은 싣는다
+					b.ApplyTo(postDetail)
+				}
+			} else {
+				lm[id].ApplyTo(postDetail)
 			}
 
 			// 처리 상태 배지 — 상세 캐시는 raw 행이고 transform 은 요청별이라 여기서 붙여도 캐시 오염 없음.
@@ -3726,25 +3732,27 @@ func main() {
 				gateDisciplinedComments(transformed, isAnonComment, false)
 			}
 
-			// lucky_point 병합 — 각 댓글의 럭키 당첨 금액(🍀 배지)을 실어 보낸다.
-			// 소스는 g5_point(po_rel_action='@lucky')라 레거시 과거 당첨까지 포함된다.
-			// 페이지 댓글 wr_id 를 모아 1쿼리로 조회한다(per-item 반복 금지). transformed 는
+			// lucky_point·lucky_exp·lucky_tier·lucky_at 병합 — 각 댓글의 럭키 당첨 내용(🍀 배지)을 실어 보낸다.
+			// 소스는 g5_point·g5_na_xp(@lucky)라 레거시 과거 당첨까지 포함된다.
+			// 페이지 댓글 wr_id 를 모아 2쿼리 고정으로 조회한다(per-item 반복 금지). transformed 는
 			// discipline enrich 후에도 comments 와 인덱스 정렬이 유지된다.
-			luckyByID := make(map[int]int)
+			luckyByID := make(map[int]gnurepo.LuckyBadge)
 			if len(comments) > 0 {
 				luckyIDs := make([]int, 0, len(comments))
 				for _, cm := range comments {
 					luckyIDs = append(luckyIDs, cm.WrID)
 				}
-				if m, lerr := gnurepo.LuckyPointsByWrID(db, slug, luckyIDs); lerr != nil {
-					// 배지 조회 실패는 목록을 막지 않는다 — 값 없이 0 으로 내려간다.
-					log.Printf("[lucky] 댓글 당첨금액 조회 실패 board=%s post=%d: %v", slug, id, lerr)
-				} else {
+				m, lerr := gnurepo.LuckyBadgesByWrID(db, slug, luckyIDs)
+				if lerr != nil {
+					// 배지 조회 실패는 목록을 막지 않는다 — 받은 값만 싣고 나머지는 0 으로 내려간다.
+					log.Printf("[lucky] 댓글 당첨 조회 실패 board=%s post=%d: %v", slug, id, lerr)
+				}
+				if m != nil {
 					luckyByID = m
 				}
 			}
 			for i, cm := range comments {
-				transformed[i]["lucky_point"] = luckyByID[cm.WrID]
+				luckyByID[cm.WrID].ApplyTo(transformed[i])
 			}
 
 			// 댓글 수정 정책 메타 — 프론트엔드 confirm 다이얼로그에서 사용 (단일 진실 근원: 백엔드 env)
