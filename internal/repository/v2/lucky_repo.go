@@ -135,8 +135,8 @@ func (c *LuckyConfig) UnmarshalJSON(b []byte) error {
 		DailyCapPost *int `json:"daily_cap_post"`
 		DailyCap     *int `json:"daily_cap"`
 	}
-	_ = json.Unmarshal(b, &present) // 위에서 같은 입력이 이미 파싱됐다
-	if present.DailyCapPost == nil && present.DailyCap != nil {
+	// 위에서 같은 입력이 이미 파싱됐다. 그래도 실패하면 이 하위호환 단계만 건너뛴다.
+	if err := json.Unmarshal(b, &present); err == nil && present.DailyCapPost == nil && present.DailyCap != nil {
 		v.DailyCapPost = v.DailyCap
 	}
 	if v.DailyCapPost < 0 {
