@@ -55,8 +55,9 @@ type LuckyGrantDetail struct {
 // LuckyAdminRepository 는 관리자 화면용 읽기·쓰기다. 지급 경로(LuckyRepository)와 분리해 둔 것은
 // 관리자 쓰기가 지급 경로의 인터페이스·테스트 가짜를 넓히지 않게 하려는 것이다.
 type LuckyAdminRepository interface {
-	// GetStoredLuckyConfig 는 캐시를 거치지 않고 저장된 lucky_config(기본값 채움)와 변경 이력(오래된 순)을 읽는다.
-	GetStoredLuckyConfig() (*LuckyConfig, []LuckyConfigHistoryEntry, error)
+	// GetStoredLuckyConfig 는 캐시를 거치지 않고 저장된 lucky_config(기본값 채움)와 변경 이력(오래된 순),
+	// 저장된 lucky_config 원문(없으면 nil)을 읽는다. 원문은 관리자 화면이 관대한 파싱에 가려진 오류를 알아채게 하려는 것이다.
+	GetStoredLuckyConfig() (*LuckyConfig, []LuckyConfigHistoryEntry, json.RawMessage, error)
 	// SaveLuckyConfig 는 lucky_config 를 통째로 바꾸고 같은 트랜잭션에서 이력을 남긴 뒤 이 파드의 캐시를 비운다.
 	SaveLuckyConfig(cfg *LuckyConfig, by string, now time.Time) error
 	// ListBoardLucky 는 모든 게시판과 각 게시판의 lucky 설정을 돌려준다.
@@ -94,18 +95,21 @@ func luckyJSONObjectOr(col string) string {
 	return "CASE WHEN UPPER(JSON_TYPE(" + col + ")) = 'OBJECT' THEN " + col + " ELSE JSON_OBJECT() END"
 }
 
-// GetStoredLuckyConfig 는 저장된 설정과 이력을 읽는다. 행이 없으면 기본값과 빈 이력이다.
-func (r *luckyAdminRepository) GetStoredLuckyConfig() (*LuckyConfig, []LuckyConfigHistoryEntry, error) {
+// GetStoredLuckyConfig 는 저장된 설정과 이력, lucky_config 원문을 읽는다. 행이 없으면 기본값·빈 이력·nil 원문이다.
+// 설정 값은 지급 경로와 같은 관대한 파싱(UnmarshalJSON)을 거친다 — 화면에 보이는 값이 실제 적용 값과 같게 하려는 것이다.
+func (r *luckyAdminRepository) GetStoredLuckyConfig() (*LuckyConfig, []LuckyConfigHistoryEntry, json.RawMessage, error) {
 	var rows []siteSettingsJSON
 	if err := r.db.Select("settings_json").Where("site_id = ?", defaultSiteID).Find(&rows).Error; err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(rows) == 0 {
-		return DefaultLuckyConfig(), nil, nil
+		return DefaultLuckyConfig(), nil, nil, nil
 	}
 	top := parseSettingsTop(rows[0].SettingsJSON)
 	cfg := DefaultLuckyConfig()
+	var stored json.RawMessage
 	if raw, ok := top["lucky_config"]; ok && len(raw) > 0 && string(raw) != nullJSON {
+		stored = raw
 		if err := json.Unmarshal(raw, cfg); err != nil {
 			// 저장값이 JSON 으로도 깨졌으면 지급 경로(getLuckyConfigFromDB)와 같게 기본값(꺼짐)으로 보여 준다.
 			// 에러로 돌려주면 관리자 화면이 열리지 않아 고쳐 저장할 길이 막힌다.
@@ -118,7 +122,7 @@ func (r *luckyAdminRepository) GetStoredLuckyConfig() (*LuckyConfig, []LuckyConf
 			hist = nil
 		}
 	}
-	return cfg, hist, nil
+	return cfg, hist, stored, nil
 }
 
 // parseSettingsTop 은 settings_json 을 최상위 키별 원본 JSON 으로 나눈다. 비었거나 깨졌으면 빈 맵이다.

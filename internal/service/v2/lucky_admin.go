@@ -328,6 +328,30 @@ type LuckyAdminConfigView struct {
 	History []v2repo.LuckyConfigHistoryEntry `json:"history"` // 최신순
 	// CacheTTLSeconds 는 다른 파드가 새 설정을 보기까지 걸릴 수 있는 최대 시간이다(화면 안내용).
 	CacheTTLSeconds int `json:"cache_ttl_seconds"`
+	// StoredParseError 는 저장된 원문이 관리자 PUT 과 같은 엄격 검증을 통과하지 못했다는 표식이다.
+	// 지급 경로는 그런 값을 조용히 기본값으로 바꾸거나 보정하므로, Config 는 원래 의도와 다를 수 있다.
+	// 이 상태로 저장하면 원문이 덮어써지므로 화면이 경고하고 원문을 보여 줄 수 있게 싣는다.
+	StoredParseError bool `json:"stored_parse_error"`
+	// StoredParseMessage 는 엄격 검증의 필드별 메시지다(StoredParseError 일 때만).
+	StoredParseMessage []LuckyFieldError `json:"stored_parse_message,omitempty"`
+	// StoredRaw 는 저장된 lucky_config 원문 그대로다(StoredParseError 일 때만).
+	StoredRaw json.RawMessage `json:"stored_raw,omitempty"`
+}
+
+// checkStoredLuckyConfig 는 저장된 원문을 관리자 PUT 과 같은 엄격 디코더로 다시 읽어 본다.
+// 원문이 없으면(설정한 적 없음) 문제없음이다. 지급 경로의 파싱은 바꾸지 않는다 — 여기서는 표식만 만든다.
+func checkStoredLuckyConfig(raw json.RawMessage) (bool, []LuckyFieldError) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	if _, err := DecodeLuckyConfig(raw); err != nil {
+		var ve *LuckyValidationError
+		if errors.As(err, &ve) {
+			return true, ve.Fields
+		}
+		return true, []LuckyFieldError{{Field: "", Message: err.Error()}}
+	}
+	return false, nil
 }
 
 // luckyConfigCacheTTLSeconds 는 v2repo 의 lucky_config 캐시 TTL 과 같은 값이다(안내용).
@@ -335,11 +359,12 @@ const luckyConfigCacheTTLSeconds = 30
 
 // GetConfig 는 저장된 설정(기본값 채움)·게시판별 lucky·최근 이력을 돌려준다.
 func (s *LuckyAdminService) GetConfig() (*LuckyAdminConfigView, error) {
-	cfg, hist, err := s.repo.GetStoredLuckyConfig()
+	cfg, hist, raw, err := s.repo.GetStoredLuckyConfig()
 	if err != nil {
 		return nil, err
 	}
 	normalizeLuckyConfig(cfg)
+	parseErr, parseMsg := checkStoredLuckyConfig(raw)
 	boards, err := s.repo.ListBoardLucky()
 	if err != nil {
 		return nil, err
@@ -351,7 +376,11 @@ func (s *LuckyAdminService) GetConfig() (*LuckyAdminConfigView, error) {
 	if boards == nil {
 		boards = []v2repo.LuckyBoardSetting{}
 	}
-	return &LuckyAdminConfigView{Config: cfg, Boards: boards, History: recent, CacheTTLSeconds: luckyConfigCacheTTLSeconds}, nil
+	view := &LuckyAdminConfigView{Config: cfg, Boards: boards, History: recent, CacheTTLSeconds: luckyConfigCacheTTLSeconds}
+	if parseErr {
+		view.StoredParseError, view.StoredParseMessage, view.StoredRaw = true, parseMsg, raw
+	}
+	return view, nil
 }
 
 // PutConfig 는 본문을 검증해 lucky_config 를 통째로 바꾼다. 검증 실패면 *LuckyValidationError 다.
@@ -447,7 +476,7 @@ func (s *LuckyAdminService) Stats(date string) (*LuckyAdminStats, error) {
 	start := day.UTC()
 	end := day.AddDate(0, 0, 1).UTC()
 
-	cfg, _, err := s.repo.GetStoredLuckyConfig()
+	cfg, _, _, err := s.repo.GetStoredLuckyConfig()
 	if err != nil {
 		return nil, err
 	}

@@ -26,8 +26,8 @@ type routeFakeLuckyAdminRepo struct {
 	savedBy []string
 }
 
-func (f *routeFakeLuckyAdminRepo) GetStoredLuckyConfig() (*v2repo.LuckyConfig, []v2repo.LuckyConfigHistoryEntry, error) {
-	return v2repo.DefaultLuckyConfig(), nil, nil
+func (f *routeFakeLuckyAdminRepo) GetStoredLuckyConfig() (*v2repo.LuckyConfig, []v2repo.LuckyConfigHistoryEntry, json.RawMessage, error) {
+	return v2repo.DefaultLuckyConfig(), nil, nil, nil
 }
 
 func (f *routeFakeLuckyAdminRepo) SaveLuckyConfig(_ *v2repo.LuckyConfig, by string, _ time.Time) error {

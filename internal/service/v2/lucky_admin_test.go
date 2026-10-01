@@ -22,6 +22,7 @@ import (
 type fakeLuckyAdminRepo struct {
 	cfg        *v2repo.LuckyConfig
 	hist       []v2repo.LuckyConfigHistoryEntry
+	raw        json.RawMessage // 저장된 lucky_config 원문(엄격 검증 표식용)
 	boards     []v2repo.LuckyBoardSetting
 	existing   map[string]bool
 	grants     []v2repo.LuckyGrantDetail
@@ -33,12 +34,12 @@ type fakeLuckyAdminRepo struct {
 	rangeEnd   time.Time
 }
 
-func (f *fakeLuckyAdminRepo) GetStoredLuckyConfig() (*v2repo.LuckyConfig, []v2repo.LuckyConfigHistoryEntry, error) {
+func (f *fakeLuckyAdminRepo) GetStoredLuckyConfig() (*v2repo.LuckyConfig, []v2repo.LuckyConfigHistoryEntry, json.RawMessage, error) {
 	if f.cfg == nil {
-		return v2repo.DefaultLuckyConfig(), f.hist, nil
+		return v2repo.DefaultLuckyConfig(), f.hist, f.raw, nil
 	}
 	cp := *f.cfg
-	return &cp, f.hist, nil
+	return &cp, f.hist, f.raw, nil
 }
 
 func (f *fakeLuckyAdminRepo) SaveLuckyConfig(cfg *v2repo.LuckyConfig, by string, _ time.Time) error {
@@ -330,6 +331,60 @@ func TestLuckyAdmin_NoRandomWindowTimes(t *testing.T) {
 			if k == "start" || k == "end" || k == "start_at" || k == "opens_at" {
 				t.Errorf("windows[%d] 에 시각 키 %q 가 있으면 안 된다", i, k)
 			}
+		}
+	}
+}
+
+// TestLuckyAdmin_GetConfigFlagsStoredParseError — 저장된 원문이 엄격 검증을 통과하지 못하면
+// stored_parse_error=true 와 필드별 메시지·원문을 싣고, 정상이거나 설정이 없으면 false 만 싣는다.
+func TestLuckyAdmin_GetConfigFlagsStoredParseError(t *testing.T) {
+	const bad = `{"enabled":true,"daily_cap_post":"8"}`
+	repo := &fakeLuckyAdminRepo{raw: json.RawMessage(bad)}
+	view, err := NewLuckyAdminService(repo).GetConfig()
+	if err != nil {
+		t.Fatalf("GetConfig 실패: %v", err)
+	}
+	if !view.StoredParseError || string(view.StoredRaw) != bad || len(view.StoredParseMessage) == 0 {
+		t.Fatalf("타입 오류 원문이면 표식·원문·메시지가 있어야 한다: %+v", view)
+	}
+	found := false
+	for _, m := range view.StoredParseMessage {
+		if m.Field == "daily_cap_post" && m.Message != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("필드별 메시지에 daily_cap_post 가 있어야 한다: %+v", view.StoredParseMessage)
+	}
+	raw, _ := json.Marshal(view)
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("응답 파싱 실패: %v", err)
+	}
+	if string(decoded["stored_parse_error"]) != "true" || string(decoded["stored_raw"]) != bad {
+		t.Errorf("응답에 stored_parse_error=true·stored_raw 원문: %s", raw)
+	}
+
+	for name, rawCfg := range map[string]json.RawMessage{
+		"정상 원문": json.RawMessage(`{"enabled":true,"daily_cap_post":8}`),
+		"설정 없음": nil,
+	} {
+		repo := &fakeLuckyAdminRepo{raw: rawCfg}
+		view, err := NewLuckyAdminService(repo).GetConfig()
+		if err != nil {
+			t.Fatalf("%s: GetConfig 실패: %v", name, err)
+		}
+		raw, _ := json.Marshal(view)
+		var decoded map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &decoded)
+		if view.StoredParseError || string(decoded["stored_parse_error"]) != "false" {
+			t.Errorf("%s: stored_parse_error=false 여야 한다: %s", name, raw)
+		}
+		if _, ok := decoded["stored_raw"]; ok {
+			t.Errorf("%s: 정상이면 stored_raw 를 싣지 않는다: %s", name, raw)
+		}
+		if _, ok := decoded["stored_parse_message"]; ok {
+			t.Errorf("%s: 정상이면 stored_parse_message 를 싣지 않는다: %s", name, raw)
 		}
 	}
 }

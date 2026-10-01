@@ -133,9 +133,33 @@ func TestSaveLuckyConfig_PreservesOtherKeysAndRecordsHistory(t *testing.T) {
 	}
 
 	// 다시 읽으면 저장된 값과 이력이 나온다.
-	stored, gotHist, err := repo.GetStoredLuckyConfig()
-	if err != nil || !stored.Enabled || len(gotHist) != 1 {
-		t.Errorf("다시 읽기: %+v %d %v", stored, len(gotHist), err)
+	stored, gotHist, raw, err := repo.GetStoredLuckyConfig()
+	if err != nil || !stored.Enabled || len(gotHist) != 1 || len(raw) == 0 {
+		t.Errorf("다시 읽기: %+v %d raw=%s %v", stored, len(gotHist), raw, err)
+	}
+}
+
+// TestGetStoredLuckyConfig_ReturnsRawUntouched — 타입이 틀린 저장값도 원문을 그대로 돌려주고,
+// 설정 값은 지급 경로와 같은 관대한 파싱(기본값 폴백)을 거친다. 설정이 없으면 원문은 nil 이다.
+func TestGetStoredLuckyConfig_ReturnsRawUntouched(t *testing.T) {
+	repo, db := newLuckyAdminTestRepo(t)
+	if _, _, raw, err := repo.GetStoredLuckyConfig(); err != nil || raw != nil {
+		t.Fatalf("행이 없으면 원문 nil: %s %v", raw, err)
+	}
+	const bad = `{"enabled":true,"windows":[{"name":"가","minutes":10,"odds":"8","points":3}]}`
+	if err := db.Exec(`INSERT INTO site_settings (site_id, settings_json) VALUES ('default', ?)`,
+		`{"xp_config":{"login_xp":12},"lucky_config":`+bad+`}`).Error; err != nil {
+		t.Fatalf("시드 실패: %v", err)
+	}
+	cfg, _, raw, err := repo.GetStoredLuckyConfig()
+	if err != nil {
+		t.Fatalf("읽기 실패: %v", err)
+	}
+	if string(raw) != bad {
+		t.Errorf("원문 그대로여야 한다: %s", raw)
+	}
+	if cfg.Enabled {
+		t.Error("타입 오류 설정은 지급 경로와 같게 기본값(꺼짐)으로 읽혀야 한다")
 	}
 }
 
