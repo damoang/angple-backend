@@ -2,6 +2,16 @@ package gnuboard
 
 import "testing"
 
+// testLuckyBaseName 는 테스트용 임의 평소 단계 이름이다(운영 값 아님).
+const testLuckyBaseName = "임의평소"
+
+// 테스트에서 되풀이하는 문구·이름.
+const (
+	testLegacyBasePointContent = "앙복타임 럭키 포인트"
+	testTierAngpangTime        = "앙팡타임"
+	testTierAngpangpangTime    = "앙팡팡타임"
+)
+
 // ⛔ 이 파일이 지키는 계약 (평소 단계 이름 base_name):
 //
 //   - N2 「앙복타임 럭키 」로 시작하는 지난 당첨은 tier 를 현재 평소 단계 이름(base_name)으로 보고한다(표시 별칭).
@@ -18,13 +28,13 @@ func TestLuckyTierFromContent_LegacyBaseAlias(t *testing.T) {
 		content string
 		want    string
 	}{
-		{LuckyTierNames{}, "앙복타임 럭키 포인트", "앙팡"},
-		{LuckyTierNames{}, "앙복타임 럭키 경험치(댓글)", "앙팡"},
-		{LuckyTierNames{Base: "  "}, "앙복타임 럭키 포인트", "앙팡"}, // 공백뿐이면 미설정과 같다
-		{LuckyTierNames{Base: "임의평소"}, "앙복타임 럭키 포인트", "임의평소"},
-		{LuckyTierNames{Base: "임의평소"}, "앙복타임 럭키 경험치(댓글)", "임의평소"},
-		{LuckyTierNames{Base: "임의평소"}, "임의평소 럭키 포인트", "임의평소"},
-		{LuckyTierNames{Base: "임의평소"}, "임의평소 럭키 경험치(댓글)", "임의평소"},
+		{LuckyTierNames{}, testLegacyBasePointContent, LuckyDefaultBaseName},
+		{LuckyTierNames{}, "앙복타임 럭키 경험치(댓글)", LuckyDefaultBaseName},
+		{LuckyTierNames{Base: "  "}, testLegacyBasePointContent, LuckyDefaultBaseName}, // 공백뿐이면 미설정과 같다
+		{LuckyTierNames{Base: testLuckyBaseName}, testLegacyBasePointContent, testLuckyBaseName},
+		{LuckyTierNames{Base: testLuckyBaseName}, "앙복타임 럭키 경험치(댓글)", testLuckyBaseName},
+		{LuckyTierNames{Base: testLuckyBaseName}, "임의평소 럭키 포인트", testLuckyBaseName},
+		{LuckyTierNames{Base: testLuckyBaseName}, "임의평소 럭키 경험치(댓글)", testLuckyBaseName},
 	}
 	for _, c := range cases {
 		got, ok := LuckyTierFromContent(c.content, c.names)
@@ -33,26 +43,26 @@ func TestLuckyTierFromContent_LegacyBaseAlias(t *testing.T) {
 		}
 	}
 	// 별칭이 원래 이름을 새지 않는다.
-	if got, _ := LuckyTierFromContent("앙복타임 럭키 포인트", LuckyTierNames{Base: "임의평소"}); got == LuckyLegacyBaseName {
+	if got, _ := LuckyTierFromContent(testLegacyBasePointContent, LuckyTierNames{Base: testLuckyBaseName}); got == LuckyLegacyBaseName {
 		t.Errorf("「앙복타임」 그대로 보고하면 안 된다: %q", got)
 	}
 }
 
 // TestLuckyTierFromContent_AngpangNamesDistinct — 「앙팡」/「앙팡타임」/「앙팡팡타임」은 구분자까지 비교해 섞이지 않는다.
 func TestLuckyTierFromContent_AngpangNamesDistinct(t *testing.T) {
-	for _, names := range []LuckyTierNames{{}, {Base: "앙팡"}, {Base: "앙팡", Names: []string{"앙팡타임", "앙팡팡타임"}}} {
+	for _, names := range []LuckyTierNames{{}, {Base: LuckyDefaultBaseName}, {Base: LuckyDefaultBaseName, Names: []string{testTierAngpangTime, testTierAngpangpangTime}}} {
 		cases := []struct {
 			content string
 			want    string
 			ok      bool
 		}{
-			{"앙팡 럭키 포인트", "앙팡", true},
-			{"앙팡 럭키 경험치(댓글)", "앙팡", true},
-			{"앙팡타임 럭키 포인트", "앙팡타임", true},
-			{"앙팡타임 럭키 경험치(댓글)", "앙팡타임", true},
-			{"앙팡팡타임 럭키 포인트", "앙팡팡타임", true},
-			{"앙팡팡타임 럭키 경험치(댓글)", "앙팡팡타임", true},
-			{"앙복타임 럭키 포인트", "앙팡", true},
+			{"앙팡 럭키 포인트", LuckyDefaultBaseName, true},
+			{"앙팡 럭키 경험치(댓글)", LuckyDefaultBaseName, true},
+			{"앙팡타임 럭키 포인트", testTierAngpangTime, true},
+			{"앙팡타임 럭키 경험치(댓글)", testTierAngpangTime, true},
+			{"앙팡팡타임 럭키 포인트", testTierAngpangpangTime, true},
+			{"앙팡팡타임 럭키 경험치(댓글)", testTierAngpangpangTime, true},
+			{testLegacyBasePointContent, LuckyDefaultBaseName, true},
 			{"앙팡럭키 포인트", "", false},       // 구분자 없음
 			{"앙팡 포인트", "", false},         // 「 럭키 」 없음
 			{"나리야 럭키 포인트", "", false},     // 레거시
@@ -73,21 +83,21 @@ func TestLuckyTierFromContent_AngpangNamesDistinct(t *testing.T) {
 
 // TestLuckyTierFromContent_BaseRenamedKeepsDefaultName — base_name 을 바꿔도 이미 「앙팡」으로 지급된 당첨은 단계가 남는다.
 func TestLuckyTierFromContent_BaseRenamedKeepsDefaultName(t *testing.T) {
-	names := LuckyTierNames{Base: "임의평소"}
-	if got, ok := LuckyTierFromContent("앙팡 럭키 포인트", names); !ok || got != "앙팡" {
+	names := LuckyTierNames{Base: testLuckyBaseName}
+	if got, ok := LuckyTierFromContent("앙팡 럭키 포인트", names); !ok || got != LuckyDefaultBaseName {
 		t.Errorf("기본 이름으로 지급된 문구는 그대로 인정: %q,%v", got, ok)
 	}
-	if got, ok := LuckyTierFromContent("앙팡타임 럭키 포인트", names); !ok || got != "앙팡타임" {
+	if got, ok := LuckyTierFromContent("앙팡타임 럭키 포인트", names); !ok || got != testTierAngpangTime {
 		t.Errorf("기본 단계 이름은 base 와 무관: %q,%v", got, ok)
 	}
 }
 
 // TestLuckyTierNames_BaseName — 미설정·공백이면 기본 「앙팡」, 값이 있으면 앞뒤 공백을 뗀 값.
 func TestLuckyTierNames_BaseName(t *testing.T) {
-	if got := (LuckyTierNames{}).BaseName(); got != LuckyDefaultBaseName || got != "앙팡" {
+	if got := (LuckyTierNames{}).BaseName(); got != "앙팡" { // 기본값 상수 자체가 「앙팡」인지도 함께 본다
 		t.Errorf("기본값: %q", got)
 	}
-	if got := (LuckyTierNames{Base: " 임의평소 "}).BaseName(); got != "임의평소" {
+	if got := (LuckyTierNames{Base: " 임의평소 "}).BaseName(); got != testLuckyBaseName {
 		t.Errorf("앞뒤 공백 제거: %q", got)
 	}
 }
@@ -103,17 +113,17 @@ func TestLuckyBadgesByWrID_LegacyBaseAlias(t *testing.T) {
 	}
 	counter.reset()
 
-	got, err := LuckyBadgesByWrID(db, "free", []int{101, 108, 109}, LuckyTierNames{Base: "임의평소"})
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 108, 109}, LuckyTierNames{Base: testLuckyBaseName})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
 	if n := len(counter.snapshot()); n != 2 {
 		t.Errorf("2쿼리여야 한다, got %d", n)
 	}
-	if b := got[108]; b.Tier != "임의평소" || b.At != "2026-09-30T11:12:13+09:00" || b.Points != 17 {
+	if b := got[108]; b.Tier != testLuckyBaseName || b.At != "2026-09-30T11:12:13+09:00" || b.Points != 17 {
 		t.Errorf("「앙복타임」 행은 현재 base_name tier: %+v", b)
 	}
-	if b := got[109]; b.Tier != "앙팡" || b.Points != 19 {
+	if b := got[109]; b.Tier != LuckyDefaultBaseName || b.Points != 19 {
 		t.Errorf("「앙팡」 행은 「앙팡」 tier: %+v", b)
 	}
 	if b := got[101]; b.Tier != "" || b.At != "" {
@@ -122,13 +132,13 @@ func TestLuckyBadgesByWrID_LegacyBaseAlias(t *testing.T) {
 
 	item := map[string]any{}
 	got[108].ApplyTo(item)
-	if item["lucky_tier"] != "임의평소" {
+	if item["lucky_tier"] != testLuckyBaseName {
 		t.Errorf("응답 lucky_tier 는 base_name: %v", item)
 	}
 
 	// base_name 미설정이면 기본 「앙팡」.
 	got, _ = LuckyBadgesByWrID(db, "free", []int{108}, LuckyTierNames{})
-	if got[108].Tier != "앙팡" {
+	if got[108].Tier != LuckyDefaultBaseName {
 		t.Errorf("미설정이면 「앙팡」: %+v", got[108])
 	}
 }

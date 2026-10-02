@@ -14,6 +14,15 @@ import (
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 )
 
+// testLuckyBaseName 는 테스트용 임의 평소 단계 이름이다(운영 값 아님).
+const testLuckyBaseName = "임의평소"
+
+// 테스트에서 되풀이하는 경로·필드 이름.
+const (
+	testLuckyAdminPath = "/config"
+	testBaseNameField  = "base_name"
+)
+
 // ⛔ 이 파일이 지키는 계약 (관리자 API 의 평소 단계 이름 base_name, HTTP 경계):
 //
 //   - N3 base_name 위반 PUT 은 400 + 필드별 사유(details[].field)이고 저장하지 않는다.
@@ -52,14 +61,14 @@ func newBaseNameAdminRouter(repo *fakeBaseNameAdminRepo) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	h := NewLuckyAdminHandler(v2svc.NewLuckyAdminService(repo))
 	r := gin.New()
-	r.GET("/config", h.GetConfig)
-	r.PUT("/config", h.PutConfig)
+	r.GET(testLuckyAdminPath, h.GetConfig)
+	r.PUT(testLuckyAdminPath, h.PutConfig)
 	return r
 }
 
 func doLuckyAdmin(t *testing.T, r *gin.Engine, method, body string) (int, map[string]any) {
 	t.Helper()
-	req := httptest.NewRequest(method, "/config", strings.NewReader(body))
+	req := httptest.NewRequest(method, testLuckyAdminPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -76,11 +85,11 @@ func TestLuckyAdminHandler_BaseNameInvalid400(t *testing.T) {
 		body  string
 		field string
 	}{
-		{`{"base_name":""}`, "base_name"},
-		{`{"base_name":"앙복타임"}`, "base_name"},
-		{`{"base_name":"나리야"}`, "base_name"},
-		{`{"base_name":"임의 럭키 이름"}`, "base_name"},
-		{`{"base_name":"` + strings.Repeat("가", 21) + `"}`, "base_name"},
+		{`{"base_name":""}`, testBaseNameField},
+		{`{"base_name":"앙복타임"}`, testBaseNameField},
+		{`{"base_name":"나리야"}`, testBaseNameField},
+		{`{"base_name":"임의 럭키 이름"}`, testBaseNameField},
+		{`{"base_name":"` + strings.Repeat("가", 21) + `"}`, testBaseNameField},
 		{`{"base_name":"겹침가","fixed_windows":[{"name":"겹침가","start":"01:00","end":"02:00","odds":3,"points":4}]}`, "fixed_windows[0].name"},
 	}
 	for _, c := range cases {
@@ -107,7 +116,7 @@ func TestLuckyAdminHandler_BaseNameRoundTrip(t *testing.T) {
 	baseOf := func(out map[string]any) any {
 		data, _ := out["data"].(map[string]any)
 		cfg, _ := data["config"].(map[string]any)
-		return cfg["base_name"]
+		return cfg[testBaseNameField]
 	}
 
 	code, out := doLuckyAdmin(t, r, http.MethodGet, "")
@@ -116,12 +125,12 @@ func TestLuckyAdminHandler_BaseNameRoundTrip(t *testing.T) {
 	}
 
 	code, out = doLuckyAdmin(t, r, http.MethodPut, `{"enabled":true,"base_name":"임의평소"}`)
-	if code != http.StatusOK || baseOf(out) != "임의평소" || repo.saves != 1 {
+	if code != http.StatusOK || baseOf(out) != testLuckyBaseName || repo.saves != 1 {
 		t.Fatalf("정상 PUT: code=%d out=%v saves=%d", code, out, repo.saves)
 	}
 
 	code, out = doLuckyAdmin(t, r, http.MethodGet, "")
-	if code != http.StatusOK || baseOf(out) != "임의평소" {
+	if code != http.StatusOK || baseOf(out) != testLuckyBaseName {
 		t.Fatalf("저장한 base_name 이 GET 에 보여야 한다: code=%d out=%v", code, out)
 	}
 }

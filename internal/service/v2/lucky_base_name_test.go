@@ -9,6 +9,9 @@ import (
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 )
 
+// testLuckyBaseName 는 테스트용 임의 평소 단계 이름이다(운영 값 아님).
+const testLuckyBaseName = "임의평소"
+
 // ⛔ 이 파일이 지키는 계약 (평소 단계 이름 base_name):
 //
 //   - N1 평소 단계(시간대 밖) 지급의 단계 이름은 lucky_config.base_name 이고, 미설정이면 「앙팡」이다.
@@ -25,30 +28,30 @@ func TestLuckyLive_BaseNameTier(t *testing.T) {
 	// 기본 설정: 「앙팡」.
 	store := &fakeLuckyStore{cfg: enabledCfg(), boardOdds: 13, boardPts: 9}
 	res := newTestLive(store, &fakeRoller{win: true}, nil, testNow).Process("member_a", "free", 1, false, 0)
-	if len(store.grants) != 1 || store.grants[0].opt.TierName != "앙팡" || res.Tier != "앙팡" {
+	if len(store.grants) != 1 || store.grants[0].opt.TierName != LuckyBaseTierName || res.Tier != LuckyBaseTierName {
 		t.Fatalf("기본 평소 단계 이름은 「앙팡」: res=%+v grants=%+v", res, store.grants)
 	}
 
 	// 설정한 이름.
 	cfg := enabledCfg()
-	cfg.BaseName = "임의평소"
+	cfg.BaseName = testLuckyBaseName
 	store = &fakeLuckyStore{cfg: cfg, boardOdds: 13, boardCOdds: 17, boardPts: 9}
 	cfg.IncludeComments = true
 	res = newTestLive(store, &fakeRoller{win: true}, nil, testNow).Process("member_a", "free", 2, true, 50)
-	if len(store.grants) != 1 || store.grants[0].opt.TierName != "임의평소" || res.Tier != "임의평소" {
+	if len(store.grants) != 1 || store.grants[0].opt.TierName != testLuckyBaseName || res.Tier != testLuckyBaseName {
 		t.Fatalf("평소 단계 이름은 base_name: res=%+v grants=%+v", res, store.grants)
 	}
 
 	// 코드로 만든 설정처럼 BaseName 이 비어 있어도 「앙팡」(이름 없는 문구가 생기면 안 된다).
 	store = &fakeLuckyStore{cfg: &v2repo.LuckyConfig{Enabled: true, MemberDailyCap: 1, DailyCapPost: 10}, boardOdds: 13, boardPts: 9}
 	res = newTestLive(store, &fakeRoller{win: true}, nil, testNow).Process("member_a", "free", 3, false, 0)
-	if res.Tier != LuckyBaseTierName || LuckyBaseTierName != "앙팡" {
+	if res.Tier != "앙팡" { // 기본값 상수 자체가 「앙팡」인지도 함께 본다
 		t.Fatalf("BaseName 이 비면 「앙팡」: %+v", res)
 	}
 
 	// 고정 시간대에 걸리면 base_name 이 아니라 그 시간대 이름.
 	fcfg := fixedCfg(v2repo.LuckyFixedWindow{Name: "고정가", Start: "11:00", End: "13:00", Odds: 6, Points: 9})
-	fcfg.BaseName = "임의평소"
+	fcfg.BaseName = testLuckyBaseName
 	store = &fakeLuckyStore{cfg: fcfg, boardOdds: 13, boardPts: 9}
 	res = newTestLive(store, &fakeRoller{win: true}, nil, testNow).Process("member_a", "free", 4, false, 0)
 	if res.Tier != "고정가" {
@@ -122,14 +125,14 @@ func TestLuckyAdmin_BaseNameRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetConfig 실패: %v", err)
 	}
-	if got := baseNameOf(view); got != "앙팡" {
+	if got := baseNameOf(view); got != LuckyBaseTierName {
 		t.Errorf("미설정 GET 은 「앙팡」, got %q", got)
 	}
 
 	// 저장소가 BaseName 빈 값을 주더라도 GET 은 기본값을 채운다.
 	repo.cfg = &v2repo.LuckyConfig{WindowStartHour: 9, WindowEndHour: 23}
 	view, _ = svc.GetConfig()
-	if got := baseNameOf(view); got != "앙팡" {
+	if got := baseNameOf(view); got != LuckyBaseTierName {
 		t.Errorf("빈 BaseName 도 GET 에서 「앙팡」, got %q", got)
 	}
 
@@ -138,18 +141,18 @@ func TestLuckyAdmin_BaseNameRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("정상 PUT 실패: %v", err)
 	}
-	if saved.BaseName != "임의평소" || len(repo.saved) != 1 || repo.saved[0].BaseName != "임의평소" {
+	if saved.BaseName != testLuckyBaseName || len(repo.saved) != 1 || repo.saved[0].BaseName != testLuckyBaseName {
 		t.Fatalf("앞뒤 공백을 뗀 값으로 저장: %+v", repo.saved)
 	}
 	repo.cfg = repo.saved[0]
 	view, _ = svc.GetConfig()
-	if got := baseNameOf(view); got != "임의평소" {
+	if got := baseNameOf(view); got != testLuckyBaseName {
 		t.Errorf("저장한 값이 GET 에 보여야 한다, got %q", got)
 	}
 
 	// base_name 키를 빼고 PUT 하면(전체 교체) 기본값.
 	saved, err = svc.PutConfig([]byte(`{"enabled":true}`), "admin_a")
-	if err != nil || saved.BaseName != "앙팡" {
+	if err != nil || saved.BaseName != LuckyBaseTierName {
 		t.Errorf("키가 없으면 기본값으로 저장: cfg=%+v err=%v", saved, err)
 	}
 }
@@ -157,7 +160,7 @@ func TestLuckyAdmin_BaseNameRoundTrip(t *testing.T) {
 // TestLuckyAdmin_StatsBaseNameAlias — stats 단계별 집계·최근 목록이 「앙복타임」을 현재 base_name 으로 보인다.
 func TestLuckyAdmin_StatsBaseNameAlias(t *testing.T) {
 	cfg := v2repo.DefaultLuckyConfig()
-	cfg.BaseName = "임의평소"
+	cfg.BaseName = testLuckyBaseName
 	at := func(h, m int) time.Time { return time.Date(2026, 10, 2, h, m, 0, 0, luckyKST) }
 	repo := &fakeLuckyAdminRepo{cfg: cfg, grants: []v2repo.LuckyGrantDetail{
 		{MbID: "m1", Nick: "닉가", SourceTable: "free", SourceID: "21", Kind: v2repo.LuckyKindPost, Amount: 3, PointContent: "앙복타임 럭키 포인트", CreatedAt: at(8, 0)},
@@ -173,14 +176,14 @@ func TestLuckyAdmin_StatsBaseNameAlias(t *testing.T) {
 	for _, tc := range st.Tiers {
 		tiers[tc.Tier] = tc.Count
 	}
-	if tiers["임의평소"] != 2 || tiers["앙팡타임"] != 1 || tiers[""] != 1 || tiers["앙복타임"] != 0 {
+	if tiers[testLuckyBaseName] != 2 || tiers["앙팡타임"] != 1 || tiers[""] != 1 || tiers["앙복타임"] != 0 {
 		t.Errorf("단계별 집계: %+v", st.Tiers)
 	}
 	byWr := map[string]string{}
 	for _, r := range st.Recent {
 		byWr[r.WrID] = r.Tier
 	}
-	if byWr["21"] != "임의평소" || byWr["22"] != "임의평소" || byWr["23"] != "앙팡타임" || byWr["24"] != "" {
+	if byWr["21"] != testLuckyBaseName || byWr["22"] != testLuckyBaseName || byWr["23"] != "앙팡타임" || byWr["24"] != "" {
 		t.Errorf("최근 목록 단계: %v", byWr)
 	}
 }
@@ -188,7 +191,7 @@ func TestLuckyAdmin_StatsBaseNameAlias(t *testing.T) {
 // TestLuckyAdmin_BaseNameKeepsRandomWindowHidden — F4: base_name 을 넣어도 GET·stats 에 무작위 window 시각이 없다.
 func TestLuckyAdmin_BaseNameKeepsRandomWindowHidden(t *testing.T) {
 	cfg := angpangCfg()
-	cfg.BaseName = "임의평소"
+	cfg.BaseName = testLuckyBaseName
 	day := kstDay(2026, 10, 2)
 	slots := luckyWindowsForDay(DeriveLuckyWindowKey("test-secret-b"), day, cfg)
 	if len(slots) == 0 {

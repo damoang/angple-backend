@@ -9,6 +9,9 @@ import (
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 )
 
+// testLuckyBaseName 는 테스트용 임의 평소 단계 이름이다(운영 값 아님).
+const testLuckyBaseName = "임의평소"
+
 // ⛔ 이 파일이 지키는 계약 (평소 단계 이름 base_name):
 //
 //   - N1 lucky_config.base_name 이 없거나 비면 「앙팡」이다. 평소 단계 지급 문구는 「<base_name> 럭키 포인트/경험치」,
@@ -19,17 +22,17 @@ import (
 
 // TestLuckyConfig_BaseNameDefault — 키 없음·빈 문자열·공백이면 「앙팡」, 값이 있으면 앞뒤 공백을 뗀 값.
 func TestLuckyConfig_BaseNameDefault(t *testing.T) {
-	if got := DefaultLuckyConfig().BaseName; got != "앙팡" {
+	if got := DefaultLuckyConfig().BaseName; got != gnurepo.LuckyDefaultBaseName {
 		t.Errorf("기본값은 「앙팡」, got %q", got)
 	}
 	cases := []struct {
 		raw  string
 		want string
 	}{
-		{`{"enabled":true}`, "앙팡"},
-		{`{"base_name":""}`, "앙팡"},
-		{`{"base_name":"   "}`, "앙팡"},
-		{`{"base_name":" 임의평소 "}`, "임의평소"},
+		{`{"enabled":true}`, gnurepo.LuckyDefaultBaseName},
+		{`{"base_name":""}`, gnurepo.LuckyDefaultBaseName},
+		{`{"base_name":"   "}`, gnurepo.LuckyDefaultBaseName},
+		{`{"base_name":" 임의평소 "}`, testLuckyBaseName},
 	}
 	for _, c := range cases {
 		var cfg LuckyConfig
@@ -41,11 +44,11 @@ func TestLuckyConfig_BaseNameDefault(t *testing.T) {
 		}
 	}
 	// 코드로 만든 설정(BaseName 비움)이나 nil 이어도 지급 이름은 기본값이다.
-	if got := (&LuckyConfig{}).BaseTierName(); got != "앙팡" {
+	if got := (&LuckyConfig{}).BaseTierName(); got != gnurepo.LuckyDefaultBaseName {
 		t.Errorf("빈 설정: %q", got)
 	}
 	var nilCfg *LuckyConfig
-	if got := nilCfg.BaseTierName(); got != "앙팡" {
+	if got := nilCfg.BaseTierName(); got != gnurepo.LuckyDefaultBaseName {
 		t.Errorf("nil 설정: %q", got)
 	}
 }
@@ -53,16 +56,16 @@ func TestLuckyConfig_BaseNameDefault(t *testing.T) {
 // TestLuckyConfig_BadgeTierNames — 배지 이름 묶음에 base_name 과 설정 단계 이름이 실린다.
 func TestLuckyConfig_BadgeTierNames(t *testing.T) {
 	cfg := DefaultLuckyConfig()
-	cfg.BaseName = "임의평소"
+	cfg.BaseName = testLuckyBaseName
 	cfg.Windows = []LuckyWindow{{Name: "무작위가", Minutes: 10, Odds: 3, Points: 4}}
 	cfg.FixedWindows = []LuckyFixedWindow{{Name: "고정가", Start: "01:00", End: "02:00", Odds: 5, Points: 6}}
 	n := cfg.BadgeTierNames()
-	if n.Base != "임의평소" || len(n.Names) != 2 || n.Names[0] != "무작위가" || n.Names[1] != "고정가" {
+	if n.Base != testLuckyBaseName || len(n.Names) != 2 || n.Names[0] != "무작위가" || n.Names[1] != "고정가" {
 		t.Errorf("이름 묶음: %+v", n)
 	}
 
 	got := LuckyTierNamesFrom(func() (*LuckyConfig, error) { return cfg, nil })
-	if got.Base != "임의평소" || len(got.Names) != 2 {
+	if got.Base != testLuckyBaseName || len(got.Names) != 2 {
 		t.Errorf("LuckyTierNamesFrom: %+v", got)
 	}
 	// 읽기 실패·nil 이면 제로 값 — 평소 단계는 기본 「앙팡」으로 본다.
@@ -72,7 +75,7 @@ func TestLuckyConfig_BadgeTierNames(t *testing.T) {
 		func() (*LuckyConfig, error) { return nil, nil },
 	} {
 		z := LuckyTierNamesFrom(get)
-		if z.Base != "" || len(z.Names) != 0 || z.BaseName() != "앙팡" {
+		if z.Base != "" || len(z.Names) != 0 || z.BaseName() != gnurepo.LuckyDefaultBaseName {
 			t.Errorf("실패면 제로 값(기본 「앙팡」): %+v", z)
 		}
 	}
@@ -88,7 +91,7 @@ func TestLuckyContent_BaseName(t *testing.T) {
 		{luckyPointContentFor(base, true), "앙팡 럭키 포인트(댓글)"},
 		{luckyExpContentFor(base, false), "앙팡 럭키 경험치"},
 		{luckyExpContentFor(base, true), "앙팡 럭키 경험치(댓글)"},
-		{luckyPointContentFor("임의평소", true), "임의평소 럭키 포인트(댓글)"},
+		{luckyPointContentFor(testLuckyBaseName, true), "임의평소 럭키 포인트(댓글)"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -97,7 +100,7 @@ func TestLuckyContent_BaseName(t *testing.T) {
 	}
 	names := DefaultLuckyConfig().BadgeTierNames()
 	for _, content := range []string{cases[0].got, cases[1].got, cases[2].got, cases[3].got} {
-		if tier, ok := gnurepo.LuckyTierFromContent(content, names); !ok || tier != "앙팡" {
+		if tier, ok := gnurepo.LuckyTierFromContent(content, names); !ok || tier != gnurepo.LuckyDefaultBaseName {
 			t.Errorf("배지가 새 문구를 「앙팡」으로 읽어야 한다: %q → %q,%v", content, tier, ok)
 		}
 	}
