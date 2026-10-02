@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/damoang/angple-backend/internal/middleware"
@@ -34,7 +35,16 @@ func (h *MemberHandler) UploadImage(c *gin.Context) {
 
 	url, err := h.memberService.UpdateMemberImage(c.Request.Context(), mbID, file)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		var invalid *service.MemberImageValidationError
+		switch {
+		case errors.As(err, &invalid):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": invalid.Msg})
+		case errors.Is(err, service.ErrMemberImageProcessingTimeout):
+			// 원본은 올라갔지만 변환 결과를 기다리다 시간이 지났다. DB 는 그대로다.
+			c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": service.ErrMemberImageProcessingTimeout.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "프로필 이미지 저장에 실패했습니다"})
+		}
 		return
 	}
 

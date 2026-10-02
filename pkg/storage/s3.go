@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 )
 
@@ -73,6 +75,12 @@ type UploadResult struct {
 
 // Upload uploads a file to S3-compatible storage
 func (c *S3Client) Upload(ctx context.Context, key string, body io.Reader, contentType string, size int64) (*UploadResult, error) {
+	return c.UploadWithMetadata(ctx, key, body, contentType, size, nil)
+}
+
+// UploadWithMetadata uploads a file with user-defined object metadata
+// (sent as x-amz-meta-* headers). A nil or empty map behaves like Upload.
+func (c *S3Client) UploadWithMetadata(ctx context.Context, key string, body io.Reader, contentType string, size int64, metadata map[string]string) (*UploadResult, error) {
 	fullKey := c.basePath + key
 
 	input := &s3.PutObjectInput{
@@ -80,6 +88,9 @@ func (c *S3Client) Upload(ctx context.Context, key string, body io.Reader, conte
 		Key:         aws.String(fullKey),
 		Body:        body,
 		ContentType: aws.String(contentType),
+	}
+	if len(metadata) > 0 {
+		input.Metadata = metadata
 	}
 
 	if _, err := c.client.PutObject(ctx, input); err != nil {
@@ -115,6 +126,27 @@ func (c *S3Client) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("s3 delete failed: %w", err)
 	}
 	return nil
+}
+
+// Exists reports whether an object exists. Like Upload, the key is relative to
+// the configured base path. A missing object (404) returns false with a nil
+// error; any other failure (including 403 when the caller lacks list
+// permission) is returned as an error.
+func (c *S3Client) Exists(ctx context.Context, key string) (bool, error) {
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(c.basePath + key),
+	}
+
+	if _, err := c.client.HeadObject(ctx, input); err != nil {
+		var notFound *types.NotFound
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &notFound) || errors.As(err, &noSuchKey) {
+			return false, nil
+		}
+		return false, fmt.Errorf("s3 head failed: %w", err)
+	}
+	return true, nil
 }
 
 // GetPresignedURL generates a pre-signed URL for direct download
