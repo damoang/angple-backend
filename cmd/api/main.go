@@ -91,6 +91,15 @@ const maxCommentReplyDepth = 10
 // @description JWT Authorization header using the Bearer scheme. Example: "Bearer {token}"
 
 // getConfigPath returns config file path based on APP_ENV environment variable
+// registerMediaUploadRoutes registers the media upload routes as admin-only.
+// 웹·앱 사용처가 없는 업로드 경로라 DELETE /files 와 같이 관리자 전용으로 둔다.
+// 회원 프로필 사진은 별도 경로(/api/v2/members/me/image)를 쓴다.
+func registerMediaUploadRoutes(media *gin.RouterGroup, mediaHandler *handler.MediaHandler) {
+	media.POST("/images", middleware.RequireAdmin(), mediaHandler.UploadImage)
+	media.POST("/attachments", middleware.RequireAdmin(), mediaHandler.UploadAttachment)
+	media.POST("/videos", middleware.RequireAdmin(), mediaHandler.UploadVideo)
+}
+
 func getConfigPath() string {
 	env := os.Getenv("APP_ENV")
 	if env == "" {
@@ -7261,9 +7270,7 @@ func main() {
 			// TODO: UploadRateLimitConfig 구현 후 활성화
 			// uploadRateLimit := middleware.RateLimit(redisClient, middleware.UploadRateLimitConfig())
 			media := router.Group("/api/v2/media", middleware.JWTAuth(jwtManager), middleware.BanCheck(db))
-			media.POST("/images", mediaHandler.UploadImage)
-			media.POST("/attachments", mediaHandler.UploadAttachment)
-			media.POST("/videos", mediaHandler.UploadVideo)
+			registerMediaUploadRoutes(media, mediaHandler)
 			// ⛔ 2026-08-08: DeleteFile 은 key prefix 화이트리스트만 검사하고 소유자
 			//    확인이 없어, 인증된 아무 회원이나 key 를 알면 타인 파일을 지울 수 있었다.
 			//    media 키에 업로더 정보가 없어 소유 검증이 불가하고, 웹·앱 소비처가 0

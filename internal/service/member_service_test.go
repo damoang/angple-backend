@@ -78,7 +78,7 @@ type fakeMemberRepo struct {
 	cleared []string
 }
 
-func (r *fakeMemberRepo) UpdateMemberImageUrl(mbID, imageURL string) error {
+func (r *fakeMemberRepo) UpdateMemberImageUrl(mbID, imageURL string) error { //nolint:revive // gnurepo.MemberRepository 메서드명과 일치해야 함
 	if r.updated == nil {
 		r.updated = map[string]string{}
 	}
@@ -86,7 +86,7 @@ func (r *fakeMemberRepo) UpdateMemberImageUrl(mbID, imageURL string) error {
 	return nil
 }
 
-func (r *fakeMemberRepo) ClearMemberImageUrl(mbID string) error {
+func (r *fakeMemberRepo) ClearMemberImageUrl(mbID string) error { //nolint:revive // gnurepo.MemberRepository 메서드명과 일치해야 함
 	r.cleared = append(r.cleared, mbID)
 	return nil
 }
@@ -240,7 +240,7 @@ func TestUploadMemberImage_RawUploadThenStoresWebpKey(t *testing.T) {
 func TestUploadMemberImage_KeepsBasePathInStoredKey(t *testing.T) {
 	store := newFakeMemberImageStore()
 	store.basePath = "base/"
-	store.existing["data/member_image/ab/abc_1700000000.webp"] = 0
+	store.existing["data/member_image/ab/abc_1700000000.webp"] = 1 // 키 겹침 확인 1회는 「없음」
 	repo := &fakeMemberRepo{}
 	svc := newTestMemberService(store, repo)
 
@@ -297,7 +297,7 @@ func TestUploadMemberImage_RejectsSVGWithoutUpload(t *testing.T) {
 func TestUploadMemberImage_SameSecondDoesNotOverwrite(t *testing.T) {
 	store := newFakeMemberImageStore()
 	store.existing["raw/member_image/ab/abcd_1700000000.jpg"] = 0
-	store.existing["data/member_image/ab/abcd_1700000001.webp"] = 0
+	store.existing["data/member_image/ab/abcd_1700000001.webp"] = 1 // 키 겹침 확인 1회는 「없음」
 	repo := &fakeMemberRepo{}
 	svc := newTestMemberService(store, repo)
 
@@ -306,6 +306,26 @@ func TestUploadMemberImage_SameSecondDoesNotOverwrite(t *testing.T) {
 	}
 	if got := store.uploads[0].key; got != "raw/member_image/ab/abcd_1700000001.jpg" {
 		t.Errorf("raw key = %q, 겹치지 않는 다음 시각이어야 한다", got)
+	}
+	if got := repo.updated["abcd"]; got != "data/member_image/ab/abcd_1700000001.webp" {
+		t.Errorf("DB mb_image_url = %q", got)
+	}
+}
+
+// TestUploadMemberImage_SameSecondWebpTakenBumps: 같은 초에 다른 확장자로 올린 이전 업로드의
+// webp 가 있으면, 원본 키가 비어 있어도 시각을 민다(이전 webp 를 자기 결과로 착각하지 않게).
+func TestUploadMemberImage_SameSecondWebpTakenBumps(t *testing.T) {
+	store := newFakeMemberImageStore()
+	store.existing["data/member_image/ab/abcd_1700000000.webp"] = 0
+	store.existing["data/member_image/ab/abcd_1700000001.webp"] = 1 // 키 겹침 확인 1회는 「없음」
+	repo := &fakeMemberRepo{}
+	svc := newTestMemberService(store, repo)
+
+	if _, err := svc.uploadMemberImage(context.Background(), "abcd", "a.jpg", testJPEG); err != nil {
+		t.Fatalf("업로드 실패: %v", err)
+	}
+	if got := store.uploads[0].key; got != "raw/member_image/ab/abcd_1700000001.jpg" {
+		t.Errorf("raw key = %q, webp 가 겹치지 않는 다음 시각이어야 한다", got)
 	}
 	if got := repo.updated["abcd"]; got != "data/member_image/ab/abcd_1700000001.webp" {
 		t.Errorf("DB mb_image_url = %q", got)

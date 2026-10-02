@@ -182,8 +182,9 @@ func (s *MemberService) uploadMemberImage(ctx context.Context, mbID, filename st
 	return publicURL, nil
 }
 
-// newMemberImageKeys picks a timestamp whose raw key is not taken yet, so a
-// second upload within the same second does not overwrite the earlier original.
+// newMemberImageKeys picks a timestamp whose raw and converted keys are both
+// free, so a second upload within the same second neither overwrites the
+// earlier original nor mistakes the earlier .webp for its own result.
 func (s *MemberService) newMemberImageKeys(ctx context.Context, mbID, ext string) (string, string, error) {
 	ts := s.now().Unix()
 	for i := 0; i < memberImageKeyRetries; i++ {
@@ -191,14 +192,20 @@ func (s *MemberService) newMemberImageKeys(ctx context.Context, mbID, ext string
 		if err != nil {
 			return "", "", err
 		}
-		exists, err := s.store.Exists(ctx, rawKey)
-		if err != nil || !exists {
-			// 확인 실패는 겹치지 않은 것으로 본다(같은 초 재업로드만 막으려는 장치).
+		// 원본 확장자가 달라도 webp 키는 같은 이름이 되므로 둘 다 확인한다.
+		// 확인 실패는 겹치지 않은 것으로 본다(같은 초 재업로드만 막으려는 장치).
+		if !s.keyTaken(ctx, rawKey) && !s.keyTaken(ctx, dataKey) {
 			return rawKey, dataKey, nil
 		}
 		ts++
 	}
 	return "", "", errors.New("잠시 후 다시 시도해 주세요")
+}
+
+// keyTaken reports whether key exists; a failed check counts as not taken.
+func (s *MemberService) keyTaken(ctx context.Context, key string) bool {
+	exists, err := s.store.Exists(ctx, key)
+	return err == nil && exists
 }
 
 // waitForConvertedImage polls until dataKey exists, the timeout passes, or ctx ends.
@@ -306,6 +313,10 @@ func sameProfileImageFormat(ext, actualExt string) bool {
 // The stored objects are kept (originals are preserved).
 func (s *MemberService) DeleteMemberImage(_ context.Context, mbID string) error {
 	if err := s.memberRepo.ClearMemberImageUrl(mbID); err != nil {
+		pkglogger.GetLogger().Error().
+			Str("mb_id", mbID).
+			Err(err).
+			Msg("member profile image clear failed")
 		return fmt.Errorf("DB 업데이트 실패: %w", err)
 	}
 

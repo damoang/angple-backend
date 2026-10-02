@@ -60,7 +60,7 @@ func (h *MemberHandler) DeleteImage(c *gin.Context) {
 	}
 
 	if err := h.memberService.DeleteMemberImage(c.Request.Context(), mbID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "프로필 이미지 삭제에 실패했습니다"})
 		return
 	}
 
