@@ -309,7 +309,7 @@ func (h *V2Handler) injectLuckyPoints(items []map[string]any, slug string) {
 			wrIDs = append(wrIDs, id)
 		}
 	}
-	var tierNames []string
+	var tierNames gnurepo.LuckyTierNames
 	if h.luckyTierNames != nil {
 		tierNames = h.luckyTierNames()
 	}

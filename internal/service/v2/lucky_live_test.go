@@ -141,7 +141,7 @@ func TestLuckyLive_PassesCapsAndTier(t *testing.T) {
 		t.Errorf("기본 상한 1/10 이 넘어가야 한다, got %d/%d", g.opt.MemberDailyCap, g.opt.DailyCap)
 	}
 	if g.opt.TierName != LuckyBaseTierName || res.Tier != LuckyBaseTierName {
-		t.Errorf("평소 단계 이름은 앙복타임, got %q", g.opt.TierName)
+		t.Errorf("평소 단계 이름은 기본 base_name(앙팡), got %q", g.opt.TierName)
 	}
 	if g.table != "free" || g.id != "42" || g.kind != "point" || g.amount != 90 {
 		t.Errorf("지급 키·금액: %+v", g)

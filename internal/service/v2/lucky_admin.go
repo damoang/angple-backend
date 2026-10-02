@@ -33,9 +33,10 @@ const (
 	luckyAdminRecentInStats = 30      // stats 에 싣는 최근 당첨 수
 )
 
-// luckyReservedTierNames 는 단계 이름으로 쓸 수 없는 이름이다. 레거시 내역 문구(「나리야 럭키 포인트」)와
-// 같은 접두사가 되면 과거 레거시 당첨에 배지 단계가 잘못 붙는다.
-var luckyReservedTierNames = map[string]bool{"나리야": true}
+// luckyReservedTierNames 는 단계 이름(평소 단계 이름 포함)으로 쓸 수 없는 이름이다. 레거시 내역 문구(「나리야 럭키 포인트」)와
+// 같은 접두사가 되면 과거 레거시 당첨에 배지 단계가 잘못 붙는다. 「앙복타임」은 지난 평소 단계 당첨을 현재 base_name 으로
+// 보이게 하는 별칭 전용이라, 단계 이름으로 쓰면 그 단계 당첨이 평소 단계로 잘못 표시된다.
+var luckyReservedTierNames = map[string]bool{"나리야": true, LuckyLegacyBaseTierName: true}
 
 // LuckyFieldError 는 검증 실패 한 건이다. Field 는 JSON 경로(예: fixed_windows[0].start)다.
 type LuckyFieldError struct {
@@ -128,6 +129,7 @@ func DecodeLuckyConfig(body []byte) (*v2repo.LuckyConfig, error) {
 // normalizeLuckyConfig 는 저장 전 모양을 고정한다(이름 앞뒤 공백 제거, nil 목록은 빈 목록).
 // 읽는 쪽은 nil 과 빈 목록을 같게 보지만, 이력의 before/after 비교가 모양 차이로 흔들리지 않게 한다.
 func normalizeLuckyConfig(c *v2repo.LuckyConfig) {
+	c.BaseName = c.BaseTierName() // 앞뒤 공백 제거, 비면 기본값(GET 이 늘 base_name 을 싣게)
 	if c.Windows == nil {
 		c.Windows = []v2repo.LuckyWindow{}
 	}
@@ -177,7 +179,7 @@ func ValidateLuckyConfig(c *v2repo.LuckyConfig) error {
 			return
 		case utf8.RuneCountInString(n) > luckyAdminNameMaxRunes:
 			errs.add(field, fmt.Sprintf("이름은 %d자 이하여야 합니다", luckyAdminNameMaxRunes))
-		case n == LuckyBaseTierName || luckyReservedTierNames[n]:
+		case luckyReservedTierNames[n]:
 			errs.add(field, "쓸 수 없는 이름입니다")
 		case strings.Contains(n, " 럭키 "):
 			errs.add(field, "이름에 「 럭키 」를 넣을 수 없습니다")
@@ -188,6 +190,9 @@ func ValidateLuckyConfig(c *v2repo.LuckyConfig) error {
 		}
 		names[n] = field
 	}
+
+	// 평소 단계 이름(base_name)도 같은 이름 규칙이고, windows·fixed_windows 이름과 겹칠 수 없다.
+	checkName("base_name", c.BaseName)
 
 	if len(c.Windows) > luckyAdminMaxWindows {
 		errs.add("windows", fmt.Sprintf("무작위 단계는 %d개 이하여야 합니다", luckyAdminMaxWindows))
@@ -484,7 +489,7 @@ func (s *LuckyAdminService) Stats(date string) (*LuckyAdminStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	tierNames := cfg.TierNames()
+	tierNames := cfg.BadgeTierNames() // 「앙복타임」 문구는 현재 base_name 으로 집계·표시(배지와 같은 별칭 규칙)
 
 	st := &LuckyAdminStats{
 		Date:    day.Format("2006-01-02"),

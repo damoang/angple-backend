@@ -256,7 +256,8 @@ func TestLuckyAdmin_StatsKSTDayAndNoMemberID(t *testing.T) {
 	for _, tc := range st.Tiers {
 		tiers[tc.Tier] = tc.Count
 	}
-	if tiers["고정가"] != 1 || tiers["앙복타임"] != 1 || tiers[""] != 1 {
+	// 「앙복타임」 문구는 현재 평소 단계 이름(기본 「앙팡」)으로 집계한다(표시 별칭).
+	if tiers["고정가"] != 1 || tiers[LuckyBaseTierName] != 1 || tiers[""] != 1 || tiers[LuckyLegacyBaseTierName] != 0 {
 		t.Errorf("단계별: %v", st.Tiers)
 	}
 	if len(st.Recent) != 3 || st.Recent[0].WrID != "13" || st.Recent[0].At != "2026-10-01T23:59:00+09:00" || st.Recent[2].Nickname != "닉가" {
