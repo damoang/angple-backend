@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -10,8 +11,10 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	pkglogger "github.com/damoang/angple-backend/pkg/logger"
 )
 
@@ -35,22 +38,24 @@ type S3Config struct {
 	ForcePathStyle  bool // true for MinIO/R2
 }
 
-// NewS3Client creates a new S3-compatible storage client
+// NewS3Client creates a new S3-compatible storage client.
+//
+// When both AccessKeyID and SecretAccessKey are set they are used as static
+// credentials (R2/MinIO and environments with explicit keys). When both are
+// empty the AWS SDK default credential chain is used instead (environment,
+// shared config, then the instance role via IMDS), so no extra secret is
+// needed where the node role already grants access. Setting only one of the
+// two is a misconfiguration and returns an error rather than falling back.
 func NewS3Client(cfg S3Config) (*S3Client, error) {
-	opts := func(o *s3.Options) {
-		o.Region = cfg.Region
-		o.Credentials = credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")
-		if cfg.Endpoint != "" {
-			o.BaseEndpoint = aws.String(cfg.Endpoint)
-		}
-		o.UsePathStyle = cfg.ForcePathStyle
+	client, err := newAWSS3Client(context.Background(), cfg)
+	if err != nil {
+		return nil, err
 	}
-
-	client := s3.New(s3.Options{}, opts)
 
 	pkglogger.GetLogger().Info().
 		Str("bucket", cfg.Bucket).
 		Str("endpoint", cfg.Endpoint).
+		Bool("static_credentials", hasStaticCredentials(cfg)).
 		Msg("S3 storage client initialized")
 
 	return &S3Client{
@@ -59,6 +64,44 @@ func NewS3Client(cfg S3Config) (*S3Client, error) {
 		cdnURL:   strings.TrimRight(cfg.CDNURL, "/"),
 		basePath: cfg.BasePath,
 	}, nil
+}
+
+// hasStaticCredentials reports whether both static keys are configured.
+func hasStaticCredentials(cfg S3Config) bool {
+	return cfg.AccessKeyID != "" && cfg.SecretAccessKey != ""
+}
+
+// newAWSS3Client builds the SDK client, choosing static keys or the default
+// credential chain as described on NewS3Client.
+func newAWSS3Client(ctx context.Context, cfg S3Config) (*s3.Client, error) {
+	endpointOpts := func(o *s3.Options) {
+		if cfg.Region != "" {
+			o.Region = cfg.Region
+		}
+		if cfg.Endpoint != "" {
+			o.BaseEndpoint = aws.String(cfg.Endpoint)
+		}
+		o.UsePathStyle = cfg.ForcePathStyle
+	}
+
+	if hasStaticCredentials(cfg) {
+		return s3.New(s3.Options{
+			Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
+		}, endpointOpts), nil
+	}
+	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
+		return nil, errors.New("s3 config: access key id and secret access key must be set together")
+	}
+
+	var loadOpts []func(*awsconfig.LoadOptions) error
+	if cfg.Region != "" {
+		loadOpts = append(loadOpts, awsconfig.WithRegion(cfg.Region))
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("s3 config: load default credential chain: %w", err)
+	}
+	return s3.NewFromConfig(awsCfg, endpointOpts), nil
 }
 
 // UploadResult contains the result of a file upload
@@ -73,6 +116,12 @@ type UploadResult struct {
 
 // Upload uploads a file to S3-compatible storage
 func (c *S3Client) Upload(ctx context.Context, key string, body io.Reader, contentType string, size int64) (*UploadResult, error) {
+	return c.UploadWithMetadata(ctx, key, body, contentType, size, nil)
+}
+
+// UploadWithMetadata uploads a file with user-defined object metadata
+// (sent as x-amz-meta-* headers). A nil or empty map behaves like Upload.
+func (c *S3Client) UploadWithMetadata(ctx context.Context, key string, body io.Reader, contentType string, size int64, metadata map[string]string) (*UploadResult, error) {
 	fullKey := c.basePath + key
 
 	input := &s3.PutObjectInput{
@@ -80,6 +129,9 @@ func (c *S3Client) Upload(ctx context.Context, key string, body io.Reader, conte
 		Key:         aws.String(fullKey),
 		Body:        body,
 		ContentType: aws.String(contentType),
+	}
+	if len(metadata) > 0 {
+		input.Metadata = metadata
 	}
 
 	if _, err := c.client.PutObject(ctx, input); err != nil {
@@ -115,6 +167,27 @@ func (c *S3Client) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("s3 delete failed: %w", err)
 	}
 	return nil
+}
+
+// Exists reports whether an object exists. Like Upload, the key is relative to
+// the configured base path. A missing object (404) returns false with a nil
+// error; any other failure (including 403 when the caller lacks list
+// permission) is returned as an error.
+func (c *S3Client) Exists(ctx context.Context, key string) (bool, error) {
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(c.basePath + key),
+	}
+
+	if _, err := c.client.HeadObject(ctx, input); err != nil {
+		var notFound *types.NotFound
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &notFound) || errors.As(err, &noSuchKey) {
+			return false, nil
+		}
+		return false, fmt.Errorf("s3 head failed: %w", err)
+	}
+	return true, nil
 }
 
 // GetPresignedURL generates a pre-signed URL for direct download

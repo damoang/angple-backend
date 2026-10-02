@@ -9,6 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// errMsgMediaUploadFailed 는 업로드 실패 시 내부 오류 대신 돌려주는 일반 문구다.
+const errMsgMediaUploadFailed = "파일 업로드 실패"
+
 // MediaHandler handles media upload/download endpoints
 type MediaHandler struct {
 	mediaService *service.MediaService
@@ -35,7 +38,7 @@ func (h *MediaHandler) UploadImage(c *gin.Context) {
 
 	result, err := h.mediaService.UploadImage(c.Request.Context(), file, maxWidth)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
+		common.ErrorResponse(c, http.StatusBadRequest, errMsgMediaUploadFailed, nil)
 		return
 	}
 
@@ -53,7 +56,7 @@ func (h *MediaHandler) UploadAttachment(c *gin.Context) {
 
 	result, err := h.mediaService.UploadAttachment(c.Request.Context(), file)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
+		common.ErrorResponse(c, http.StatusBadRequest, errMsgMediaUploadFailed, nil)
 		return
 	}
 
@@ -71,7 +74,7 @@ func (h *MediaHandler) UploadVideo(c *gin.Context) {
 
 	result, err := h.mediaService.UploadVideo(c.Request.Context(), file)
 	if err != nil {
-		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
+		common.ErrorResponse(c, http.StatusBadRequest, errMsgMediaUploadFailed, nil)
 		return
 	}
 
