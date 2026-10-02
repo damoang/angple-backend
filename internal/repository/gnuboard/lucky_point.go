@@ -11,9 +11,32 @@ import (
 // luckyRelAction 은 럭키 당첨 기록(g5_point.po_rel_action, g5_na_xp.xp_rel_action)의 값이다.
 const luckyRelAction = "@lucky"
 
+// LuckyDefaultBaseName 은 평소 단계(시간대 밖, 게시판 값으로 지급) 이름의 기본값이다(lucky_config.base_name 이 없을 때).
+const LuckyDefaultBaseName = "앙팡"
+
+// LuckyLegacyBaseName 은 예전 평소 단계 이름이다. 이 이름으로 지급된 지난 당첨은 배지·집계에서 현재 평소 단계
+// 이름(base_name)으로 보고한다(표시 별칭). 원장 문구는 바꾸지 않는다. 별칭 전용이라 어떤 단계 이름으로도 쓸 수 없다.
+const LuckyLegacyBaseName = "앙복타임"
+
 // luckyBuiltinTierNames 는 설정과 무관하게 항상 단계로 인정하는 이름이다. 설정에서 단계를 지우거나 이름을 바꿔도
 // 이미 지급된 당첨의 배지 단계가 사라지지 않게 하려는 것이다.
-var luckyBuiltinTierNames = []string{"앙복타임", "앙팡타임", "앙팡팡타임"}
+var luckyBuiltinTierNames = []string{LuckyLegacyBaseName, LuckyDefaultBaseName, "앙팡타임", "앙팡팡타임"}
+
+// LuckyTierNames 는 배지·집계가 원장 문구에서 단계를 읽을 때 쓰는 이름 묶음이다.
+// Base 는 현재 평소 단계 이름(비면 LuckyDefaultBaseName), Names 는 설정된 단계 이름(무작위 window·고정 시간대)이다.
+// 제로 값이면 기본 이름만 인정하고 평소 단계는 기본값으로 본다.
+type LuckyTierNames struct {
+	Base  string
+	Names []string
+}
+
+// BaseName 은 평소 단계 이름이다(비었으면 기본값).
+func (n LuckyTierNames) BaseName() string {
+	if b := strings.TrimSpace(n.Base); b != "" {
+		return b
+	}
+	return LuckyDefaultBaseName
+}
 
 // luckyTierContentSep 는 지급 내역 문구(「<단계> 럭키 포인트」「<단계> 럭키 경험치(댓글)」)에서 단계 이름 뒤에 오는 부분이다.
 // 이 구분자까지 포함한 접두사로만 비교한다 — 레거시 「나리야 럭키 포인트」나 설정에 없는 이름은 단계·시각을 비운다(배지만).
@@ -67,12 +90,13 @@ type luckyBadgeRow struct {
 // 단계·시각은 단계 문구가 있는 행 중 가장 이른 행에서 가져온다(포인트·경험치가 같은 지급이면 같은 값).
 // 시각은 이미 지급된 행의 시각뿐이다 — 단계가 열리는 시각과는 무관하다.
 //
-// tierNames 는 설정에 있는 단계 이름(무작위 window·고정 시간대)이다. 기본 3개(luckyBuiltinTierNames)는 항상 인정하므로
-// nil 이어도 된다. 이름 비교는 접두사 문자열 비교라 이름에 정규식 메타문자가 있어도 안전하고, 쿼리 수도 그대로다.
+// names 는 설정에 있는 평소 단계 이름·단계 이름(무작위 window·고정 시간대)이다. 기본 이름(luckyBuiltinTierNames)은
+// 항상 인정하므로 제로 값이어도 된다. 「앙복타임」 문구는 names.BaseName() 으로 보고한다(LuckyTierFromContent).
+// 이름 비교는 접두사 문자열 비교라 이름에 정규식 메타문자가 있어도 안전하고, 쿼리 수도 그대로다.
 //
 // 부분 실패: 포인트 조회가 실패하면 빈 맵과 에러, 경험치 조회만 실패하면 포인트만 채운 맵과 에러를 돌려준다
 // (경험치 조회 실패가 기존 포인트 배지까지 지우지 않게). 호출부는 에러를 로그로 남기고 맵은 그대로 쓴다.
-func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int, tierNames []string) (map[int]LuckyBadge, error) {
+func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int, names LuckyTierNames) (map[int]LuckyBadge, error) {
 	out := make(map[int]LuckyBadge)
 	if db == nil || slug == "" {
 		return out, nil
@@ -91,7 +115,7 @@ func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int, tierNames []string
 		return out, err
 	}
 	for _, r := range pointRows {
-		mergeLuckyBadgeRow(out, earliest, r, false, tierNames)
+		mergeLuckyBadgeRow(out, earliest, r, false, names)
 	}
 
 	var expRows []luckyBadgeRow
@@ -102,13 +126,13 @@ func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int, tierNames []string
 		return out, err
 	}
 	for _, r := range expRows {
-		mergeLuckyBadgeRow(out, earliest, r, true, tierNames)
+		mergeLuckyBadgeRow(out, earliest, r, true, names)
 	}
 	return out, nil
 }
 
 // mergeLuckyBadgeRow 는 한 행을 배지 맵에 합친다. 금액은 MAX, 단계·시각은 단계 문구가 있는 가장 이른 행.
-func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r luckyBadgeRow, isExp bool, tierNames []string) {
+func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r luckyBadgeRow, isExp bool, names LuckyTierNames) {
 	wrID, err := strconv.Atoi(r.RelID)
 	if err != nil {
 		return
@@ -121,7 +145,7 @@ func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r lu
 	} else if r.Amount > b.Points {
 		b.Points = r.Amount
 	}
-	if tier, ok := LuckyTierFromContent(r.Content, tierNames); ok && !r.Datetime.IsZero() {
+	if tier, ok := LuckyTierFromContent(r.Content, names); ok && !r.Datetime.IsZero() {
 		if prev, seen := earliest[wrID]; !seen || r.Datetime.Before(prev) {
 			earliest[wrID] = r.Datetime
 			b.Tier = tier
@@ -132,10 +156,12 @@ func mergeLuckyBadgeRow(out map[int]LuckyBadge, earliest map[int]time.Time, r lu
 }
 
 // LuckyTierFromContent 는 지급 내역 문구에서 단계 이름을 뽑는다. 「<이름> 럭키 」로 시작해야 하고, 이름은
-// 기본 3개(앙복타임·앙팡타임·앙팡팡타임) 또는 tierNames(설정된 이름) 중 하나여야 한다. 아니면 ok=false.
+// 기본 이름(앙복타임·앙팡·앙팡타임·앙팡팡타임), names.Base, names.Names 중 하나여야 한다. 아니면 ok=false.
 // 예) 「앙팡타임 럭키 포인트(댓글)」→ 앙팡타임, 「나리야 럭키 포인트」→ 없음.
-// 여러 이름이 맞으면 가장 긴 이름을 쓴다(구분자까지 비교하므로 실제로는 하나만 맞는다).
-func LuckyTierFromContent(content string, tierNames []string) (string, bool) {
+// 여러 이름이 맞으면 가장 긴 이름을 쓴다(구분자까지 비교하므로 실제로는 하나만 맞는다 — 「앙팡 럭키 」와
+// 「앙팡타임 럭키 」는 섞이지 않는다).
+// 별칭: 맞은 이름이 「앙복타임」(예전 평소 단계)이면 현재 평소 단계 이름(names.BaseName())을 돌려준다.
+func LuckyTierFromContent(content string, names LuckyTierNames) (string, bool) {
 	best := ""
 	try := func(name string) {
 		name = strings.TrimSpace(name)
@@ -149,8 +175,12 @@ func LuckyTierFromContent(content string, tierNames []string) (string, bool) {
 	for _, n := range luckyBuiltinTierNames {
 		try(n)
 	}
-	for _, n := range tierNames {
+	try(names.Base)
+	for _, n := range names.Names {
 		try(n)
+	}
+	if best == LuckyLegacyBaseName {
+		best = names.BaseName()
 	}
 	return best, best != ""
 }

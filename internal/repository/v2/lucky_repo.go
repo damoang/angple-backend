@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	sqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -50,7 +51,7 @@ const luckyConfigCacheTTL = 30 * time.Second
 // (stored in site_settings.settings_json under the "lucky_config" key).
 //
 // Enabled 이 전체 킬스위치다. 기본값 false — 켜기 전에는 어느 게시판에서도 지급되지 않는다.
-// 평소(앙복타임) 확률·금액은 전역이 아니라 **게시판별**(v2_board_extended_settings.lucky)로 정한다(GetBoardLucky).
+// 평소 단계(BaseName, 기본 「앙팡」) 확률·금액은 전역이 아니라 **게시판별**(v2_board_extended_settings.lucky)로 정한다(GetBoardLucky).
 //
 // ⛔ 키가 없으면 「무제한」이 아니라 DefaultLuckyConfig 의 값(댓글 제외·회원 1·글 10·댓글 20·댓글 10자·만료 365일·시간대 없음)이다.
 // 그래서 정수 필드는 0 과 「키 없음」을 구분해야 하고, 그 구분은 UnmarshalJSON 이 기본값을 먼저 깔아 둔다.
@@ -67,11 +68,15 @@ type LuckyConfig struct {
 	MinCommentChars int `json:"min_comment_chars"` // (default: 10, 0=제한 없음)
 	// ExpireDays 는 당첨 포인트의 유효기간(일)이다. 만료일 = 지급 시각의 KST 날짜 + ExpireDays.
 	ExpireDays int `json:"expire_days"` // (default: 365, 0=만료 없음 9999-12-31)
+	// BaseName 은 평소 단계(시간대 밖, 게시판 값으로 지급) 이름이다. 지급 문구 「<BaseName> 럭키 포인트/경험치」와
+	// 배지 tier 에 쓰인다. 키가 없거나 비면 gnurepo.LuckyDefaultBaseName(「앙팡」). 예전 이름 「앙복타임」 문구는
+	// 배지·집계에서 이 이름으로 보고한다(표시 별칭, 원장은 그대로).
+	BaseName string `json:"base_name"` // default: "앙팡"
 	// 시간대 단계(앙팡타임 등)를 놓을 수 있는 KST 시 범위 [WindowStartHour, WindowEndHour).
 	WindowStartHour int `json:"window_start_hour"` // default: 9
 	WindowEndHour   int `json:"window_end_hour"`   // default: 23
 	// Windows 는 하루 한 번씩 무작위(서버 비밀값으로 결정적) 시각에 열리는 단계들이다.
-	// 비어 있으면 앙복타임(게시판 설정)만 쓴다.
+	// 비어 있으면 평소 단계(BaseName, 게시판 설정)만 쓴다.
 	Windows []LuckyWindow `json:"windows"`
 	// FixedWindows 는 매일 같은 KST 시각에 열리는 고정 시간대다(예: 저트래픽 시간 가중치).
 	// 무작위 window 와 달리 시각이 설정에 그대로 있다 — 공개돼도 되는 값이라서다.
@@ -91,9 +96,25 @@ type LuckyFixedWindow struct {
 	Prizes      []LuckyPrize `json:"prizes"`       // 상품 표(비면 Points 로 포인트만)
 }
 
+// BaseTierName 은 평소 단계 이름이다. 비었거나 nil 이면 기본값(「앙팡」).
+func (c *LuckyConfig) BaseTierName() string {
+	if c != nil {
+		if b := strings.TrimSpace(c.BaseName); b != "" {
+			return b
+		}
+	}
+	return gnurepo.LuckyDefaultBaseName
+}
+
+// BadgeTierNames 는 배지·집계가 원장 문구에서 단계를 읽을 때 쓰는 이름 묶음(평소 단계 이름 + 설정 단계 이름)이다.
+// nil 이면 기본값만 담는다.
+func (c *LuckyConfig) BadgeTierNames() gnurepo.LuckyTierNames {
+	return gnurepo.LuckyTierNames{Base: c.BaseTierName(), Names: c.TierNames()}
+}
+
 // TierNames 는 이 설정에서 정한 단계 이름(무작위 window + 고정 시간대)을 중복 없이 돌려준다.
 // 배지가 원장 문구에서 단계를 읽을 때 쓰는 허용 목록이다 — 설정에 없는 이름으로 시작하는 문구(레거시 등)는
-// 단계로 인정하지 않으려는 것이다. 기본 단계 이름(앙복타임 등)은 배지 쪽이 항상 따로 인정한다.
+// 단계로 인정하지 않으려는 것이다. 기본 단계 이름(앙팡타임 등)과 평소 단계 이름은 배지 쪽이 따로 인정한다(BadgeTierNames).
 func (c *LuckyConfig) TierNames() []string {
 	if c == nil {
 		return nil
@@ -174,7 +195,7 @@ const (
 )
 
 // DefaultLuckyConfig returns the default lucky configuration
-// (disabled, 글만, 회원 1·글 10·댓글 20, 댓글 10자 이상, 만료 365일, 시간대 없음).
+// (disabled, 글만, 회원 1·글 10·댓글 20, 댓글 10자 이상, 만료 365일, 시간대 없음, 평소 단계 「앙팡」).
 func DefaultLuckyConfig() *LuckyConfig {
 	return &LuckyConfig{
 		Enabled:         false,
@@ -185,6 +206,7 @@ func DefaultLuckyConfig() *LuckyConfig {
 		DailyCapComment: defaultLuckyDailyCapComment,
 		MinCommentChars: defaultLuckyMinCommentChars,
 		ExpireDays:      defaultLuckyExpireDays,
+		BaseName:        gnurepo.LuckyDefaultBaseName,
 		WindowStartHour: defaultLuckyWindowStartHour,
 		WindowEndHour:   defaultLuckyWindowEndHour,
 	}
@@ -230,6 +252,11 @@ func (c *LuckyConfig) UnmarshalJSON(b []byte) error {
 	if v.ExpireDays < 0 {
 		v.ExpireDays = defaultLuckyExpireDays
 	}
+	// 평소 단계 이름이 비면(키가 "" 등) 기본값. 이름 없는 지급 문구가 생기지 않게 한다.
+	v.BaseName = strings.TrimSpace(v.BaseName)
+	if v.BaseName == "" {
+		v.BaseName = gnurepo.LuckyDefaultBaseName
+	}
 	*c = LuckyConfig(v)
 	return nil
 }
@@ -242,16 +269,16 @@ type BoardLucky struct {
 	Points      int  `json:"points"`       // 당첨 시 1..Points 지급(글·댓글 공통, prizes 가 없을 때)
 	Odds        int  `json:"odds"`         // 글 당첨확률 = 1/Odds (쌍주사위)
 	CommentOdds int  `json:"comment_odds"` // 댓글 당첨확률 = 1/CommentOdds. 없거나 1 미만이면 댓글 미발동
-	// Prizes 는 앙복타임 상품 표다. 비어 있으면 Points 로 포인트만 준다(하위호환).
+	// Prizes 는 평소 단계 상품 표다. 비어 있으면 Points 로 포인트만 준다(하위호환).
 	Prizes []LuckyPrize `json:"prizes"`
 }
 
 // BoardLuckyOdds 는 GetBoardLucky 결과다. 0 은 「그 종류는 이 게시판에서 발동하지 않음」이다.
 type BoardLuckyOdds struct {
-	Odds        int          // 글 확률 분모(앙복타임)
-	CommentOdds int          // 댓글 확률 분모(앙복타임)
+	Odds        int          // 글 확률 분모(평소 단계)
+	CommentOdds int          // 댓글 확률 분모(평소 단계)
 	Points      int          // 최대 금액(글·댓글 공통, Prizes 가 없을 때)
-	Prizes      []LuckyPrize // 앙복타임 상품 표(없으면 Points 로 포인트만)
+	Prizes      []LuckyPrize // 평소 단계 상품 표(없으면 Points 로 포인트만)
 }
 
 // Payable 은 이 게시판 설정에 지급할 것이 있는지(레거시 points 또는 상품 표) 본다.
@@ -292,17 +319,17 @@ type LuckyRepository interface {
 	GetBoardLucky(boardSlug string) BoardLuckyOdds
 }
 
-// LuckyTierNamesFrom 는 설정 읽기 함수에서 배지용 단계 이름 목록을 뽑는다(캐시된 설정을 쓰므로 요청마다 DB 를 치지 않는다).
-// 읽기에 실패하면 nil — 배지는 기본 단계 이름만 인정하게 된다(표시만 줄 뿐 지급과는 무관하다).
-func LuckyTierNamesFrom(get func() (*LuckyConfig, error)) []string {
+// LuckyTierNamesFrom 는 설정 읽기 함수에서 배지용 단계 이름 묶음을 뽑는다(캐시된 설정을 쓰므로 요청마다 DB 를 치지 않는다).
+// 읽기에 실패하면 제로 값 — 배지는 기본 단계 이름만 인정하고 평소 단계는 기본값으로 본다(표시만 줄 뿐 지급과는 무관하다).
+func LuckyTierNamesFrom(get func() (*LuckyConfig, error)) gnurepo.LuckyTierNames {
 	if get == nil {
-		return nil
+		return gnurepo.LuckyTierNames{}
 	}
 	cfg, err := get()
 	if err != nil || cfg == nil {
-		return nil
+		return gnurepo.LuckyTierNames{}
 	}
-	return cfg.TierNames()
+	return cfg.BadgeTierNames()
 }
 
 type luckyRepository struct {
@@ -320,7 +347,7 @@ type GrantOptions struct {
 	MemberDailyCap int
 	// DailyCap 은 사이트 전체 KST 하루 지급 상한이다. 같은 kind 끼리만 센다(글·댓글 상한이 서로 독립). 0 이하 = 확인 안 함.
 	DailyCap int
-	// TierName 은 단계 이름(앙복타임·앙팡타임 등)이다. 포인트 내역 문구 앞에 붙는다. 비면 기존 문구.
+	// TierName 은 단계 이름(앙팡·앙팡타임 등)이다. 포인트 내역 문구 앞에 붙는다. 비면 기존 문구.
 	TierName string
 	// Now 는 판정·기록 기준 시각이다. zero 면 time.Now(). 테스트가 하루 경계를 고정하려고 둔다.
 	Now time.Time

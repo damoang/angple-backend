@@ -120,7 +120,7 @@ func newLuckyBadgeTestDB(t *testing.T, withXP bool) (*gorm.DB, *sqlCountingLogge
 // TestLuckyBadgesByWrID_Values — 포인트만·경험치만·둘 다·없음이 정확히 나뉘고, 다른 action·게시판은 섞이지 않는다.
 func TestLuckyBadgesByWrID_Values(t *testing.T) {
 	db, _ := newLuckyBadgeTestDB(t, true)
-	got, err := LuckyBadgesByWrID(db, "free", []int{101, 102, 103, 104, 105, 106}, nil)
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 102, 103, 104, 105, 106}, LuckyTierNames{})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 	}
 	for _, ids := range [][]int{{101}, {101, 102, 103, 104, 105}, big} {
 		counter.reset()
-		if _, err := LuckyBadgesByWrID(db, "free", ids, nil); err != nil {
+		if _, err := LuckyBadgesByWrID(db, "free", ids, LuckyTierNames{}); err != nil {
 			t.Fatalf("조회 실패: %v", err)
 		}
 		sqls := counter.snapshot()
@@ -163,7 +163,7 @@ func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 
 	for _, ids := range [][]int{nil, {}, {0, -3}} {
 		counter.reset()
-		if _, err := LuckyBadgesByWrID(db, "free", ids, nil); err != nil {
+		if _, err := LuckyBadgesByWrID(db, "free", ids, LuckyTierNames{}); err != nil {
 			t.Fatalf("조회 실패: %v", err)
 		}
 		if n := len(counter.snapshot()); n != 0 {
@@ -175,7 +175,7 @@ func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 // TestLuckyBadgesByWrID_ExpFailureKeepsPoints — 경험치 조회만 실패하면 에러와 함께 포인트 배지는 남긴다.
 func TestLuckyBadgesByWrID_ExpFailureKeepsPoints(t *testing.T) {
 	db, _ := newLuckyBadgeTestDB(t, false) // g5_na_xp 없음 → 경험치 조회 실패
-	got, err := LuckyBadgesByWrID(db, "free", []int{101, 103}, nil)
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 103}, LuckyTierNames{})
 	if err == nil {
 		t.Fatal("경험치 조회 실패는 에러로 알려야 한다")
 	}
@@ -191,7 +191,8 @@ func TestLuckyTierFromContent(t *testing.T) {
 		want    string
 		ok      bool
 	}{
-		{"앙복타임 럭키 포인트", "앙복타임", true},
+		{"앙복타임 럭키 포인트", LuckyDefaultBaseName, true}, // 예전 평소 단계 → 현재 평소 단계 이름(기본 「앙팡」)
+		{"앙팡 럭키 포인트", "앙팡", true},
 		{"앙팡타임 럭키 경험치(댓글)", "앙팡타임", true},
 		{"앙팡팡타임 럭키 포인트(댓글)", "앙팡팡타임", true},
 		{"나리야 럭키 포인트", "", false},
@@ -202,7 +203,7 @@ func TestLuckyTierFromContent(t *testing.T) {
 		{"", "", false},
 	}
 	for _, c := range cases {
-		got, ok := LuckyTierFromContent(c.content, nil)
+		got, ok := LuckyTierFromContent(c.content, LuckyTierNames{})
 		if got != c.want || ok != c.ok {
 			t.Errorf("LuckyTierFromContent(%q) = %q,%v want %q,%v", c.content, got, ok, c.want, c.ok)
 		}
@@ -258,7 +259,7 @@ func TestLuckyBadgeApplyTo(t *testing.T) {
 // TestLuckyTierFromContent_ConfiguredNames — F3: 설정된 이름(고정 시간대 등)으로 시작하는 문구는 그 이름이 단계가 된다.
 // 이름에 정규식 메타문자가 있어도 글자 그대로 비교하고, 목록에 없는 이름·레거시 문구는 여전히 미표시다.
 func TestLuckyTierFromContent_ConfiguredNames(t *testing.T) {
-	names := []string{"테스트구간", "a.b(c)*", "테스트"}
+	names := LuckyTierNames{Names: []string{"테스트구간", "a.b(c)*", "테스트"}}
 	cases := []struct {
 		content string
 		want    string
@@ -281,8 +282,8 @@ func TestLuckyTierFromContent_ConfiguredNames(t *testing.T) {
 			t.Errorf("LuckyTierFromContent(%q) = %q,%v want %q,%v", c.content, got, ok, c.want, c.ok)
 		}
 	}
-	// 목록을 안 주면 설정 이름은 인정하지 않는다(기본 3개만).
-	if _, ok := LuckyTierFromContent("테스트구간 럭키 포인트", nil); ok {
+	// 목록을 안 주면 설정 이름은 인정하지 않는다(기본 이름만).
+	if _, ok := LuckyTierFromContent("테스트구간 럭키 포인트", LuckyTierNames{}); ok {
 		t.Error("이름 목록이 없으면 설정 이름은 단계가 아니어야 한다")
 	}
 }
@@ -296,7 +297,7 @@ func TestLuckyBadgesByWrID_ConfiguredTier(t *testing.T) {
 	}
 	counter.reset()
 
-	got, err := LuckyBadgesByWrID(db, "free", []int{101, 107}, []string{"테스트구간"})
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 107}, LuckyTierNames{Names: []string{"테스트구간"}})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
@@ -312,7 +313,7 @@ func TestLuckyBadgesByWrID_ConfiguredTier(t *testing.T) {
 	}
 
 	// 이름 목록 없이 보면 같은 행이 tier 없이(포인트만) 나온다.
-	got, _ = LuckyBadgesByWrID(db, "free", []int{107}, nil)
+	got, _ = LuckyBadgesByWrID(db, "free", []int{107}, LuckyTierNames{})
 	if got[107].Tier != "" || got[107].Points != 21 {
 		t.Errorf("목록에 없는 이름은 tier 미표시·포인트는 유지: %+v", got[107])
 	}

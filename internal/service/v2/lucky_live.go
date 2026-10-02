@@ -12,11 +12,16 @@ import (
 	"time"
 	"unicode/utf8"
 
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 )
 
-// LuckyBaseTierName 은 시간대 단계 밖(평소)의 단계 이름이다. 확률·금액은 게시판 설정을 쓴다.
-const LuckyBaseTierName = "앙복타임"
+// LuckyBaseTierName 은 시간대 단계 밖(평소)의 단계 이름 기본값이다(lucky_config.base_name 이 없을 때).
+// 실제 이름은 설정의 base_name(LuckyConfig.BaseTierName)이고, 확률·금액은 게시판 설정을 쓴다.
+const LuckyBaseTierName = gnurepo.LuckyDefaultBaseName
+
+// LuckyLegacyBaseTierName 은 예전 평소 단계 이름이다. 지난 당첨 문구의 표시 별칭 전용이라 단계 이름으로 쓸 수 없다.
+const LuckyLegacyBaseTierName = gnurepo.LuckyLegacyBaseName
 
 // luckyWindowKeyLabel 은 기존 백엔드 시크릿에서 시간대 전용 키를 뽑을 때 붙이는 라벨이다.
 // 라벨을 붙여 파생하므로 시간대 키가 새어도 원래 시크릿(서명 키)은 되짚을 수 없다.
@@ -60,7 +65,7 @@ type LuckyLive struct {
 	randN func(n int) int
 }
 
-// NewLuckyLive 는 LuckyLive 를 만든다. windowKey 가 비면 시간대 단계를 끈다(앙복타임만).
+// NewLuckyLive 는 LuckyLive 를 만든다. windowKey 가 비면 시간대 단계를 끈다(평소 단계만).
 func NewLuckyLive(store LuckyLiveStore, roller LuckyService, windowKey []byte) *LuckyLive {
 	return &LuckyLive{store: store, roller: roller, windowKey: windowKey, now: time.Now, randN: cryptoRandN}
 }
@@ -80,7 +85,7 @@ func DeriveLuckyWindowKey(baseSecret string) []byte {
 // Process 는 한 건(글 또는 댓글)을 판정하고 당첨이면 지급한다. best-effort 라 에러는 로그로만 남긴다.
 // commentChars 는 댓글 본문의 정리 길이(LuckyCommentChars)다. 글이면 쓰지 않는다(글은 길이 제한 없음).
 //
-// 순서: 마스터 스위치 → 댓글 여부·길이 → 게시판(그 종류의 확률) → 단계 선택(무작위 window > 고정 시간대 > 앙복타임)
+// 순서: 마스터 스위치 → 댓글 여부·길이 → 게시판(그 종류의 확률) → 단계 선택(무작위 window > 고정 시간대 > 평소 단계)
 // → 그 단계의 그 종류 확률 → 주사위 → 지급(상한 포함).
 // ⛔ 게시판이 꺼져 있으면 시간대와 무관하게 발동하지 않는다 — 운영 기록·광고 게시판에 시간대가 새면 안 된다.
 // 댓글도 같다: 게시판 comment_odds 가 없으면 시간대 안이어도 댓글은 발동하지 않는다.
@@ -101,7 +106,7 @@ func (l *LuckyLive) Process(mbID, slug string, wrID int, isComment bool, comment
 			return res
 		}
 	}
-	board := l.store.GetBoardLucky(slug) // 게시판별 앙복타임 확률·금액(안 켠 곳은 0)
+	board := l.store.GetBoardLucky(slug) // 게시판별 평소 단계 확률·금액(안 켠 곳은 0)
 	boardOdds := board.Odds
 	if isComment {
 		boardOdds = board.CommentOdds
@@ -243,7 +248,7 @@ func prizeFallbackPoints(prizes []v2repo.LuckyPrize, legacyPoints int) int {
 	return 0
 }
 
-// pickTier 는 now 에 적용할 단계를 고른다. 우선순위: 무작위 window(앙팡 등) > 고정 시간대 > 앙복타임(게시판 값).
+// pickTier 는 now 에 적용할 단계를 고른다. 우선순위: 무작위 window(앙팡타임 등) > 고정 시간대 > 평소 단계(base_name, 게시판 값).
 // 무작위 window 가 가장 드물고 가장 후한 이벤트라 고정 시간대가 그것을 가리면 안 된다.
 func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, board v2repo.BoardLuckyOdds) luckyTier {
 	k := now.In(luckyKST)
@@ -260,7 +265,7 @@ func (l *LuckyLive) pickTier(cfg *v2repo.LuckyConfig, now time.Time, board v2rep
 		}
 		return luckyTier{name: strings.TrimSpace(f.Name), odds: f.Odds, commentOdds: commentOdds, points: f.Points, prizes: f.Prizes}
 	}
-	return luckyTier{name: LuckyBaseTierName, odds: board.Odds, commentOdds: board.CommentOdds, points: board.Points, prizes: board.Prizes}
+	return luckyTier{name: cfg.BaseTierName(), odds: board.Odds, commentOdds: board.CommentOdds, points: board.Points, prizes: board.Prizes}
 }
 
 // activeFixedWindow 는 now(KST) 를 포함하는 첫 고정 시간대를 돌려준다(겹치면 배열 앞쪽).
@@ -332,7 +337,7 @@ type luckyWindowSlot struct {
 // 어느 파드·언제 계산해도 같다. 구간은 [start_hour, end_hour) 안에 통째로 들어가고, 앞 단계와 겹치면
 // "…|index|attempt" 로 다음 후보를 뽑는다. 그래도 다 겹치면 첫 후보부터 1분씩 밀며 찾고, 들어갈 자리가
 // 없으면 그 단계는 그날 열지 않는다(겹쳐서 여는 일은 없다).
-// key 가 비거나 단계가 없거나 시 범위가 잘못되면 nil(앙복타임만).
+// key 가 비거나 단계가 없거나 시 범위가 잘못되면 nil(평소 단계만).
 func luckyWindowsForDay(key []byte, dayStart time.Time, cfg *v2repo.LuckyConfig) []luckyWindowSlot {
 	if len(key) == 0 || cfg == nil || len(cfg.Windows) == 0 {
 		return nil
