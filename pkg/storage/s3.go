@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -37,22 +38,24 @@ type S3Config struct {
 	ForcePathStyle  bool // true for MinIO/R2
 }
 
-// NewS3Client creates a new S3-compatible storage client
+// NewS3Client creates a new S3-compatible storage client.
+//
+// When both AccessKeyID and SecretAccessKey are set they are used as static
+// credentials (R2/MinIO and environments with explicit keys). When both are
+// empty the AWS SDK default credential chain is used instead (environment,
+// shared config, then the instance role via IMDS), so no extra secret is
+// needed where the node role already grants access. Setting only one of the
+// two is a misconfiguration and returns an error rather than falling back.
 func NewS3Client(cfg S3Config) (*S3Client, error) {
-	opts := func(o *s3.Options) {
-		o.Region = cfg.Region
-		o.Credentials = credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")
-		if cfg.Endpoint != "" {
-			o.BaseEndpoint = aws.String(cfg.Endpoint)
-		}
-		o.UsePathStyle = cfg.ForcePathStyle
+	client, err := newAWSS3Client(context.Background(), cfg)
+	if err != nil {
+		return nil, err
 	}
-
-	client := s3.New(s3.Options{}, opts)
 
 	pkglogger.GetLogger().Info().
 		Str("bucket", cfg.Bucket).
 		Str("endpoint", cfg.Endpoint).
+		Bool("static_credentials", hasStaticCredentials(cfg)).
 		Msg("S3 storage client initialized")
 
 	return &S3Client{
@@ -61,6 +64,44 @@ func NewS3Client(cfg S3Config) (*S3Client, error) {
 		cdnURL:   strings.TrimRight(cfg.CDNURL, "/"),
 		basePath: cfg.BasePath,
 	}, nil
+}
+
+// hasStaticCredentials reports whether both static keys are configured.
+func hasStaticCredentials(cfg S3Config) bool {
+	return cfg.AccessKeyID != "" && cfg.SecretAccessKey != ""
+}
+
+// newAWSS3Client builds the SDK client, choosing static keys or the default
+// credential chain as described on NewS3Client.
+func newAWSS3Client(ctx context.Context, cfg S3Config) (*s3.Client, error) {
+	endpointOpts := func(o *s3.Options) {
+		if cfg.Region != "" {
+			o.Region = cfg.Region
+		}
+		if cfg.Endpoint != "" {
+			o.BaseEndpoint = aws.String(cfg.Endpoint)
+		}
+		o.UsePathStyle = cfg.ForcePathStyle
+	}
+
+	if hasStaticCredentials(cfg) {
+		return s3.New(s3.Options{
+			Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
+		}, endpointOpts), nil
+	}
+	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
+		return nil, errors.New("s3 config: access key id and secret access key must be set together")
+	}
+
+	var loadOpts []func(*awsconfig.LoadOptions) error
+	if cfg.Region != "" {
+		loadOpts = append(loadOpts, awsconfig.WithRegion(cfg.Region))
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("s3 config: load default credential chain: %w", err)
+	}
+	return s3.NewFromConfig(awsCfg, endpointOpts), nil
 }
 
 // UploadResult contains the result of a file upload

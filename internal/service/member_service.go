@@ -33,8 +33,10 @@ const (
 	memberImageMetaKey   = "Photo-Type"
 	memberImageMetaValue = "member-profile"
 
+	// 변환 결과(.webp)를 기다리는 간격과 상한. 큰 GIF 는 변환에 수 초가 걸려
+	// 상한을 실측 최대치보다 넉넉하게 둔다. 웹 프록시 타임아웃보다 충분히 짧다.
 	defaultMemberImagePollInterval = 300 * time.Millisecond
-	defaultMemberImagePollTimeout  = 8 * time.Second
+	defaultMemberImagePollTimeout  = 12 * time.Second
 
 	// memberImageKeyRetries 는 같은 초에 다시 올려 원본 키가 겹칠 때 시각을 밀어 보는 횟수다.
 	memberImageKeyRetries = 3
@@ -44,7 +46,8 @@ const (
 )
 
 // ErrMemberImageProcessingTimeout is returned when the converted profile image
-// did not appear within the polling window. The DB is left unchanged.
+// did not appear within the polling window (12s by default). The DB is left
+// unchanged.
 var ErrMemberImageProcessingTimeout = errors.New("이미지 처리가 지연되고 있습니다. 잠시 후 다시 시도해 주세요")
 
 // MemberImageValidationError is returned when an uploaded profile image is

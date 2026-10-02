@@ -101,6 +101,20 @@ func newTestMemberService(store *fakeMemberImageStore, repo *fakeMemberRepo) *Me
 	}
 }
 
+// TestNewMemberService_PollDefaults: 변환 대기 기본값(300ms 간격, 12초 상한)을 잠근다.
+func TestNewMemberService_PollDefaults(t *testing.T) {
+	svc := NewMemberService(nil, &fakeMemberRepo{})
+	if svc.pollInterval != 300*time.Millisecond {
+		t.Errorf("pollInterval = %v, want 300ms", svc.pollInterval)
+	}
+	if svc.pollTimeout != 12*time.Second {
+		t.Errorf("pollTimeout = %v, want 12s", svc.pollTimeout)
+	}
+	if svc.store != nil {
+		t.Error("S3 클라이언트가 nil 이면 store 도 nil 이어야 한다(typed nil 방지)")
+	}
+}
+
 func TestMemberImageKeys(t *testing.T) {
 	tests := []struct {
 		name     string
