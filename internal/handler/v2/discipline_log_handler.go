@@ -438,6 +438,12 @@ var disciplineLogColumns = []string{
 	"wr_deleted_at", "wr_deleted_by",
 }
 
+// escapeLikePattern 은 LIKE 와일드카드(\, %, _)를 이스케이프해 사용자 입력이
+// 패턴으로 해석되지 않게 한다.
+func escapeLikePattern(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
 // GetList handles GET /api/v1/discipline-logs
 func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -450,18 +456,27 @@ func (h *DisciplineLogHandler) GetList(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	memberID := c.Query("member_id")
+	memberID := strings.TrimSpace(c.Query("member_id"))
 
 	var posts []*gnuboard.G5Write
 	var total int64
 
 	if memberID != "" {
-		// Filter by member_id using generated column (indexed)
+		// member_id 검색어는 세 경로 중 하나로 맞으면 찾는다.
+		//  1) 회원 아이디: penalty_mb_id (generated column, indexed)
+		//  2) 현재 닉네임: g5_member.mb_nick 으로 아이디를 찾아 penalty_mb_id 와 대조
+		//  3) 제재 당시 닉네임: wr_subject 형식이 "<mb_id>(<당시 닉네임>)" 이므로 접미 "(닉네임)" 매칭
+		// LIKE 와일드카드는 이스케이프하고, MySQL 기본 이스케이프 문자(\)에 맡긴다.
 		table := "g5_write_disciplinelog"
-		filter := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND penalty_mb_id = ?"
+		filter := "wr_is_comment = 0 AND wr_deleted_at IS NULL AND (" +
+			"penalty_mb_id = ? " +
+			"OR penalty_mb_id IN (SELECT mb_id FROM g5_member WHERE mb_nick = ?) " +
+			"OR wr_subject LIKE ?)"
+		subjectLike := "%(" + escapeLikePattern(memberID) + ")"
+		args := []interface{}{memberID, memberID, subjectLike}
 
-		h.db.Table(table).Where(filter, memberID).Count(&total)
-		h.db.Table(table).Select(disciplineLogColumns).Where(filter, memberID).
+		h.db.Table(table).Where(filter, args...).Count(&total)
+		h.db.Table(table).Select(disciplineLogColumns).Where(filter, args...).
 			Order("wr_id DESC").Offset(offset).Limit(limit).Find(&posts)
 	} else {
 		var err error
