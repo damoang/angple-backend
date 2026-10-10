@@ -247,3 +247,12 @@ func TestSoloFinishStoresFlaggedButDoesNotAccept(t *testing.T) {
 		t.Fatalf("재제출 = %d", code)
 	}
 }
+
+func TestSoloRESTIgnoresQueryToken(t *testing.T) {
+	svc, _ := newTestSolo(&fakeSoloStore{})
+	rec := httptest.NewRecorder()
+	svc.HandleStart(rec, httptest.NewRequest(http.MethodPost, "/stack-ws/solo/start?token=member-p1", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("쿼리 토큰을 받았다: %d", rec.Code)
+	}
+}

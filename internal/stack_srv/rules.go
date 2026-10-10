@@ -1,5 +1,7 @@
 package stacksrv
 
+import "time"
+
 // 이 파일의 표와 식은 웹 클라이언트(versus.ts·engine.ts)와 같은 값이어야 한다.
 // 한쪽을 바꾸면 다른 쪽도 함께 바꾼다.
 
@@ -90,9 +92,20 @@ func AttackFor(cleared int) int {
 // CellBalanceOK 는 대전 칸 보존식이다. 굳힌 조각 4칸 + 넣은 방해 줄 8칸 − 지운 줄 9칸은
 // 판 안의 칸 수이므로 0 이상 162 이하여야 한다. 지운 줄을 부풀리면 음수가 된다.
 func CellBalanceOK(locks, garbageLines, cleared int) bool {
-	cells := 4*locks + 8*garbageLines - 9*cleared
-	return cells >= 0 && cells <= BoardCells
+	return CellBalanceWithin(locks, garbageLines, cleared, 0)
 }
+
+// CellBalanceWithin 은 칸 보존식의 위쪽 한도에 slackLines×8 칸 여유를 준 판정이다.
+// 서버는 방해 줄을 보낸 순간 넣은 것으로 세지만, 클라이언트가 그 줄을 받기 전에 다음 조각을 굳히면
+// 그 판에는 아직 없다. 판이 거의 찬 상태에서 이 시차로 162 를 넘겨 cheat 로 오판하지 않게
+// 방금 보낸 줄과 대기 줄만큼은 봐준다. 아래쪽 한도(지운 줄 부풀리기 방지)는 그대로다.
+func CellBalanceWithin(locks, garbageLines, cleared, slackLines int) bool {
+	cells := 4*locks + 8*garbageLines - 9*cleared
+	return cells >= 0 && cells <= BoardCells+8*slackLines
+}
+
+// GarbageAckWindow 는 보낸 방해 줄을 아직 판에 반영하지 못했을 수 있다고 보는 시간이다.
+const GarbageAckWindow = 2 * time.Second
 
 // ValidBoard 는 board 가 162자 '0'~'8' 인지 본다.
 func ValidBoard(b string) bool {

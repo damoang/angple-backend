@@ -116,3 +116,14 @@ func TestOnlyV1RulesOpen(t *testing.T) {
 		t.Fatalf("sprint40 = %+v", sprint)
 	}
 }
+
+func TestCellBalanceSlackOnlyRaisesUpperBound(t *testing.T) {
+	// 41 조각 = 164 칸: 여유 없으면 위반, 방금 보낸 방해 줄 1줄 여유면 통과.
+	if CellBalanceWithin(41, 0, 0, 0) || !CellBalanceWithin(41, 0, 0, 1) {
+		t.Fatal("위쪽 여유가 적용되지 않았다")
+	}
+	// 지운 줄 부풀리기(아래쪽 한도)는 여유와 무관하게 막는다.
+	if CellBalanceWithin(1, 0, 4, 12) {
+		t.Fatal("아래쪽 한도에 여유가 적용됐다")
+	}
+}

@@ -42,7 +42,7 @@ func (f *fakeBoardStore) SoloTop(_ time.Time, _ int) ([]SoloRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
-	return []SoloRow{{Nickname: "첫째", Score: 70485}, {Nickname: "둘째", Score: 100}}, nil
+	return []SoloRow{{Nickname: "첫째", Score: 12345}, {Nickname: "둘째", Score: 100}}, nil
 }
 
 func (f *fakeBoardStore) VersusTop(_ string, _ int) ([]VersusRow, error) {

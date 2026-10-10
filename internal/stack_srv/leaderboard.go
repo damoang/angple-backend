@@ -91,7 +91,7 @@ func (l *Leaderboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	board := r.URL.Query().Get("board")
 	if !knownBoard(board) {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "unknown_board"})
+		writeError(w, http.StatusBadRequest, "unknown_board")
 		return
 	}
 	now := l.now()
@@ -102,7 +102,7 @@ func (l *Leaderboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	body := l.cache.get(now, key, func() ([]byte, error) { return l.build(board, now) })
 	if body == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "unavailable"})
+		writeError(w, http.StatusServiceUnavailable, "unavailable")
 		return
 	}
 	writePublicJSON(w, body)
@@ -159,6 +159,7 @@ func (l *Leaderboard) build(board string, now time.Time) ([]byte, error) {
 }
 
 // SoloTop 은 혼자하기 상위 n 줄이다(flagged 판은 best·weekly 에 들어가지 않으므로 자연히 빠진다).
+// 탈퇴했거나 이용 제한 중인 회원은 공개 점수판에서 뺀다(자동 등업과 같은 조건).
 func (s *Store) SoloTop(weekStart time.Time, n int) ([]SoloRow, error) {
 	var rows []SoloRow
 	if weekStart.IsZero() {
@@ -166,6 +167,7 @@ func (s *Store) SoloTop(weekStart time.Time, n int) ([]SoloRow, error) {
 			`SELECT m.mb_nick, b.score, b.cleared_lines, b.level
 			   FROM angple_stack_solo_best b
 			   JOIN g5_member m ON m.mb_id = b.mb_id
+			  WHERE m.mb_leave_date = '' AND m.mb_intercept_date = ''
 			  ORDER BY b.score DESC, b.achieved_at ASC LIMIT ?`, n,
 		).Scan(&rows).Error
 		return rows, err
@@ -174,20 +176,20 @@ func (s *Store) SoloTop(weekStart time.Time, n int) ([]SoloRow, error) {
 		`SELECT m.mb_nick, w.score, w.cleared_lines, w.level
 		   FROM angple_stack_solo_weekly w
 		   JOIN g5_member m ON m.mb_id = w.mb_id
-		  WHERE w.week_start = ?
+		  WHERE w.week_start = ? AND m.mb_leave_date = '' AND m.mb_intercept_date = ''
 		  ORDER BY w.score DESC, w.achieved_at ASC LIMIT ?`, weekStart.Format("2006-01-02"), n,
 	).Scan(&rows).Error
 	return rows, err
 }
 
-// VersusTop 은 대전 규칙별 레이팅 상위 n 줄이다(첫 판이 끝나야 stats 행이 생긴다).
+// VersusTop 은 대전 규칙별 레이팅 상위 n 줄이다(첫 판이 끝나야 stats 행이 생긴다). 탈퇴·이용 제한 회원은 뺀다.
 func (s *Store) VersusTop(rule string, n int) ([]VersusRow, error) {
 	var rows []VersusRow
 	err := s.db.Raw(
 		`SELECT m.mb_nick, t.rating, t.wins, t.losses, t.draws
 		   FROM angple_stack_stats t
 		   JOIN g5_member m ON m.mb_id = t.mb_id
-		  WHERE t.rule = ?
+		  WHERE t.rule = ? AND m.mb_leave_date = '' AND m.mb_intercept_date = ''
 		  ORDER BY t.rating DESC, t.wins DESC LIMIT ?`, rule, n,
 	).Scan(&rows).Error
 	return rows, err

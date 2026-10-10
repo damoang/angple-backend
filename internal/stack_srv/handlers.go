@@ -8,7 +8,10 @@ import (
 )
 
 // errUnauthorized 는 토큰이 없거나 회원을 확정할 수 없을 때다.
-var errUnauthorized = errors.New("unauthorized")
+var errUnauthorized = errors.New(codeUnauthorized)
+
+// codeUnauthorized 는 인증 실패 코드다.
+const codeUnauthorized = "unauthorized"
 
 // handleMessage 는 메시지 종류별로 나눈다. ready 만 roomId 를 싣고, 나머지는 연결의 방을 쓴다.
 func (s *Server) handleMessage(c *Client, msg Message) {
@@ -40,9 +43,11 @@ func (s *Server) handleMessage(c *Client, msg Message) {
 
 // 자주 쓰는 메시지 이름·오류 코드
 const (
-	msgMatchingStatus  = "matching_status"
-	msgRematchCanceled = "rematch_canceled"
-	codeServerBusy     = "server_busy"
+	msgMatchingStatus         = "matching_status"
+	msgRematchCanceled        = "rematch_canceled"
+	codeServerBusy            = "server_busy"
+	codeOpponentPaymentFailed = "opponent_payment_failed"
+	statusError               = "error"
 )
 
 // sendBadMessage 는 형식이 틀린 요청에 답한다.

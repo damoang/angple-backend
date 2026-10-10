@@ -420,7 +420,7 @@ func TestLockValidationRejects(t *testing.T) {
 	s := newTestServer(newFakeStore(), timing)
 	c1, _, _ := startGame(t, s, ModeRandom, RuleAttack)
 	errCode := func() string {
-		m := next(t, c1, "error")
+		m := next(t, c1, statusError)
 		code, _ := m.Data["code"].(string)
 		return code
 	}
@@ -507,9 +507,9 @@ func TestMatchChargeFailureRefundsPayer(t *testing.T) {
 	join := map[string]interface{}{"mode": "random", "rule": "sprint40"}
 	sendMsg(t, s, c1, "join_matching_queue", join)
 	sendMsg(t, s, c2, "join_matching_queue", join)
-	e1 := nextWhere(t, c1, "error", func(m outMsg) bool { return m.Data["status"] == "error" })
-	e2 := nextWhere(t, c2, "error", func(m outMsg) bool { return m.Data["status"] == "error" })
-	if e1.Data["code"] != "opponent_payment_failed" || e2.Data["code"] != "insufficient_point" {
+	e1 := nextWhere(t, c1, statusError, func(m outMsg) bool { return m.Data["status"] == statusError })
+	e2 := nextWhere(t, c2, statusError, func(m outMsg) bool { return m.Data["status"] == statusError })
+	if e1.Data["code"] != codeOpponentPaymentFailed || e2.Data["code"] != "insufficient_point" {
 		t.Fatalf("codes = %v / %v", e1.Data["code"], e2.Data["code"])
 	}
 	charges, refunds, aborts, _ := store.snapshot()
@@ -555,7 +555,7 @@ func TestRematchChargesAgainAndRefundsOnFailure(t *testing.T) {
 	s.handleMessage(c2, Message{Type: "rematch"})
 	r1 := next(t, c1, "rematch_canceled")
 	r2 := next(t, c2, "rematch_canceled")
-	if r1.Data["reason"] != "opponent_payment_failed" || r2.Data["reason"] != "insufficient_point" {
+	if r1.Data["reason"] != codeOpponentPaymentFailed || r2.Data["reason"] != "insufficient_point" {
 		t.Fatalf("rematch_canceled = %v / %v", r1.Data, r2.Data)
 	}
 	charges, refunds, _, _ := store.snapshot()
@@ -570,7 +570,7 @@ func TestFavoriteIsFreeAndNeedsSameRule(t *testing.T) {
 	c1, c2 := newTestClient(s, "p1"), newTestClient(s, "p2")
 	sendMsg(t, s, c1, "join_matching_queue", map[string]interface{}{"mode": "favorite", "rule": "attack", "invite": "abcd1234"})
 	sendMsg(t, s, c2, "join_matching_queue", map[string]interface{}{"mode": "favorite", "rule": "sprint40", "invite": "abcd1234"})
-	e := nextWhere(t, c2, "rule_mismatch", func(m outMsg) bool { return m.Data["status"] == "error" })
+	e := nextWhere(t, c2, "rule_mismatch", func(m outMsg) bool { return m.Data["status"] == statusError })
 	if e.Data["code"] != "rule_mismatch" {
 		t.Fatalf("code = %v", e.Data["code"])
 	}
@@ -689,8 +689,12 @@ func TestRoomLimit(t *testing.T) {
 func TestTokenBucket(t *testing.T) {
 	b := newTokenBucket(2, 1)
 	t0 := time.Unix(0, 0)
-	if !b.allow(t0) || !b.allow(t0) || b.allow(t0) {
-		t.Fatal("burst 2 를 넘어 허용했다")
+	got := make([]bool, 0, 3)
+	for i := 0; i < 3; i++ {
+		got = append(got, b.allow(t0))
+	}
+	if !got[0] || !got[1] || got[2] {
+		t.Fatalf("burst 2 = %v", got)
 	}
 	if !b.allow(t0.Add(time.Second)) {
 		t.Fatal("1초 뒤 충전되지 않았다")

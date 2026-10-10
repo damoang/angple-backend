@@ -46,30 +46,47 @@ func (s *Server) onReadyTimeout(roomID string) {
 	players := room.players
 	s.mu.Unlock()
 
-	refunded := false
-	if s.store != nil && room.dbGameID > 0 {
-		if room.fee > 0 {
-			for _, p := range players {
-				if err := s.store.RefundEntryFee(room.dbGameID, p.mbID, room.fee); err != nil {
-					log.Printf("[stack] refund failed game=%d: %v", room.dbGameID, err)
-				}
-			}
-			refunded = true
+	refunded := s.refundReadyTimeout(room, players)
+	s.mu.Lock()
+	for i, p := range players {
+		message := "상대방이 준비하지 않아 대전이 취소되었습니다."
+		switch {
+		case refunded[i]:
+			message += " 낸 참가비는 돌려드렸습니다."
+		case room.fee > 0:
+			message += " 참가비 환불이 지연되고 있습니다. 확인 후 돌려드립니다."
 		}
+		s.emitToLocked(p.mbID, msgMatchingStatus, map[string]interface{}{"status": statusError, "rule": room.rule, "code": "ready_timeout", "message": message, "refunded": refunded[i]})
+	}
+	s.mu.Unlock()
+	log.Printf("[stack] ready timeout room=%s", roomID)
+}
+
+// refundReadyTimeout 은 ready 시간 초과 방의 참가비를 돌려주고 자리별 실제 환불 성공 여부를 돌려준다.
+// 환불이 하나라도 실패하면 판을 aborted 로 닫지 않는다 — playing 으로 남겨 두면 다음 기동 때
+// AbortStalePlayingGames 가 아직 환불되지 않은 참가비를 다시 돌려준다.
+func (s *Server) refundReadyTimeout(room *Room, players [2]*playerState) [2]bool {
+	var refunded [2]bool
+	if s.store == nil || room.dbGameID <= 0 {
+		return refunded
+	}
+	allRefunded := true
+	if room.fee > 0 {
+		for i, p := range players {
+			if err := s.store.RefundEntryFee(room.dbGameID, p.mbID, room.fee); err != nil {
+				log.Printf("[stack] refund failed game=%d seat=%d: %v", room.dbGameID, i, err)
+				allRefunded = false
+				continue
+			}
+			refunded[i] = true
+		}
+	}
+	if allRefunded {
 		if err := s.store.AbortGame(room.dbGameID, "ready_timeout"); err != nil {
 			log.Printf("[stack] abort game failed id=%d: %v", room.dbGameID, err)
 		}
 	}
-	message := "상대방이 준비하지 않아 대전이 취소되었습니다."
-	if refunded {
-		message += " 낸 참가비는 돌려드렸습니다."
-	}
-	s.mu.Lock()
-	for _, p := range players {
-		s.emitToLocked(p.mbID, msgMatchingStatus, map[string]interface{}{"status": "error", "rule": room.rule, "code": "ready_timeout", "message": message, "refunded": refunded})
-	}
-	s.mu.Unlock()
-	log.Printf("[stack] ready timeout room=%s", roomID)
+	return refunded
 }
 
 // handleReady 는 ready {roomId} 다. 둘 다 준비되면 game_start(카운트다운 3초) 후 go 를 보낸다.
@@ -215,7 +232,7 @@ func (s *Server) applyLockLocked(room *Room, idx int, d lockData) (lockOutcome, 
 	}
 	p.tick = d.Tick
 	p.locks++
-	if !CellBalanceOK(p.locks, p.garbageIn, p.lines+d.Cleared) {
+	if !CellBalanceWithin(p.locks, p.garbageIn, p.lines+d.Cleared, p.garbageSlack(now)) {
 		// 조각은 굳은 것으로 세되 지운 줄·공격은 인정하지 않는다.
 		return s.violationLocked(room, idx, "cell_balance")
 	}
@@ -254,6 +271,15 @@ func (p *playerState) allowLock(now time.Time, perSecond int) bool {
 	}
 	p.lockTimes = append(p.lockTimes, now)
 	return true
+}
+
+// garbageSlack 은 칸 보존식 위쪽 여유 줄 수다: 최근 보낸 방해 줄 + 대기 줄.
+func (p *playerState) garbageSlack(now time.Time) int {
+	slack := p.pending.total()
+	if now.Sub(p.recentGarbageAt) <= GarbageAckWindow {
+		slack += p.recentGarbage
+	}
+	return slack
 }
 
 // violationLocked 는 위반을 세고, 3회째면 cheat 패배를 돌려준다.
@@ -295,9 +321,15 @@ func (s *Server) applyGarbageLocked(room *Room, idx, cleared int) {
 	for _, ch := range chunks {
 		after += ch.lines
 	}
+	now := s.now()
+	if now.Sub(p.recentGarbageAt) > GarbageAckWindow {
+		p.recentGarbage = 0
+	}
+	p.recentGarbageAt = now
 	for _, ch := range chunks {
 		after -= ch.lines
 		p.garbageIn += ch.lines
+		p.recentGarbage += ch.lines
 		s.emitToLocked(p.mbID, "garbage_apply", map[string]interface{}{"lines": ch.lines, "hole": ch.hole, "pending": after})
 	}
 }
@@ -398,9 +430,7 @@ func (s *Server) finishGame(roomID string, winner int, reason string) {
 	var stats [2]PlayerStats
 	if s.store != nil {
 		if room.dbGameID > 0 {
-			if err := s.store.FinishGame(res); err != nil {
-				log.Printf("[stack] finish persist failed room=%s db=%d: %v", roomID, room.dbGameID, err)
-			}
+			s.persistFinish(roomID, res)
 		}
 		for i, mb := range []string{res.P1, res.P2} {
 			st, ok := s.store.Stats(mb, room.rule)
@@ -429,6 +459,26 @@ func (s *Server) finishGame(roomID string, winner int, reason string) {
 		room.rematchTimer = time.AfterFunc(s.timing.Rematch, func() { s.onRematchExpired(roomID) })
 	}
 	log.Printf("[stack] game over room=%s winnerSeat=%d reason=%s", roomID, winner, reason)
+}
+
+// finishRetries 는 결과 저장 시도 횟수다.
+const finishRetries = 4
+
+// persistFinish 는 결과를 저장한다. 실패하면 잠깐씩 늘려 가며 다시 시도한다 — 저장되지 않으면
+// 다음 기동 때 진행 중 대전으로 보여 참가비가 환불되고 전적도 빠지기 때문이다.
+func (s *Server) persistFinish(roomID string, res GameResult) {
+	wait := 200 * time.Millisecond
+	for attempt := 1; attempt <= finishRetries; attempt++ {
+		err := s.store.FinishGame(res)
+		if err == nil {
+			return
+		}
+		log.Printf("[stack] finish persist failed room=%s db=%d attempt=%d/%d: %v", roomID, res.GameID, attempt, finishRetries, err)
+		if attempt < finishRetries {
+			time.Sleep(wait)
+			wait *= 2
+		}
+	}
 }
 
 // stopRoomTimersLocked 는 방의 진행 타이머를 모두 멈춘다.

@@ -102,8 +102,10 @@ type Message struct {
 type Client struct {
 	// conn 은 웹소켓 연결이다(테스트에서는 nil).
 	conn *websocket.Conn
-	// send 는 쓰기 펌프로 가는 버퍼다.
+	// send 는 쓰기 펌프로 가는 버퍼다. 닫지 않는다.
 	send chan []byte
+	// done 은 읽기 펌프가 끝나면 닫힌다(쓰기 펌프 종료 신호). 테스트에서는 nil.
+	done chan struct{}
 	// MbID 는 회원 아이디다.
 	MbID string
 	// Nick 은 닉네임이다.
@@ -158,6 +160,10 @@ type playerState struct {
 	lines int
 	// garbageIn 은 실제로 넣으라고 보낸 방해 줄 합이다.
 	garbageIn int
+	// recentGarbage 는 최근(GarbageAckWindow 안) 넣으라고 보낸 방해 줄 수다(칸 보존식 여유).
+	recentGarbage int
+	// recentGarbageAt 은 마지막으로 방해 줄을 보낸 시각이다.
+	recentGarbageAt time.Time
 	// pending 은 아직 넣지 않은 방해 줄 묶음이다(오래된 것부터).
 	pending garbageQueue
 	// board 는 마지막으로 받은 판이다.

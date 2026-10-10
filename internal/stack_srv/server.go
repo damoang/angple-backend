@@ -36,7 +36,7 @@ func NewServer(store GameStore, verifyToken func(string) (string, string, error)
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	mbID, nick, err := s.authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, codeUnauthorized, http.StatusUnauthorized)
 		return
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -44,7 +44,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[stack] upgrade error: %v", err)
 		return
 	}
-	client := &Client{conn: conn, send: make(chan []byte, 256), MbID: mbID, Nick: nick}
+	client := &Client{conn: conn, send: make(chan []byte, 256), done: make(chan struct{}), MbID: mbID, Nick: nick}
 	client.alive.Store(true)
 	client.limiter = newTokenBucket(20, 10)
 	conn.SetPongHandler(func(string) error { client.alive.Store(true); return nil })
@@ -112,9 +112,19 @@ func bearerToken(r *http.Request) string {
 	return r.URL.Query().Get("token")
 }
 
+// bearerHeader 는 Authorization 헤더의 토큰만 꺼낸다. REST(혼자하기 기록)는 쿼리 토큰을 받지 않는다 —
+// 쿼리 문자열은 프록시 접근 로그에 남는다.
+func bearerHeader(r *http.Request) string {
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimSpace(h[7:])
+	}
+	return ""
+}
+
 // readPump 는 메시지를 읽어 처리한다. 2KB 를 넘는 메시지는 연결을 끊는다.
 func (s *Server) readPump(c *Client) {
 	defer func() {
+		close(c.done)
 		s.handleDisconnect(c)
 		closeConn(c)
 	}()
@@ -136,9 +146,15 @@ func (s *Server) readPump(c *Client) {
 }
 
 // writePump 는 send 버퍼를 연결로 흘려보낸다.
+// send 는 닫지 않는다(emit 이 닫힌 채널에 보내면 panic). 대신 readPump 가 끝나며 done 을 닫으면 빠져나온다.
 func (s *Server) writePump(c *Client) {
-	for msg := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+	for {
+		select {
+		case msg := <-c.send:
+			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-c.done:
 			return
 		}
 	}
@@ -181,7 +197,7 @@ func (s *Server) emitToLocked(mbID, typ string, data interface{}) {
 
 // sendError 는 error {code, message} 를 보낸다.
 func (s *Server) sendError(c *Client, code, message string) {
-	s.emit(c, "error", map[string]interface{}{"code": code, "message": message})
+	s.emit(c, statusError, map[string]interface{}{"code": code, "message": message})
 }
 
 // StartHeartbeat 은 30초마다 ping 하고 응답 없는 연결을 끊는다.
@@ -264,7 +280,9 @@ func (s *Server) HandleLobby(w http.ResponseWriter, r *http.Request) {
 func writePublicJSON(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=60")
-	_, _ = w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		log.Printf("[stack] write response failed: %v", err)
+	}
 }
 
 // PublicCacheTTL 은 공개 GET 의 서버 메모리 캐시 수명이다.
@@ -356,15 +374,26 @@ func generateID(n int) string {
 }
 
 // randomUint32 는 crypto/rand 로 만든 32비트 값이다(엔진 시드).
+// Go 1.24 부터 crypto/rand.Read 는 실패하지 않는다(실패 시 프로세스가 멈춘다). 그래도 에러는 남긴다.
 func randomUint32() uint32 {
 	var b [4]byte
 	if _, err := crand.Read(b[:]); err != nil {
-		return uint32(time.Now().UnixNano())
+		log.Printf("[stack] crypto/rand failed: %v", err)
 	}
 	return binary.LittleEndian.Uint32(b[:])
 }
 
-// randomHole 은 방해 줄 구멍 열(0~8)이다.
+// randomHole 은 방해 줄 구멍 열(0~8)이다. 바이트 하나를 9의 배수 구간(0~251)에서만 받아 치우침을 없앤다.
 func randomHole() int {
-	return int(randomUint32() % Cols)
+	var b [1]byte
+	for i := 0; i < 16; i++ {
+		if _, err := crand.Read(b[:]); err != nil {
+			log.Printf("[stack] crypto/rand failed: %v", err)
+			return 0
+		}
+		if b[0] < 252 {
+			return int(b[0]) % Cols
+		}
+	}
+	return int(b[0]) % Cols
 }

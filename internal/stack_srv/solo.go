@@ -90,24 +90,14 @@ func toCount(v float64) int64 {
 // clears 개수≤pieces≤ticks / ticks≤floor(elapsedMs×60/1000)+180 /
 // 줄 점수 재계산(지울 때의 레벨)≤score, 나머지(낙하 점수)≤2×(18+12)×(pieces+1).
 func SoloClaimCheck(c SoloClaim, elapsedMs int64) SoloCheck {
-	if !isCount(c.Score) || !isCount(c.Lines) || !isCount(c.Level) || !isCount(c.Ticks) || !isCount(c.Pieces) || c.Clears == nil {
+	if !claimShapeOK(c) {
 		return SoloCheck{Reasons: []string{"shape"}}
 	}
 	score, lines, level := int64(c.Score), int64(c.Lines), int64(c.Level)
 	ticks, pieces := int64(c.Ticks), int64(c.Pieces)
 
+	sum, clearScore, rangeBad := scoreClears(c.Clears)
 	var reasons []string
-	var sum, clearScore int64
-	rangeBad := false
-	for _, n := range c.Clears {
-		if n != math.Trunc(n) || n < 1 || n > 4 {
-			rangeBad = true
-			continue
-		}
-		levelAt := 1 + sum/LinesPerLevel
-		clearScore += ScoreFor(int(n), levelAt)
-		sum += int64(n)
-	}
 	if rangeBad {
 		reasons = append(reasons, "clears_range")
 	}
@@ -117,10 +107,41 @@ func SoloClaimCheck(c SoloClaim, elapsedMs int64) SoloCheck {
 	if level != 1+lines/LinesPerLevel {
 		reasons = append(reasons, "level")
 	}
+	reasons = append(reasons, countReasons(lines, pieces, ticks, int64(len(c.Clears)), elapsedMs)...)
+	drop := score - clearScore
+	if r := dropReason(drop, pieces); r != "" {
+		reasons = append(reasons, r)
+	}
+	return SoloCheck{Reasons: reasons, ClearScore: clearScore, DropScore: drop}
+}
+
+// claimShapeOK 는 숫자가 모두 0 이상의 정수이고 clears 가 있는지다.
+func claimShapeOK(c SoloClaim) bool {
+	return isCount(c.Score) && isCount(c.Lines) && isCount(c.Level) && isCount(c.Ticks) && isCount(c.Pieces) && c.Clears != nil
+}
+
+// scoreClears 는 clears 를 순서대로 훑어 줄 합과 줄 점수(지울 때의 레벨로)를 다시 계산한다.
+// 1~4 정수가 아닌 값은 건너뛰고 rangeBad 로 알린다.
+func scoreClears(clears []float64) (sum, clearScore int64, rangeBad bool) {
+	for _, n := range clears {
+		if n != math.Trunc(n) || n < 1 || n > 4 {
+			rangeBad = true
+			continue
+		}
+		levelAt := 1 + sum/LinesPerLevel
+		clearScore += ScoreFor(int(n), levelAt)
+		sum += int64(n)
+	}
+	return sum, clearScore, rangeBad
+}
+
+// countReasons 는 칸 보존·조각/틱·실경과 검사 실패 사유다(cells, pieces_ticks, ticks_elapsed 순서).
+func countReasons(lines, pieces, ticks, clearEvents, elapsedMs int64) []string {
+	var reasons []string
 	if cells := 4*pieces - 9*lines; cells < 0 || cells > BoardCells {
 		reasons = append(reasons, "cells")
 	}
-	if int64(len(c.Clears)) > pieces || pieces > ticks {
+	if clearEvents > pieces || pieces > ticks {
 		reasons = append(reasons, "pieces_ticks")
 	}
 	if elapsedMs < 0 {
@@ -129,13 +150,18 @@ func SoloClaimCheck(c SoloClaim, elapsedMs int64) SoloCheck {
 	if ticks > elapsedMs*TicksPerSecond/1000+SoloTickSlack {
 		reasons = append(reasons, "ticks_elapsed")
 	}
-	drop := score - clearScore
+	return reasons
+}
+
+// dropReason 은 낙하 점수(점수 − 줄 점수) 검사 실패 사유다. 통과면 빈 문자열.
+func dropReason(drop, pieces int64) string {
 	if drop < 0 {
-		reasons = append(reasons, "score_low")
-	} else if drop > 2*DropRowsPerPieceMax*(pieces+1) {
-		reasons = append(reasons, "drop_cap")
+		return "score_low"
 	}
-	return SoloCheck{Reasons: reasons, ClearScore: clearScore, DropScore: drop}
+	if drop > 2*DropRowsPerPieceMax*(pieces+1) {
+		return "drop_cap"
+	}
+	return ""
 }
 
 // SoloRecord 는 저장할 혼자하기 판 하나다. Flagged 면 감사용으로만 남고 점수판에서 빠진다.
@@ -283,12 +309,12 @@ func (s *SoloService) HandleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	mbID, ok := s.authenticate(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "unauthorized"})
+		writeError(w, http.StatusUnauthorized, codeUnauthorized)
 		return
 	}
 	runID, seed, err := s.Start(mbID)
 	if err != nil {
-		writeJSON(w, http.StatusTooManyRequests, map[string]interface{}{"error": "rate_limited"})
+		writeError(w, http.StatusTooManyRequests, "rate_limited")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"runId": runID, "seed": seed})
@@ -310,23 +336,23 @@ func (s *SoloService) HandleFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	mbID, ok := s.authenticate(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "unauthorized"})
+		writeError(w, http.StatusUnauthorized, codeUnauthorized)
 		return
 	}
 	var req soloFinishRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, soloBodyMax)).Decode(&req); err != nil || len(req.Clears) > soloClearsMax {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "bad_request"})
+		writeError(w, http.StatusBadRequest, "bad_request")
 		return
 	}
 	run := s.take(mbID, req.RunID)
 	if run == nil {
-		writeJSON(w, http.StatusConflict, map[string]interface{}{"accepted": false, "error": "unknown_run"})
+		writeJSON(w, http.StatusConflict, map[string]interface{}{"accepted": false, keyError: "unknown_run"})
 		return
 	}
 	standing, accepted, err := s.finish(run, req.SoloClaim)
 	if err != nil {
 		log.Printf("[stack] solo save failed: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"accepted": false, "error": "save_failed"})
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"accepted": false, keyError: "save_failed"})
 		return
 	}
 	body := map[string]interface{}{"accepted": accepted, "best": standing.Best, "weekBest": standing.WeekBest}
@@ -355,7 +381,7 @@ func (s *SoloService) finish(run *soloRun, claim SoloClaim) (SoloStanding, bool,
 
 // authenticate 는 Authorization: Bearer 토큰으로 회원을 확정한다.
 func (s *SoloService) authenticate(r *http.Request) (string, bool) {
-	token := bearerToken(r)
+	token := bearerHeader(r)
 	if token == "" || s.verifyToken == nil {
 		return "", false
 	}
@@ -380,7 +406,15 @@ func joinReasons(reasons []string) string {
 
 // writeMethodNotAllowed 는 허용하지 않는 메서드에 405 를 쓴다.
 func writeMethodNotAllowed(w http.ResponseWriter) {
-	writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method_not_allowed"})
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+// keyError 는 오류 응답의 키다.
+const keyError = "error"
+
+// writeError 는 {"error": code} 를 쓴다.
+func writeError(w http.ResponseWriter, status int, code string) {
+	writeJSON(w, status, map[string]interface{}{keyError: code})
 }
 
 // writeJSON 은 개인 응답(캐시 금지) JSON 을 쓴다.
@@ -388,5 +422,7 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("[stack] write response failed: %v", err)
+	}
 }

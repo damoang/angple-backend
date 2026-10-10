@@ -50,16 +50,21 @@ func sanitizeInviteCode(c string) string {
 		return ""
 	}
 	for _, r := range c {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+		if !isAlnum(r) {
 			return ""
 		}
 	}
 	return c
 }
 
+// isAlnum 은 ASCII 영숫자인지다.
+func isAlnum(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+}
+
 // matchingError 는 matching_status error 를 보낸다.
 func (s *Server) matchingError(c *Client, rule, code, message string) {
-	s.emit(c, msgMatchingStatus, map[string]interface{}{"status": "error", "rule": rule, "code": code, "message": message})
+	s.emit(c, msgMatchingStatus, map[string]interface{}{"status": statusError, "rule": rule, "code": code, "message": message})
 }
 
 // handleJoin 은 join_matching_queue {mode, rule, invite?} 다.
@@ -277,7 +282,7 @@ func (s *Server) notifyStartFailed(plan matchPlan, failedMbID, code string, refu
 		case failedMbID != "" && p.mbID == failedMbID:
 			message = "참가비 1,000P가 부족해 대전이 취소되었습니다."
 		case failedMbID != "":
-			myCode = "opponent_payment_failed"
+			myCode = codeOpponentPaymentFailed
 			message = "상대방의 참가비 결제가 되지 않아 대전이 취소되었습니다."
 			if refundNotice {
 				message += " 낸 참가비는 돌려드렸습니다."
