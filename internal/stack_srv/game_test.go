@@ -2,6 +2,7 @@ package stacksrv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -698,5 +699,42 @@ func TestTokenBucket(t *testing.T) {
 	}
 	if !b.allow(t0.Add(time.Second)) {
 		t.Fatal("1초 뒤 충전되지 않았다")
+	}
+}
+
+// flakyFinishStore 는 첫 FinishGame 을 커밋한 뒤 오류를 돌려준다(응답 유실 흉내).
+// Store.FinishGame 과 같은 계약으로, 이미 끝난 판이면 전적을 다시 더하지 않는다.
+type flakyFinishStore struct {
+	*fakeStore
+	// finished 는 끝난 대전 id 다.
+	finished map[int64]bool
+	// statUpdates 는 전적이 실제로 반영된 횟수다.
+	statUpdates int
+	// calls 는 FinishGame 호출 횟수다.
+	calls int
+}
+
+func (f *flakyFinishStore) FinishGame(r GameResult) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if !f.finished[r.GameID] {
+		f.finished[r.GameID] = true
+		f.statUpdates++
+	}
+	if f.calls == 1 {
+		return errors.New("connection reset after commit")
+	}
+	return nil
+}
+
+func TestPersistFinishRetryDoesNotDoubleCount(t *testing.T) {
+	store := &flakyFinishStore{fakeStore: newFakeStore(), finished: map[int64]bool{}}
+	s := newTestServer(store, testTiming())
+	s.persistFinish("room", GameResult{GameID: 7, Winner: "p1", P1: "p1", P2: "p2", Rule: RuleAttack})
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.calls != 2 || store.statUpdates != 1 {
+		t.Fatalf("calls=%d statUpdates=%d (재시도는 하되 전적은 한 번만)", store.calls, store.statUpdates)
 	}
 }

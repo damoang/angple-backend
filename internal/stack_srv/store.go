@@ -74,7 +74,7 @@ type GameStore interface {
 	RefundEntryFee(gameID int64, mbID string, amount int) error
 	// AbortGame 은 성립하지 못한 대전을 닫는다.
 	AbortGame(gameID int64, reason string) error
-	// FinishGame 은 결과와 규칙별 전적·레이팅을 남긴다.
+	// FinishGame 은 결과와 규칙별 전적·레이팅을 남긴다. 멱등이어야 한다(이미 끝난 판이면 아무것도 하지 않는다).
 	FinishGame(r GameResult) error
 	// Stats 는 규칙별 전적이다. 기록이 없으면 ok=false.
 	Stats(mbID, rule string) (PlayerStats, bool)
@@ -196,18 +196,25 @@ func (s *Store) AbortStalePlayingGames() (int, error) {
 	return refunded, err
 }
 
-// FinishGame 은 결과를 남기고 (회원, 규칙)별 전적·레이팅을 갱신한다.
+// FinishGame 은 결과를 남기고 (회원, 규칙)별 전적·레이팅을 갱신한다. 진행 중(playing)인 행일 때만
+// 반영하므로 같은 결과로 여러 번 불러도 전적은 한 번만 더해진다.
 // 장기와 같이 초대 대전도 전적·레이팅에 반영한다. 무승부는 레이팅을 바꾸지 않는다.
 func (s *Store) FinishGame(r GameResult) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(
+		res := tx.Exec(
 			`UPDATE angple_stack_games
 			    SET status = 'finished', winner_mb_id = NULLIF(?, ''), end_reason = ?,
 			        p1_lines = ?, p2_lines = ?, duration_ms = ?, ended_at = NOW()
 			  WHERE id = ? AND status = 'playing'`,
 			r.Winner, r.Reason, r.P1Lines, r.P2Lines, r.DurationMs, r.GameID,
-		).Error; err != nil {
-			return err
+		)
+		if res.Error != nil {
+			return res.Error
+		}
+		// 이미 끝난(또는 취소된) 판이면 전적을 다시 더하지 않는다. 커밋은 됐는데 응답이 오류로 온 뒤
+		// persistFinish 가 다시 시도해도 승패·레이팅이 두 번 반영되지 않게 하는 멱등 장치다.
+		if res.RowsAffected == 0 {
+			return nil
 		}
 		if r.Winner == "" {
 			if err := upsertStat(tx, r.P1, r.Rule, 0, 0, 1, 0); err != nil {
