@@ -17,6 +17,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /
 # (실행 진입점은 k8s command 로 지정 — 이 이미지의 기본 CMD 는 api 그대로)
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /app/omok-ws ./cmd/omok-ws
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /app/janggi-ws ./cmd/janggi-ws
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /app/stack-ws ./cmd/stack-ws
 
 # Runtime stage
 FROM alpine:latest
@@ -28,6 +29,7 @@ WORKDIR /app
 COPY --from=builder /app/api .
 COPY --from=builder /app/omok-ws .
 COPY --from=builder /app/janggi-ws .
+COPY --from=builder /app/stack-ws .
 COPY --from=builder /app/configs ./configs
 
 EXPOSE 8081 8084

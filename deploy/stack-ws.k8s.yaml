@@ -1,0 +1,98 @@
+# 앙쌓기 실시간 대전·점수판 서버 (신규 기능)
+#
+# ⛔ 이 파일은 **참조용 사본**이다. 운영 정본은 k8s 매니페스트 저장소에 두고 그쪽에서 apply 한다.
+#    여기 두는 이유: 이미지·환경변수·포트가 이 저장소의 코드와 함께 바뀌므로
+#    변경 이력을 코드 옆에서 볼 수 있어야 한다. (omok-ws.k8s.yaml 과 같은 구성)
+#
+# 설계 결정:
+#   - API 와 **같은 이미지**를 쓰되 command 로 진입점만 바꾼다(빌드 1회).
+#   - **별도 Deployment** 인 이유: WebSocket 은 장시간 연결이라 API 롤아웃마다
+#     대전이 끊기면 안 된다. replicas=1 인 이유: 대전 상태가 프로세스 메모리에
+#     있어 여러 파드로 나뉘면 같은 방의 두 사람이 다른 파드에 붙는다.
+#     혼자하기 runId·점수판 캐시도 메모리라 같은 이유로 1개다.
+#   - 재시작 시 진행 중 대전은 서버가 자동으로 aborted 처리하고 참가비를 환불한다.
+#   - 테이블 6개(angple_stack_*)는 자동 생성하지 않는다. apply 전에 DDL 을 수동으로 먼저 적용한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: angple-stack
+  namespace: angple
+  labels:
+    app: angple-stack
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate # 상태가 메모리라 두 파드가 동시에 뜨면 안 된다
+  selector:
+    matchLabels:
+      app: angple-stack
+  template:
+    metadata:
+      labels:
+        app: angple-stack
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: stack
+          image: localhost:5000/angple-backend:REPLACE_WITH_SHA
+          imagePullPolicy: Always
+          command: ['./stack-ws']
+          env:
+            - name: APP_ENV
+              value: k3s
+            - name: STACK_PORT
+              value: '8086'
+            - name: STACK_PATH
+              value: /stack-ws/
+          envFrom:
+            - configMapRef:
+                name: angple-config # DB_HOST/DB_NAME 등
+            - secretRef:
+                name: angple-secrets # DB_PASSWORD, JWT_SECRET
+          ports:
+            - containerPort: 8086
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8086
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8086
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8086
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: angple-stack-svc
+  namespace: angple
+spec:
+  type: NodePort
+  selector:
+    app: angple-stack
+  ports:
+    - port: 8086
+      targetPort: 8086
+      nodePort: 30086 # ⛔ 비어 있는 포트인지 확인 후 apply. 호스트 nginx 의 /stack-ws/ 프록시를 이 포트로
+      protocol: TCP
