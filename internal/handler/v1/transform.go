@@ -113,6 +113,11 @@ func normalizeMediaURL(raw string) string {
 	return raw
 }
 
+// NormalizeMediaContent 본문 미디어 주소를 상세 응답과 같은 규칙으로 정규화한다.
+func NormalizeMediaContent(raw string, boardID ...string) string {
+	return normalizeMediaContent(raw, boardID...)
+}
+
 func normalizeMediaContent(raw string, _ ...string) string {
 	cdnURL := strings.TrimRight(os.Getenv("CDN_URL"), "/")
 	if raw == "" {
