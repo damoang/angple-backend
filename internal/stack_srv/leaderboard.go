@@ -17,10 +17,32 @@ const (
 )
 
 // LeaderboardSize 는 점수판 한 장의 인원이다.
-const LeaderboardSize = 20
+const LeaderboardSize = 10
 
 // kst 는 한국 표준시(UTC+9, 일광절약 없음)다. 컨테이너 tzdata 에 기대지 않으려고 고정 오프셋을 쓴다.
 var kst = time.FixedZone("KST", 9*60*60)
+
+// achievedLayout 은 achieved_at 을 DB 와 주고받는 벽시계 형식이다(KST 벽시계로 저장한다).
+const achievedLayout = "2006-01-02 15:04:05"
+
+// AchievedAtKST 는 achieved_at 벽시계 문자열(KST, "2006-01-02 15:04:05")을 RFC3339(+09:00)로 바꾼다.
+// 기록은 SaveSoloRun 이 Go 에서 KST 로 바꾼 값을 직접 넣으므로 DB 세션 time_zone·드라이버 loc 와 무관하다.
+// 비었거나 형식이 틀리거나 0000-00-00 이면 빈 문자열(웹은 빈칸으로 그린다).
+func AchievedAtKST(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	t, err := time.ParseInLocation(achievedLayout, raw, kst)
+	if err != nil || t.Year() < 2000 {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
+// achievedWallKST 는 t 를 achieved_at 에 넣을 KST 벽시계 문자열로 바꾼다.
+func achievedWallKST(t time.Time) string {
+	return t.In(kst).Format(achievedLayout)
+}
 
 // WeekStartKST 는 t 가 속한 주의 시작(KST 월요일 0시)이다. 주간 점수판은 이 시각에 새로 시작한다.
 func WeekStartKST(t time.Time) time.Time {
@@ -41,6 +63,10 @@ type SoloRow struct {
 	Lines int64 `json:"lines" gorm:"column:cleared_lines"`
 	// Level 은 레벨이다.
 	Level int64 `json:"level" gorm:"column:level"`
+	// AchievedAt 은 기록을 세운 시각(KST, RFC3339 +09:00)이다. 알 수 없으면 빈 문자열.
+	AchievedAt string `json:"achievedAt" gorm:"-"`
+	// AchievedRaw 는 DB 에서 문자열로 읽은 achieved_at 벽시계다(응답에는 싣지 않는다).
+	AchievedRaw string `json:"-" gorm:"column:achieved_raw"`
 }
 
 // VersusRow 는 대전 점수판 한 줄이다. 회원 아이디는 싣지 않는다(닉네임만 공개).
@@ -133,6 +159,7 @@ func (l *Leaderboard) build(board string, now time.Time) ([]byte, error) {
 		}
 		for i := range rows {
 			rows[i].Rank = i + 1
+			rows[i].AchievedAt = AchievedAtKST(rows[i].AchievedRaw)
 		}
 		if rows == nil {
 			rows = []SoloRow{}
@@ -160,11 +187,13 @@ func (l *Leaderboard) build(board string, now time.Time) ([]byte, error) {
 
 // SoloTop 은 혼자하기 상위 n 줄이다(flagged 판은 best·weekly 에 들어가지 않으므로 자연히 빠진다).
 // 탈퇴했거나 이용 제한 중인 회원은 공개 점수판에서 뺀다(자동 등업과 같은 조건).
+// achieved_at 은 드라이버의 시각 해석(parseTime·loc)을 거치지 않게 문자열로 읽는다.
 func (s *Store) SoloTop(weekStart time.Time, n int) ([]SoloRow, error) {
 	var rows []SoloRow
 	if weekStart.IsZero() {
 		err := s.db.Raw(
-			`SELECT m.mb_nick, b.score, b.cleared_lines, b.level
+			`SELECT m.mb_nick, b.score, b.cleared_lines, b.level,
+			        COALESCE(DATE_FORMAT(b.achieved_at, '%Y-%m-%d %H:%i:%s'), '') AS achieved_raw
 			   FROM angple_stack_solo_best b
 			   JOIN g5_member m ON m.mb_id = b.mb_id
 			  WHERE m.mb_leave_date = '' AND m.mb_intercept_date = ''
@@ -173,7 +202,8 @@ func (s *Store) SoloTop(weekStart time.Time, n int) ([]SoloRow, error) {
 		return rows, err
 	}
 	err := s.db.Raw(
-		`SELECT m.mb_nick, w.score, w.cleared_lines, w.level
+		`SELECT m.mb_nick, w.score, w.cleared_lines, w.level,
+		        COALESCE(DATE_FORMAT(w.achieved_at, '%Y-%m-%d %H:%i:%s'), '') AS achieved_raw
 		   FROM angple_stack_solo_weekly w
 		   JOIN g5_member m ON m.mb_id = w.mb_id
 		  WHERE w.week_start = ? AND m.mb_leave_date = '' AND m.mb_intercept_date = ''
@@ -196,8 +226,10 @@ func (s *Store) VersusTop(rule string, n int) ([]VersusRow, error) {
 }
 
 // SaveSoloRun 은 판을 남기고, 통과한 판이면 역대·주간 최고 기록을 높을 때만 갱신한 뒤 내 기록을 돌려준다.
+// achieved_at 은 NOW() 대신 Go 에서 만든 KST 벽시계를 넣는다 — DB 세션 time_zone 에 기대지 않는다.
 func (s *Store) SaveSoloRun(rec SoloRecord) (SoloStanding, error) {
 	week := rec.WeekStart.Format("2006-01-02")
+	achieved := achievedWallKST(time.Now())
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(
 			`INSERT INTO angple_stack_solo_runs
@@ -215,27 +247,27 @@ func (s *Store) SaveSoloRun(rec SoloRecord) (SoloStanding, error) {
 		// MySQL 은 ON DUPLICATE KEY UPDATE 의 대입을 왼쪽부터 하므로 score 는 맨 끝에 바꾼다.
 		if err := tx.Exec(
 			`INSERT INTO angple_stack_solo_best (mb_id, score, cleared_lines, level, run_id, achieved_at)
-			 VALUES (?, ?, ?, ?, ?, NOW())
+			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON DUPLICATE KEY UPDATE
 			   cleared_lines = IF(VALUES(score) > score, VALUES(cleared_lines), cleared_lines),
 			   level = IF(VALUES(score) > score, VALUES(level), level),
 			   run_id = IF(VALUES(score) > score, VALUES(run_id), run_id),
-			   achieved_at = IF(VALUES(score) > score, NOW(), achieved_at),
+			   achieved_at = IF(VALUES(score) > score, VALUES(achieved_at), achieved_at),
 			   score = GREATEST(score, VALUES(score))`,
-			rec.MbID, rec.Score, rec.Lines, rec.Level, rec.RunID,
+			rec.MbID, rec.Score, rec.Lines, rec.Level, rec.RunID, achieved,
 		).Error; err != nil {
 			return err
 		}
 		return tx.Exec(
 			`INSERT INTO angple_stack_solo_weekly (week_start, mb_id, score, cleared_lines, level, run_id, achieved_at)
-			 VALUES (?, ?, ?, ?, ?, ?, NOW())
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
 			 ON DUPLICATE KEY UPDATE
 			   cleared_lines = IF(VALUES(score) > score, VALUES(cleared_lines), cleared_lines),
 			   level = IF(VALUES(score) > score, VALUES(level), level),
 			   run_id = IF(VALUES(score) > score, VALUES(run_id), run_id),
-			   achieved_at = IF(VALUES(score) > score, NOW(), achieved_at),
+			   achieved_at = IF(VALUES(score) > score, VALUES(achieved_at), achieved_at),
 			   score = GREATEST(score, VALUES(score))`,
-			week, rec.MbID, rec.Score, rec.Lines, rec.Level, rec.RunID,
+			week, rec.MbID, rec.Score, rec.Lines, rec.Level, rec.RunID, achieved,
 		).Error
 	})
 	if err != nil {
