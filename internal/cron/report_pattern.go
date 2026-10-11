@@ -1,8 +1,10 @@
 package cron
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -43,6 +45,19 @@ type reportStats struct {
 	PrevWeek *prevWeekKPI `json:"prev_week,omitempty"`
 	// DailyAvg4w: 직전 4주 요일별 평균(일별 트렌드 차트 겹치기용). key=요일명("일"~"토").
 	DailyAvg4w map[string]dailyAvgEntry `json:"daily_avg_4w,omitempty"`
+	// TakedownStats: 외부 요청 처리 건수(유형별). 조회 실패 시 nil 로 두어 키 자체를 뺀다.
+	TakedownStats *takedownStats `json:"takedown_stats,omitempty"`
+}
+
+// takedownStats: 외부 삭제 요청 처리 완료 건수를 유형(type)별로 센 값.
+// 요청 기관 칸은 자유 입력이라 싣지 않는다 — 유형별 건수만.
+type takedownStats struct {
+	// Week: 보고 기간 안에 처리 완료된 건, key=type
+	Week map[string]int `json:"week"`
+	// Total: 누적 처리 완료 건, key=type
+	Total map[string]int `json:"total"`
+	// Since: 누적 집계 시작일(처리 완료 건 중 가장 이른 received_date, YYYY-MM-DD)
+	Since string `json:"since"`
 }
 
 // prevWeekKPI: 전주 대비 변화율 계산에 쓰는 직전 주 핵심 지표.
@@ -129,6 +144,9 @@ func runUpdateReportPatternAt(db *gorm.DB, now time.Time) (*ReportPatternResult,
 
 	// 전주 대비 지표(a) + 직전 4주 요일평균(b) 보강 — 추세 비교용 (report/296#c_299)
 	addWeeklyComparison(db, stats, startDate, endDate, now)
+
+	// 외부 요청 처리 건수 — 실패해도 보고서는 만든다(섹션만 빠짐)
+	attachTakedownStats(db, stats, startDate, endDate)
 
 	// 보고서 저장
 	if err := saveReportPost(db, stats, subject, now); err != nil {
@@ -573,6 +591,114 @@ func addWeeklyComparison(db *gorm.DB, stats *reportStats, startDate, endDate str
 	stats.DailyAvg4w = avg
 }
 
+// attachTakedownStats fills stats.TakedownStats. On query failure it logs and
+// leaves the field nil so the section is omitted while the report still saves.
+func attachTakedownStats(db *gorm.DB, stats *reportStats, startDate, endDate string) {
+	ts, err := collectTakedownStats(db, startDate, endDate)
+	if err != nil {
+		log.Printf("[Cron:update-report-pattern] takedown stats skipped: %v", err)
+		stats.TakedownStats = nil
+		return
+	}
+	stats.TakedownStats = ts
+}
+
+// collectTakedownStats counts completed external takedown requests by type,
+// for the report period (week) and cumulatively (total).
+//
+// 시간대: processed_at 은 KST 벽시계 값이다. 쓰는 쪽이 time.Time 을 DSN
+// loc=Asia/Seoul 로 바인딩해 저장하므로 DB 세션 시간대(UTC)와 무관하게
+// KST 시각이 그대로 들어간다(실측: 처리 시각이 16~22시에 몰려 있음 = 한국 저녁).
+// 보고 기간(date_from~date_to)도 KST 날짜이므로 변환 없이 같은 벽시계 문자열로
+// 비교한다. time.Time 이 아닌 문자열로 바인딩해 드라이버 변환을 타지 않게 한다.
+//
+// 경계: [date_from 00:00:00, date_to 다음날 00:00:00) 반열린 구간. datetime(3)
+// 이라 23:59:59 이하로 자르면 23:59:59.5 같은 값이 빠진다.
+// processed_at 이 NULL 인 완료 건은 received_date(KST 날짜)로 기간을 판정한다.
+func collectTakedownStats(db *gorm.DB, startDate, endDate string) (*takedownStats, error) {
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date %q: %w", endDate, err)
+	}
+	startDT := startDate + " 00:00:00"
+	endExclusive := end.AddDate(0, 0, 1).Format("2006-01-02") + " 00:00:00"
+
+	type typeCountRow struct {
+		Type  string `gorm:"column:type"`
+		Count int    `gorm:"column:cnt"`
+	}
+
+	var weekRows []typeCountRow
+	if err := db.Raw(`
+		SELECT type, COUNT(*) AS cnt
+		FROM g5_takedown_requests
+		WHERE status = 'completed'
+		AND (
+			(processed_at IS NOT NULL AND processed_at >= ? AND processed_at < ?)
+			OR (processed_at IS NULL AND received_date >= ? AND received_date <= ?)
+		)
+		GROUP BY type
+	`, startDT, endExclusive, startDate, endDate).Scan(&weekRows).Error; err != nil {
+		return nil, fmt.Errorf("week counts: %w", err)
+	}
+
+	var totalRows []typeCountRow
+	if err := db.Raw(`
+		SELECT type, COUNT(*) AS cnt
+		FROM g5_takedown_requests
+		WHERE status = 'completed'
+		GROUP BY type
+	`).Scan(&totalRows).Error; err != nil {
+		return nil, fmt.Errorf("total counts: %w", err)
+	}
+
+	var sinceRow struct {
+		Since sql.NullString `gorm:"column:since"`
+	}
+	if err := db.Raw(`
+		SELECT CAST(MIN(received_date) AS CHAR) AS since
+		FROM g5_takedown_requests
+		WHERE status = 'completed'
+	`).Scan(&sinceRow).Error; err != nil {
+		return nil, fmt.Errorf("since date: %w", err)
+	}
+
+	ts := &takedownStats{
+		Week:  make(map[string]int),
+		Total: make(map[string]int),
+	}
+	for _, r := range weekRows {
+		ts.Week[r.Type] = r.Count
+	}
+	for _, r := range totalRows {
+		ts.Total[r.Type] = r.Count
+	}
+	if sinceRow.Since.Valid {
+		since := sinceRow.Since.String
+		if len(since) > 10 {
+			since = since[:10]
+		}
+		ts.Since = since
+	}
+	return ts, nil
+}
+
+// takedownSummaryLine returns the plain-text summary line for wr_content, or
+// an empty string when the stats are absent.
+func takedownSummaryLine(ts *takedownStats) string {
+	if ts == nil {
+		return ""
+	}
+	week, total := 0, 0
+	for _, n := range ts.Week {
+		week += n
+	}
+	for _, n := range ts.Total {
+		total += n
+	}
+	return fmt.Sprintf("• 외부 요청 처리: 이번 주 %d건 (누적 %d건)\n\n", week, total)
+}
+
 // saveReportPost saves the report as a post in g5_write_report
 func saveReportPost(db *gorm.DB, stats *reportStats, subject string, now time.Time) error {
 	statsJSON, err := json.Marshal(stats)
@@ -595,6 +721,7 @@ func saveReportPost(db *gorm.DB, stats *reportStats, subject string, now time.Ti
 			"  - 처리완료: %d건\n"+
 			"  - 소명처리: %d건\n"+
 			"  - 신고자수: %d명\n\n"+
+			"%s"+
 			"▣ 데이터 규모\n"+
 			"• 전체 게시글: %d개\n"+
 			"• 전체 댓글: %d개\n"+
@@ -603,6 +730,7 @@ func saveReportPost(db *gorm.DB, stats *reportStats, subject string, now time.Ti
 		stats.DateFrom, stats.DateTo, stats.PeriodDays,
 		stats.TotalReports, stats.ReportCount, stats.ReportMonth,
 		stats.CompletedReports, stats.ClaimReports, stats.ReporterCount,
+		takedownSummaryLine(stats.TakedownStats),
 		stats.TotalCases, stats.TotalMonthCases, len(statsJSON),
 	)
 
