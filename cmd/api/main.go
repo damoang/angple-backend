@@ -26,6 +26,7 @@ import (
 	gnuboard "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
 	"github.com/damoang/angple-backend/internal/handler"
+	"github.com/damoang/angple-backend/internal/handler/publicrevision"
 	v1handler "github.com/damoang/angple-backend/internal/handler/v1"
 	v2handler "github.com/damoang/angple-backend/internal/handler/v2"
 	"github.com/damoang/angple-backend/internal/middleware"
@@ -5505,19 +5506,47 @@ func main() {
 			})
 		})
 
-		// 공개 수정 이력 (설정된 게시판만, 기본 claim) — 관리자용 /revisions 와 별개. public_revisions.go 참조.
-		registerPublicRevisionRoutes(v1Boards, &publicRevisionAPI{
-			db:  db,
-			cfg: service.LoadPublicRevisionConfig(),
-			boardAdmin: func(slug string) (string, bool) {
+		// 공개 수정 이력 (설정된 게시판만, 기본 claim) — 관리자용 /revisions 와 별개.
+		// 규칙은 service/public_revision.go, 핸들러는 handler/publicrevision.
+		publicrevision.Register(v1Boards, &publicrevision.API{
+			DB:     db,
+			Config: service.LoadPublicRevisionConfig(),
+			BoardAdmin: func(slug string) (string, bool) {
 				b, err := gnuBoardRepo.FindByID(slug)
 				if err != nil || b == nil {
 					return "", false
 				}
 				return b.BoAdmin, true
 			},
-			blindedIDs: func(slug string, ids []int, isComment bool) (map[int]bool, error) {
-				return publicRevisionBlindedIDs(db, slug, ids, isComment)
+			// 가림 = 신고잠금(wr_7='lock') 또는 이용제한 근거. 조회 실패는 「모름」이라 에러로 돌려 공개하지 않는다.
+			BlindedIDs: func(slug string, ids []int, isComment bool) (map[int]bool, error) {
+				out := map[int]bool{}
+				if len(ids) == 0 {
+					return out, nil
+				}
+				locked, err := reportLockedIDs(db, slug, ids, isComment)
+				if err != nil {
+					return nil, err
+				}
+				for id := range locked {
+					out[id] = true
+				}
+				items := make([]map[string]any, 0, len(ids))
+				for _, id := range ids {
+					items = append(items, map[string]any{"id": id})
+				}
+				enriched, err := enrichWithDisciplineRelated(db, slug, items, false)
+				if err != nil {
+					return nil, err
+				}
+				for _, it := range enriched {
+					flagged, _ := it["is_discipline_related"].(bool)
+					id, ok := it["id"].(int)
+					if flagged && ok {
+						out[id] = true
+					}
+				}
+				return out, nil
 			},
 		}, middleware.JWTAuth(jwtManager))
 

@@ -1,4 +1,4 @@
-package main
+package publicrevision
 
 import (
 	"encoding/json"
@@ -22,7 +22,11 @@ import (
 //   - 응답에 수정한 사람·IP·메타데이터가 없고, 본문은 정화되며, 캐시하지 않는다.
 //   - 숨기기는 사이트 관리자·게시판 관리자만.
 
-const prevTestEditorNick = "편집자닉네임"
+const (
+	prevTestEditorNick = "편집자닉네임"
+	testBoardClaim     = "claim"
+	testBoardFree      = "free"
+)
 
 func newPublicRevisionTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -62,19 +66,19 @@ func newPublicRevisionTestDB(t *testing.T) *gorm.DB {
 		deleted                        bool
 	}
 	writes := []row{
-		{board: "claim", id: 1, parent: 1, author: "u1", content: "<script>alert(1)</script>C2"},
-		{board: "claim", id: 11, parent: 1, isComment: 1, author: "u2", content: "K1"},
-		{board: "claim", id: 12, parent: 1, isComment: 1, author: "u1", option: "secret", content: "S1"},
-		{board: "claim", id: 13, parent: 1, isComment: 1, author: "adm", content: "A1"},
-		{board: "claim", id: 14, parent: 1, isComment: 1, author: "role1", content: "R1"},
-		{board: "claim", id: 15, parent: 1, isComment: 1, author: "u2", content: "D1", deleted: true},
-		{board: "claim", id: 2, parent: 2, author: "u1", option: "secret", content: "P2"},
-		{board: "claim", id: 21, parent: 2, isComment: 1, author: "u2", content: "K21"},
-		{board: "claim", id: 3, parent: 3, author: "u1", content: "P3", deleted: true},
-		{board: "claim", id: 4, parent: 4, author: "u1", content: "P4"},
-		{board: "claim", id: 5, parent: 5, author: "adm", content: "P5"},
-		{board: "claim", id: 6, parent: 6, author: "u1", content: "final"},
-		{board: "free", id: 1, parent: 1, author: "u1", content: "F2"},
+		{board: testBoardClaim, id: 1, parent: 1, author: "u1", content: "<script>alert(1)</script>C2"},
+		{board: testBoardClaim, id: 11, parent: 1, isComment: 1, author: "u2", content: "K1"},
+		{board: testBoardClaim, id: 12, parent: 1, isComment: 1, author: "u1", option: "secret", content: "S1"},
+		{board: testBoardClaim, id: 13, parent: 1, isComment: 1, author: "adm", content: "A1"},
+		{board: testBoardClaim, id: 14, parent: 1, isComment: 1, author: "role1", content: "R1"},
+		{board: testBoardClaim, id: 15, parent: 1, isComment: 1, author: "u2", content: "D1", deleted: true},
+		{board: testBoardClaim, id: 2, parent: 2, author: "u1", option: "secret", content: "P2"},
+		{board: testBoardClaim, id: 21, parent: 2, isComment: 1, author: "u2", content: "K21"},
+		{board: testBoardClaim, id: 3, parent: 3, author: "u1", content: "P3", deleted: true},
+		{board: testBoardClaim, id: 4, parent: 4, author: "u1", content: "P4"},
+		{board: testBoardClaim, id: 5, parent: 5, author: "adm", content: "P5"},
+		{board: testBoardClaim, id: 6, parent: 6, author: "u1", content: "final"},
+		{board: testBoardFree, id: 1, parent: 1, author: "u1", content: "F2"},
 	}
 	for _, w := range writes {
 		var deletedAt any
@@ -96,26 +100,27 @@ func newPublicRevisionTestDB(t *testing.T) *gorm.DB {
 		kind, by, at string
 		content      string
 	}
-	revs := []rev{
-		{"claim", 1, 1, "create", "u1", "2026-09-01 10:00:00", "C0"},
-		{"claim", 1, 2, "update", "u1", "2026-09-02 00:00:00", "C0"},
-		{"claim", 1, 3, "update", "u1", "2026-10-05 12:00:00", "C1"},
-	}
+	revs := make([]rev, 0, 32)
+	revs = append(revs,
+		rev{testBoardClaim, 1, 1, "create", "u1", "2026-09-01 10:00:00", "C0"},
+		rev{testBoardClaim, 1, 2, "update", "u1", "2026-09-02 00:00:00", "C0"},
+		rev{testBoardClaim, 1, 3, "update", "u1", "2026-10-05 12:00:00", "C1"},
+	)
 	// 댓글·기타 글: 작성자 본인 1회 수정
 	for _, id := range []int{11, 12, 13, 14, 15, 21, 2, 3, 4} {
 		author := map[int]string{11: "u2", 12: "u1", 13: "adm", 14: "role1", 15: "u2", 21: "u2"}[id]
 		if author == "" {
 			author = "u1"
 		}
-		revs = append(revs, rev{"claim", id, 1, "update", author, "2026-10-02 10:00:00", "old-" + strconv.Itoa(id)})
+		revs = append(revs, rev{testBoardClaim, id, 1, "update", author, "2026-10-02 10:00:00", "old-" + strconv.Itoa(id)})
 	}
 	revs = append(revs,
-		rev{"claim", 5, 1, "update", "adm", "2026-10-02 10:00:00", "old-5"},
+		rev{testBoardClaim, 5, 1, "update", "adm", "2026-10-02 10:00:00", "old-5"},
 		// 6: 작성자 → 운영진 정정(개인정보 삭제) → 작성자
-		rev{"claim", 6, 1, "update", "u1", "2026-10-02 10:00:00", "orig"},
-		rev{"claim", 6, 2, "update", "adm", "2026-10-02 11:00:00", "has PII mail"},
-		rev{"claim", 6, 3, "update", "u1", "2026-10-02 12:00:00", "after fix"},
-		rev{"free", 1, 1, "update", "u1", "2026-10-02 10:00:00", "F0"},
+		rev{testBoardClaim, 6, 1, "update", "u1", "2026-10-02 10:00:00", "orig"},
+		rev{testBoardClaim, 6, 2, "update", "adm", "2026-10-02 11:00:00", "has PII mail"},
+		rev{testBoardClaim, 6, 3, "update", "u1", "2026-10-02 12:00:00", "after fix"},
+		rev{testBoardFree, 1, 1, "update", "u1", "2026-10-02 10:00:00", "F0"},
 	)
 	for _, r := range revs {
 		if err := db.Exec(`INSERT INTO g5_write_revisions
@@ -132,19 +137,19 @@ func newPublicRevisionTestRouter(t *testing.T, cfg service.PublicRevisionConfig)
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	db := newPublicRevisionTestDB(t)
-	api := &publicRevisionAPI{
-		db:  db,
-		cfg: cfg,
-		boardAdmin: func(slug string) (string, bool) {
+	api := &API{
+		DB:     db,
+		Config: cfg,
+		BoardAdmin: func(slug string) (string, bool) {
 			switch slug {
-			case "claim":
+			case testBoardClaim:
 				return "boardadm", true
-			case "free":
+			case testBoardFree:
 				return "", true
 			}
 			return "", false
 		},
-		blindedIDs: func(_ string, ids []int, _ bool) (map[int]bool, error) {
+		BlindedIDs: func(_ string, ids []int, _ bool) (map[int]bool, error) {
 			out := map[int]bool{}
 			for _, id := range ids {
 				if id == 4 {
@@ -174,13 +179,13 @@ func newPublicRevisionTestRouter(t *testing.T, cfg service.PublicRevisionConfig)
 		}
 		c.Next()
 	}
-	registerPublicRevisionRoutes(g, api, auth)
+	Register(g, api, auth)
 	return r, db
 }
 
 func defaultPublicRevisionConfig() service.PublicRevisionConfig {
 	return service.PublicRevisionConfig{
-		Boards:   map[string]bool{"claim": true},
+		Boards:   map[string]bool{testBoardClaim: true},
 		StaffIDs: map[string]bool{"role1": true},
 	}
 }
@@ -358,7 +363,7 @@ func TestPublicRevisions_HidePermissionAndEffect(t *testing.T) {
 		t.Fatalf("관리자 재숨기기 = %d (%s)", w.Code, w.Body.String())
 	}
 	var n int64
-	db.Table("g5_write_revision_hidden").Where("board_id = ? AND wr_id = ? AND version = ?", "claim", 1, 2).Count(&n)
+	db.Table("g5_write_revision_hidden").Where("board_id = ? AND wr_id = ? AND version = ?", testBoardClaim, 1, 2).Count(&n)
 	if n != 1 {
 		t.Fatalf("숨김 행 = %d, want 1", n)
 	}
