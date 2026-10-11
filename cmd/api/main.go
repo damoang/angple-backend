@@ -5505,6 +5505,22 @@ func main() {
 			})
 		})
 
+		// 공개 수정 이력 (설정된 게시판만, 기본 claim) — 관리자용 /revisions 와 별개. public_revisions.go 참조.
+		registerPublicRevisionRoutes(v1Boards, &publicRevisionAPI{
+			db:  db,
+			cfg: service.LoadPublicRevisionConfig(),
+			boardAdmin: func(slug string) (string, bool) {
+				b, err := gnuBoardRepo.FindByID(slug)
+				if err != nil || b == nil {
+					return "", false
+				}
+				return b.BoAdmin, true
+			},
+			blindedIDs: func(slug string, ids []int, isComment bool) (map[int]bool, error) {
+				return publicRevisionBlindedIDs(db, slug, ids, isComment)
+			},
+		}, middleware.JWTAuth(jwtManager))
+
 		// PATCH /api/v1/boards/:slug/posts/:id/soft-delete - Soft delete post
 		v1Boards.PATCH("/:slug/posts/:id/soft-delete", middleware.JWTAuth(jwtManager), func(c *gin.Context) {
 			slug := c.Param("slug")
