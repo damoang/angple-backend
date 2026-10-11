@@ -36,19 +36,26 @@ type fakeBoardStore struct {
 	mu sync.Mutex
 	// calls 는 조회 횟수다.
 	calls int
+	// lastN 은 마지막으로 요청받은 인원이다.
+	lastN int
 }
 
-func (f *fakeBoardStore) SoloTop(_ time.Time, _ int) ([]SoloRow, error) {
+func (f *fakeBoardStore) SoloTop(_ time.Time, n int) ([]SoloRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
-	return []SoloRow{{Nickname: "첫째", Score: 12345}, {Nickname: "둘째", Score: 100}}, nil
+	f.lastN = n
+	return []SoloRow{
+		{Nickname: "첫째", Score: 12345, AchievedRaw: "2026-10-10 00:05:00"},
+		{Nickname: "둘째", Score: 100},
+	}, nil
 }
 
-func (f *fakeBoardStore) VersusTop(_ string, _ int) ([]VersusRow, error) {
+func (f *fakeBoardStore) VersusTop(_ string, n int) ([]VersusRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	f.lastN = n
 	return []VersusRow{{Nickname: "고수", Rating: 1620, Wins: 3}}, nil
 }
 
@@ -88,6 +95,15 @@ func TestLeaderboardCachesAndHidesMemberID(t *testing.T) {
 	if out.WeekStart != "2026-10-05" || len(out.Rows) != 2 || out.Rows[0].Rank != 1 || out.Rows[1].Rank != 2 {
 		t.Fatalf("out = %+v", out)
 	}
+	if out.Rows[0].AchievedAt != "2026-10-10T00:05:00+09:00" || out.Rows[1].AchievedAt != "" {
+		t.Fatalf("achievedAt = %q, %q", out.Rows[0].AchievedAt, out.Rows[1].AchievedAt)
+	}
+	if strings.Contains(body, "achieved_raw") || strings.Contains(body, "AchievedRaw") || !strings.Contains(body, `"achievedAt":""`) {
+		t.Fatalf("응답 모양이 다르다: %s", body)
+	}
+	if store.lastN != 10 {
+		t.Fatalf("점수판은 10줄이어야 한다 (%d)", store.lastN)
+	}
 
 	get(BoardSoloWeek)
 	clock.advance(30 * time.Second)
@@ -106,8 +122,54 @@ func TestLeaderboardCachesAndHidesMemberID(t *testing.T) {
 	if n := store.count(); n != 5 {
 		t.Fatalf("보드별로 따로 캐시해야 한다 (%d)", n)
 	}
+	if store.lastN != LeaderboardSize || LeaderboardSize != 10 {
+		t.Fatalf("대전 보드도 10줄이어야 한다 (%d)", store.lastN)
+	}
 	if rec := get("vs_score120"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("알 수 없는 보드 = %d", rec.Code)
+	}
+}
+
+func TestAchievedAtKST(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{"2026-10-11 23:59:59", "2026-10-11T23:59:59+09:00"},
+		{"2026-10-12 00:00:00", "2026-10-12T00:00:00+09:00"},
+		{"", ""},
+		{"0000-00-00 00:00:00", ""},
+		{"2026-10-11T10:00:00Z", ""},
+		{"엉터리", ""},
+	}
+	for _, c := range cases {
+		if got := AchievedAtKST(c.raw); got != c.want {
+			t.Fatalf("AchievedAtKST(%q) = %q, want %q", c.raw, got, c.want)
+		}
+	}
+}
+
+func TestAchievedWallKSTConvertsFromAnyZone(t *testing.T) {
+	cases := []struct {
+		at   time.Time
+		want string
+	}{
+		// UTC 14:59:59 = KST 23:59:59 (같은 날), UTC 15:00 = KST 다음 날 0시.
+		{time.Date(2026, 10, 11, 14, 59, 59, 0, time.UTC), "2026-10-11 23:59:59"},
+		{time.Date(2026, 10, 11, 15, 0, 0, 0, time.UTC), "2026-10-12 00:00:00"},
+		{time.Date(2026, 10, 11, 9, 30, 0, 0, time.FixedZone("PDT", -7*60*60)), "2026-10-12 01:30:00"},
+		{time.Date(2026, 10, 12, 0, 0, 0, 0, kst), "2026-10-12 00:00:00"},
+	}
+	for _, c := range cases {
+		wall := achievedWallKST(c.at)
+		if wall != c.want {
+			t.Fatalf("achievedWallKST(%v) = %q, want %q", c.at, wall, c.want)
+		}
+		// 저장한 벽시계를 다시 읽으면 같은 순간이어야 한다.
+		back, err := time.Parse(time.RFC3339, AchievedAtKST(wall))
+		if err != nil || !back.Equal(c.at) {
+			t.Fatalf("왕복 %v → %q → %v (%v)", c.at, wall, back, err)
+		}
 	}
 }
 
