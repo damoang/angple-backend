@@ -438,17 +438,18 @@ func TestSurvivalSendsNoGarbageOrProgress(t *testing.T) {
 func TestSurvivalTopoutLoses(t *testing.T) {
 	store := newFakeStore()
 	s := newTestServer(store, testTiming())
+	const topout = "topout"
 	c1, c2, _ := startGame(t, s, ModeRandom, RuleSurvival)
 	sendMsg(t, s, c2, "topped_out", map[string]interface{}{"seq": 1, "tick": 0})
 	over := next(t, c1, "game_over")
-	if over.Data["reason"] != "topout" || over.Data["youWon"] != true || over.Data["winner"] != "nick-p1" {
+	if over.Data["reason"] != topout || over.Data["youWon"] != true || over.Data["winner"] != "nick-p1" {
 		t.Fatalf("game_over = %v", over.Data)
 	}
-	if lost := next(t, c2, "game_over"); lost.Data["youWon"] != false || lost.Data["reason"] != "topout" {
+	if lost := next(t, c2, "game_over"); lost.Data["youWon"] != false || lost.Data["reason"] != topout {
 		t.Fatalf("상대 game_over = %v", lost.Data)
 	}
 	_, _, _, finishes := store.snapshot()
-	if len(finishes) != 1 || finishes[0].Winner != "p1" || finishes[0].Rule != RuleSurvival || finishes[0].Reason != "topout" {
+	if len(finishes) != 1 || finishes[0].Winner != "p1" || finishes[0].Rule != RuleSurvival || finishes[0].Reason != topout {
 		t.Fatalf("finishes = %+v", finishes)
 	}
 }
