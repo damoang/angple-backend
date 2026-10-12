@@ -35,6 +35,10 @@ const RuleAttack = "attack"
 // RuleSprint40 은 40줄 스프린트다. 서버가 합산한 줄 수로 40줄을 먼저 채운 쪽이 이긴다.
 const RuleSprint40 = "sprint40"
 
+// RuleSurvival 은 생존전이다. 방해 줄 없이 같은 시드로 시작해 시간이 지날수록 빨라지고,
+// 먼저 넘친 쪽이 진다. 제한시간이 다 되면 줄을 더 많이 지운 쪽이 이긴다(같으면 무승부).
+const RuleSurvival = "survival"
+
 // SpeedUp 은 시간이 지나면 최소 레벨이 오르는 규칙이다.
 type SpeedUp struct {
 	// StartSec 부터 최소 레벨이 오른다.
@@ -59,7 +63,7 @@ type RuleSpec struct {
 	SpeedUp *SpeedUp `json:"speedUp"`
 }
 
-// LookupRule 은 v1 에서 열린 규칙만 돌려준다. 그 외(score120·survival 등)는 거부한다.
+// LookupRule 은 열린 규칙(attack·sprint40·survival)만 돌려준다. 그 외(score120 등)는 거부한다.
 func LookupRule(id string) (RuleSpec, bool) {
 	switch id {
 	case RuleAttack:
@@ -67,13 +71,15 @@ func LookupRule(id string) (RuleSpec, bool) {
 	case RuleSprint40:
 		goal := 40
 		return RuleSpec{ID: RuleSprint40, Label: "40줄 스프린트", GoalLines: &goal, TimeLimitSec: 300}, true
+	case RuleSurvival:
+		return RuleSpec{ID: RuleSurvival, Label: "생존전", TimeLimitSec: 600, SpeedUp: &SpeedUp{StartSec: 30, EverySec: 20}}, true
 	}
 	return RuleSpec{}, false
 }
 
-// OpenRules 는 v1 에서 열린 규칙 목록이다(로비·전적 표시 순서).
+// OpenRules 는 열린 규칙 목록이다(로비·전적 표시 순서).
 func OpenRules() []string {
-	return []string{RuleAttack, RuleSprint40}
+	return []string{RuleAttack, RuleSprint40, RuleSurvival}
 }
 
 // AttackFor 는 한 번에 지운 줄 수(0~4)에 대한 공격 줄 수다. 1→0, 2→1, 3→2, 4→4.
@@ -192,9 +198,9 @@ func goalReached(spec RuleSpec, lines int) bool {
 }
 
 // judgeTimeLimit 은 제한시간이 다 됐을 때의 승자 자리(0·1)다. 무승부면 -1.
-// attack 은 무승부, sprint40 은 줄을 더 많이 지운 쪽이 이긴다(같으면 무승부).
+// attack 은 무승부, sprint40·survival 은 줄을 더 많이 지운 쪽이 이긴다(같으면 무승부).
 func judgeTimeLimit(rule string, lines [2]int) int {
-	if rule != RuleSprint40 {
+	if rule != RuleSprint40 && rule != RuleSurvival {
 		return -1
 	}
 	switch {

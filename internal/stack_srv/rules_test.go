@@ -82,14 +82,26 @@ func TestValidBoard(t *testing.T) {
 }
 
 func TestJudgeTimeLimit(t *testing.T) {
-	if w := judgeTimeLimit(RuleSprint40, [2]int{20, 31}); w != 1 {
-		t.Fatalf("sprint40 줄 많은 쪽 = %d", w)
+	cases := []struct {
+		rule  string
+		lines [2]int
+		want  int
+	}{
+		{RuleSprint40, [2]int{20, 31}, 1},
+		{RuleSprint40, [2]int{31, 20}, 0},
+		{RuleSprint40, [2]int{25, 25}, -1},
+		{RuleSurvival, [2]int{48, 12}, 0},
+		{RuleSurvival, [2]int{3, 7}, 1},
+		{RuleSurvival, [2]int{30, 30}, -1},
+		{RuleSurvival, [2]int{0, 0}, -1},
+		{RuleAttack, [2]int{30, 1}, -1},
+		{RuleAttack, [2]int{1, 30}, -1},
+		{RuleAttack, [2]int{10, 10}, -1},
 	}
-	if w := judgeTimeLimit(RuleSprint40, [2]int{25, 25}); w != -1 {
-		t.Fatalf("sprint40 동률 = %d", w)
-	}
-	if w := judgeTimeLimit(RuleAttack, [2]int{30, 1}); w != -1 {
-		t.Fatalf("attack 10분 = %d (무승부여야 한다)", w)
+	for _, c := range cases {
+		if w := judgeTimeLimit(c.rule, c.lines); w != c.want {
+			t.Fatalf("judgeTimeLimit(%s, %v) = %d, want %d", c.rule, c.lines, w, c.want)
+		}
 	}
 	spec, _ := LookupRule(RuleSprint40)
 	if goalReached(spec, 39) || !goalReached(spec, 40) {
@@ -99,12 +111,25 @@ func TestJudgeTimeLimit(t *testing.T) {
 	if goalReached(attack, 1000) {
 		t.Fatal("attack 에는 목표 줄이 없다")
 	}
+	survival, _ := LookupRule(RuleSurvival)
+	if goalReached(survival, 1000) {
+		t.Fatal("survival 에는 목표 줄이 없다")
+	}
 }
 
-func TestOnlyV1RulesOpen(t *testing.T) {
-	for _, id := range []string{"score120", "survival", "", "ATTACK"} {
+func TestOnlyOpenRules(t *testing.T) {
+	for _, id := range []string{"score120", "", "ATTACK", "Survival"} {
 		if _, ok := LookupRule(id); ok {
-			t.Fatalf("%q 는 v1 에서 열리면 안 된다", id)
+			t.Fatalf("%q 는 열리면 안 된다", id)
+		}
+	}
+	open := OpenRules()
+	if len(open) != 3 || open[0] != RuleAttack || open[1] != RuleSprint40 || open[2] != RuleSurvival {
+		t.Fatalf("OpenRules = %v", open)
+	}
+	for _, id := range open {
+		if spec, ok := LookupRule(id); !ok || spec.ID != id {
+			t.Fatalf("OpenRules 의 %q 를 LookupRule 이 거부했다", id)
 		}
 	}
 	attack, _ := LookupRule(RuleAttack)
@@ -114,6 +139,11 @@ func TestOnlyV1RulesOpen(t *testing.T) {
 	sprint, _ := LookupRule(RuleSprint40)
 	if sprint.Garbage || sprint.TimeLimitSec != 300 || sprint.GoalLines == nil || *sprint.GoalLines != 40 {
 		t.Fatalf("sprint40 = %+v", sprint)
+	}
+	survival, ok := LookupRule(RuleSurvival)
+	if !ok || survival.ID != "survival" || survival.Label != "생존전" || survival.Garbage || survival.GoalLines != nil ||
+		survival.TimeLimitSec != 600 || survival.SpeedUp == nil || survival.SpeedUp.StartSec != 30 || survival.SpeedUp.EverySec != 20 {
+		t.Fatalf("survival = %+v", survival)
 	}
 }
 

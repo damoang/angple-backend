@@ -2,6 +2,7 @@ package stacksrv
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -14,7 +15,11 @@ const (
 	BoardSoloAll    = "solo_all"
 	BoardVsAttack   = "vs_attack"
 	BoardVsSprint40 = "vs_sprint40"
+	BoardVsSurvival = "vs_survival"
 )
+
+// errUnknownBoard 는 열리지 않은 점수판이다(ServeHTTP 가 먼저 400 으로 거른다).
+var errUnknownBoard = errors.New("unknown_board")
 
 // LeaderboardSize 는 점수판 한 장의 인원이다.
 const LeaderboardSize = 10
@@ -137,10 +142,23 @@ func (l *Leaderboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // knownBoard 는 열린 점수판인지다.
 func knownBoard(board string) bool {
 	switch board {
-	case BoardSoloWeek, BoardSoloAll, BoardVsAttack, BoardVsSprint40:
+	case BoardSoloWeek, BoardSoloAll, BoardVsAttack, BoardVsSprint40, BoardVsSurvival:
 		return true
 	}
 	return false
+}
+
+// versusBoardRule 은 대전 점수판 이름을 규칙 이름으로 바꾼다. 대전 점수판이 아니면 false.
+func versusBoardRule(board string) (string, bool) {
+	switch board {
+	case BoardVsAttack:
+		return RuleAttack, true
+	case BoardVsSprint40:
+		return RuleSprint40, true
+	case BoardVsSurvival:
+		return RuleSurvival, true
+	}
+	return "", false
 }
 
 // build 는 점수판 하나의 응답 본문을 만든다.
@@ -166,9 +184,9 @@ func (l *Leaderboard) build(board string, now time.Time) ([]byte, error) {
 		}
 		out["rows"] = rows
 	default:
-		rule := RuleAttack
-		if board == BoardVsSprint40 {
-			rule = RuleSprint40
+		rule, ok := versusBoardRule(board)
+		if !ok {
+			return nil, errUnknownBoard
 		}
 		rows, err := l.store.VersusTop(rule, LeaderboardSize)
 		if err != nil {

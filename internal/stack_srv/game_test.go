@@ -394,6 +394,93 @@ func TestTimeLimitJudgement(t *testing.T) {
 	}
 }
 
+func TestSurvivalSendsNoGarbageOrProgress(t *testing.T) {
+	s := newTestServer(newFakeStore(), testTiming())
+	c1, c2, roomID := startGame(t, s, ModeRandom, RuleSurvival)
+	presetLocks(s, roomID, 20)
+	// 4줄·3줄·2줄을 지워도 상대에게 방해 줄이 가지 않는다.
+	sendMsg(t, s, c1, "lock", lock(1, 4))
+	sendMsg(t, s, c1, "lock", lock(2, 3))
+	sendMsg(t, s, c1, "lock", lock(3, 2))
+	// 상대가 줄을 못 지운 lock 을 해도 넣을 방해 줄이 없다.
+	sendMsg(t, s, c2, "lock", lock(1, 0))
+	// 처리와 발송은 동기라 여기까지의 메시지가 모두 쌓여 있다.
+	got2 := drain(t, c2)
+	all := drain(t, c1)
+	all = append(all, got2...)
+	for _, typ := range []string{"garbage_queued", "garbage_apply", "progress"} {
+		if n := countType(all, typ); n != 0 {
+			t.Fatalf("survival 에서 %s 가 %d번 나갔다", typ, n)
+		}
+	}
+	seen := false
+	for _, m := range got2 {
+		if m.Type == "opponent_state" && m.Data["lines"] == float64(9) {
+			seen = true
+			if m.Data["pending"] != float64(0) {
+				t.Fatalf("opponent_state = %v", m.Data)
+			}
+		}
+	}
+	if !seen {
+		t.Fatal("상대 판(9줄)이 전달되지 않았다")
+	}
+	s.mu.Lock()
+	p1, p2 := s.rooms[roomID].players[0], s.rooms[roomID].players[1]
+	pending, garbageIn := p2.pending.total(), p2.garbageIn
+	lines := p1.lines
+	s.mu.Unlock()
+	if pending != 0 || garbageIn != 0 || lines != 9 {
+		t.Fatalf("pending=%d garbageIn=%d lines=%d", pending, garbageIn, lines)
+	}
+}
+
+func TestSurvivalTopoutLoses(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store, testTiming())
+	const topout = "topout"
+	c1, c2, _ := startGame(t, s, ModeRandom, RuleSurvival)
+	sendMsg(t, s, c2, "topped_out", map[string]interface{}{"seq": 1, "tick": 0})
+	over := next(t, c1, "game_over")
+	if over.Data["reason"] != topout || over.Data["youWon"] != true || over.Data["winner"] != "nick-p1" {
+		t.Fatalf("game_over = %v", over.Data)
+	}
+	if lost := next(t, c2, "game_over"); lost.Data["youWon"] != false || lost.Data["reason"] != topout {
+		t.Fatalf("상대 game_over = %v", lost.Data)
+	}
+	_, _, _, finishes := store.snapshot()
+	if len(finishes) != 1 || finishes[0].Winner != "p1" || finishes[0].Rule != RuleSurvival || finishes[0].Reason != topout {
+		t.Fatalf("finishes = %+v", finishes)
+	}
+}
+
+func TestSurvivalTimeLimitJudgement(t *testing.T) {
+	store := newFakeStore()
+	s := newTestServer(store, testTiming())
+	c1, _, roomID := startGame(t, s, ModeRandom, RuleSurvival)
+	s.mu.Lock()
+	s.rooms[roomID].players[0].lines = 21
+	s.rooms[roomID].players[1].lines = 8
+	s.mu.Unlock()
+	s.onTimeLimit(roomID)
+	over := next(t, c1, "game_over")
+	if over.Data["reason"] != "time" || over.Data["winner"] != "nick-p1" {
+		t.Fatalf("survival 시간 판정 = %v", over.Data)
+	}
+
+	s2 := newTestServer(store, testTiming())
+	d1, _, drawRoom := startGame(t, s2, ModeRandom, RuleSurvival)
+	s2.mu.Lock()
+	s2.rooms[drawRoom].players[0].lines = 15
+	s2.rooms[drawRoom].players[1].lines = 15
+	s2.mu.Unlock()
+	s2.onTimeLimit(drawRoom)
+	draw := next(t, d1, "game_over")
+	if draw.Data["reason"] != "draw" || draw.Data["winner"] != nil {
+		t.Fatalf("survival 동률 = %v", draw.Data)
+	}
+}
+
 func TestCellBalanceViolationsEndInCheat(t *testing.T) {
 	store := newFakeStore()
 	s := newTestServer(store, testTiming())
@@ -594,7 +681,7 @@ func TestJoinRejectsClosedRulesAndBadInvite(t *testing.T) {
 		code string
 	}{
 		{map[string]interface{}{"mode": "random", "rule": "score120"}, "invalid_rule"},
-		{map[string]interface{}{"mode": "random", "rule": "survival"}, "invalid_rule"},
+		{map[string]interface{}{"mode": "random", "rule": "Survival"}, "invalid_rule"},
 		{map[string]interface{}{"mode": "rating", "rule": "attack"}, "invalid_mode"},
 		{map[string]interface{}{"mode": "favorite", "rule": "attack"}, "invalid_invite"},
 	}
