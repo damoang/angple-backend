@@ -39,6 +39,11 @@ const RuleSprint40 = "sprint40"
 // 먼저 넘친 쪽이 진다. 제한시간이 다 되면 줄을 더 많이 지운 쪽이 이긴다(같으면 무승부).
 const RuleSurvival = "survival"
 
+// RuleScore120 은 2분 점수전이다. 방해 줄·가속 없이 같은 시드로 120초 동안 점수를 겨룬다.
+// 제한시간이 다 되면 서버 판정 점수(scoreLockLine·judgedScore)가 높은 쪽이 이긴다(같으면 무승부).
+// 그 전에 넘치면 다른 규칙처럼 진다.
+const RuleScore120 = "score120"
+
 // SpeedUp 은 시간이 지나면 최소 레벨이 오르는 규칙이다.
 type SpeedUp struct {
 	// StartSec 부터 최소 레벨이 오른다.
@@ -63,7 +68,7 @@ type RuleSpec struct {
 	SpeedUp *SpeedUp `json:"speedUp"`
 }
 
-// LookupRule 은 열린 규칙(attack·sprint40·survival)만 돌려준다. 그 외(score120 등)는 거부한다.
+// LookupRule 은 열린 규칙(attack·sprint40·survival·score120)만 돌려준다. 그 외는 거부한다.
 func LookupRule(id string) (RuleSpec, bool) {
 	switch id {
 	case RuleAttack:
@@ -73,13 +78,15 @@ func LookupRule(id string) (RuleSpec, bool) {
 		return RuleSpec{ID: RuleSprint40, Label: "40줄 스프린트", GoalLines: &goal, TimeLimitSec: 300}, true
 	case RuleSurvival:
 		return RuleSpec{ID: RuleSurvival, Label: "생존전", TimeLimitSec: 600, SpeedUp: &SpeedUp{StartSec: 30, EverySec: 20}}, true
+	case RuleScore120:
+		return RuleSpec{ID: RuleScore120, Label: "2분 점수전", TimeLimitSec: 120}, true
 	}
 	return RuleSpec{}, false
 }
 
 // OpenRules 는 열린 규칙 목록이다(로비·전적 표시 순서).
 func OpenRules() []string {
-	return []string{RuleAttack, RuleSprint40, RuleSurvival}
+	return []string{RuleAttack, RuleSprint40, RuleSurvival, RuleScore120}
 }
 
 // AttackFor 는 한 번에 지운 줄 수(0~4)에 대한 공격 줄 수다. 1→0, 2→1, 3→2, 4→4.
@@ -198,16 +205,46 @@ func goalReached(spec RuleSpec, lines int) bool {
 }
 
 // judgeTimeLimit 은 제한시간이 다 됐을 때의 승자 자리(0·1)다. 무승부면 -1.
-// attack 은 무승부, sprint40·survival 은 줄을 더 많이 지운 쪽이 이긴다(같으면 무승부).
-func judgeTimeLimit(rule string, lines [2]int) int {
-	if rule != RuleSprint40 && rule != RuleSurvival {
-		return -1
+// attack 은 무승부, sprint40·survival 은 줄을 더 많이 지운 쪽, score120 은 서버 판정 점수가
+// 더 높은 쪽이 이긴다(같으면 무승부).
+func judgeTimeLimit(rule string, lines [2]int, scores [2]int64) int {
+	switch rule {
+	case RuleSprint40, RuleSurvival:
+		return higherSeat(int64(lines[0]), int64(lines[1]))
+	case RuleScore120:
+		return higherSeat(scores[0], scores[1])
 	}
+	return -1
+}
+
+// higherSeat 은 값이 더 큰 자리(0·1)다. 같으면 -1.
+func higherSeat(a, b int64) int {
 	switch {
-	case lines[0] > lines[1]:
+	case a > b:
 		return 0
-	case lines[1] > lines[0]:
+	case b > a:
 		return 1
 	}
 	return -1
+}
+
+// scoreLockLine 은 score120 서버 줄 점수 누적이다. lock 하나에서 cleared 줄을 지우면
+// 이번 lock 반영 전 누적 줄 수 linesBefore 로 정한 레벨(1 + linesBefore/8)로 ScoreFor 를 더한다.
+// 웹 엔진도 점수를 먼저 더한 뒤 레벨을 갱신하므로 순서가 같다.
+func scoreLockLine(lineScore int64, linesBefore, cleared int) int64 {
+	return lineScore + ScoreFor(cleared, int64(1+linesBefore/LinesPerLevel))
+}
+
+// judgedScore 는 score120 판정 점수다. 클라이언트 점수에서 서버 줄 점수를 뺀 나머지(낙하 점수)를
+// 0 이상, 혼자하기 drop_cap 과 같은 2×(Rows+12)×(locks+1) 이하로 잘라 줄 점수에 더한다.
+// 잘라 쓰기만 하고 위반으로 세지는 않는다.
+func judgedScore(lineScore, clientScore int64, locks int) int64 {
+	drop := clientScore - lineScore
+	if drop < 0 {
+		drop = 0
+	}
+	if limit := 2 * DropRowsPerPieceMax * int64(locks+1); drop > limit {
+		drop = limit
+	}
+	return lineScore + drop
 }

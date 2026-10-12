@@ -168,8 +168,10 @@ type playerState struct {
 	pending garbageQueue
 	// board 는 마지막으로 받은 판이다.
 	board string
-	// score 는 클라이언트가 알린 점수다(표시용).
+	// score 는 클라이언트가 알린 점수다(표시용). score120 에서는 서버 판정 점수(judgedScore)다.
 	score int64
+	// lineScore 는 score120 에서 서버가 누적한 줄 점수다(scoreLockLine).
+	lineScore int64
 	// violations 는 타당성 검사 위반 횟수다.
 	violations int
 	// lockTimes 는 최근 1초 lock 시각이다(빈도 제한).

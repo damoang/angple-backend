@@ -128,7 +128,7 @@ func TestLeaderboardCachesAndHidesMemberID(t *testing.T) {
 	if store.lastN != LeaderboardSize || LeaderboardSize != 10 {
 		t.Fatalf("대전 보드도 10줄이어야 한다 (%d)", store.lastN)
 	}
-	if rec := get("vs_score120"); rec.Code != http.StatusBadRequest {
+	if rec := get("vs_score60"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("알 수 없는 보드 = %d", rec.Code)
 	}
 }
@@ -144,6 +144,7 @@ func TestLeaderboardVersusBoardRules(t *testing.T) {
 		{BoardVsAttack, RuleAttack},
 		{BoardVsSprint40, RuleSprint40},
 		{BoardVsSurvival, RuleSurvival},
+		{BoardVsScore120, RuleScore120},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
@@ -169,7 +170,7 @@ func TestLeaderboardVersusBoardRules(t *testing.T) {
 		}
 	}
 	before := store.count()
-	for _, board := range []string{"vs_score120", "vs_", "survival", "VS_SURVIVAL", ""} {
+	for _, board := range []string{"vs_score60", "vs_", "survival", "score120", "VS_SCORE120", "VS_SURVIVAL", ""} {
 		rec := httptest.NewRecorder()
 		lb.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stack-ws/leaderboard?board="+board, nil))
 		if rec.Code != http.StatusBadRequest {
