@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"html"
 	"log"
 	"regexp"
 	"strings"
@@ -136,8 +137,15 @@ func (w *WriteAfterWorker) sendKeywordAlerts(job PostCreatedJob, authorName stri
 	if w.keywordMatcher == nil {
 		return
 	}
+	// 부가 기능이 이벤트 처리 고루틴을 죽이지 않게 한다 — 패닉은 로그만 남긴다.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[KeywordAlert] panic for %s/%d: %v", job.BoardSlug, job.WriteID, r)
+		}
+	}()
 	ctx := context.Background()
-	matches := w.keywordMatcher.Match(ctx, job.Subject)
+	// 제목은 HTML 이스케이프된 채 저장될 수 있다(&amp; 등) — 화면에 보이는 글자로 대조한다.
+	matches := w.keywordMatcher.Match(ctx, html.UnescapeString(job.Subject))
 	if len(matches) == 0 {
 		return
 	}

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -79,6 +80,7 @@ type KeywordAlertMatcher struct {
 
 	mu          sync.Mutex
 	entries     []keywordAlertEntry
+	loading     bool
 	attempted   bool
 	lastAttempt time.Time
 }
@@ -129,27 +131,55 @@ func buildKeywordAlertEntries(rows []KeywordAlertRow) []keywordAlertEntry {
 }
 
 // snapshot 은 TTL 이 지났으면 목록을 다시 읽고, 현재 스냅샷을 돌려준다.
+//
+// DB 적재는 잠금 밖에서 한다 — 적재가 느려도 다른 워커 고루틴이 잠금에 묶이지 않는다.
+// 적재는 한 번에 하나만 돌고, 그동안 다른 호출은 직전 스냅샷을 그대로 쓴다.
 // 돌려준 슬라이스는 교체만 되고 수정되지 않으므로 잠금 밖에서 읽어도 안전하다.
 func (m *KeywordAlertMatcher) snapshot(ctx context.Context) []keywordAlertEntry {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	now := m.now()
-	if m.attempted && now.Sub(m.lastAttempt) < m.ttl {
-		return m.entries
+	if m.loading || (m.attempted && now.Sub(m.lastAttempt) < m.ttl) {
+		entries := m.entries
+		m.mu.Unlock()
+		return entries
 	}
+	m.loading = true
 	m.attempted = true
 	m.lastAttempt = now
+	m.mu.Unlock()
+
+	return m.reload(ctx)
+}
+
+// reload 는 잠금 밖에서 목록을 읽고, 성공하면 스냅샷을 바꾼다. 실패하면 직전 스냅샷을 유지한다.
+// 로더가 패닉해도 loading 표식은 반드시 풀린다(풀리지 않으면 영영 재적재하지 않는다).
+func (m *KeywordAlertMatcher) reload(ctx context.Context) (entries []keywordAlertEntry) {
+	var built []keywordAlertEntry
+	var loadErr error
+	defer func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.loading = false
+		if r := recover(); r != nil {
+			loadErr = fmt.Errorf("loader panic: %v", r)
+		}
+		if loadErr != nil {
+			log.Printf("[KeywordAlert] reload failed, keeping previous snapshot (%d entries): %v", len(m.entries), loadErr)
+		} else {
+			m.entries = built
+		}
+		entries = m.entries
+	}()
 
 	loadCtx, cancel := context.WithTimeout(ctx, keywordAlertLoadTimeout)
 	defer cancel()
 	rows, err := m.loader.LoadKeywordAlerts(loadCtx)
 	if err != nil {
-		log.Printf("[KeywordAlert] reload failed, keeping previous snapshot (%d entries): %v", len(m.entries), err)
-		return m.entries
+		loadErr = err
+		return nil
 	}
-	m.entries = buildKeywordAlertEntries(rows)
-	return m.entries
+	built = buildKeywordAlertEntries(rows)
+	return built
 }
 
 // Match 는 제목에 키워드가 들어간 회원 목록을 돌려준다(회원당 가장 긴 키워드 하나).

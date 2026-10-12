@@ -141,3 +141,76 @@ func TestKeywordAlertMatcherFirstLoadFailure(t *testing.T) {
 		t.Fatalf("첫 적재 실패 시 아무에게도 보내지 않는다: %v", got)
 	}
 }
+
+type blockingKeywordLoader struct {
+	started chan struct{}
+	release chan struct{}
+	rows    []KeywordAlertRow
+}
+
+func (b *blockingKeywordLoader) LoadKeywordAlerts(_ context.Context) ([]KeywordAlertRow, error) {
+	b.started <- struct{}{}
+	<-b.release
+	return b.rows, nil
+}
+
+// 적재 중에도 다른 호출은 잠금에 묶이지 않고 직전 스냅샷으로 바로 답한다.
+func TestKeywordAlertMatcherLoadsOutsideLock(t *testing.T) {
+	loader := &blockingKeywordLoader{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		rows:    []KeywordAlertRow{{MbID: "new", Keyword: "마우스"}},
+	}
+	m := NewKeywordAlertMatcher(loader)
+	now := time.Date(2026, 10, 12, 3, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	m.entries = buildKeywordAlertEntries([]KeywordAlertRow{{MbID: "old", Keyword: "키보드"}})
+	m.attempted = true
+	m.lastAttempt = now.Add(-2 * keywordAlertReloadTTL)
+	ctx := context.Background()
+
+	done := make(chan []KeywordAlertMatch, 1)
+	go func() { done <- m.Match(ctx, "무선 마우스") }()
+	<-loader.started
+
+	got := m.Match(ctx, "기계식 키보드")
+	if len(got) != 1 || got[0].MbID != "old" {
+		t.Fatalf("적재 중에는 직전 스냅샷으로 답해야 한다: %v", got)
+	}
+
+	close(loader.release)
+	if got := <-done; len(got) != 1 || got[0].MbID != "new" {
+		t.Fatalf("적재한 고루틴은 새 스냅샷으로 답한다: %v", got)
+	}
+	if got := m.Match(ctx, "무선 마우스"); len(got) != 1 || got[0].MbID != "new" {
+		t.Fatalf("적재 후에는 새 스냅샷: %v", got)
+	}
+}
+
+type panicKeywordLoader struct {
+	calls int
+}
+
+func (p *panicKeywordLoader) LoadKeywordAlerts(_ context.Context) ([]KeywordAlertRow, error) {
+	p.calls++
+	panic("boom")
+}
+
+// 로더가 패닉해도 직전 스냅샷을 유지하고, 다음 주기에 다시 적재를 시도한다.
+func TestKeywordAlertMatcherLoaderPanic(t *testing.T) {
+	loader := &panicKeywordLoader{}
+	m := NewKeywordAlertMatcher(loader)
+	now := time.Date(2026, 10, 12, 3, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	m.entries = buildKeywordAlertEntries([]KeywordAlertRow{{MbID: "old", Keyword: "키보드"}})
+	ctx := context.Background()
+
+	if got := m.Match(ctx, "기계식 키보드"); len(got) != 1 || got[0].MbID != "old" {
+		t.Fatalf("패닉 시 직전 스냅샷 유지: %v", got)
+	}
+	now = now.Add(keywordAlertReloadTTL + time.Second)
+	m.Match(ctx, "기계식 키보드")
+	if loader.calls != 2 {
+		t.Fatalf("패닉 뒤에도 loading 표식이 풀려 재시도해야 한다: calls=%d", loader.calls)
+	}
+}

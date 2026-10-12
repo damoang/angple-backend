@@ -286,6 +286,20 @@ func TestHandlePostCreatedKeywordAlertRecipientCap(t *testing.T) {
 	}
 }
 
+func TestHandlePostCreatedKeywordAlertUnescapesTitle(t *testing.T) {
+	db := newKeywordAlertTestDB(t, "unescape", "html1")
+	rows := []KeywordAlertRow{{MbID: "amp", Keyword: "AT&T"}}
+	w, repo := newKeywordAlertTestWorker(db, rows, nil)
+	job := keywordAlertTestJob()
+	job.Subject = "AT&amp;T 요금제 정리"
+
+	w.handlePostCreated(job)
+
+	if got := repo.byMember(); strings.Join(got["amp"], ",") != keywordAlertToCase {
+		t.Errorf("HTML 이스케이프된 제목도 화면 글자 기준으로 일치해야 한다: %v", got)
+	}
+}
+
 func TestRedisKeywordAlertLimiter(t *testing.T) {
 	counts := make(map[string]int64)
 	var failErr error

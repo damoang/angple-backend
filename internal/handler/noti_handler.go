@@ -131,6 +131,9 @@ func generateTitle(fromCase, toCase, relMbNick string, wrID, wrParent int) strin
 	case "mention":
 		return relMbNick + "님이 회원님을 멘션했습니다"
 	case "write":
+		if toCase == "keyword" {
+			return "등록한 키워드가 들어간 새 글이 올라왔습니다"
+		}
 		return relMbNick + "님이 새 글을 작성했습니다"
 	case "digest":
 		return "새 글 요약이 도착했습니다"
@@ -468,6 +471,9 @@ func generateGroupTitle(fromCase, toCase, latestSender string, senderCount, wrID
 	case "nogood":
 		action = "비추천했습니다"
 	case "write":
+		if toCase == "keyword" {
+			return "등록한 키워드가 들어간 새 글이 올라왔습니다"
+		}
 		action = "새 글을 작성했습니다"
 	case "memo":
 		action = "쪽지를 보냈습니다"
