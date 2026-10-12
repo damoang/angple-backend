@@ -21,16 +21,15 @@ name: Load Test
 # =============================================================================
 
 on:
-  # 스케줄 (매주 일요일 03:00 UTC = 한국시간 12:00)
-  schedule:
-    - cron: '0 3 * * 0'
-  # 수동 실행 + 개발용 DB 초기화 스크립트·compose 를 바꾸는 PR 에서도 돌린다(예약에서만 돌면 깨져도 늦게 안다)
+  # 예약 실행은 껐다(2026-10-12): 시드 100건짜리 로컬 DB 30초라 운영 성능 정보가 거의 없고, 초기화가 깨진 채 9개월 빨강이었다.
+  # 수동 실행 + 개발용 DB 초기화 스크립트·compose·부하 시나리오를 바꾸는 PR 에서 돌린다.
   workflow_dispatch:
   pull_request:
     paths:
       - '.github/workflows/load-test.yml'
       - '.docker/mysql/init/**'
       - 'docker-compose.dev.yml'
+      - 'tests/load/**'
 
 # 환경변수로 설정 가능 (Repository Settings > Secrets and variables > Actions)
 # 설정하지 않으면 기본값 사용
