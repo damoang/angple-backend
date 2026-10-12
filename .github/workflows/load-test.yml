@@ -24,6 +24,13 @@ on:
   # 스케줄 (매주 일요일 03:00 UTC = 한국시간 12:00)
   schedule:
     - cron: '0 3 * * 0'
+  # 수동 실행 + 개발용 DB 초기화 스크립트·compose 를 바꾸는 PR 에서도 돌린다(예약에서만 돌면 깨져도 늦게 안다)
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/load-test.yml'
+      - '.docker/mysql/init/**'
+      - 'docker-compose.dev.yml'
 
 # 환경변수로 설정 가능 (Repository Settings > Secrets and variables > Actions)
 # 설정하지 않으면 기본값 사용
@@ -101,6 +108,14 @@ jobs:
             exit 1
           fi
         fi
+
+    # 컨테이너가 죽으면 원인이 로그에만 남는다 — 실패 시 MySQL·API 로그를 남긴다
+    - name: Dump container logs on failure
+      if: failure()
+      run: |
+        docker compose -f docker-compose.dev.yml ps -a || true
+        docker compose -f docker-compose.dev.yml logs --no-color --tail 200 mysql || true
+        docker compose -f docker-compose.dev.yml logs --no-color --tail 100 api || true
 
     - name: Cleanup
       if: always()
