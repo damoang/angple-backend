@@ -41,6 +41,27 @@ jobs:
     - name: Run govulncheck (SARIF)
       run: govulncheck -format=sarif ./... > govulncheck.sarif || true
 
+    # govulncheck 의 SARIF 가 같은 호출 경로(stacks)를 중복으로 넣어 업로드가 「유효하지 않은 SARIF」로 실패한다.
+    # 내용은 그대로 두고 중복만 걷어낸다.
+    - name: Dedupe govulncheck SARIF stacks
+      run: |
+        python3 - <<'EOF'
+        import json
+        p = "govulncheck.sarif"
+        d = json.load(open(p))
+        for run in d.get("runs", []):
+            for r in run.get("results", []):
+                if "stacks" in r:
+                    seen, out = set(), []
+                    for st in r["stacks"]:
+                        k = json.dumps(st, sort_keys=True)
+                        if k not in seen:
+                            seen.add(k)
+                            out.append(st)
+                    r["stacks"] = out
+        json.dump(d, open(p, "w"))
+        EOF
+
     - name: Upload govulncheck SARIF
       uses: github/codeql-action/upload-sarif@v4
       with:

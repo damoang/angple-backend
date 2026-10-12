@@ -423,7 +423,7 @@ func (r *luckyRepository) Grant(mbID, sourceTable, sourceID, kind string, amount
 // 둘 다 원장 INSERT 와 같은 트랜잭션이라 원장 UNIQUE 하나가 포인트·경험치 이중지급을 함께 막는다.
 // 원장 amount 는 포인트 금액이다(경험치만이면 0). 경험치의 근거는 g5_na_xp(xp_rel_action=@lucky)다.
 // ⛔ mb_level 은 건드리지 않는다 — as_level 만 바뀐다.
-func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind string, amount int, opt GrantOptions) (GrantOutcome, error) {
+func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind string, amount int, opt GrantOptions) (GrantOutcome, error) { //nolint:gocyclo // 원장 INSERT·포인트·경험치를 한 트랜잭션에서 순서대로 — 분해 시 이중지급 방지 경계 위험
 	if amount < 0 {
 		amount = 0
 	}
