@@ -2623,7 +2623,7 @@ func main() {
 
 		// 조회수 버퍼 — 조회마다 UPDATE 하지 않고 Redis 에 모았다가 주기적으로 묶어 반영한다.
 		// Redis 가 없거나 쓰기에 실패하면 기존처럼 즉시 UPDATE 한다. 종료 시 Stop 이 진행 중 flush 를
-		// 취소하고 한 번 더 flush 한다(hitbuffer.StopTimeout 3s + 되돌리기 1s 상한).
+		// 취소하고 한 번 더 flush 한다(hitbuffer.StopTimeout 3s + 정리 호출 1~2s 상한).
 		// 버퍼는 컨텍스트 마감을 지키는 전용 Redis 클라이언트를 따로 연다(전역 클라이언트 설정은 그대로).
 		var hitBackend hitbuffer.Backend
 		if redisClient != nil {
@@ -7823,8 +7823,8 @@ func main() {
 	//    새 요청은 들어오지 않는다 — 남은 것만 흘려보내면 된다.
 	// ⛔ 20초를 주면 안 된다. defer 는 LIFO 라 이 뒤에 deleteWorker/pushWorker/
 	//    hitBuffer/writeAfterWorker 의 Stop 이 줄줄이 서고, 30초 grace 를 넘기면 SIGKILL 이다.
-	//    preStop(5s) + 여기(8s) + hitBuffer(진행 중 flush 취소 + 종료 flush, 약 4s 상한)
-	//    + writeAfterWorker(5s 상한) = 22s. deleteWorker/pushWorker 는 진행 중인 한 번의
+	//    preStop(5s) + 여기(8s) + hitBuffer(진행 중 flush 취소 + 종료 flush, 약 5s 상한)
+	//    + writeAfterWorker(5s 상한) = 23s. deleteWorker/pushWorker 는 진행 중인 한 번의
 	//    처리만 기다린다 — 이 셋을 합쳐 30초 안에 들어와야 한다.
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancelShutdown()

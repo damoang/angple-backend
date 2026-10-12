@@ -17,6 +17,8 @@
 //   - 묶음 UPDATE 가 커밋된 뒤 그 필드를 지우는 HDEL(Ack)이 실패한 경우 — 필드가 처리 중 키에
 //     남아 staleAfter 뒤 회수되며 다시 더해진다(그 묶음만).
 //   - DB 가 커밋한 뒤 오류를 돌려준 경우(응답 유실·타임아웃) — 되돌린 값이 다음 flush 에 다시 더해진다.
+//   - Incr 의 Redis 호출이 시간 초과로 실패했지만 서버에서는 HINCRBY 가 실행된 경우 — 폴백
+//     즉시 UPDATE 와 버퍼 값이 둘 다 반영되어 그 조회 1건이 두 번 세어진다.
 //
 // Redis 쪽에서 아직 반영 안 된 값이 사라질 수 있는 경우:
 //   - maxmemory 정책이 allkeys-* 이면 이 키들도 내쫓길 수 있다(volatile-* 은 TTL 없는 키를 내쫓지 않는다).
@@ -54,12 +56,14 @@ const (
 	DefaultStaleAfter = 10 * time.Minute
 
 	// StopTimeout 은 Stop 이 기다리는 총 상한이다(진행 중 flush 중단 + 종료 flush).
-	// 중단된 묶음을 되돌리는 restoreTimeout 만큼 넘칠 수 있다.
+	// 취소 뒤에도 끝까지 시도하는 정리 호출(bookkeepingTimeout, 많아야 두어 번)만큼 넘칠 수 있다.
 	StopTimeout = 3 * time.Second
 
-	incrTimeout    = time.Second
-	flushTimeout   = time.Minute
-	restoreTimeout = time.Second
+	incrTimeout  = time.Second
+	flushTimeout = time.Minute
+
+	// DB 반영 뒤의 정리 호출(Ack·Done·Restore) 상한. flush 가 취소돼도 이 호출들은 끝까지 시도한다.
+	bookkeepingTimeout = time.Second
 
 	// 리더 락 TTL 은 주기보다 조금 짧게 둔다 — 락을 쥔 파드가 다음 틱에 다시 잡을 수 있게.
 	lockMargin = 10 * time.Second
@@ -407,7 +411,7 @@ func (b *Buffer) drain(ctx context.Context, boardID, key string) error {
 	entries, bad := parseHits(raw)
 	if len(bad) > 0 {
 		log.Printf("[hitbuffer] %d malformed fields dropped from %s", len(bad), key)
-		if err := b.backend.Ack(ctx, key, bad); err != nil {
+		if err := b.ack(ctx, key, bad); err != nil {
 			return fmt.Errorf("hitbuffer: drop malformed %s: %w", key, err)
 		}
 	}
@@ -423,11 +427,13 @@ func (b *Buffer) drain(ctx context.Context, boardID, key string) error {
 		if err := b.store.AddHits(ctx, boardID, hits); err != nil {
 			return b.restoreAfterFailure(ctx, boardID, key, err)
 		}
-		if err := b.backend.Ack(ctx, key, fields); err != nil {
+		if err := b.ack(ctx, key, fields); err != nil {
 			return fmt.Errorf("hitbuffer: ack %s: %w", key, err)
 		}
 	}
-	if err := b.backend.Done(ctx, key); err != nil {
+	dctx, cancel := bookkeepingContext(ctx)
+	defer cancel()
+	if err := b.backend.Done(dctx, key); err != nil {
 		return fmt.Errorf("hitbuffer: done %s: %w", key, err)
 	}
 	return nil
@@ -437,7 +443,7 @@ func (b *Buffer) drain(ctx context.Context, boardID, key string) error {
 // flush 가 취소된 경우(종료)에도 되돌릴 수 있게 취소와 분리된 짧은 컨텍스트를 쓴다.
 // 되돌리기마저 실패하면 키는 처리 중 목록에 남아 staleAfter 뒤 회수된다.
 func (b *Buffer) restoreAfterFailure(ctx context.Context, boardID, key string, cause error) error {
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), restoreTimeout)
+	rctx, cancel := bookkeepingContext(ctx)
 	defer cancel()
 	if rErr := b.backend.Restore(rctx, boardID, key); rErr != nil {
 		return fmt.Errorf("hitbuffer: update %s: %w (restore failed: %w)", boardID, cause, rErr)
@@ -449,6 +455,19 @@ func (b *Buffer) restoreAfterFailure(ctx context.Context, boardID, key string, c
 		return nil
 	}
 	return fmt.Errorf("hitbuffer: update %s (restored to buffer): %w", boardID, cause)
+}
+
+// ack 는 반영된 필드를 지운다. DB 에 이미 반영된 뒤라 flush 가 취소돼도 끝까지 시도한다
+// (여기서 빠지면 그 묶음이 회수 때 한 번 더 더해진다).
+func (b *Buffer) ack(ctx context.Context, key string, fields []string) error {
+	actx, cancel := bookkeepingContext(ctx)
+	defer cancel()
+	return b.backend.Ack(actx, key, fields)
+}
+
+// bookkeepingContext 는 부모의 취소와 분리되고 bookkeepingTimeout 으로 제한된 컨텍스트다.
+func bookkeepingContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), bookkeepingTimeout)
 }
 
 func (b *Buffer) markMissing(boardID string) {
