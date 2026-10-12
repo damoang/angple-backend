@@ -10,7 +10,7 @@ CREATE INDEX idx_g5_point_expiry ON g5_point (po_expired, po_point, po_expire_da
 
 -- Normalize existing data: set empty/null expire dates to permanent (9999-12-31)
 UPDATE g5_point SET po_expire_date = '9999-12-31'
-WHERE po_expire_date IS NULL OR po_expire_date = '' OR po_expire_date = '0000-00-00';
+WHERE po_expire_date IS NULL OR po_expire_date = '0000-00-00';  -- DATE 컬럼은 '' 비교 불가(ERROR 1525)
 
 -- Normalize existing data: set NULL po_expired to 0
 UPDATE g5_point SET po_expired = 0 WHERE po_expired IS NULL;
