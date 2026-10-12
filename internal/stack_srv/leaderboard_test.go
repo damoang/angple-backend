@@ -38,6 +38,8 @@ type fakeBoardStore struct {
 	calls int
 	// lastN 은 마지막으로 요청받은 인원이다.
 	lastN int
+	// lastRule 은 VersusTop 에 마지막으로 넘어온 규칙이다.
+	lastRule string
 }
 
 func (f *fakeBoardStore) SoloTop(_ time.Time, n int) ([]SoloRow, error) {
@@ -51,11 +53,12 @@ func (f *fakeBoardStore) SoloTop(_ time.Time, n int) ([]SoloRow, error) {
 	}, nil
 }
 
-func (f *fakeBoardStore) VersusTop(_ string, n int) ([]VersusRow, error) {
+func (f *fakeBoardStore) VersusTop(rule string, n int) ([]VersusRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
 	f.lastN = n
+	f.lastRule = rule
 	return []VersusRow{{Nickname: "고수", Rating: 1620, Wins: 3}}, nil
 }
 
@@ -127,6 +130,57 @@ func TestLeaderboardCachesAndHidesMemberID(t *testing.T) {
 	}
 	if rec := get("vs_score120"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("알 수 없는 보드 = %d", rec.Code)
+	}
+}
+
+func TestLeaderboardVersusBoardRules(t *testing.T) {
+	store := &fakeBoardStore{}
+	lb := NewLeaderboard(store)
+	lb.now = (&testClock{t: time.Date(2026, 10, 12, 12, 0, 0, 0, kst)}).now
+	cases := []struct {
+		board string
+		rule  string
+	}{
+		{BoardVsAttack, RuleAttack},
+		{BoardVsSprint40, RuleSprint40},
+		{BoardVsSurvival, RuleSurvival},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		lb.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stack-ws/leaderboard?board="+c.board, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s code = %d", c.board, rec.Code)
+		}
+		store.mu.Lock()
+		got := store.lastRule
+		store.mu.Unlock()
+		if got != c.rule {
+			t.Fatalf("%s → 규칙 %q, want %q", c.board, got, c.rule)
+		}
+		var out struct {
+			Board string      `json:"board"`
+			Rows  []VersusRow `json:"rows"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Board != c.board || len(out.Rows) != 1 || out.Rows[0].Rank != 1 {
+			t.Fatalf("%s out = %+v", c.board, out)
+		}
+	}
+	before := store.count()
+	for _, board := range []string{"vs_score120", "vs_", "survival", "VS_SURVIVAL", ""} {
+		rec := httptest.NewRecorder()
+		lb.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stack-ws/leaderboard?board="+board, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("알 수 없는 보드 %q = %d", board, rec.Code)
+		}
+	}
+	if store.count() != before {
+		t.Fatal("알 수 없는 보드로 저장소를 읽었다")
+	}
+	if rule, ok := versusBoardRule(BoardSoloAll); ok || rule != "" {
+		t.Fatalf("혼자하기 보드가 대전 규칙으로 매핑됐다 (%q)", rule)
 	}
 }
 

@@ -165,7 +165,7 @@ func (s *Server) onInactivity(roomID string, idx, gen int) {
 	}
 }
 
-// onTimeLimit 은 제한시간 판정이다. attack 은 무승부, sprint40 은 줄이 많은 쪽 승(같으면 무승부).
+// onTimeLimit 은 제한시간 판정이다. attack 은 무승부, sprint40·survival 은 줄이 많은 쪽 승(같으면 무승부).
 func (s *Server) onTimeLimit(roomID string) {
 	s.mu.Lock()
 	room := s.rooms[roomID]
@@ -293,7 +293,7 @@ func (s *Server) violationLocked(room *Room, idx int, code string) (lockOutcome,
 	return lockOutcome{}, code
 }
 
-// applyGarbageLocked 는 attack 규칙의 방해 줄을 처리한다.
+// applyGarbageLocked 는 방해 줄 규칙(RuleSpec.Garbage, 현재 attack 만)의 방해 줄을 처리한다.
 // 줄을 지우면 공격표(1→0, 2→1, 3→2, 4→4)만큼 먼저 내 대기 줄을 상쇄하고 남은 만큼 상대에게 쌓는다(대기 ≤ 12).
 // 줄을 못 지운 lock 뒤에는 내 대기 줄을 최대 8줄 넣으라고 보낸다(묶음마다 구멍 열이 같다).
 func (s *Server) applyGarbageLocked(room *Room, idx, cleared int) {
@@ -366,7 +366,7 @@ func (s *Server) sendOpponentStateLocked(room *Room, seat int) {
 	s.emitToLocked(to.mbID, "opponent_state", map[string]interface{}{"board": from.board, "lines": from.lines, "score": from.score, "pending": from.pending.total()})
 }
 
-// sendProgressLocked 는 sprint40 진행률 progress {you, opp, elapsedMs} 를 두 사람에게 보낸다.
+// sendProgressLocked 는 목표 줄 수 규칙(RuleSpec.GoalLines, 현재 sprint40 만)의 진행률 progress {you, opp, elapsedMs} 를 두 사람에게 보낸다.
 func (s *Server) sendProgressLocked(room *Room) {
 	elapsed := s.now().Sub(room.goAt).Milliseconds()
 	for i, p := range room.players {
