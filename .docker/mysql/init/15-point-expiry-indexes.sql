@@ -2,7 +2,7 @@
 
 -- FIFO consumption: find active credit entries ordered by expire date
 -- Used in GnuboardPointWriteRepository.AddPoint (negative points)
-CREATE INDEX idx_g5_point_fifo ON g5_point (po_mb_id, po_expired, po_point, po_expire_date, po_id);
+CREATE INDEX idx_g5_point_fifo ON g5_point (mb_id, po_expired, po_point, po_expire_date, po_id);
 
 -- Batch expiry: find entries past their expiry date
 -- Used in GnuboardPointWriteRepository.ExpireBatch (cron)
