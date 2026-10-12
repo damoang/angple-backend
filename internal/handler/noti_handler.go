@@ -101,6 +101,10 @@ func mapNotificationType(fromCase, toCase string, wrID, wrParent int) string {
 		if toCase == "follow" {
 			return "follow"
 		}
+		// 키워드 알림(새 글 제목에 회원이 등록한 키워드). 구독과 아이콘·문구를 나누기 위해 따로 둔다.
+		if toCase == "keyword" {
+			return "keyword"
+		}
 		return "subscribe"
 	default:
 		return "system"
@@ -805,6 +809,7 @@ type notiPreferenceResponse struct {
 	NotiLike           bool `json:"noti_like"`
 	NotiFollow         bool `json:"noti_follow"`
 	NotiBoardSubscribe bool `json:"noti_board_subscribe"`
+	NotiKeyword        bool `json:"noti_keyword"`
 	LikeThreshold      int  `json:"like_threshold"`
 }
 
@@ -816,6 +821,7 @@ func toNotiPreferenceResponse(pref *gnurepo.NotiPreference) notiPreferenceRespon
 		NotiLike:           pref.NotiLike,
 		NotiFollow:         pref.NotiFollow,
 		NotiBoardSubscribe: pref.NotiBoardSubscribe,
+		NotiKeyword:        pref.NotiKeyword,
 		LikeThreshold:      pref.LikeThreshold,
 	}
 }
@@ -852,6 +858,7 @@ func (h *NotiHandler) UpdatePreferences(c *gin.Context) {
 		NotiLike           *bool `json:"noti_like"`
 		NotiFollow         *bool `json:"noti_follow"`
 		NotiBoardSubscribe *bool `json:"noti_board_subscribe"`
+		NotiKeyword        *bool `json:"noti_keyword"`
 		LikeThreshold      *int  `json:"like_threshold"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -882,6 +889,9 @@ func (h *NotiHandler) UpdatePreferences(c *gin.Context) {
 	}
 	if req.NotiBoardSubscribe != nil {
 		pref.NotiBoardSubscribe = *req.NotiBoardSubscribe
+	}
+	if req.NotiKeyword != nil {
+		pref.NotiKeyword = *req.NotiKeyword
 	}
 	if req.LikeThreshold != nil {
 		if *req.LikeThreshold < 1 {

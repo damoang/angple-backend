@@ -99,6 +99,11 @@ type WriteAfterWorker struct {
 	httpClient     *http.Client
 	webBaseURL     string
 	internalSecret string
+
+	// 키워드 알림(선택) — SetKeywordAlert 로 켠다. keywordMatcher 가 nil 이면 꺼진 상태다.
+	keywordMatcher       *KeywordAlertMatcher
+	keywordLimiter       KeywordAlertLimiter
+	keywordMaxRecipients int
 }
 
 type PostCreatedJob struct {
@@ -613,6 +618,8 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 	for _, fid := range followerIDs {
 		followerSet[fid] = true
 	}
+	// 이 글로 구독 알림 대상이 된 회원 — 키워드 알림에서 제외한다(한 글 = 한 회원 1건).
+	subscribed := make(map[string]bool)
 	for _, sid := range subscriberIDs {
 		if followerSet[sid] {
 			continue
@@ -625,6 +632,7 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 		if !ok || !pref.NotiBoardSubscribe {
 			continue
 		}
+		subscribed[sid] = true
 		w.createNotification(&gnurepo.Notification{
 			PhToCase: "subscribe", PhFromCase: "write", BoTable: job.BoardSlug,
 			WrID: job.WriteID, MbID: sid, RelMbID: job.MemberID,
@@ -636,6 +644,10 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 			WrParent:   job.WriteID,
 		})
 	}
+
+	// 키워드 알림 — 새 원글 제목에 회원이 등록한 키워드가 들어가면 보낸다.
+	// 팔로우·구독 알림이 모두 끝난 뒤에 돌고, 실패해도 로그만 남긴다(keyword_alert.go).
+	w.sendKeywordAlerts(job, authorName, blockedBy, followerSet, subscribed)
 }
 
 //nolint:gocyclo // Notification routing for comments is branching-heavy business logic and stays explicit on purpose.

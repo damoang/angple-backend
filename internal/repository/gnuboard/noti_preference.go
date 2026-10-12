@@ -16,6 +16,7 @@ type NotiPreference struct {
 	NotiFollow  bool   `gorm:"column:noti_follow;default:1"`
 	// 게시판 구독('write' subscribe) 알림 — 회원 팔로우(NotiFollow)와 분리 (#12607)
 	NotiBoardSubscribe bool      `gorm:"column:noti_board_subscribe;default:1"`
+	NotiKeyword        bool      `gorm:"column:noti_keyword;default:1"`
 	LikeThreshold      int       `gorm:"column:like_threshold;default:1"`
 	UpdatedAt          time.Time `gorm:"column:updated_at"`
 }
@@ -52,6 +53,7 @@ func (r *notiPreferenceRepository) Get(mbID string) (*NotiPreference, error) {
 				NotiLike:           true,
 				NotiFollow:         true,
 				NotiBoardSubscribe: true,
+				NotiKeyword:        true,
 				LikeThreshold:      1,
 			}, nil
 		}
@@ -73,6 +75,7 @@ func (r *notiPreferenceRepository) Upsert(pref *NotiPreference) error {
 		"noti_like":            pref.NotiLike,
 		"noti_follow":          pref.NotiFollow,
 		"noti_board_subscribe": pref.NotiBoardSubscribe,
+		"noti_keyword":         pref.NotiKeyword,
 		"like_threshold":       pref.LikeThreshold,
 	}).Error
 }

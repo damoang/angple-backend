@@ -2618,6 +2618,14 @@ func main() {
 			getBlockedIDs,
 			worker.ClearPostMemCache(&postMemCache),
 		)
+		// 키워드 알림 — 전체 키워드 목록을 파드 메모리에 60초 주기로 적재해 새 원글 제목과 대조한다.
+		// 시간당 상한은 Redis 카운터로 센다(Redis 가 없거나 오류면 상한 없이 보낸다).
+		// ⛔ 스키마 선행 필요 — migration/013_keyword_alert.up.sql (수동 DDL 후 배포).
+		var keywordLimiter worker.KeywordAlertLimiter
+		if redisClient != nil {
+			keywordLimiter = worker.NewRedisKeywordAlertLimiter(redisClient)
+		}
+		writeAfterWorker.SetKeywordAlert(worker.NewKeywordAlertMatcher(worker.NewDBKeywordAlertLoader(db)), keywordLimiter)
 		writeAfterWorker.Start(4)
 		defer writeAfterWorker.Stop()
 
