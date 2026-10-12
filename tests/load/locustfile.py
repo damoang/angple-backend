@@ -48,7 +48,7 @@ class AngpleUser(HttpUser):
     def get_post_detail(self):
         """View single post"""
         self.client.get(
-            "/api/v1/boards/free/posts/1",
+            "/api/v1/boards/free/posts/11",  # 개발 시드의 자유게시판 글은 wr_id 10 부터(11 = 댓글 2개)
             name="/api/v1/boards/[board_id]/posts/[id]"
         )
 
@@ -56,7 +56,7 @@ class AngpleUser(HttpUser):
     def get_comments(self):
         """View comments on a post"""
         self.client.get(
-            "/api/v1/boards/free/posts/1/comments",
+            "/api/v1/boards/free/posts/11/comments",
             name="/api/v1/boards/[board_id]/posts/[post_id]/comments"
         )
 
