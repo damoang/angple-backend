@@ -99,7 +99,8 @@ jobs:
       run: |
         # Extract failure rate from CSV
         if [ -f load-test-results_stats.csv ]; then
-          FAIL_RATE=$(tail -1 load-test-results_stats.csv | cut -d',' -f5)
+          # 5번째 열은 중앙값 응답시간(ms)이다 — 실패율은 Aggregated 행의 실패 수 ÷ 요청 수로 계산한다
+          FAIL_RATE=$(python3 -c "import csv; r=[x for x in csv.DictReader(open('load-test-results_stats.csv')) if x['Name']=='Aggregated'][0]; n=int(r['Request Count']); print(round(int(r['Failure Count'])*100/n, 2) if n else 100)")
           echo "Failure rate: ${FAIL_RATE}%"
           # Fail if error rate > 1%
           if [ $(echo "$FAIL_RATE > 1" | bc -l) -eq 1 ]; then
