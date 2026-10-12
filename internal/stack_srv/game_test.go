@@ -481,6 +481,170 @@ func TestSurvivalTimeLimitJudgement(t *testing.T) {
 	}
 }
 
+// scoredLock 은 클라이언트 점수를 실은 lock 이다.
+func scoredLock(seq, cleared int, score int64) map[string]interface{} {
+	m := lock(seq, cleared)
+	m["score"] = score
+	return m
+}
+
+// seatScores 는 두 자리의 (서버 판정) 점수와 줄 점수다.
+func seatScores(s *Server, roomID string) (score, lineScore [2]int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, p := range s.rooms[roomID].players {
+		score[i], lineScore[i] = p.score, p.lineScore
+	}
+	return score, lineScore
+}
+
+// lastOpponentScore 는 쌓인 opponent_state 중 마지막 score 다.
+func lastOpponentScore(t *testing.T, c *Client) interface{} {
+	t.Helper()
+	var got interface{}
+	for _, m := range drain(t, c) {
+		if m.Type == "opponent_state" {
+			got = m.Data["score"]
+		}
+	}
+	return got
+}
+
+func TestScore120UsesServerJudgedScore(t *testing.T) {
+	s := newTestServer(newFakeStore(), testTiming())
+	c1, c2, roomID := startGame(t, s, ModeRandom, RuleScore120)
+	presetLocks(s, roomID, 20)
+	// 21번째 조각, 4줄(레벨 1) = 700. 낙하 점수 상한 2×30×22 = 1320 → 부풀린 점수는 2020 으로 잘린다.
+	sendMsg(t, s, c1, "lock", scoredLock(1, 4, 1000000))
+	if score, line := seatScores(s, roomID); score[0] != 2020 || line[0] != 700 {
+		t.Fatalf("부풀림 잘림: score=%d line=%d", score[0], line[0])
+	}
+	if got := lastOpponentScore(t, c2); got != float64(2020) {
+		t.Fatalf("opponent_state score = %v", got)
+	}
+	// 4줄 더(지우기 전 4줄 → 레벨 1) = 1400. 클라이언트 점수가 더 작으면 낙하 점수 0.
+	sendMsg(t, s, c1, "lock", scoredLock(2, 4, 0))
+	if score, line := seatScores(s, roomID); score[0] != 1400 || line[0] != 1400 {
+		t.Fatalf("음수 낙하: score=%d line=%d", score[0], line[0])
+	}
+	// 8줄을 채운 뒤의 1줄은 레벨 2 = 200 → 줄 점수 1600, 낙하 점수 50 은 그대로.
+	sendMsg(t, s, c1, "lock", scoredLock(3, 1, 1650))
+	if score, line := seatScores(s, roomID); score[0] != 1650 || line[0] != 1600 {
+		t.Fatalf("레벨 경계: score=%d line=%d", score[0], line[0])
+	}
+	if got := lastOpponentScore(t, c2); got != float64(1650) {
+		t.Fatalf("opponent_state score = %v", got)
+	}
+	// 잘라 쓰기만 하고 위반으로 세지 않는다.
+	s.mu.Lock()
+	violations := s.rooms[roomID].players[0].violations
+	s.mu.Unlock()
+	if violations != 0 {
+		t.Fatalf("violations = %d", violations)
+	}
+}
+
+func TestScore120TimeLimitJudgement(t *testing.T) {
+	const reasonTime, reasonDraw, winnerNick, winnerID = "time", "draw", "nick-p1", "p1"
+	store := newFakeStore()
+	s := newTestServer(store, testTiming())
+	c1, c2, roomID := startGame(t, s, ModeRandom, RuleScore120)
+	presetLocks(s, roomID, 20)
+	// p1 은 줄이 적어도 점수가 높다: 4줄 700 + 낙하 300 = 1000.
+	sendMsg(t, s, c1, "lock", scoredLock(1, 4, 1000))
+	// p2 는 줄이 많아도 점수가 낮다: 1줄 × 5번(레벨 1) = 500.
+	for seq := 1; seq <= 5; seq++ {
+		sendMsg(t, s, c2, "lock", scoredLock(seq, 1, int64(100*seq)))
+	}
+	s.mu.Lock()
+	lines := [2]int{s.rooms[roomID].players[0].lines, s.rooms[roomID].players[1].lines}
+	s.mu.Unlock()
+	if lines != [2]int{4, 5} {
+		t.Fatalf("lines = %v", lines)
+	}
+	s.onTimeLimit(roomID)
+	over := next(t, c1, "game_over")
+	if over.Data["reason"] != reasonTime || over.Data["winner"] != winnerNick || over.Data["youWon"] != true {
+		t.Fatalf("score120 시간 판정 = %v", over.Data)
+	}
+	if result, _ := over.Data["result"].(map[string]interface{}); result["score"] != float64(1000) || result["lines"] != float64(4) {
+		t.Fatalf("result = %v", over.Data["result"])
+	}
+	lost := next(t, c2, "game_over")
+	if result, _ := lost.Data["result"].(map[string]interface{}); lost.Data["youWon"] != false || result["score"] != float64(500) {
+		t.Fatalf("상대 game_over = %v", lost.Data)
+	}
+	_, _, _, finishes := store.snapshot()
+	if len(finishes) != 1 || finishes[0].Winner != winnerID || finishes[0].Rule != RuleScore120 || finishes[0].Reason != reasonTime {
+		t.Fatalf("finishes = %+v", finishes)
+	}
+
+	// 점수가 같으면 줄 수와 상관없이 무승부다.
+	s2 := newTestServer(store, testTiming())
+	d1, _, drawRoom := startGame(t, s2, ModeRandom, RuleScore120)
+	s2.mu.Lock()
+	s2.rooms[drawRoom].players[0].lines = 20
+	s2.rooms[drawRoom].players[1].lines = 3
+	s2.rooms[drawRoom].players[0].score = 2400
+	s2.rooms[drawRoom].players[1].score = 2400
+	s2.mu.Unlock()
+	s2.onTimeLimit(drawRoom)
+	draw := next(t, d1, "game_over")
+	if draw.Data["reason"] != reasonDraw || draw.Data["winner"] != nil {
+		t.Fatalf("score120 동점 = %v", draw.Data)
+	}
+}
+
+func TestScore120TopoutLosesAndSendsNoGarbage(t *testing.T) {
+	const topout, winnerNick, winnerID = "topout", "nick-p2", "p2"
+	store := newFakeStore()
+	s := newTestServer(store, testTiming())
+	c1, c2, roomID := startGame(t, s, ModeRandom, RuleScore120)
+	presetLocks(s, roomID, 20)
+	sendMsg(t, s, c1, "lock", scoredLock(1, 4, 700))
+	sendMsg(t, s, c2, "lock", scoredLock(1, 0, 0))
+	all := append(drain(t, c1), drain(t, c2)...)
+	for _, typ := range []string{"garbage_queued", "garbage_apply", "progress"} {
+		if n := countType(all, typ); n != 0 {
+			t.Fatalf("score120 에서 %s 가 %d번 나갔다", typ, n)
+		}
+	}
+	// 점수가 앞서도 먼저 넘치면 진다.
+	sendMsg(t, s, c1, "topped_out", map[string]interface{}{"seq": 2, "tick": 0})
+	lost := next(t, c1, "game_over")
+	if lost.Data["reason"] != topout || lost.Data["youWon"] != false {
+		t.Fatalf("game_over = %v", lost.Data)
+	}
+	if won := next(t, c2, "game_over"); won.Data["youWon"] != true || won.Data["winner"] != winnerNick {
+		t.Fatalf("상대 game_over = %v", won.Data)
+	}
+	_, _, _, finishes := store.snapshot()
+	if len(finishes) != 1 || finishes[0].Winner != winnerID || finishes[0].Rule != RuleScore120 || finishes[0].Reason != topout {
+		t.Fatalf("finishes = %+v", finishes)
+	}
+}
+
+func TestOtherRulesKeepClientScore(t *testing.T) {
+	for _, rule := range []string{RuleAttack, RuleSprint40, RuleSurvival} {
+		s := newTestServer(newFakeStore(), testTiming())
+		c1, c2, roomID := startGame(t, s, ModeRandom, rule)
+		presetLocks(s, roomID, 20)
+		// 서버 판정 점수라면 잘렸을 값이 그대로 남아야 한다.
+		sendMsg(t, s, c1, "lock", scoredLock(1, 1, 1000000))
+		score, line := seatScores(s, roomID)
+		if score[0] != 1000000 || line[0] != 0 {
+			t.Fatalf("%s: score=%d line=%d", rule, score[0], line[0])
+		}
+		if got := lastOpponentScore(t, c2); got != float64(1000000) {
+			t.Fatalf("%s: opponent_state score = %v", rule, got)
+		}
+		sendMsg(t, s, c1, "lock", scoredLock(2, 0, 3))
+		if score, _ := seatScores(s, roomID); score[0] != 3 {
+			t.Fatalf("%s: 낮아진 클라이언트 점수 = %d", rule, score[0])
+		}
+	}
+}
+
 func TestCellBalanceViolationsEndInCheat(t *testing.T) {
 	store := newFakeStore()
 	s := newTestServer(store, testTiming())
@@ -680,7 +844,8 @@ func TestJoinRejectsClosedRulesAndBadInvite(t *testing.T) {
 		data map[string]interface{}
 		code string
 	}{
-		{map[string]interface{}{"mode": "random", "rule": "score120"}, "invalid_rule"},
+		{map[string]interface{}{"mode": "random", "rule": "score60"}, "invalid_rule"},
+		{map[string]interface{}{"mode": "random", "rule": "Score120"}, "invalid_rule"},
 		{map[string]interface{}{"mode": "random", "rule": "Survival"}, "invalid_rule"},
 		{map[string]interface{}{"mode": "rating", "rule": "attack"}, "invalid_mode"},
 		{map[string]interface{}{"mode": "favorite", "rule": "attack"}, "invalid_invite"},

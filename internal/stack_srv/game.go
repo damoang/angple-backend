@@ -16,7 +16,7 @@ type lockData struct {
 	Cleared int `json:"cleared"`
 	// Board 는 줄을 지운 뒤, 방해 줄을 넣기 전의 판이다(162자).
 	Board string `json:"board"`
-	// Score 는 클라이언트 점수다(표시용).
+	// Score 는 클라이언트 점수다. 다른 규칙에서는 표시용이고, score120 에서는 서버가 잘라 판정 점수를 만든다(judgedScore).
 	Score int64 `json:"score"`
 	// Lines 는 클라이언트 줄 합이다(표시용 — 판정은 서버 합산).
 	Lines int `json:"lines"`
@@ -165,7 +165,8 @@ func (s *Server) onInactivity(roomID string, idx, gen int) {
 	}
 }
 
-// onTimeLimit 은 제한시간 판정이다. attack 은 무승부, sprint40·survival 은 줄이 많은 쪽 승(같으면 무승부).
+// onTimeLimit 은 제한시간 판정이다. attack 은 무승부, sprint40·survival 은 줄이 많은 쪽,
+// score120 은 서버 판정 점수가 높은 쪽 승(같으면 무승부).
 func (s *Server) onTimeLimit(roomID string) {
 	s.mu.Lock()
 	room := s.rooms[roomID]
@@ -173,7 +174,7 @@ func (s *Server) onTimeLimit(roomID string) {
 		s.mu.Unlock()
 		return
 	}
-	winner := judgeTimeLimit(room.rule, [2]int{room.players[0].lines, room.players[1].lines})
+	winner := judgeTimeLimit(room.rule, [2]int{room.players[0].lines, room.players[1].lines}, [2]int64{room.players[0].score, room.players[1].score})
 	s.mu.Unlock()
 	reason := "time"
 	if winner < 0 {
@@ -236,9 +237,14 @@ func (s *Server) applyLockLocked(room *Room, idx int, d lockData) (lockOutcome, 
 		// 조각은 굳은 것으로 세되 지운 줄·공격은 인정하지 않는다.
 		return s.violationLocked(room, idx, "cell_balance")
 	}
+	if room.rule == RuleScore120 {
+		p.lineScore = scoreLockLine(p.lineScore, p.lines, d.Cleared)
+		p.score = judgedScore(p.lineScore, d.Score, p.locks)
+	} else {
+		p.score = d.Score
+	}
 	p.lines += d.Cleared
 	p.board = d.Board
-	p.score = d.Score
 
 	spec, _ := LookupRule(room.rule)
 	if spec.Garbage {

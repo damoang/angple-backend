@@ -16,6 +16,7 @@ const (
 	BoardVsAttack   = "vs_attack"
 	BoardVsSprint40 = "vs_sprint40"
 	BoardVsSurvival = "vs_survival"
+	BoardVsScore120 = "vs_score120"
 )
 
 // errUnknownBoard 는 열리지 않은 점수판이다(ServeHTTP 가 먼저 400 으로 거른다).
@@ -142,7 +143,7 @@ func (l *Leaderboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // knownBoard 는 열린 점수판인지다.
 func knownBoard(board string) bool {
 	switch board {
-	case BoardSoloWeek, BoardSoloAll, BoardVsAttack, BoardVsSprint40, BoardVsSurvival:
+	case BoardSoloWeek, BoardSoloAll, BoardVsAttack, BoardVsSprint40, BoardVsSurvival, BoardVsScore120:
 		return true
 	}
 	return false
@@ -157,6 +158,8 @@ func versusBoardRule(board string) (string, bool) {
 		return RuleSprint40, true
 	case BoardVsSurvival:
 		return RuleSurvival, true
+	case BoardVsScore120:
+		return RuleScore120, true
 	}
 	return "", false
 }
