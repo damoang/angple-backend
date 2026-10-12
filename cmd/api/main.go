@@ -40,6 +40,7 @@ import (
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
 	v2routes "github.com/damoang/angple-backend/internal/routes/v2"
 	"github.com/damoang/angple-backend/internal/service"
+	"github.com/damoang/angple-backend/internal/service/hitbuffer"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	"github.com/damoang/angple-backend/internal/telemetry"
 	"github.com/damoang/angple-backend/internal/worker"
@@ -2620,6 +2621,18 @@ func main() {
 		writeAfterWorker.Start(4)
 		defer writeAfterWorker.Stop()
 
+		// 조회수 버퍼 — 조회마다 UPDATE 하지 않고 Redis 에 모았다가 주기적으로 묶어 반영한다.
+		// Redis 가 없거나 쓰기에 실패하면 기존처럼 즉시 UPDATE 한다. 종료 시 Stop 이 진행 중 flush 를
+		// 취소하고 한 번 더 flush 한다(hitbuffer.StopTimeout 3s + 정리 호출 1~2s 상한).
+		// 버퍼는 컨텍스트 마감을 지키는 전용 Redis 클라이언트를 따로 연다(전역 클라이언트 설정은 그대로).
+		var hitBackend hitbuffer.Backend
+		if redisClient != nil {
+			hitBackend = hitbuffer.NewRedisBackend(redisClient)
+		}
+		hitBuffer := hitbuffer.New(hitBackend, hitbuffer.NewDBStore(db, gnuWriteRepo.IncrementHit))
+		hitBuffer.Start()
+		defer hitBuffer.Stop()
+
 		// 푸시 알림 outbox 폴러 — g5_na_noti 를 폴링해 Expo Push 로 발송.
 		// PUSH_ENABLED=true 일 때만 가동(canary 검증 후 prod on).
 		if v := os.Getenv("PUSH_ENABLED"); v == "true" || v == "1" {
@@ -3298,10 +3311,10 @@ func main() {
 			}
 
 			// Increment view count async (skip for deleted posts)
-			// 응답 지연 방지: goroutine으로 비동기 처리
+			// 응답 지연 방지: goroutine으로 비동기 처리. 버퍼에 쌓고 주기적으로 DB 에 반영한다.
 			if post.WrDeletedAt == nil {
 				go func(boardID string, wrID int) {
-					if vcErr := gnuWriteRepo.IncrementHit(boardID, wrID); vcErr != nil {
+					if vcErr := hitBuffer.Incr(boardID, wrID); vcErr != nil {
 						log.Printf("IncrementHit error: %v", vcErr)
 					}
 				}(slug, id)
@@ -7809,8 +7822,10 @@ func main() {
 	//    여기서 아무리 기다려도 소용없다. preStop(5s) 이 이미 엔드포인트에서 빼주므로
 	//    새 요청은 들어오지 않는다 — 남은 것만 흘려보내면 된다.
 	// ⛔ 20초를 주면 안 된다. defer 는 LIFO 라 이 뒤에 deleteWorker/pushWorker/
-	//    writeAfterWorker 의 Stop 이 줄줄이 서고, 30초 grace 를 넘기면 SIGKILL 이다.
-	//    preStop(5s) + 여기(8s) + 워커 Stop 들(각 상한 5s) 이 30초 안에 들어와야 한다.
+	//    hitBuffer/writeAfterWorker 의 Stop 이 줄줄이 서고, 30초 grace 를 넘기면 SIGKILL 이다.
+	//    preStop(5s) + 여기(8s) + hitBuffer(진행 중 flush 취소 + 종료 flush, 약 5s 상한)
+	//    + writeAfterWorker(5s 상한) = 23s. deleteWorker/pushWorker 는 진행 중인 한 번의
+	//    처리만 기다린다 — 이 셋을 합쳐 30초 안에 들어와야 한다.
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancelShutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
