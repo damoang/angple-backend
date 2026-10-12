@@ -13,6 +13,15 @@
 //   - 처리 도중 파드가 죽어 남은 처리 중 키는 staleAfter 가 지난 뒤 다음 flush 가
 //     원자적으로 다시 가져가 반영한다(두 파드가 동시에 가져가지 못한다).
 //
+// 전달 보장은 「최소 한 번」이다. 아래 좁은 창에서는 같은 몫이 두 번 반영될 수 있다:
+//   - 묶음 UPDATE 가 커밋된 뒤 그 필드를 지우는 HDEL(Ack)이 실패한 경우 — 필드가 처리 중 키에
+//     남아 staleAfter 뒤 회수되며 다시 더해진다(그 묶음만).
+//   - DB 가 커밋한 뒤 오류를 돌려준 경우(응답 유실·타임아웃) — 되돌린 값이 다음 flush 에 다시 더해진다.
+//
+// Redis 쪽에서 아직 반영 안 된 값이 사라질 수 있는 경우:
+//   - maxmemory 정책이 allkeys-* 이면 이 키들도 내쫓길 수 있다(volatile-* 은 TTL 없는 키를 내쫓지 않는다).
+//   - Redis 가 재시작하면 마지막 RDB/AOF 저장 이후 쌓인 값은 사라진다(최대 한 주기분 + 저장 간격).
+//
 // 화면에 보이는 조회수의 집계 방식(중복 제거 여부)은 바꾸지 않는다 — 반영 시점만 늦어진다.
 package hitbuffer
 
@@ -20,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"regexp"
 	"sort"
@@ -43,9 +53,19 @@ const (
 	// flush 제한 시간(flushTimeout)보다 충분히 길어야 살아있는 flush 의 키를 가로채지 않는다.
 	DefaultStaleAfter = 10 * time.Minute
 
-	incrTimeout      = time.Second
-	flushTimeout     = time.Minute
-	stopFlushTimeout = 3 * time.Second
+	// StopTimeout 은 Stop 이 기다리는 총 상한이다(진행 중 flush 중단 + 종료 flush).
+	// 중단된 묶음을 되돌리는 restoreTimeout 만큼 넘칠 수 있다.
+	StopTimeout = 3 * time.Second
+
+	incrTimeout    = time.Second
+	flushTimeout   = time.Minute
+	restoreTimeout = time.Second
+
+	// 리더 락 TTL 은 주기보다 조금 짧게 둔다 — 락을 쥔 파드가 다음 틱에 다시 잡을 수 있게.
+	lockMargin = 10 * time.Second
+
+	// 테이블이 없는 게시판은 이 시간 동안 flush 를 건너뛰고(값은 버퍼에 남는다) 로그도 이 간격으로만 남긴다.
+	missingTableBackoff = time.Hour
 
 	liveKeyPrefix   = "hits:"
 	flushingSegment = "flushing"
@@ -61,6 +81,9 @@ var (
 
 	// ErrInvalidPostID 는 글 ID 가 0 이하일 때 반환된다.
 	ErrInvalidPostID = errors.New("hitbuffer: invalid post id")
+
+	// ErrTableMissing 은 Store 가 게시판 테이블이 없다고 판단했을 때 반환한다.
+	ErrTableMissing = errors.New("hitbuffer: board table missing")
 )
 
 // ValidBoardID 는 게시판 ID 가 동적 테이블명에 넣어도 안전한 값인지 확인한다.
@@ -115,16 +138,20 @@ type Buffer struct {
 	token string
 	seq   atomic.Uint64
 
-	stopCh   chan struct{}
-	doneCh   chan struct{}
-	started  atomic.Bool
-	stopOnce sync.Once
+	loopCtx    context.Context
+	loopCancel context.CancelFunc
+	doneCh     chan struct{}
+	started    atomic.Bool
+	stopOnce   sync.Once
+
+	missingMu sync.Mutex
+	missing   map[string]time.Time
 }
 
 // Option 은 Buffer 설정을 바꾼다.
 type Option func(*Buffer)
 
-// WithInterval 은 flush 주기를 바꾼다(리더 락 TTL 도 이 값을 쓴다).
+// WithInterval 은 flush 주기를 바꾼다(리더 락 TTL 도 이 값에서 정한다).
 func WithInterval(d time.Duration) Option {
 	return func(b *Buffer) {
 		if d > 0 {
@@ -162,6 +189,7 @@ func WithClock(now func() time.Time) Option {
 
 // New 는 Buffer 를 만든다. backend 가 nil 이면 모든 조회를 즉시 DB 에 반영한다(기존 동작).
 func New(backend Backend, store Store, opts ...Option) *Buffer {
+	loopCtx, loopCancel := context.WithCancel(context.Background())
 	b := &Buffer{
 		backend:    backend,
 		store:      store,
@@ -170,8 +198,10 @@ func New(backend Backend, store Store, opts ...Option) *Buffer {
 		staleAfter: DefaultStaleAfter,
 		now:        time.Now,
 		token:      uuid.NewString(),
-		stopCh:     make(chan struct{}),
+		loopCtx:    loopCtx,
+		loopCancel: loopCancel,
 		doneCh:     make(chan struct{}),
+		missing:    map[string]time.Time{},
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -213,10 +243,11 @@ func (b *Buffer) loop() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-b.stopCh:
+		case <-b.loopCtx.Done():
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
+			// Stop 이 loopCtx 를 취소하면 진행 중인 Redis·DB 호출이 바로 끝난다.
+			ctx, cancel := context.WithTimeout(b.loopCtx, flushTimeout)
 			if _, err := b.FlushIfLeader(ctx); err != nil {
 				log.Printf("[hitbuffer] flush error: %v", err)
 			}
@@ -226,23 +257,45 @@ func (b *Buffer) loop() {
 }
 
 // Stop 은 flush 루프를 멈추고 마지막으로 한 번 flush 한다(종료 시 호출).
+// 진행 중인 flush 는 취소되고(못 끝낸 묶음은 버퍼로 되돌아간다), 전체가 StopTimeout 안에 끝난다.
 // 종료 flush 는 리더 락 없이 돈다 — RENAME 으로 가져간 몫만 처리하므로
 // 다른 파드의 flush 와 겹쳐도 같은 값을 두 번 반영하지 않는다.
 func (b *Buffer) Stop() {
-	b.stopOnce.Do(func() {
-		close(b.stopCh)
-		if b.started.Load() {
-			<-b.doneCh
-		}
-		if b.backend == nil {
+	b.stopOnce.Do(b.stop)
+}
+
+func (b *Buffer) stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), StopTimeout)
+	defer cancel()
+	b.loopCancel()
+	if b.started.Load() {
+		select {
+		case <-b.doneCh:
+		case <-ctx.Done():
+			// 루프가 아직 Redis 를 쓰고 있을 수 있으므로 백엔드를 닫지 않는다.
+			log.Printf("[hitbuffer] stop timed out waiting for in-flight flush")
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), stopFlushTimeout)
-		defer cancel()
-		if err := b.Flush(ctx); err != nil {
-			log.Printf("[hitbuffer] shutdown flush error: %v", err)
+	}
+	if b.backend == nil {
+		return
+	}
+	if err := b.Flush(ctx); err != nil {
+		log.Printf("[hitbuffer] shutdown flush error: %v", err)
+	}
+	if c, ok := b.backend.(io.Closer); ok {
+		if err := c.Close(); err != nil {
+			log.Printf("[hitbuffer] backend close error: %v", err)
 		}
-	})
+	}
+}
+
+// lockTTL 은 리더 락 TTL 이다. 주기보다 lockMargin 만큼 짧아 락을 쥔 파드가 다음 틱에 다시 잡는다.
+func (b *Buffer) lockTTL() time.Duration {
+	if b.interval > 2*lockMargin {
+		return b.interval - lockMargin
+	}
+	return b.interval
 }
 
 // FlushIfLeader 는 리더 락을 잡은 경우에만 flush 한다. 락은 주기만큼 유지되어
@@ -251,7 +304,7 @@ func (b *Buffer) FlushIfLeader(ctx context.Context) (bool, error) {
 	if b.backend == nil {
 		return false, nil
 	}
-	ok, err := b.backend.AcquireLock(ctx, b.token, b.interval)
+	ok, err := b.backend.AcquireLock(ctx, b.token, b.lockTTL())
 	if err != nil {
 		return false, fmt.Errorf("hitbuffer: acquire lock: %w", err)
 	}
@@ -288,6 +341,10 @@ func (b *Buffer) flushTable(ctx context.Context, boardID string) error {
 	if !ValidBoardID(boardID) {
 		log.Printf("[hitbuffer] invalid board id in buffer, dropped: %q", boardID)
 		return b.backend.RemoveTable(ctx, boardID)
+	}
+	if b.recentlyMissing(boardID) {
+		// 값은 hits:{boardID} 에 그대로 남아 나중에 반영될 수 있다.
+		return nil
 	}
 	dst := b.newFlushingKey(boardID)
 	ok, err := b.backend.Claim(ctx, boardID, LiveKey(boardID), dst, false)
@@ -364,10 +421,7 @@ func (b *Buffer) drain(ctx context.Context, boardID, key string) error {
 			fields = append(fields, e.field)
 		}
 		if err := b.store.AddHits(ctx, boardID, hits); err != nil {
-			if rErr := b.backend.Restore(ctx, boardID, key); rErr != nil {
-				return fmt.Errorf("hitbuffer: update %s: %w (restore failed: %w)", boardID, err, rErr)
-			}
-			return fmt.Errorf("hitbuffer: update %s (restored to buffer): %w", boardID, err)
+			return b.restoreAfterFailure(ctx, boardID, key, err)
 		}
 		if err := b.backend.Ack(ctx, key, fields); err != nil {
 			return fmt.Errorf("hitbuffer: ack %s: %w", key, err)
@@ -377,6 +431,44 @@ func (b *Buffer) drain(ctx context.Context, boardID, key string) error {
 		return fmt.Errorf("hitbuffer: done %s: %w", key, err)
 	}
 	return nil
+}
+
+// restoreAfterFailure 는 DB 반영 실패 시 남은 값을 버퍼로 되돌린다.
+// flush 가 취소된 경우(종료)에도 되돌릴 수 있게 취소와 분리된 짧은 컨텍스트를 쓴다.
+// 되돌리기마저 실패하면 키는 처리 중 목록에 남아 staleAfter 뒤 회수된다.
+func (b *Buffer) restoreAfterFailure(ctx context.Context, boardID, key string, cause error) error {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), restoreTimeout)
+	defer cancel()
+	if rErr := b.backend.Restore(rctx, boardID, key); rErr != nil {
+		return fmt.Errorf("hitbuffer: update %s: %w (restore failed: %w)", boardID, cause, rErr)
+	}
+	if errors.Is(cause, ErrTableMissing) {
+		// 같은 게시판으로 매 주기 로그가 쌓이지 않도록 한 시간 동안 건너뛴다(그동안 로그도 없음).
+		b.markMissing(boardID)
+		log.Printf("[hitbuffer] table for board %q missing; counts kept in buffer, retry in %s", boardID, missingTableBackoff)
+		return nil
+	}
+	return fmt.Errorf("hitbuffer: update %s (restored to buffer): %w", boardID, cause)
+}
+
+func (b *Buffer) markMissing(boardID string) {
+	b.missingMu.Lock()
+	defer b.missingMu.Unlock()
+	b.missing[boardID] = b.now()
+}
+
+func (b *Buffer) recentlyMissing(boardID string) bool {
+	b.missingMu.Lock()
+	defer b.missingMu.Unlock()
+	at, ok := b.missing[boardID]
+	if !ok {
+		return false
+	}
+	if b.now().Sub(at) >= missingTableBackoff {
+		delete(b.missing, boardID)
+		return false
+	}
+	return true
 }
 
 // parseHits 는 해시 필드/값을 글 ID/증가분으로 바꾼다. 해석할 수 없는 필드는 bad 로 돌려준다.

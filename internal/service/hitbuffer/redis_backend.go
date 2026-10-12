@@ -62,14 +62,31 @@ return #kv / 2
 
 var _ Backend = (*RedisBackend)(nil)
 
+// 버퍼 전용 클라이언트의 소켓 읽기/쓰기 상한. 조회 경로(Incr)가 Redis 지연에 묶이지 않게 짧게 둔다.
+const backendIOTimeout = time.Second
+
 // RedisBackend 는 go-redis 클라이언트로 구현한 Backend 다.
 type RedisBackend struct {
 	client redis.UniversalClient
 }
 
-// NewRedisBackend 는 RedisBackend 를 만든다.
-func NewRedisBackend(client redis.UniversalClient) *RedisBackend {
-	return &RedisBackend{client: client}
+// NewRedisBackend 는 base 와 같은 서버에 붙는 버퍼 전용 클라이언트로 RedisBackend 를 만든다.
+//
+// go-redis v9 는 ContextTimeoutEnabled 가 기본 false 라 컨텍스트 마감이 소켓 대기에
+// 적용되지 않는다. 전역 클라이언트 동작은 그대로 두고, 여기서만 켜고 소켓 상한도 짧게 잡아
+// 종료 시 진행 중인 flush 가 컨텍스트 취소로 바로 끝나게 한다.
+func NewRedisBackend(base *redis.Client) *RedisBackend {
+	opt := base.Options()
+	own := *opt
+	own.ContextTimeoutEnabled = true
+	own.ReadTimeout = backendIOTimeout
+	own.WriteTimeout = backendIOTimeout
+	return &RedisBackend{client: redis.NewClient(&own)}
+}
+
+// Close 는 버퍼 전용 클라이언트를 닫는다.
+func (r *RedisBackend) Close() error {
+	return r.client.Close()
 }
 
 // Incr 는 hits:{boardID} 의 wrID 필드를 1 올리고 게시판을 목록에 등록한다(MULTI).

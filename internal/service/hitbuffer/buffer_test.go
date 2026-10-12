@@ -3,6 +3,7 @@ package hitbuffer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"testing"
@@ -26,6 +27,7 @@ type fakeBackend struct {
 	lockTTL time.Duration
 
 	incrErr error
+	ackErr  error
 }
 
 func newFakeBackend() *fakeBackend {
@@ -134,6 +136,9 @@ func (f *fakeBackend) Read(_ context.Context, key string) (map[string]string, er
 func (f *fakeBackend) Ack(_ context.Context, key string, fields []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ackErr != nil {
+		return f.ackErr
+	}
 	for _, field := range fields {
 		delete(f.hashes[key], field)
 	}
@@ -183,10 +188,18 @@ type fakeStore struct {
 	direct    int
 	addCalls  int
 	failCalls map[int]bool // n 번째(1부터) AddHits 호출을 실패시킨다
+	missing   map[string]bool
+
+	// entered 가 있으면 첫 AddHits 가 이를 닫고 ctx 가 끝날 때까지 막힌다(진행 중 flush 흉내).
+	entered chan struct{}
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{hits: map[string]map[int]int64{}, failCalls: map[int]bool{}}
+	return &fakeStore{
+		hits:      map[string]map[int]int64{},
+		failCalls: map[int]bool{},
+		missing:   map[string]bool{},
+	}
 }
 
 func (s *fakeStore) IncrementHit(boardID string, wrID int) error {
@@ -197,11 +210,24 @@ func (s *fakeStore) IncrementHit(boardID string, wrID int) error {
 	return nil
 }
 
-func (s *fakeStore) AddHits(_ context.Context, boardID string, hits map[int]int64) error {
+func (s *fakeStore) AddHits(ctx context.Context, boardID string, hits map[int]int64) error {
+	s.mu.Lock()
+	s.addCalls++
+	call := s.addCalls
+	entered := s.entered
+	s.mu.Unlock()
+	if entered != nil && call == 1 {
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.addCalls++
-	if s.failCalls[s.addCalls] {
+	if s.missing[boardID] {
+		return fmt.Errorf("%w: %s", ErrTableMissing, boardID)
+	}
+	if s.failCalls[call] {
 		return errBoom
 	}
 	for id, n := range hits {
@@ -359,7 +385,7 @@ func TestFlushIfLeaderPreventsDoubleFlush(t *testing.T) {
 	ranA, err := podA.FlushIfLeader(context.Background())
 	require.NoError(t, err)
 	assert.True(t, ranA)
-	assert.Equal(t, time.Minute, be.lockTTL, "락 TTL 은 주기와 같다")
+	assert.Equal(t, 50*time.Second, be.lockTTL, "락 TTL 은 주기보다 조금 짧다")
 
 	require.NoError(t, podB.Incr(testBoard, 1))
 	ranB, err := podB.FlushIfLeader(context.Background())
@@ -466,4 +492,93 @@ func TestStopFlushesBuffered(t *testing.T) {
 	assert.Equal(t, int64(2), st.get(testBoard, 1))
 	assert.Empty(t, be.buffered())
 	b.Stop() // 두 번 불러도 안전
+}
+
+func TestLockTTLShorterThanInterval(t *testing.T) {
+	st := newFakeStore()
+	assert.Equal(t, DefaultInterval-10*time.Second, New(nil, st).lockTTL())
+	assert.Equal(t, 15*time.Second, New(nil, st, WithInterval(15*time.Second)).lockTTL())
+}
+
+func TestStopCancelsInFlightFlush(t *testing.T) {
+	be := newFakeBackend()
+	st := newFakeStore()
+	st.entered = make(chan struct{})
+	b := New(be, st, WithInterval(5*time.Millisecond))
+
+	require.NoError(t, b.Incr(testBoard, 1))
+	b.Start()
+	select {
+	case <-st.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("flush did not start")
+	}
+
+	// 진행 중 flush 가 컨텍스트 취소로 바로 끝나야 Stop 이 상한 안에 돌아온다.
+	started := time.Now()
+	b.Stop()
+	assert.Less(t, time.Since(started), StopTimeout)
+
+	// 취소된 묶음은 버퍼로 되돌아갔다가 종료 flush 로 반영된다 — 누락·이중 없음.
+	assert.Equal(t, int64(1), st.get(testBoard, 1))
+	assert.Empty(t, be.buffered())
+	assert.Empty(t, be.pending)
+}
+
+func TestAckFailureLeavesKeyForRecovery(t *testing.T) {
+	be := newFakeBackend()
+	be.ackErr = errBoom
+	st := newFakeStore()
+	now := time.Unix(1_800_000_000, 0)
+	b := New(be, st, WithChunkSize(2), WithClock(func() time.Time { return now }))
+
+	for id := 1; id <= 4; id++ {
+		require.NoError(t, b.Incr(testBoard, id))
+	}
+	require.Error(t, b.Flush(context.Background()))
+	// 첫 묶음은 DB 에 반영됐지만 HDEL 이 실패해 처리 중 키에 그대로 남는다.
+	assert.Equal(t, int64(1), st.get(testBoard, 1))
+	assert.Equal(t, int64(0), st.get(testBoard, 3))
+	assert.Len(t, be.pending, 1)
+	assert.Equal(t, map[string]int64{"1": 1, "2": 1, "3": 1, "4": 1}, be.buffered())
+
+	// staleAfter 뒤 회수되어 남은 몫이 반영된다. 이미 반영된 첫 묶음은 한 번 더 더해진다
+	// (패키지 문서의 「최소 한 번」 창) — 조회수가 사라지지는 않는다.
+	be.ackErr = nil
+	now = now.Add(DefaultStaleAfter)
+	require.NoError(t, b.Flush(context.Background()))
+	assert.Equal(t, int64(2), st.get(testBoard, 1))
+	assert.Equal(t, int64(2), st.get(testBoard, 2))
+	assert.Equal(t, int64(1), st.get(testBoard, 3))
+	assert.Equal(t, int64(1), st.get(testBoard, 4))
+	assert.Empty(t, be.pending)
+	assert.Empty(t, be.buffered())
+}
+
+func TestMissingTableKeepsCountsAndBacksOff(t *testing.T) {
+	be := newFakeBackend()
+	st := newFakeStore()
+	st.missing[testBoard] = true
+	now := time.Unix(1_800_000_000, 0)
+	b := New(be, st, WithClock(func() time.Time { return now }))
+
+	require.NoError(t, b.Incr(testBoard, 1))
+	require.NoError(t, b.Incr(testBoard, 1))
+	require.NoError(t, b.Flush(context.Background()), "테이블 없음은 flush 오류로 올리지 않는다")
+	assert.Equal(t, 1, st.addCalls)
+	assert.Equal(t, map[string]int64{"1": 2}, be.buffered(), "값은 버퍼에 남는다")
+	assert.Empty(t, be.pending)
+
+	// 한 시간 동안은 DB 에 다시 묻지 않는다.
+	require.NoError(t, b.Incr(testBoard, 1))
+	now = now.Add(30 * time.Minute)
+	require.NoError(t, b.Flush(context.Background()))
+	assert.Equal(t, 1, st.addCalls)
+
+	// 테이블이 돌아오면 쌓인 값이 모두 반영된다.
+	st.missing[testBoard] = false
+	now = now.Add(31 * time.Minute)
+	require.NoError(t, b.Flush(context.Background()))
+	assert.Equal(t, int64(3), st.get(testBoard, 1))
+	assert.Empty(t, be.buffered())
 }

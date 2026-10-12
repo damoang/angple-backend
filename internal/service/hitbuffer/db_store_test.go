@@ -39,6 +39,8 @@ func TestDBStoreAddHits(t *testing.T) {
 	require.NoError(t, s.AddHits(context.Background(), testBoard, nil))
 	assert.ErrorIs(t, s.AddHits(context.Background(), "free` SET wr_hit = 0 --", map[int]int64{1: 1}), ErrInvalidBoardID)
 	assert.Equal(t, int64(15), hitOf(t, db, 1))
+
+	assert.ErrorIs(t, s.AddHits(context.Background(), "nope", map[int]int64{1: 1}), ErrTableMissing)
 }
 
 func TestDBStoreIncrementHitDelegates(t *testing.T) {
