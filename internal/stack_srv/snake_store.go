@@ -31,7 +31,7 @@ type SnakeRow struct {
 // wallClockExpr 는 DATETIME 열을 "YYYY-MM-DD HH:MM:SS" 문자열로 읽는 식이다.
 // 드라이버의 시각 해석(parseTime·loc)을 거치지 않게 한다. 테스트용 sqlite 에서는 strftime 을 쓴다.
 func (s *Store) wallClockExpr(col string) string {
-	if s.db.Dialector.Name() == "sqlite" {
+	if s.db.Name() == "sqlite" {
 		return "COALESCE(strftime('%Y-%m-%d %H:%M:%S', " + col + "), '')"
 	}
 	return "COALESCE(DATE_FORMAT(" + col + ", '%Y-%m-%d %H:%i:%s'), '')"
