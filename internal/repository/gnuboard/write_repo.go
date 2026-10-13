@@ -880,14 +880,14 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 		return r.SearchPosts(boardID, searchField, searchQuery, page, limit)
 	}
 
-	// 작성자 계열 검색: 검색어가 탈퇴 회원과 같거나 판정 실패면 빈 결과(search_withdrawn.go).
-	if r.blockedAuthorSearch(searchField, searchQuery) {
-		return nil, 0, nil
-	}
-
 	// Sphinx로 검색 후 차단 유저 필터링
 	if r.sphinx == nil {
 		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
+	}
+
+	// 작성자 계열 검색: 검색어가 탈퇴 회원과 같거나 판정 실패면 빈 결과(search_withdrawn.go).
+	if r.blockedAuthorSearch(searchField, searchQuery) {
+		return nil, 0, nil
 	}
 
 	// 차단 유저 필터를 위해 여유분 조회 (최대 2배)
@@ -939,14 +939,16 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 // SearchPosts retrieves posts matching search criteria (sfl/stx) with pagination.
 // Requires Sphinx full-text search. Returns error if Sphinx is unavailable.
 func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery string, page, limit int, sortBy ...string) ([]*gnuboard.G5Write, int64, error) {
-	// 작성자 계열 검색: 검색어가 탈퇴 회원 아이디·닉네임과 같거나 판정에 실패하면
-	// 검색 없이 빈 결과(일반 「결과 없음」과 같은 모양). search_withdrawn.go 참고.
-	if r.blockedAuthorSearch(searchField, searchQuery) {
-		return nil, 0, nil
-	}
-
 	if r.sphinx == nil {
 		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
+	}
+
+	// 작성자 계열 검색: 검색어가 탈퇴 회원 아이디·닉네임과 같거나 판정에 실패하면
+	// 검색 없이 빈 결과(일반 「결과 없음」과 같은 모양). search_withdrawn.go 참고.
+	// 검색 서비스 장애 응답과 구별되지 않도록 sphinx 확인 뒤에 판정한다.
+	// LIKE 폴백(searchPostsLike)도 이 판정을 거친 뒤에만 탄다.
+	if r.blockedAuthorSearch(searchField, searchQuery) {
+		return nil, 0, nil
 	}
 
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit, sortBy...)

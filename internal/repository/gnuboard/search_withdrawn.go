@@ -32,7 +32,7 @@ func isAuthorSearchField(field string) bool {
 }
 
 // withdrawnAuthorNotExistsSQL 은 작성자가 탈퇴 회원인 행을 빼는 조건이다.
-// table 은 바깥 쿼리의 게시판 테이블명(검증된 slug 로 만든 값)이다. 비회원 글(mb_id='')은
+// table 은 바깥 쿼리의 게시판 테이블명(검증된 slug 로 만든 값)이다. 비회원 글(mb_id 가 빈 값)은
 // 회원 행이 없으므로 그대로 남는다.
 func withdrawnAuthorNotExistsSQL(table string) string {
 	return "NOT EXISTS (SELECT 1 FROM g5_member wm WHERE wm.mb_id = " + table +

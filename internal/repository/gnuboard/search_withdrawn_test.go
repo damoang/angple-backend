@@ -90,7 +90,7 @@ func TestApplyAuthorSearchFilter(t *testing.T) {
 	}
 
 	kept, total := r.applyAuthorSearchFilter("author", posts, 50)
-	var ids []int
+	ids := make([]int, 0, len(kept))
 	for _, p := range kept {
 		ids = append(ids, p.WrID)
 	}
@@ -121,16 +121,33 @@ func TestApplyAuthorSearchFilter_LookupFailure(t *testing.T) {
 	}
 }
 
-func TestSearchPosts_WithdrawnTermShortCircuits(t *testing.T) {
-	// sphinx 가 없어도 탈퇴 회원 검색어는 오류 없이 빈 결과 — 「결과 없음」과 같은 모양.
+func TestSearchPosts_SphinxOutageIndistinguishable(t *testing.T) {
+	// 검색 서비스가 없을 때는 탈퇴 회원 검색어든 일반 검색어든 같은 오류가 나야 한다.
+	// 판정이 sphinx 확인보다 앞서면 장애 중에 「빈 결과 vs 오류」로 탈퇴 여부가 드러난다.
 	r := newWithdrawnSearchTestRepo(t, true)
-	posts, total, err := r.SearchPosts("free", "author", "gone1", 1, 20)
-	if err != nil || len(posts) != 0 || total != 0 {
-		t.Fatalf("got posts=%d total=%d err=%v", len(posts), total, err)
+	search := map[string]func(field, query string) error{
+		"SearchPosts": func(field, query string) error {
+			_, _, err := r.SearchPosts("free", field, query, 1, 20)
+			return err
+		},
+		"SearchPostsFiltered": func(field, query string) error {
+			_, _, err := r.SearchPostsFiltered("free", field, query, 1, 20, []string{"blocked1"})
+			return err
+		},
+		"SearchPostsByCategory": func(field, query string) error {
+			_, _, err := r.SearchPostsByCategory("free", field, query, "cat", 1, 20)
+			return err
+		},
 	}
-	// 일반 회원 검색어는 원래 경로로 간다(sphinx 없음 → 기존 오류).
-	if _, _, err := r.SearchPosts("free", "author", "active1", 1, 20); err == nil {
-		t.Fatal("일반 회원 검색은 기존 경로를 타야 한다")
+	for name, fn := range search {
+		blockedErr := fn("author", "gone1")
+		normalErr := fn("author", "active1")
+		if blockedErr == nil || normalErr == nil {
+			t.Fatalf("%s: sphinx 없음은 두 경우 모두 오류여야 한다: blocked=%v normal=%v", name, blockedErr, normalErr)
+		}
+		if blockedErr.Error() != normalErr.Error() {
+			t.Errorf("%s: 오류가 달라 탈퇴 여부가 드러난다: %q vs %q", name, blockedErr, normalErr)
+		}
 	}
 }
 
