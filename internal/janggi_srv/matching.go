@@ -247,8 +247,16 @@ func (s *Server) notifyMatchFailed(a, b *Client, msg string) {
 	}
 }
 
+// handleCancelMatching 은 대기열에서 뺀다. 이미 방이 잡힌(상차림 선택 단계 또는
+// 대국 중) 사람의 취소는 조용히 무시한다 — 선택 단계를 모르는 구 클라이언트가
+// 「대기 중」 화면에서 취소를 누르면 matching_canceled 를 받고 연결을 끊어,
+// 유예 뒤 이탈 패배가 되기 때문이다.
 func (s *Server) handleCancelMatching(client *Client) {
 	s.mu.Lock()
+	if roomInPlayLocked(s.rooms[client.roomID]) {
+		s.mu.Unlock()
+		return
+	}
 	mode := client.matchingMode
 	if mode != "" {
 		q := s.matchingQueue[mode]

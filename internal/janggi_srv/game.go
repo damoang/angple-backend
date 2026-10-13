@@ -45,11 +45,15 @@ func (s *Server) createGame(roomID, choMbID, hanMbID string, choSetup, hanSetup 
 	s.armTurnTimer(roomID)
 	log.Printf("[janggi] game start room=%s cho=%s han=%s db=%d", roomID, choMbID, hanMbID, dbID)
 
-	// 상차림 기록은 대국 진행과 무관하다 — 실패해도 로그만 남긴다.
+	// 상차림 기록은 대국 진행과 무관하다 — 비동기로 남기고 실패해도 로그만 남긴다
+	// (대국을 시작시킨 고루틴이 DB 지연에 묶이지 않게).
 	if s.store != nil && dbID > 0 {
-		if err := s.store.UpdateSetups(dbID, string(choSetup), string(hanSetup)); err != nil {
-			log.Printf("[janggi] setup persist failed room=%s db=%d: %v", roomID, dbID, err)
-		}
+		store, cho, han := s.store, string(choSetup), string(hanSetup)
+		go func() {
+			if err := store.UpdateSetups(dbID, cho, han); err != nil {
+				log.Printf("[janggi] setup persist failed room=%s db=%d: %v", roomID, dbID, err)
+			}
+		}()
 	}
 }
 

@@ -363,3 +363,47 @@ func TestSetupRemainingMs(t *testing.T) {
 		t.Fatalf("지난 마감은 0이어야 한다: %d", got)
 	}
 }
+
+// TestCancelMatchingDuringSetupIgnored — 선택 단계를 모르는 구 클라이언트가 「대기 중」
+// 화면에서 취소를 눌러도 matching_canceled 를 받지 않고, 대국은 정상 시작한다.
+func TestCancelMatchingDuringSetupIgnored(t *testing.T) {
+	s := newTestServer(200 * time.Millisecond)
+	defer stopAllTimers(s)
+	a, b := newTestClient(s, "alice"), newTestClient(s, "bob")
+	roomID, cho, han := startTestMatch(t, s, a, b)
+
+	s.handleMessage(cho, Message{Type: "cancel_matching"})
+	s.mu.RLock()
+	phase := s.rooms[roomID].setupPhase
+	s.mu.RUnlock()
+	if !phase {
+		t.Fatal("취소 요청이 선택 단계를 닫았다")
+	}
+
+	// 타임아웃 뒤 정상 시작 — 그 사이 matching_canceled 는 없어야 한다.
+	got := map[string]int{}
+	deadline := time.After(2 * time.Second)
+	for got["game_start"] == 0 {
+		select {
+		case raw := <-cho.send:
+			var m map[string]interface{}
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatal(err)
+			}
+			typ, _ := m["type"].(string)
+			got[typ]++
+		case <-deadline:
+			t.Fatalf("game_start 가 오지 않았다: %v", got)
+		}
+	}
+	if got["matching_canceled"] != 0 {
+		t.Fatalf("선택 단계 중 matching_canceled 가 나갔다: %v", got)
+	}
+	nextOfType(t, han, "game_start", time.Second)
+
+	// 대국 중 취소도 무시된다.
+	s.handleMessage(cho, Message{Type: "cancel_matching"})
+	if n := countOfType(t, cho, "matching_canceled", 50*time.Millisecond); n != 0 {
+		t.Fatalf("대국 중 matching_canceled %d건", n)
+	}
+}
