@@ -885,6 +885,11 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
 	}
 
+	// 작성자 계열 검색: 검색어가 탈퇴 회원과 같거나 판정 실패면 빈 결과(search_withdrawn.go).
+	if r.blockedAuthorSearch(searchField, searchQuery) {
+		return nil, 0, nil
+	}
+
 	// 차단 유저 필터를 위해 여유분 조회 (최대 2배)
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit*2)
 	if err != nil {
@@ -920,12 +925,15 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 		}
 	}
 
+	// 작성자 계열 검색: 작성자가 탈퇴 회원인 글을 뺀다(limit 적용 전).
+	ordered, totalFound := r.applyAuthorSearchFilter(searchField, ordered, result.TotalFound)
+
 	// limit 적용
 	if len(ordered) > limit {
 		ordered = ordered[:limit]
 	}
 
-	return ordered, result.TotalFound, nil
+	return ordered, totalFound, nil
 }
 
 // SearchPosts retrieves posts matching search criteria (sfl/stx) with pagination.
@@ -933,6 +941,14 @@ func (r *writeRepository) SearchPostsFiltered(boardID string, searchField, searc
 func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery string, page, limit int, sortBy ...string) ([]*gnuboard.G5Write, int64, error) {
 	if r.sphinx == nil {
 		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
+	}
+
+	// 작성자 계열 검색: 검색어가 탈퇴 회원 아이디·닉네임과 같거나 판정에 실패하면
+	// 검색 없이 빈 결과(일반 「결과 없음」과 같은 모양). search_withdrawn.go 참고.
+	// 검색 서비스 장애 응답과 구별되지 않도록 sphinx 확인 뒤에 판정한다.
+	// LIKE 폴백(searchPostsLike)도 이 판정을 거친 뒤에만 탄다.
+	if r.blockedAuthorSearch(searchField, searchQuery) {
+		return nil, 0, nil
 	}
 
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, page, limit, sortBy...)
@@ -972,7 +988,9 @@ func (r *writeRepository) SearchPosts(boardID string, searchField, searchQuery s
 			ordered = append(ordered, p)
 		}
 	}
-	return ordered, result.TotalFound, nil
+	// 작성자 계열 검색: 작성자가 탈퇴 회원인 글을 뺀다(부분 일치 포함).
+	kept, total := r.applyAuthorSearchFilter(searchField, ordered, result.TotalFound)
+	return kept, total, nil
 }
 
 // searchPostsLike is the MySQL LIKE fallback for boards whose Sphinx/Manticore
@@ -1015,6 +1033,11 @@ func (r *writeRepository) searchPostsLike(boardID, searchField, searchQuery stri
 	table := tableName(boardID)
 	whereClause := "wr_is_comment = 0 AND " + cond +
 		" AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')"
+	// 작성자 계열 검색: 작성자가 탈퇴 회원인 글을 쿼리에서 뺀다(총 건수도 정확).
+	// 검색어 일치 판정은 호출부(SearchPosts)가 먼저 했다.
+	if isAuthorSearchField(searchField) {
+		whereClause += " AND " + withdrawnAuthorNotExistsSQL(table)
+	}
 
 	var total int64
 	if err := r.db.Table(table).
@@ -1048,6 +1071,11 @@ func (r *writeRepository) SearchPostsByCategory(boardID string, searchField, sea
 		return nil, 0, fmt.Errorf("검색 서비스를 일시적으로 사용할 수 없습니다")
 	}
 
+	// 작성자 계열 검색: 검색어가 탈퇴 회원과 같거나 판정 실패면 빈 결과(search_withdrawn.go).
+	if r.blockedAuthorSearch(searchField, searchQuery) {
+		return nil, 0, nil
+	}
+
 	// Fetch extra results from Sphinx since category filter will reduce count
 	result, err := r.sphinx.Search(boardID, searchField, searchQuery, 1, limit*page*3)
 	if err != nil {
@@ -1060,8 +1088,13 @@ func (r *writeRepository) SearchPostsByCategory(boardID string, searchField, sea
 	// Fetch from MySQL with category filter and count
 	var total int64
 	table := tableName(boardID)
+	whereClause := "wr_id IN ? AND ca_name = ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')"
+	if isAuthorSearchField(searchField) {
+		// 작성자가 탈퇴 회원인 글은 쿼리에서 뺀다(총 건수도 같은 조건).
+		whereClause += " AND " + withdrawnAuthorNotExistsSQL(table)
+	}
 	if err := r.db.Table(table).
-		Where("wr_id IN ? AND ca_name = ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs, category).
+		Where(whereClause, result.IDs, category).
 		Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -1070,7 +1103,7 @@ func (r *writeRepository) SearchPostsByCategory(boardID string, searchField, sea
 	offset := (page - 1) * limit
 	if err := r.db.Table(table).
 		Select(postSelectColumns(boardID, "")).
-		Where("wr_id IN ? AND ca_name = ? AND (wr_deleted_at IS NULL OR wr_deleted_at = '0000-00-00 00:00:00')", result.IDs, category).
+		Where(whereClause, result.IDs, category).
 		Order("wr_id DESC").
 		Offset(offset).
 		Limit(limit).
