@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,7 @@ import (
 //   - 판정 실패: 빈 응답(비노출 우선)
 //   - 숙려 중 탈퇴 취소: 다시 보인다
 
-const emptyActivityBody = `{"recentComments":[],"recentPosts":[]}`
+const emptyActivityBody = `{"recentPosts":[],"recentComments":[]}`
 
 // countingBoardRepo 는 회원 활동 조회가 저장소까지 갔는지 센다.
 // 게시판 목록 조회를 실패시켜 이후 경로는 「활동 없음」 응답으로 끝난다.
@@ -69,6 +70,17 @@ func TestMemberActivity_WithdrawnReturnsEmpty(t *testing.T) {
 	if boards.findAll != 0 {
 		t.Fatalf("withdrawn member must not reach the repository (calls=%d)", boards.findAll)
 	}
+	// 탈퇴 회원 응답은 활동이 없는 일반 회원 응답(같은 구조체·필드 순서)과 바이트까지 같아야 한다.
+	noActivity, err := json.Marshal(activityResponse{
+		RecentPosts:    []map[string]interface{}{},
+		RecentComments: []map[string]interface{}{},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := w.Body.String(); got != string(noActivity) {
+		t.Fatalf("withdrawn body = %s, want no-activity body %s", got, noActivity)
+	}
 }
 
 func TestMemberActivity_NormalPassesThrough(t *testing.T) {
@@ -78,9 +90,8 @@ func TestMemberActivity_NormalPassesThrough(t *testing.T) {
 	if boards.findAll != 1 {
 		t.Fatalf("normal member must reach the repository once (calls=%d)", boards.findAll)
 	}
-	// 탈퇴 회원 응답은 「활동 없음」 응답과 구별되지 않아야 한다.
-	if w.Code != http.StatusOK || w.Body.String() != emptyActivityBody {
-		t.Fatalf("no-activity response = %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
 	}
 }
 

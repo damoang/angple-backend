@@ -300,7 +300,10 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 	// 탈퇴(숙려 포함) 회원은 「활동 없음」과 같은 응답. 캐시보다 먼저 본다 —
 	// 탈퇴 직전에 저장된 응답이 TTL 동안 그대로 나가지 않게 한다.
 	if hideMemberActivity(c.Request.Context(), mbID) {
-		c.JSON(http.StatusOK, gin.H{"recentPosts": []interface{}{}, "recentComments": []interface{}{}})
+		c.JSON(http.StatusOK, activityResponse{
+			RecentPosts:    []map[string]interface{}{},
+			RecentComments: []map[string]interface{}{},
+		})
 		return
 	}
 
