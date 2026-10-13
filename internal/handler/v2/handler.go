@@ -280,7 +280,8 @@ func (h *V2Handler) GetUser(c *gin.Context) {
 		return
 	}
 	user, err := h.userRepo.FindByID(id)
-	if err != nil {
+	if err != nil || hideV2UserProfile(c.Request.Context(), user.Username) {
+		// 탈퇴(숙려 포함) 회원은 없는 회원과 같은 응답이다.
 		common.V2ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
 		return
 	}
@@ -291,7 +292,8 @@ func (h *V2Handler) GetUser(c *gin.Context) {
 func (h *V2Handler) GetUserByUsername(c *gin.Context) {
 	username := c.Param("username")
 	user, err := h.userRepo.FindByUsername(username)
-	if err != nil {
+	if err != nil || hideV2UserProfile(c.Request.Context(), user.Username) {
+		// 탈퇴(숙려 포함) 회원은 없는 회원과 같은 응답이다.
 		common.V2ErrorResponse(c, http.StatusNotFound, "사용자를 찾을 수 없습니다", err)
 		return
 	}
