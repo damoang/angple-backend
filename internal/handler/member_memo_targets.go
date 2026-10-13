@@ -75,6 +75,11 @@ func (h *MemberMemoTargetsHandler) GetMemoTargets(c *gin.Context) {
 		return
 	}
 	data, err := LoadMemoTargets(h.db, memberID, MemoTargetsLimit)
+	if err == nil {
+		// 탈퇴(숙려 포함) 회원 대상은 목록에서 뺀다 — IN 쿼리 1회.
+		// 판정 실패도 목록 조회 실패와 같은 500(클라이언트는 「모름」으로 보고 batch 로 폴백).
+		data, err = DropWithdrawnFromMemoTargets(c.Request.Context(), data)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "메모 대상 조회 실패"})
 		return

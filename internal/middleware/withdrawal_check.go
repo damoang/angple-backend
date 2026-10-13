@@ -102,6 +102,77 @@ func blockIfWithdrawn(c *gin.Context, mbID string) bool {
 //	막지 못해 생기는 노출(탈퇴자 일부가 잠깐 통과)보다 장애 규모가 압도적으로 크다.
 //	대신 실패를 반드시 로그로 남긴다 — 열린 상태가 조용히 지속되면 안 된다.
 func isWithdrawn(ctx context.Context, mbID string) bool {
+	withdrawn, err := lookupWithdrawn(ctx, mbID)
+	if err != nil {
+		// ⛔ fail-open. 여기서 막으면 DB 블립이 전면 장애가 된다.
+		log.Printf("[withdrawalGate] ⛔ DB 조회 실패 — fail-open 통과 (%s): %v", mbID, err)
+		return false
+	}
+	return withdrawn
+}
+
+// IsWithdrawnMember 는 mbID 회원이 탈퇴(숙려 포함) 상태인지 돌려준다.
+// 판정·캐시는 탈퇴 게이트(isWithdrawn)와 같다 — 캐시 우선, 미스 시 DB 1회.
+//
+// 게이트와 달리 **조회 실패를 error 로 그대로 돌려준다.** 실패 시 어떻게 할지는
+// 호출자가 정한다(예: 회원 메모는 조회=빈 값, 저장=거부).
+//
+// DB 가 주입되지 않았거나(SetWithdrawalCheck 미호출·nil) mbID 가 비어 있으면
+// 판정하지 않고 (false, nil) 을 돌려준다 — 게이트의 skip 과 같은 규칙이다.
+func IsWithdrawnMember(ctx context.Context, mbID string) (bool, error) {
+	if withdrawalCheckDB == nil || mbID == "" {
+		return false, nil
+	}
+	return lookupWithdrawn(ctx, mbID)
+}
+
+// WithdrawnMemberIDs 는 ids 중 탈퇴(숙려 포함) 회원 ID 집합을 돌려준다.
+// 캐시를 거치지 않고 **IN 쿼리 1회**로 판정한다(배치 조회용).
+//
+// 판정 기준은 lookupWithdrawn 과 같다(isWithdrawnLeaveDate).
+// DB 미주입·빈 ids 면 빈 집합과 nil 을 돌려준다.
+func WithdrawnMemberIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+	result := map[string]bool{}
+	if withdrawalCheckDB == nil || len(ids) == 0 {
+		return result, nil
+	}
+	type row struct {
+		MbID        string `gorm:"column:mb_id"`
+		MbLeaveDate string `gorm:"column:mb_leave_date"`
+	}
+	var rows []row
+	if err := withdrawalCheckDB.WithContext(ctx).Table("g5_member").
+		Select("mb_id, mb_leave_date").
+		Where("mb_id IN ? AND "+WithdrawnLeaveDateSQL("mb_leave_date"), ids).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if isWithdrawnLeaveDate(r.MbLeaveDate) {
+			result[r.MbID] = true
+		}
+	}
+	return result, nil
+}
+
+// isWithdrawnLeaveDate 는 mb_leave_date 값이 탈퇴(숙려 포함)를 뜻하는지 본다.
+// 빈 값과 "0" 은 탈퇴가 아니다.
+//
+// ⛔ WithdrawnLeaveDateSQL 과 같은 규칙이다. 한쪽을 바꾸면 다른 쪽도 바꿀 것.
+func isWithdrawnLeaveDate(leaveDate string) bool {
+	return leaveDate != "" && leaveDate != "0"
+}
+
+// WithdrawnLeaveDateSQL 은 isWithdrawnLeaveDate 와 같은 판정을 SQL 조건으로 돌려준다.
+// col 은 mb_leave_date 컬럼 식(별칭 포함, 예: "gm.mb_leave_date")이며
+// 호출자가 고정 문자열로만 넘긴다(사용자 입력 금지).
+func WithdrawnLeaveDateSQL(col string) string {
+	return "(" + col + " <> '' AND " + col + " <> '0')"
+}
+
+// lookupWithdrawn 은 캐시 우선, 미스 시 DB 1회로 탈퇴 여부를 판정한다.
+// DB 조회 실패는 error 로 돌려준다(fail-open/closed 는 호출자가 정한다).
+func lookupWithdrawn(ctx context.Context, mbID string) (bool, error) {
 	key := WithdrawalGateKey(mbID)
 
 	if withdrawalCheckRedis != nil {
@@ -109,7 +180,7 @@ func isWithdrawn(ctx context.Context, mbID string) bool {
 		v, err := withdrawalCheckRedis.Get(rctx, key).Result()
 		cancel()
 		if err == nil {
-			return v == "1"
+			return v == "1", nil
 		}
 		if !errors.Is(err, redis.Nil) {
 			// 캐시 장애는 치명적이지 않다(DB 로 폴백). 다만 조용히 넘기면
@@ -123,12 +194,10 @@ func isWithdrawn(ctx context.Context, mbID string) bool {
 		Select("mb_leave_date").Where("mb_id = ?", mbID).
 		Limit(1).Scan(&leaveDate).Error
 	if err != nil {
-		// ⛔ fail-open. 여기서 막으면 DB 블립이 전면 장애가 된다.
-		log.Printf("[withdrawalGate] ⛔ DB 조회 실패 — fail-open 통과 (%s): %v", mbID, err)
-		return false
+		return false, err
 	}
 
-	withdrawn := leaveDate != "" && leaveDate != "0"
+	withdrawn := isWithdrawnLeaveDate(leaveDate)
 	if withdrawalCheckRedis != nil {
 		val := "0"
 		if withdrawn {
@@ -140,5 +209,5 @@ func isWithdrawn(ctx context.Context, mbID string) bool {
 		}
 		cancel()
 	}
-	return withdrawn
+	return withdrawn, nil
 }

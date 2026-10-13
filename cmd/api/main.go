@@ -583,6 +583,9 @@ func filterItems(items []map[string]any, blockedIDs []string) []map[string]any {
 	return filtered
 }
 
+// authorMemoWithdrawnIDs 는 enrichWithAuthorMemo 의 탈퇴 작성자 판정이다(테스트에서 교체).
+var authorMemoWithdrawnIDs = middleware.WithdrawnMemberIDs
+
 // enrichWithAuthorMemo augments items with current user's `author_memo` field for each post/comment.
 // Replaces the previous N+1 pattern (frontend per-author /api/v1/members/{id}/memo fetch).
 // Returns a NEW slice when enrichment occurs (cached items must not be mutated). When the user is
@@ -632,6 +635,24 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 			"content":     m.Memo,
 			"memo_detail": m.MemoDetail,
 			"color":       m.Color,
+		}
+	}
+	// 탈퇴(숙려 포함) 작성자에게 단 메모는 붙이지 않는다(메모 없음과 같은 형태 = author_memo nil).
+	// 판정은 메모가 있는 작성자 묶음에 한해 IN 쿼리 1회. 판정 실패 시 이 요청에는 메모를 붙이지
+	// 않는다 — 메모 조회 실패와 같은 경로(입력 그대로)라 클라이언트는 batch 로 폴백하고,
+	// batch 도 같은 가드를 탄다.
+	if len(memoMap) > 0 {
+		memoTargetIDs := make([]string, 0, len(memoMap))
+		for id := range memoMap {
+			memoTargetIDs = append(memoTargetIDs, id)
+		}
+		withdrawn, err := authorMemoWithdrawnIDs(context.Background(), memoTargetIDs)
+		if err != nil {
+			log.Printf("[enrichWithAuthorMemo] 탈퇴 판정 실패 — 메모 미첨부 (%d건): %v", len(memoTargetIDs), err)
+			return items
+		}
+		for id := range withdrawn {
+			delete(memoMap, id)
 		}
 	}
 	// 메모 없는 author도 author_memo: nil 명시 — frontend preloadMemos가 cache 채우도록.
@@ -2051,7 +2072,9 @@ func main() {
 			err := db.Table("g5_member_memo").
 				Where("member_id = ? AND target_member_id = ?", currentUserID, targetID).
 				First(&memo).Error
-			if err != nil {
+			// 탈퇴(숙려 포함) 대상 메모는 「메모 없음」과 같은 응답으로 숨긴다(판정 실패 시에도).
+			// 메모가 있을 때만 판정하므로 메모 없는 조회에는 추가 조회가 없다.
+			if err != nil || handler.HideMemoForTarget(c.Request.Context(), targetID) {
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
 				return
 			}
@@ -2070,6 +2093,10 @@ func main() {
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "content is required"})
+				return
+			}
+			// 탈퇴(숙려 포함) 회원 대상 메모는 저장·수정하지 않는다(판정 실패 시에도 거부).
+			if handler.RejectMemoWriteForTarget(c, targetID) {
 				return
 			}
 
@@ -2131,6 +2158,10 @@ func main() {
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "content is required"})
+				return
+			}
+			// 탈퇴(숙려 포함) 회원 대상 메모는 저장·수정하지 않는다(판정 실패 시에도 거부).
+			if handler.RejectMemoWriteForTarget(c, targetID) {
 				return
 			}
 
@@ -2214,6 +2245,8 @@ func main() {
 					result[m.TargetID] = m
 				}
 			}
+			// 탈퇴(숙려 포함) 대상은 결과에서 뺀다 — IN 쿼리 1회, 판정 실패 시 이 요청만 빈 결과.
+			result = handler.DropWithdrawnMemoTargets(c.Request.Context(), result)
 
 			// has_any: 이 회원이 메모를 **하나라도** 갖고 있는가.
 			//
@@ -7110,7 +7143,7 @@ func main() {
 		v2MessageRepo := v2repo.NewMessageRepository(db)
 		v2DeviceRepo := v2repo.NewDeviceRepository(db)
 		v2routes.SetupScrap(router, v2handler.NewScrapHandler(v2ScrapRepo), jwtManager, db)
-		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo), jwtManager, db)
+		v2routes.SetupMemo(router, v2handler.NewMemoHandler(v2MemoRepo).WithWithdrawnTargetGuard(db), jwtManager, db)
 		v2routes.SetupBlock(router, v2handler.NewBlockHandler(v2BlockRepo, cacheService), jwtManager, db)
 		v2routes.SetupMessage(router, v2handler.NewMessageHandler(v2MessageRepo), jwtManager, db)
 		v2routes.SetupDevices(router, v2handler.NewDeviceHandler(v2DeviceRepo), jwtManager)
