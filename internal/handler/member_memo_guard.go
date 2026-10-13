@@ -88,18 +88,21 @@ func DropWithdrawnMemoTargets(ctx context.Context, memos map[string]interface{})
 // 남은 대상의 순서는 그대로이고 Count 는 남은 개수로 맞춘다. Truncated 는 원래 값을
 // 유지한다(목록이 잘렸으면 클라이언트는 어차피 batch 로 폴백하고, batch 도 같은 가드를 탄다).
 //
-// 판정은 IN 쿼리 1회. 판정에 실패하면 빈 목록을 돌려준다(비노출 우선).
-func DropWithdrawnFromMemoTargets(ctx context.Context, data MemoTargets) MemoTargets {
+// 판정은 IN 쿼리 1회. 판정에 실패하면 error 를 돌려준다 — 호출자는 목록 조회 실패와
+// 똑같이 500 으로 응답한다. 클라이언트는 이를 「모름」으로 보고 같은 가드를 타는
+// batch 조회로 폴백하므로 탈퇴 대상이 드러나지 않는다. 빈 목록으로 답하면
+// 「메모 없음」으로 확정돼 세션 동안 일반 회원 메모까지 사라진다.
+func DropWithdrawnFromMemoTargets(ctx context.Context, data MemoTargets) (MemoTargets, error) {
 	if len(data.Targets) == 0 {
-		return data
+		return data, nil
 	}
 	withdrawn, err := memoWithdrawnTargetIDs(ctx, data.Targets)
 	if err != nil {
-		log.Printf("[memoGuard] 탈퇴 판정 실패 — 메모 대상 목록 비노출 (%d건): %v", len(data.Targets), err)
-		return MemoTargets{Targets: []string{}}
+		log.Printf("[memoGuard] 탈퇴 판정 실패 — 메모 대상 목록 실패 처리 (%d건): %v", len(data.Targets), err)
+		return MemoTargets{Targets: []string{}}, err
 	}
 	if len(withdrawn) == 0 {
-		return data
+		return data, nil
 	}
 	kept := make([]string, 0, len(data.Targets))
 	for _, id := range data.Targets {
@@ -109,5 +112,5 @@ func DropWithdrawnFromMemoTargets(ctx context.Context, data MemoTargets) MemoTar
 	}
 	data.Targets = kept
 	data.Count = len(kept)
-	return data
+	return data, nil
 }

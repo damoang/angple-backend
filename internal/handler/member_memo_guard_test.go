@@ -162,7 +162,10 @@ func TestDropWithdrawnFromMemoTargets_KeepsOrder(t *testing.T) {
 		return map[string]bool{"b": true, "d": true}, nil
 	})
 	in := MemoTargets{Targets: []string{"a", "b", "c", "d", "e"}, Count: 5, Truncated: true}
-	out := DropWithdrawnFromMemoTargets(context.Background(), in)
+	out, err := DropWithdrawnFromMemoTargets(context.Background(), in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if *calls != 1 {
 		t.Fatalf("expected one lookup, got %d", *calls)
 	}
@@ -176,19 +179,62 @@ func TestDropWithdrawnFromMemoTargets_NoneWithdrawnUnchanged(t *testing.T) {
 		return map[string]bool{}, nil
 	})
 	in := MemoTargets{Targets: []string{"a", "b"}, Count: 2}
-	out := DropWithdrawnFromMemoTargets(context.Background(), in)
-	if !reflect.DeepEqual(out, in) {
+	out, err := DropWithdrawnFromMemoTargets(context.Background(), in)
+	if err != nil || !reflect.DeepEqual(out, in) {
 		t.Fatalf("got %+v, want %+v", out, in)
 	}
 }
 
-func TestDropWithdrawnFromMemoTargets_LookupFailureEmpty(t *testing.T) {
+func TestDropWithdrawnFromMemoTargets_LookupFailureReturnsError(t *testing.T) {
 	stubMemoWithdrawnTargetIDs(t, func(context.Context, []string) (map[string]bool, error) {
 		return nil, errors.New("db down")
 	})
-	out := DropWithdrawnFromMemoTargets(context.Background(), MemoTargets{Targets: []string{"a"}, Count: 1})
-	if out.Targets == nil || len(out.Targets) != 0 || out.Count != 0 || out.Truncated {
-		t.Fatalf("lookup failure must return empty list (targets [] not null), got %+v", out)
+	out, err := DropWithdrawnFromMemoTargets(context.Background(), MemoTargets{Targets: []string{"a"}, Count: 1})
+	if err == nil {
+		t.Fatalf("lookup failure must return error (handler answers 500 = unknown)")
+	}
+	if len(out.Targets) != 0 || out.Count != 0 {
+		t.Fatalf("lookup failure must not carry targets, got %+v", out)
+	}
+}
+
+// 판정 실패 시 GET /members/me/memo-targets 는 목록 조회 실패와 같은 500 이어야 한다.
+// 빈 목록(200)으로 답하면 클라이언트가 「메모 없음」으로 확정한다.
+func TestGetMemoTargets_LookupFailure500(t *testing.T) {
+	db := newMemoTargetsTestDB(t)
+	insertMemo(t, db, "me", "a", "hello")
+	stubMemoWithdrawnTargetIDs(t, func(context.Context, []string) (map[string]bool, error) {
+		return nil, errors.New("db down")
+	})
+	c, w := newMemoGuardCtx()
+	c.Set("userID", "me")
+	NewMemberMemoTargetsHandler(db).GetMemoTargets(c)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+}
+
+func TestGetMemoTargets_DropsWithdrawn(t *testing.T) {
+	db := newMemoTargetsTestDB(t)
+	insertMemo(t, db, "me", "a", "hello")
+	insertMemo(t, db, "me", "left", "bye")
+	stubMemoWithdrawnTargetIDs(t, func(context.Context, []string) (map[string]bool, error) {
+		return map[string]bool{"left": true}, nil
+	})
+	c, w := newMemoGuardCtx()
+	c.Set("userID", "me")
+	NewMemberMemoTargetsHandler(db).GetMemoTargets(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var body struct {
+		Data MemoTargets `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !reflect.DeepEqual(body.Data.Targets, []string{"a"}) || body.Data.Count != 1 {
+		t.Fatalf("got %+v", body.Data)
 	}
 }
 

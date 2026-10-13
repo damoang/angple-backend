@@ -583,6 +583,9 @@ func filterItems(items []map[string]any, blockedIDs []string) []map[string]any {
 	return filtered
 }
 
+// authorMemoWithdrawnIDs 는 enrichWithAuthorMemo 의 탈퇴 작성자 판정이다(테스트에서 교체).
+var authorMemoWithdrawnIDs = middleware.WithdrawnMemberIDs
+
 // enrichWithAuthorMemo augments items with current user's `author_memo` field for each post/comment.
 // Replaces the previous N+1 pattern (frontend per-author /api/v1/members/{id}/memo fetch).
 // Returns a NEW slice when enrichment occurs (cached items must not be mutated). When the user is
@@ -632,6 +635,24 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 			"content":     m.Memo,
 			"memo_detail": m.MemoDetail,
 			"color":       m.Color,
+		}
+	}
+	// 탈퇴(숙려 포함) 작성자에게 단 메모는 붙이지 않는다(메모 없음과 같은 형태 = author_memo nil).
+	// 판정은 메모가 있는 작성자 묶음에 한해 IN 쿼리 1회. 판정 실패 시 이 요청에는 메모를 붙이지
+	// 않는다 — 메모 조회 실패와 같은 경로(입력 그대로)라 클라이언트는 batch 로 폴백하고,
+	// batch 도 같은 가드를 탄다.
+	if len(memoMap) > 0 {
+		memoTargetIDs := make([]string, 0, len(memoMap))
+		for id := range memoMap {
+			memoTargetIDs = append(memoTargetIDs, id)
+		}
+		withdrawn, err := authorMemoWithdrawnIDs(context.Background(), memoTargetIDs)
+		if err != nil {
+			log.Printf("[enrichWithAuthorMemo] 탈퇴 판정 실패 — 메모 미첨부 (%d건): %v", len(memoTargetIDs), err)
+			return items
+		}
+		for id := range withdrawn {
+			delete(memoMap, id)
 		}
 	}
 	// 메모 없는 author도 author_memo: nil 명시 — frontend preloadMemos가 cache 채우도록.
