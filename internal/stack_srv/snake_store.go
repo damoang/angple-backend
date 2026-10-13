@@ -7,8 +7,9 @@ import (
 )
 
 // 뱀 게임 기록 저장 — 표 3개(angple_snake_runs·angple_snake_best·angple_snake_weekly).
-// 최고·주간 기록은 「높을 때만 갱신」을 UPDATE … WHERE score < ? 와 없을 때 INSERT 로 한다.
-// 회원당 진행 판은 1개뿐이라(발급기 규칙) 같은 회원의 갱신이 겹치지 않는다.
+// 최고·주간 기록은 「높을 때만 갱신」한다. MySQL 은 INSERT … ON DUPLICATE KEY UPDATE 로 한 문장에
+// 처리해 동시에 끝난 판이 겹쳐도 안전하다(앙쌓기 SaveSoloRun 과 같은 식). 테스트용 sqlite 는
+// UPDATE … WHERE score < ? 후 행이 없을 때만 INSERT 한다. 0점 판은 기록만 남기고 랭킹 표에는 넣지 않는다.
 // 시각은 NOW() 대신 Go 에서 만든 KST 벽시계를 넣는다 — DB 세션 time_zone 에 기대지 않는다.
 
 // snakeDayLayout 은 week_start 형식이다.
@@ -56,9 +57,19 @@ func (s *Store) SnakeTop(weekStart time.Time, n int) ([]SnakeRow, error) {
 	return rows, err
 }
 
-// raiseSnakeBest 는 table 에서 keyWhere 에 맞는 행의 점수를 높을 때만 바꾸고, 행이 없으면 만든다.
+// raiseSnakeBest 는 table 에서 키가 같은 행의 점수를 높을 때만 바꾸고(run_id·achieved_at 도 그때만), 행이 없으면 만든다.
 // table·keyWhere·insertCols·insertMarks 는 이 파일 안의 고정 문자열만 넘긴다(사용자 값 아님).
 func raiseSnakeBest(tx *gorm.DB, table, keyWhere, insertCols, insertMarks string, keyArgs []interface{}, rec SnakeRecord, achieved string) error {
+	insertArgs := append(append(make([]interface{}, 0, len(keyArgs)+3), keyArgs...), rec.Score, rec.RunID, achieved)
+	insert := "INSERT INTO " + table + " (" + insertCols + ", score, run_id, achieved_at) VALUES (" + insertMarks + ", ?, ?, ?)"
+	if tx.Name() != "sqlite" {
+		// MySQL 은 ON DUPLICATE KEY UPDATE 의 대입을 왼쪽부터 하므로 score 는 맨 끝에 바꾼다.
+		return tx.Exec(insert+
+			" ON DUPLICATE KEY UPDATE"+
+			" run_id = IF(VALUES(score) > score, VALUES(run_id), run_id),"+
+			" achieved_at = IF(VALUES(score) > score, VALUES(achieved_at), achieved_at),"+
+			" score = GREATEST(score, VALUES(score))", insertArgs...).Error
+	}
 	upd := tx.Exec(
 		"UPDATE "+table+" SET score = ?, run_id = ?, achieved_at = ? WHERE "+keyWhere+" AND score < ?",
 		append(append([]interface{}{rec.Score, rec.RunID, achieved}, keyArgs...), rec.Score)...,
@@ -67,16 +78,10 @@ func raiseSnakeBest(tx *gorm.DB, table, keyWhere, insertCols, insertMarks string
 		return upd.Error
 	}
 	var exists int64
-	if err := tx.Raw("SELECT COUNT(*) FROM "+table+" WHERE "+keyWhere, keyArgs...).Scan(&exists).Error; err != nil {
+	if err := tx.Raw("SELECT COUNT(*) FROM "+table+" WHERE "+keyWhere, keyArgs...).Scan(&exists).Error; err != nil || exists > 0 {
 		return err
 	}
-	if exists > 0 {
-		return nil
-	}
-	return tx.Exec(
-		"INSERT INTO "+table+" ("+insertCols+", score, run_id, achieved_at) VALUES ("+insertMarks+", ?, ?, ?)",
-		append(append([]interface{}{}, keyArgs...), rec.Score, rec.RunID, achieved)...,
-	).Error
+	return tx.Exec(insert, insertArgs...).Error
 }
 
 // SaveSnakeRun 은 판을 남기고, 통과한 판이면 역대·주간 최고 기록을 높을 때만 갱신한 뒤 내 기록을 돌려준다.
@@ -93,7 +98,7 @@ func (s *Store) SaveSnakeRun(rec SnakeRecord) (SoloStanding, error) {
 		).Error; err != nil {
 			return err
 		}
-		if rec.Flagged {
+		if rec.Flagged || rec.Score <= 0 {
 			return nil
 		}
 		if err := raiseSnakeBest(tx, "angple_snake_best", "mb_id = ?", "mb_id", "?",
@@ -118,6 +123,7 @@ type snakeBests struct {
 }
 
 // snakeStanding 은 내 역대 최고·이번 주 최고·이번 주 순위다.
+// 순위는 공개 랭킹과 같은 조건(탈퇴·이용 제한 회원 제외)으로 앞선 사람만 센다.
 func (s *Store) snakeStanding(mbID, week string) (SoloStanding, error) {
 	var b snakeBests
 	err := s.db.Raw(
@@ -130,7 +136,12 @@ func (s *Store) snakeStanding(mbID, week string) (SoloStanding, error) {
 		return st, err
 	}
 	var ahead int64
-	err = s.db.Raw("SELECT COUNT(*) FROM angple_snake_weekly WHERE week_start = ? AND score > ?", week, st.WeekBest).Scan(&ahead).Error
+	err = s.db.Raw(
+		`SELECT COUNT(*) FROM angple_snake_weekly w
+		   JOIN g5_member m ON m.mb_id = w.mb_id
+		  WHERE w.week_start = ? AND w.score > ? AND m.mb_leave_date = '' AND m.mb_intercept_date = ''`,
+		week, st.WeekBest,
+	).Scan(&ahead).Error
 	st.RankWeek = int(ahead) + 1
 	return st, err
 }

@@ -343,7 +343,7 @@ func newSnakeTestStore(t *testing.T) *Store {
 		`CREATE TABLE angple_snake_weekly (week_start DATE NOT NULL, mb_id TEXT NOT NULL, score INTEGER NOT NULL,
 			run_id TEXT NOT NULL, achieved_at DATETIME NOT NULL, PRIMARY KEY (week_start, mb_id))`,
 		`INSERT INTO g5_member (mb_id, mb_nick, mb_leave_date, mb_intercept_date) VALUES
-			('a', '에이', '', ''), ('b', '비', '', ''), ('left', '탈퇴', '20261001', ''), ('blocked', '제한', '', '20261001')`,
+			('a', '에이', '', ''), ('b', '비', '', ''), ('c', '씨', '', ''), ('left', '탈퇴', '20261001', ''), ('blocked', '제한', '', '20261001')`,
 	}
 	for _, s := range stmts {
 		if err := db.Exec(s).Error; err != nil {
@@ -390,12 +390,20 @@ func TestSnakeStoreSaveAndTop(t *testing.T) {
 	save("a", 80, false, lastWeek) // 지난주 기록 — 이번 주 표에는 없고 역대에는 있다
 	save("left", 500, false, week)
 	save("blocked", 400, false, week)
+	// 순위는 공개 랭킹과 같은 조건 — 탈퇴·이용 제한 회원(500·400점)은 앞선 사람으로 세지 않는다.
+	if st := save("a", 36, false, week); st.WeekBest != 36 || st.RankWeek != 2 {
+		t.Fatalf("제외 회원을 뺀 순위 = %+v", st)
+	}
+	// 0점 판은 기록만 남고 랭킹 표에는 들어가지 않는다.
+	if st := save("c", 0, false, week); st.Best != 0 || st.WeekBest != 0 || st.RankWeek != 0 {
+		t.Fatalf("0점 = %+v", st)
+	}
 
 	var runs, flagged int64
 	if err := s.db.Raw("SELECT COUNT(*), COALESCE(SUM(flagged), 0) FROM angple_snake_runs").Row().Scan(&runs, &flagged); err != nil {
 		t.Fatal(err)
 	}
-	if runs != 8 || flagged != 1 {
+	if runs != 10 || flagged != 1 {
 		t.Fatalf("runs=%d flagged=%d", runs, flagged)
 	}
 
@@ -403,7 +411,7 @@ func TestSnakeStoreSaveAndTop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(weekRows) != 2 || weekRows[0].Nickname != "비" || weekRows[0].Score != 40 || weekRows[1].Score != 35 {
+	if len(weekRows) != 2 || weekRows[0].Nickname != "비" || weekRows[0].Score != 40 || weekRows[1].Score != 36 {
 		t.Fatalf("이번 주 = %+v", weekRows)
 	}
 	if AchievedAtKST(weekRows[0].AchievedRaw) == "" {
