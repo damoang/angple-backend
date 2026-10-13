@@ -1,6 +1,6 @@
 // Command stack-ws 는 앙쌓기 온라인 대전·점수판 서버다.
 //
-// 기본 포트 8086 에서 /stack-ws/ 를 서빙한다(웹소켓 + 로비·점수판·혼자하기 기록 REST).
+// 기본 포트 8086 에서 /stack-ws/ 를 서빙한다(웹소켓 + 로비·점수판·혼자하기 기록 REST + 뱀 게임 기록).
 // API 서버와 같은 저장소·같은 DB 를 쓰되 프로세스는 분리한다. 장시간 유지되는 웹소켓 연결이
 // API 파드의 롤아웃에 끌려다니지 않게 하기 위해서다(오목·장기와 같은 구성).
 package main
@@ -60,6 +60,7 @@ func main() {
 	go server.StartStatusMonitor()
 	solo := stacksrv.NewSoloService(store, verify)
 	board := stacksrv.NewLeaderboard(store)
+	snake := stacksrv.NewSnakeService(store, verify)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, server.HandleWebSocket)
@@ -69,6 +70,10 @@ func main() {
 	// 혼자하기 기록 — 로그인 회원만(Authorization: Bearer). 실패하면 웹은 로컬 모드로 둔다.
 	mux.HandleFunc(path+"solo/start", solo.HandleStart)
 	mux.HandleFunc(path+"solo/finish", solo.HandleFinish)
+	// 뱀 게임 기록 — 같은 방식(로그인 회원만). 서버가 seed+입력 기록을 다시 돌려 점수를 확인한다.
+	// 랭킹은 위 점수판의 board=snake_week|snake_all.
+	mux.HandleFunc(path+"snake/start", snake.HandleStart)
+	mux.HandleFunc(path+"snake/finish", snake.HandleFinish)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		body, _ := json.Marshal(map[string]interface{}{

@@ -17,6 +17,8 @@ const (
 	BoardVsSprint40 = "vs_sprint40"
 	BoardVsSurvival = "vs_survival"
 	BoardVsScore120 = "vs_score120"
+	BoardSnakeWeek  = "snake_week"
+	BoardSnakeAll   = "snake_all"
 )
 
 // errUnknownBoard 는 열리지 않은 점수판이다(ServeHTTP 가 먼저 400 으로 거른다).
@@ -97,6 +99,8 @@ type LeaderboardStore interface {
 	SoloTop(weekStart time.Time, n int) ([]SoloRow, error)
 	// VersusTop 은 대전 규칙별 레이팅 상위 n 줄이다.
 	VersusTop(rule string, n int) ([]VersusRow, error)
+	// SnakeTop 은 뱀 게임 상위 n 줄이다. weekStart 가 영값이면 역대, 아니면 그 주.
+	SnakeTop(weekStart time.Time, n int) ([]SnakeRow, error)
 }
 
 // Leaderboard 는 GET /stack-ws/leaderboard?board= 처리기다. 공개·인증 불요.
@@ -128,7 +132,7 @@ func (l *Leaderboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	now := l.now()
 	key := board
-	if board == BoardSoloWeek {
+	if board == BoardSoloWeek || board == BoardSnakeWeek {
 		// 주가 바뀌면 캐시 키도 바뀐다 — 월요일 0시 직후에 지난주 표가 남지 않게.
 		key = board + ":" + WeekStartKST(now).Format("2006-01-02")
 	}
@@ -143,7 +147,8 @@ func (l *Leaderboard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // knownBoard 는 열린 점수판인지다.
 func knownBoard(board string) bool {
 	switch board {
-	case BoardSoloWeek, BoardSoloAll, BoardVsAttack, BoardVsSprint40, BoardVsSurvival, BoardVsScore120:
+	case BoardSoloWeek, BoardSoloAll, BoardVsAttack, BoardVsSprint40, BoardVsSurvival, BoardVsScore120,
+		BoardSnakeWeek, BoardSnakeAll:
 		return true
 	}
 	return false
@@ -168,6 +173,8 @@ func versusBoardRule(board string) (string, bool) {
 func (l *Leaderboard) build(board string, now time.Time) ([]byte, error) {
 	out := map[string]interface{}{"board": board}
 	switch board {
+	case BoardSnakeWeek, BoardSnakeAll:
+		return l.buildSnake(board, now, out)
 	case BoardSoloWeek, BoardSoloAll:
 		var week time.Time
 		if board == BoardSoloWeek {
@@ -203,6 +210,27 @@ func (l *Leaderboard) build(board string, now time.Time) ([]byte, error) {
 		}
 		out["rows"] = rows
 	}
+	return json.Marshal(out)
+}
+
+// buildSnake 는 뱀 게임 랭킹 응답 본문을 만든다. 이번 주 표에는 weekStart 를 싣는다.
+func (l *Leaderboard) buildSnake(board string, now time.Time, out map[string]interface{}) ([]byte, error) {
+	var week time.Time
+	if board == BoardSnakeWeek {
+		week = WeekStartKST(now)
+		out["weekStart"] = week.Format(snakeDayLayout)
+	}
+	rows, err := l.store.SnakeTop(week, LeaderboardSize)
+	if err != nil {
+		return nil, err
+	}
+	ranked := make([]SnakeRow, 0, len(rows))
+	for i, row := range rows {
+		row.Rank = i + 1
+		row.AchievedAt = AchievedAtKST(row.AchievedRaw)
+		ranked = append(ranked, row)
+	}
+	out["rows"] = ranked
 	return json.Marshal(out)
 }
 
