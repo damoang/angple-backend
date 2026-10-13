@@ -40,6 +40,8 @@ type fakeBoardStore struct {
 	lastN int
 	// lastRule 은 VersusTop 에 마지막으로 넘어온 규칙이다.
 	lastRule string
+	// lastSnakeWeek 는 SnakeTop 에 마지막으로 넘어온 주 시작이다.
+	lastSnakeWeek time.Time
 }
 
 func (f *fakeBoardStore) SoloTop(_ time.Time, n int) ([]SoloRow, error) {
@@ -60,6 +62,15 @@ func (f *fakeBoardStore) VersusTop(rule string, n int) ([]VersusRow, error) {
 	f.lastN = n
 	f.lastRule = rule
 	return []VersusRow{{Nickname: "고수", Rating: 1620, Wins: 3}}, nil
+}
+
+func (f *fakeBoardStore) SnakeTop(week time.Time, n int) ([]SnakeRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.lastN = n
+	f.lastSnakeWeek = week
+	return []SnakeRow{{Nickname: "뱀왕", Score: 57, AchievedRaw: "2026-10-12 00:00:01"}}, nil
 }
 
 func (f *fakeBoardStore) count() int {
