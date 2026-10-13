@@ -51,42 +51,113 @@ type Point struct {
 // Board 는 좌표→말 조회용 격자다. b[y][x], 빈 칸은 nil.
 type Board [Rows][Cols]*Piece
 
-// InitPieces 는 초기 배치를 돌려준다. 배치 좌표는 TS initPieces 와 동일하다.
-// (마상상마 변형 배치는 1차 범위 밖 — 클라이언트도 고정 배치다.)
+// Setup 은 상차림(뒷줄 마·상 배치)이다. 값은 **자기 시점(왼→오른)** 으로 읽은
+// [1]~[4] 칸의 기물이며, 웹 SETUPS 와 같은 한글 문자열을 그대로 주고받는다.
+//
+// 판 x 매핑(웹 setupColumns 와 동일):
+//   - 초(하단)는 판 x 순서와 자기 시점이 같다: [1]=x1, [2]=x2, [3]=x6, [4]=x7
+//   - 한(상단)은 반대편에서 보므로 좌우가 뒤집힌다: [1]=x7, [2]=x6, [3]=x2, [4]=x1
+type Setup string
+
+// 상차림 4종(자기 시점).
+const (
+	SetupMaSangMaSang Setup = "마상마상" // 오른상
+	SetupMaSangSangMa Setup = "마상상마" // 안상
+	SetupSangMaSangMa Setup = "상마상마" // 왼상
+	SetupSangMaMaSang Setup = "상마마상" // 바깥상
+)
+
+// 진영별 기본 상차림. 둘을 함께 쓰면 상차림 도입 전 고정 배치와 좌표·배열
+// 순서까지 똑같다(초 x1~x7 = 상마…상마, 한도 판 x 기준 상마…상마).
+const (
+	DefaultChoSetup = SetupSangMaSangMa
+	DefaultHanSetup = SetupMaSangMaSang
+)
+
+// setupKinds 는 상차림 → 자기 시점 [1]~[4] 칸의 기물이다.
+var setupKinds = map[Setup][4]int{
+	SetupMaSangMaSang: {KindMa, KindSang, KindMa, KindSang},
+	SetupMaSangSangMa: {KindMa, KindSang, KindSang, KindMa},
+	SetupSangMaSangMa: {KindSang, KindMa, KindSang, KindMa},
+	SetupSangMaMaSang: {KindSang, KindMa, KindMa, KindSang},
+}
+
+// IsValidSetup 은 s 가 4종 상차림 중 하나인지 본다.
+func IsValidSetup(s Setup) bool {
+	_, ok := setupKinds[s]
+	return ok
+}
+
+// DefaultSetup 은 진영별 기본 상차림이다(TeamHan 이면 한, 그 외는 초).
+func DefaultSetup(team int) Setup {
+	if team == TeamHan {
+		return DefaultHanSetup
+	}
+	return DefaultChoSetup
+}
+
+// SetupColumns 는 상차림 [1]~[4] 칸이 판에서 몇 번째 x 인지 돌려준다(진영 시점 반영).
+func SetupColumns(team int) [4]int {
+	if team == TeamHan {
+		return [4]int{7, 6, 2, 1}
+	}
+	return [4]int{1, 2, 6, 7}
+}
+
+// backRankKinds 는 team 의 뒷줄 x → 마·상 종류 표다(x1·x2·x6·x7 만 채운다).
+// ⛔ 잘못된 상차림은 그 진영의 기본값으로 대체한다 — 서버는 입력을 미리
+// IsValidSetup 으로 거르지만, 여기서도 판이 깨지지 않게 막아 둔다.
+func backRankKinds(team int, s Setup) [Cols]int {
+	kinds, ok := setupKinds[s]
+	if !ok {
+		kinds = setupKinds[DefaultSetup(team)]
+	}
+	var out [Cols]int
+	for i, x := range SetupColumns(team) {
+		out[x] = kinds[i]
+	}
+	return out
+}
+
+// InitPieces 는 기본 상차림(초 상마상마·한 마상마상)의 초기 배치를 돌려준다.
+// 상차림 도입 전 고정 배치와 좌표·배열 순서가 같다.
 func InitPieces() []Piece {
+	return InitPiecesWithSetup(DefaultChoSetup, DefaultHanSetup)
+}
+
+// InitPiecesWithSetup 은 진영별 상차림을 반영한 초기 배치를 돌려준다. 배치 좌표는
+// TS initPieces(choSetup, hanSetup) 와 동일하다. 배열 순서는 기존과 같다(한 먼저:
+// 차·x1·x2·사·사·x6·x7·차·궁·포·포·졸×5, 그다음 초 같은 순서) — 클라이언트의
+// pieces 배열과 인덱스 호환. 잘못된 상차림은 그 진영의 기본값으로 대체한다.
+func InitPiecesWithSetup(cho, han Setup) []Piece {
 	p := make([]Piece, 0, 32)
 	add := func(kind, team, x, y int) {
 		p = append(p, Piece{Kind: kind, Team: team, X: x, Y: y, Alive: true})
 	}
-	// 한(상단)
-	add(KindCha, TeamHan, 0, 0)
-	add(KindSang, TeamHan, 1, 0)
-	add(KindMa, TeamHan, 2, 0)
-	add(KindSa, TeamHan, 3, 0)
-	add(KindSa, TeamHan, 5, 0)
-	add(KindSang, TeamHan, 6, 0)
-	add(KindMa, TeamHan, 7, 0)
-	add(KindCha, TeamHan, 8, 0)
-	add(KindGung, TeamHan, 4, 1)
-	add(KindPo, TeamHan, 1, 2)
-	add(KindPo, TeamHan, 7, 2)
-	for i := 0; i < 5; i++ {
-		add(KindJol, TeamHan, i*2, 3)
+	sides := []struct {
+		team                    int
+		setup                   Setup
+		backY, gungY, poY, jolY int
+	}{
+		{TeamHan, han, 0, 1, 2, 3}, // 한(상단)
+		{TeamCho, cho, 9, 8, 7, 6}, // 초(하단)
 	}
-	// 초(하단)
-	add(KindCha, TeamCho, 0, 9)
-	add(KindSang, TeamCho, 1, 9)
-	add(KindMa, TeamCho, 2, 9)
-	add(KindSa, TeamCho, 3, 9)
-	add(KindSa, TeamCho, 5, 9)
-	add(KindSang, TeamCho, 6, 9)
-	add(KindMa, TeamCho, 7, 9)
-	add(KindCha, TeamCho, 8, 9)
-	add(KindGung, TeamCho, 4, 8)
-	add(KindPo, TeamCho, 1, 7)
-	add(KindPo, TeamCho, 7, 7)
-	for i := 0; i < 5; i++ {
-		add(KindJol, TeamCho, i*2, 6)
+	for _, sd := range sides {
+		back := backRankKinds(sd.team, sd.setup)
+		add(KindCha, sd.team, 0, sd.backY)
+		add(back[1], sd.team, 1, sd.backY)
+		add(back[2], sd.team, 2, sd.backY)
+		add(KindSa, sd.team, 3, sd.backY)
+		add(KindSa, sd.team, 5, sd.backY)
+		add(back[6], sd.team, 6, sd.backY)
+		add(back[7], sd.team, 7, sd.backY)
+		add(KindCha, sd.team, 8, sd.backY)
+		add(KindGung, sd.team, 4, sd.gungY)
+		add(KindPo, sd.team, 1, sd.poY)
+		add(KindPo, sd.team, 7, sd.poY)
+		for i := 0; i < 5; i++ {
+			add(KindJol, sd.team, i*2, sd.jolY)
+		}
 	}
 	return p
 }

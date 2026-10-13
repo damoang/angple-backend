@@ -44,6 +44,10 @@ const (
 	ratingBandSecond = 400
 )
 
+// SetupTimeout 은 매칭 직후 상차림 선택 단계의 제한시간이다. 그 안에 고르지 않은
+// 진영은 기본 상차림(초 상마상마·한 마상마상 = 상차림 도입 전 고정 배치)으로 시작한다.
+const SetupTimeout = 20 * time.Second
+
 // Client 는 접속한 한 명이다. MbID 는 JWT 로 확정된 값이며 클라이언트가
 // 보내는 값을 절대 신뢰하지 않는다.
 type Client struct {
@@ -87,6 +91,15 @@ type Room struct {
 	DBGameID int64
 	// Paid 는 참가비가 실제로 차감된 대국인지(초대 대국은 false).
 	Paid bool
+
+	// 상차림 선택 단계 — 매칭 직후 ~ game_start 전. 이 동안 GameState 는 nil 이다.
+	// setupPhase 는 「아직 대국을 시작하지 않았다」는 가드이기도 하다: 둘 다 선택과
+	// 타임아웃이 겹쳐도 락 안에서 이 값을 먼저 내린 쪽만 createGame 을 부른다.
+	setupPhase    bool
+	setupDeadline time.Time
+	setupTimer    *time.Timer
+	// setups 는 진영(1=초 2=한) → 고른 상차림. 고르지 않은 진영은 키가 없다.
+	setups map[int]janggi.Setup
 }
 
 type GameState struct {
@@ -97,6 +110,9 @@ type GameState struct {
 	MoveHistory  []Move
 	StartTime    time.Time
 	LastMoveTime time.Time
+	// ChoSetup·HanSetup 은 대국 시작 때 확정된 진영별 상차림이다.
+	ChoSetup janggi.Setup
+	HanSetup janggi.Setup
 	// turnTimer 는 현재 턴의 제한시간 타이머다. 착수·종료 때마다 교체된다.
 	turnTimer *time.Timer
 	finished  bool
@@ -133,5 +149,7 @@ type Server struct {
 	mu            sync.RWMutex
 	upgrader      websocket.Upgrader
 	store         *Store
-	verifyToken   func(string) (mbID string, nick string, err error)
+	// setupTimeout 은 상차림 선택 제한시간이다(기본 SetupTimeout, 테스트에서 줄인다).
+	setupTimeout time.Duration
+	verifyToken  func(string) (mbID string, nick string, err error)
 }

@@ -30,8 +30,9 @@ func NewServer(store *Store, verifyToken func(string) (string, string, error)) *
 			ModeRating:   {},
 			ModeFavorite: {},
 		},
-		store:       store,
-		verifyToken: verifyToken,
+		store:        store,
+		setupTimeout: SetupTimeout,
+		verifyToken:  verifyToken,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		},

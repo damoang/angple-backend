@@ -11,34 +11,51 @@ import (
 
 // createGame 은 방에 장기 초기 국면을 깐다. 1=초(선공, 하단)·2=한.
 // 오목의 createGame 과 같은 골격 — 판정은 전부 서버(engine)가 한다.
-func (s *Server) createGame(roomID, choMbID, hanMbID string) {
+// 상차림은 선택 단계(finishSetup)에서 확정된 값이다. 방마다 한 번만 깐다.
+func (s *Server) createGame(roomID, choMbID, hanMbID string, choSetup, hanSetup janggi.Setup) {
 	s.mu.Lock()
 	room := s.rooms[roomID]
-	if room == nil {
+	if room == nil || room.GameState != nil {
 		s.mu.Unlock()
 		return
 	}
 	room.GameState = &GameState{
-		Pieces: janggi.InitPieces(), CurrentTeam: janggi.TeamCho,
+		Pieces: janggi.InitPiecesWithSetup(choSetup, hanSetup), CurrentTeam: janggi.TeamCho,
 		ChoMbID: choMbID, HanMbID: hanMbID,
+		ChoSetup: choSetup, HanSetup: hanSetup,
 		MoveHistory: []Move{}, StartTime: time.Now(), LastMoveTime: time.Now(),
 	}
 	clients := s.clientsInRoomLocked(room)
 	gs := room.GameState
+	dbID := room.DBGameID
 	s.mu.Unlock()
 
+	setups := setupsPayload(gs)
 	for _, c := range clients {
 		s.sendToClient(c, map[string]interface{}{
 			"type": "game_start", "roomId": roomID,
 			"playerTeam":  room.PlayerColors[c.MbID], // 1=초 2=한 (matching 의 색 배정 재사용)
 			"turnSeconds": int(TurnTimeout.Seconds()),
+			"setups":      setups,
 			"gameState": map[string]interface{}{
 				"pieces": gs.Pieces, "currentTeam": gs.CurrentTeam,
 			},
 		})
 	}
 	s.armTurnTimer(roomID)
-	log.Printf("[janggi] game start room=%s cho=%s han=%s db=%d", roomID, choMbID, hanMbID, room.DBGameID)
+	log.Printf("[janggi] game start room=%s cho=%s han=%s db=%d", roomID, choMbID, hanMbID, dbID)
+
+	// 상차림 기록은 대국 진행과 무관하다 — 실패해도 로그만 남긴다.
+	if s.store != nil && dbID > 0 {
+		if err := s.store.UpdateSetups(dbID, string(choSetup), string(hanSetup)); err != nil {
+			log.Printf("[janggi] setup persist failed room=%s db=%d: %v", roomID, dbID, err)
+		}
+	}
+}
+
+// setupsPayload 는 game_start·game_restored 에 싣는 {"cho","han"} 상차림이다.
+func setupsPayload(gs *GameState) map[string]string {
+	return map[string]string{"cho": string(gs.ChoSetup), "han": string(gs.HanSetup)}
 }
 
 // armTurnTimer — 턴 90초. 시간이 다하면 그 사람이 패배한다(이탈=패배 원칙, 오목과 동일).
@@ -254,6 +271,9 @@ func (s *Server) finishGame(roomID, winnerMbID, reason, note string) {
 
 	time.AfterFunc(10*time.Second, func() {
 		s.mu.Lock()
+		if r := s.rooms[roomID]; r != nil {
+			stopSetupTimerLocked(r) // 선택 단계 타이머 누수 방지(정상 경로에선 이미 멈춰 있다)
+		}
 		delete(s.rooms, roomID)
 		s.mu.Unlock()
 	})
