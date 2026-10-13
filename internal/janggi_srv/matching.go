@@ -154,7 +154,8 @@ func (s *Server) compatible(mode string, a, b *queueEntry) bool {
 	return diff <= band
 }
 
-// startMatch 는 방을 만들고 참가비를 걷은 뒤 대국을 시작한다.
+// startMatch 는 방을 만들고 참가비를 걷은 뒤 상차림 선택 단계를 연다.
+// 대국(game_start)은 선택이 끝나면 finishSetup 이 시작한다.
 // ⛔ 락 밖에서 호출된다(DB 트랜잭션 포함).
 func (s *Server) startMatch(a, b *queueEntry, mode string) {
 	paid := mode != ModeFavorite
@@ -219,6 +220,8 @@ func (s *Server) startMatch(a, b *queueEntry, mode string) {
 	}
 	s.rooms[roomID] = room
 	black.roomID, white.roomID = roomID, roomID
+	// 바로 game_start 하지 않고 상차림 선택 단계를 연다(제한시간 뒤엔 기본값으로 시작).
+	s.openSetupLocked(room)
 	s.mu.Unlock()
 
 	for _, c := range []*Client{black, white} {
@@ -233,7 +236,7 @@ func (s *Server) startMatch(a, b *queueEntry, mode string) {
 		})
 	}
 
-	s.createGame(roomID, black.MbID, white.MbID)
+	s.sendSetupChoose(roomID)
 }
 
 func (s *Server) notifyMatchFailed(a, b *Client, msg string) {
@@ -244,8 +247,16 @@ func (s *Server) notifyMatchFailed(a, b *Client, msg string) {
 	}
 }
 
+// handleCancelMatching 은 대기열에서 뺀다. 이미 방이 잡힌(상차림 선택 단계 또는
+// 대국 중) 사람의 취소는 조용히 무시한다 — 선택 단계를 모르는 구 클라이언트가
+// 「대기 중」 화면에서 취소를 누르면 matching_canceled 를 받고 연결을 끊어,
+// 유예 뒤 이탈 패배가 되기 때문이다.
 func (s *Server) handleCancelMatching(client *Client) {
 	s.mu.Lock()
+	if roomInPlayLocked(s.rooms[client.roomID]) {
+		s.mu.Unlock()
+		return
+	}
 	mode := client.matchingMode
 	if mode != "" {
 		q := s.matchingQueue[mode]

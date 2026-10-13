@@ -235,3 +235,137 @@ func TestIsBikjang(t *testing.T) {
 		t.Fatal("초기 배치는 궁렬에 졸·병이 있어 빅장이 아니어야 한다")
 	}
 }
+
+// legacyInitPieces 는 상차림 도입 전 InitPieces 의 고정 배치를 **리터럴 그대로**
+// 옮긴 기대값이다(좌표·배열 순서 모두). 기본 상차림이 이것과 한 칸이라도
+// 어긋나면 운영 중인 클라이언트와 pieces 인덱스가 틀어진다.
+func legacyInitPieces() []Piece {
+	p := make([]Piece, 0, 32)
+	add := func(kind, team, x, y int) {
+		p = append(p, Piece{Kind: kind, Team: team, X: x, Y: y, Alive: true})
+	}
+	add(KindCha, TeamHan, 0, 0)
+	add(KindSang, TeamHan, 1, 0)
+	add(KindMa, TeamHan, 2, 0)
+	add(KindSa, TeamHan, 3, 0)
+	add(KindSa, TeamHan, 5, 0)
+	add(KindSang, TeamHan, 6, 0)
+	add(KindMa, TeamHan, 7, 0)
+	add(KindCha, TeamHan, 8, 0)
+	add(KindGung, TeamHan, 4, 1)
+	add(KindPo, TeamHan, 1, 2)
+	add(KindPo, TeamHan, 7, 2)
+	for i := 0; i < 5; i++ {
+		add(KindJol, TeamHan, i*2, 3)
+	}
+	add(KindCha, TeamCho, 0, 9)
+	add(KindSang, TeamCho, 1, 9)
+	add(KindMa, TeamCho, 2, 9)
+	add(KindSa, TeamCho, 3, 9)
+	add(KindSa, TeamCho, 5, 9)
+	add(KindSang, TeamCho, 6, 9)
+	add(KindMa, TeamCho, 7, 9)
+	add(KindCha, TeamCho, 8, 9)
+	add(KindGung, TeamCho, 4, 8)
+	add(KindPo, TeamCho, 1, 7)
+	add(KindPo, TeamCho, 7, 7)
+	for i := 0; i < 5; i++ {
+		add(KindJol, TeamCho, i*2, 6)
+	}
+	return p
+}
+
+func samePieces(t *testing.T, got, want []Piece, label string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s: 말 수 %d != 기대 %d", label, len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s: [%d] got=%+v want=%+v", label, i, got[i], want[i])
+		}
+	}
+}
+
+func TestDefaultSetupEqualsLegacyLayout(t *testing.T) {
+	want := legacyInitPieces()
+	samePieces(t, InitPieces(), want, "InitPieces")
+	samePieces(t, InitPiecesWithSetup(DefaultChoSetup, DefaultHanSetup), want, "기본 상차림")
+	samePieces(t, InitPiecesWithSetup(SetupSangMaSangMa, SetupMaSangMaSang), want, "초 상마상마·한 마상마상")
+}
+
+func TestIsValidSetup(t *testing.T) {
+	for _, s := range []Setup{SetupMaSangMaSang, SetupMaSangSangMa, SetupSangMaSangMa, SetupSangMaMaSang} {
+		if !IsValidSetup(s) {
+			t.Fatalf("%q 는 유효해야 한다", s)
+		}
+	}
+	for _, s := range []Setup{"", "마마상상", "상상마마", "마상", "sangma", "상마상마 "} {
+		if IsValidSetup(s) {
+			t.Fatalf("%q 는 무효여야 한다", s)
+		}
+	}
+}
+
+// TestAllSetupCombos — 4×4 조합 각각 x1·x2·x6·x7 뒷줄 기물을 검증한다.
+// 기대값은 자기 시점 표기에서 손으로 유도했다: 초는 [1..4]=x1,x2,x6,x7,
+// 한은 반대편에서 보므로 [1..4]=x7,x6,x2,x1.
+func TestAllSetupCombos(t *testing.T) {
+	const M, S = KindMa, KindSang
+	// 판 x1,x2,x6,x7 순서로 본 기물
+	choAt := map[Setup][4]int{
+		SetupMaSangMaSang: {M, S, M, S},
+		SetupMaSangSangMa: {M, S, S, M},
+		SetupSangMaSangMa: {S, M, S, M},
+		SetupSangMaMaSang: {S, M, M, S},
+	}
+	hanAt := map[Setup][4]int{
+		SetupMaSangMaSang: {S, M, S, M}, // 한 시점 마상마상 = x7 마, x6 상, x2 마, x1 상
+		SetupMaSangSangMa: {M, S, S, M},
+		SetupSangMaSangMa: {M, S, M, S},
+		SetupSangMaMaSang: {S, M, M, S},
+	}
+	xs := [4]int{1, 2, 6, 7}
+	for cho, choWant := range choAt {
+		for han, hanWant := range hanAt {
+			label := "초 " + string(cho) + " · 한 " + string(han)
+			pcs := InitPiecesWithSetup(cho, han)
+			if len(pcs) != 32 {
+				t.Fatalf("%s: 말 수 %d", label, len(pcs))
+			}
+			b := MakeBoard(pcs)
+			for i, x := range xs {
+				if p := b[9][x]; p == nil || p.Team != TeamCho || p.Kind != choWant[i] {
+					t.Fatalf("%s: 초 (x%d,9) got=%+v want kind=%d", label, x, p, choWant[i])
+				}
+				if p := b[0][x]; p == nil || p.Team != TeamHan || p.Kind != hanWant[i] {
+					t.Fatalf("%s: 한 (x%d,0) got=%+v want kind=%d", label, x, p, hanWant[i])
+				}
+			}
+			// 마·상 외 기물은 상차림과 무관하게 기존 자리 그대로다.
+			legacy := legacyInitPieces()
+			for i := range legacy {
+				if legacy[i].Kind == KindMa || legacy[i].Kind == KindSang {
+					if pcs[i].X != legacy[i].X || pcs[i].Y != legacy[i].Y || pcs[i].Team != legacy[i].Team {
+						t.Fatalf("%s: [%d] 마·상 자리 순서가 바뀜 got=%+v", label, i, pcs[i])
+					}
+					continue
+				}
+				if pcs[i] != legacy[i] {
+					t.Fatalf("%s: [%d] got=%+v want=%+v", label, i, pcs[i], legacy[i])
+				}
+			}
+		}
+	}
+}
+
+// TestInvalidSetupFallsBackPerTeam — 잘못된 상차림은 **그 진영의 기본값**으로
+// 대체된다(초 상마상마·한 마상마상). 서버는 입력을 IsValidSetup 으로 먼저 거르므로
+// 이 경로는 방어선일 뿐이다.
+func TestInvalidSetupFallsBackPerTeam(t *testing.T) {
+	samePieces(t, InitPiecesWithSetup("", ""), legacyInitPieces(), "빈 값")
+	samePieces(t, InitPiecesWithSetup("bogus", "마마상상"), legacyInitPieces(), "무효 값")
+	// 한쪽만 무효면 그쪽만 기본값, 다른 쪽은 선택대로.
+	got := InitPiecesWithSetup("bogus", SetupMaSangSangMa)
+	samePieces(t, got, InitPiecesWithSetup(DefaultChoSetup, SetupMaSangSangMa), "초만 무효")
+}

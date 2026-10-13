@@ -144,6 +144,18 @@ func (s *Store) FinishGame(gameID int64, choMbID, hanMbID, winnerMbID, reason st
 	})
 }
 
+// UpdateSetups 는 대국 시작 시 확정된 진영별 상차림을 기록한다.
+// 대국 진행에는 영향이 없는 기록이므로 호출자는 실패를 로그만 남긴다.
+func (s *Store) UpdateSetups(gameID int64, choSetup, hanSetup string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Exec(
+		"UPDATE angple_janggi_games SET cho_setup = ?, han_setup = ? WHERE id = ?",
+		choSetup, hanSetup, gameID,
+	).Error
+}
+
 // AbortGame 은 서버 중단 등으로 성립하지 못한 대국을 정리한다(참가비는 환불).
 func (s *Store) AbortGame(gameID int64, reason string) error {
 	if s == nil || s.db == nil {

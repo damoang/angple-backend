@@ -11,6 +11,8 @@ func (s *Server) handleMessage(client *Client, msg Message) {
 		s.handleMatching(client, msg.Data)
 	case "cancel_matching":
 		s.handleCancelMatching(client)
+	case "setup_select":
+		s.handleSetupSelect(client, msg.Data)
 	case "move":
 		s.handleMove(client, msg.Data)
 	case "surrender":
@@ -60,7 +62,7 @@ func (s *Server) handleDisconnect(client *Client) {
 	}
 	roomID := client.roomID
 	var opponents []*Client
-	if room := s.rooms[roomID]; room != nil && room.GameState != nil && !room.GameState.finished {
+	if room := s.rooms[roomID]; roomInPlayLocked(room) {
 		session.GameID = roomID
 		session.GameState = room.GameState
 		for _, pid := range room.Players {
@@ -126,14 +128,9 @@ func (s *Server) handleReconnect(client *Client, data map[string]interface{}) {
 	delete(s.disconnectedSessions, sessionID)
 
 	room := s.rooms[session.GameID]
+	restore := restoreMsgsLocked(room, client.MbID)
 	var opponents []*Client
-	var state map[string]interface{}
-	if room != nil && room.GameState != nil && !room.GameState.finished {
-		gs := room.GameState
-		state = map[string]interface{}{
-			"pieces": gs.Pieces, "currentTeam": gs.CurrentTeam,
-			"playerTeam": room.PlayerColors[client.MbID],
-		}
+	if restore != nil {
 		for _, pid := range room.Players {
 			if pid != client.MbID {
 				if c := s.findClientByMbIDLocked(pid); c != nil {
@@ -149,13 +146,53 @@ func (s *Server) handleReconnect(client *Client, data map[string]interface{}) {
 			"type": "opponent_reconnected", "message": "상대방이 다시 접속했습니다.",
 		})
 	}
-	if state != nil {
-		s.sendToClient(client, map[string]interface{}{
-			"type": "game_restored", "roomId": session.GameID, "gameState": state,
-		})
-	} else {
+	if restore == nil {
 		s.sendToClient(client, errMsg("복구할 대국이 없습니다."))
+		return
 	}
+	for _, m := range restore {
+		s.sendToClient(client, m)
+	}
+}
+
+// restoreMsgsLocked 는 재접속한 mbID 에게 보낼 복원 메시지다(복원할 게 없으면 nil).
+//   - 상차림 선택 단계: setup_choose(남은 시간·본인 선택값) + setup_status
+//   - 대국 중: game_restored(gameState 에 setups 포함)
+//
+// 호출자가 s.mu 를 잡고 있어야 한다.
+func restoreMsgsLocked(room *Room, mbID string) []map[string]interface{} {
+	if room == nil {
+		return nil
+	}
+	if room.setupPhase {
+		return []map[string]interface{}{
+			setupChooseMsgLocked(room, mbID, time.Now()),
+			setupStatusMsgLocked(room),
+		}
+	}
+	gs := room.GameState
+	if gs == nil || gs.finished {
+		return nil
+	}
+	return []map[string]interface{}{{
+		"type": "game_restored", "roomId": room.ID,
+		"gameState": map[string]interface{}{
+			"pieces": gs.Pieces, "currentTeam": gs.CurrentTeam,
+			"playerTeam": room.PlayerColors[mbID],
+			"setups":     setupsPayload(gs),
+		},
+	}}
+}
+
+// roomInPlayLocked 는 방이 상차림 선택 단계이거나 대국 중인지 본다.
+// 선택 단계도 대국 중으로 본다 — 끊겨도 단계는 기본값으로 그대로 시작하고,
+// 유예 안에 돌아오지 않으면 기존 이탈 규칙(패배)을 따른다.
+// 호출자가 s.mu 를 잡고 있어야 한다.
+func roomInPlayLocked(room *Room) bool {
+	if room == nil {
+		return false
+	}
+	return room.setupPhase || room.GameState != nil && !room.GameState.finished
 }
 
 // findClientByMbIDLocked — 호출자가 s.mu 를 잡고 있어야 한다.
