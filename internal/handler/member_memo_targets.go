@@ -79,5 +79,7 @@ func (h *MemberMemoTargetsHandler) GetMemoTargets(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "메모 대상 조회 실패"})
 		return
 	}
+	// 탈퇴(숙려 포함) 회원 대상은 목록에서 뺀다 — IN 쿼리 1회, 판정 실패 시 빈 목록.
+	data = DropWithdrawnFromMemoTargets(c.Request.Context(), data)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
