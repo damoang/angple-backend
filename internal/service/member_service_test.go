@@ -76,9 +76,13 @@ type fakeMemberRepo struct {
 	gnurepo.MemberRepository
 	updated map[string]string
 	cleared []string
+	err     error // 설정되면 쓰기 메서드가 이 에러를 돌려준다(DB 실패 흉내)
 }
 
 func (r *fakeMemberRepo) UpdateMemberImageUrl(mbID, imageURL string) error { //nolint:revive // gnurepo.MemberRepository 메서드명과 일치해야 함
+	if r.err != nil {
+		return r.err
+	}
 	if r.updated == nil {
 		r.updated = map[string]string{}
 	}
@@ -87,6 +91,9 @@ func (r *fakeMemberRepo) UpdateMemberImageUrl(mbID, imageURL string) error { //n
 }
 
 func (r *fakeMemberRepo) ClearMemberImageUrl(mbID string) error { //nolint:revive // gnurepo.MemberRepository 메서드명과 일치해야 함
+	if r.err != nil {
+		return r.err
+	}
 	r.cleared = append(r.cleared, mbID)
 	return nil
 }

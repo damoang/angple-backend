@@ -13,6 +13,7 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"github.com/damoang/angple-backend/internal/middleware"
+	"github.com/damoang/angple-backend/internal/webcache"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -295,6 +296,8 @@ func applySelfLeave(db *gorm.DB, mbID, reason string, now time.Time) (withdrawal
 	//    전제이고, 그 전제에 기대는 대신 무조건 지운다.
 	//    DELETE 는 멱등이라 중복 실행은 무해하다(0행 매치).
 	purgeAuthArtifacts(db, mbID)
+	// 회원 표시 캐시(탈퇴 여부 포함)도 지운다. 실패해도 탈퇴는 그대로 성립한다.
+	webcache.InvalidateMemberCard(mbID)
 
 	info := buildWithdrawalInfo(member.MbLeaveDate, member.MbNick, now)
 	// 이용제한 중 탈퇴면 복원 대상이 아니다 — 화면이 버튼을 감출 수 있게 알려준다.
@@ -397,6 +400,7 @@ func cancelSelfLeave(db *gorm.DB, mbID string, now time.Time) error {
 	// ⛔ 회원 캐시도 함께 지운다. hooks 의 2차 방어가 낡은 "탈퇴함" 을 읽으면
 	//    세션을 파기해 버려 방금 만든 로그인이 즉시 끊긴다.
 	clearWithdrawalGateCache(mbID)
+	webcache.InvalidateMemberCard(mbID)
 
 	// 복원 이력 기록 — 반복 탈퇴·복원(bug/13133 ②케이스)을 추적하려면 이 행이 필요하다.
 	if err := recordLeaveHistory(db, leaveHistoryRow{

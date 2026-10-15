@@ -11,6 +11,7 @@ import (
 	"github.com/damoang/angple-backend/internal/common"
 	gnuboard "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	"github.com/damoang/angple-backend/internal/middleware"
+	"github.com/damoang/angple-backend/internal/webcache"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -317,6 +318,10 @@ func (h *AdminMemberHandler) UpdateMember(c *gin.Context) {
 	// ⛔ 탈퇴 취소(MbLeave=false) 에는 적용하지 않는다 — 복귀시키는 동작이다.
 	if req.MbLeave != nil && *req.MbLeave {
 		purgeAuthArtifacts(h.db, mbID)
+	}
+	// 닉네임·탈퇴 설정/해제가 바뀌었으면 회원 표시 캐시를 지운다(UPDATE 성공 뒤, best-effort).
+	if req.MbName != nil || req.MbLeave != nil {
+		webcache.InvalidateMemberCard(mbID)
 	}
 	common.V2Success(c, gin.H{"message": "수정 완료"})
 }
