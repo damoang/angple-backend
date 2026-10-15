@@ -286,6 +286,8 @@ func (r *luckyAdminRepository) SetBoardLucky(ids []string, lucky BoardLucky, now
 		return nil, err
 	}
 	now = now.Truncate(time.Second)
+	// 트랜잭션이 끝난 뒤(커밋·롤백 모두) 이 게시판들의 확장 설정 캐시를 지운다.
+	defer invalidateBoardExtSettings(r.db, ids...)
 	var out map[string]string
 	err = r.db.Transaction(func(tx *gorm.DB) error {
 		var existing []string
