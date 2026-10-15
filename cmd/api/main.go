@@ -8130,11 +8130,36 @@ type postStatusRow struct {
 	UpdatedKST string `gorm:"column:updated_kst"`
 }
 
-// enrichWithPostStatus 는 목록 항목에 status / status_updated_at 을 붙인다(페이지 글 묶음 1쿼리).
+// enrichWithPostStatus 는 목록 항목에 status / status_updated_at 을 붙인다. 글 상세와 같은 게시판별
+// 상태 맵(프로세스 캐시)에서 꺼내고, 맵 조회가 실패하면 예전처럼 페이지 글 묶음 1쿼리로 대신한다
+// (enrichWithPostStatusDirect).
 func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
 	if db == nil || len(items) == 0 {
 		return items
 	}
+	byID, err := postStatusBoardMap(db, slug)
+	if err != nil {
+		postStatusLogRateLimited("[post_status] 게시판 상태 맵 조회 실패 board=%s — 목록 묶음 조회로 대신함: %v", slug, err)
+		return enrichWithPostStatusDirect(db, slug, items)
+	}
+	if len(byID) == 0 {
+		return items
+	}
+	for i, item := range items {
+		id := itemIntID(item)
+		if id <= 0 {
+			continue
+		}
+		if r, ok := byID[id]; ok {
+			items[i]["status"] = r.Status
+			items[i]["status_updated_at"] = r.UpdatedKST
+		}
+	}
+	return items
+}
+
+// enrichWithPostStatusDirect 는 목록 항목에 status 를 페이지 글 묶음 1쿼리로 붙인다(맵 조회 실패 시 대체 경로).
+func enrichWithPostStatusDirect(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
 	ids := make([]int, 0, len(items))
 	for _, item := range items {
 		if id := itemIntID(item); id > 0 {
@@ -8244,7 +8269,8 @@ func clearPostStatus(db *gorm.DB, slug string, id int) error {
 // 단건 조회와 같은 컬럼·포맷 postStatusSelect). 맵 조회가 실패하면 캐시하지 않고 단건 조회로 대신한다.
 //
 // upsertPostStatus·clearPostStatus 가 성공하면 그 게시판 맵을 비운다. 백엔드 프로세스가 여럿이면 다른
-// 프로세스는 최대 postStatusBoardTTL 늦게 반영된다(글 상세의 상태 배지만 해당).
+// 프로세스는 최대 postStatusBoardTTL 늦게 반영된다(글 상세·목록의 상태 배지만 해당).
+// 목록(enrichWithPostStatus)도 같은 맵을 쓰고, 실패하면 페이지 글 묶음 조회로 대신한다.
 
 // postStatusBoardTTL 은 게시판별 상태 맵 프로세스 캐시의 수명이다.
 const postStatusBoardTTL = 60 * time.Second
