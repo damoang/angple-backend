@@ -12,6 +12,7 @@ import (
 // TagRepository handles g5_na_tag / g5_na_tag_log operations
 type TagRepository interface {
 	GetPostTags(boTable string, wrID int) ([]string, error)
+	GetPostTagsForView(boTable string, wrID int) ([]string, error)
 	GetPostsTagsBatch(boTable string, wrIDs []int) (map[int][]string, error)
 	SetPostTags(boTable string, wrID int, tags []string, mbID string) error
 	DeletePostTags(boTable string, wrID int) error
@@ -70,7 +71,7 @@ func (r *tagRepository) SetPostTags(boTable string, wrID int, tags []string, mbI
 		}
 	}
 
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		// 1. Get existing tag_ids before delete (for cnt update later)
 		var oldTagIDs []int
 		tx.Model(&gnuboard.G5NaTagLog{}).
@@ -147,12 +148,20 @@ func (r *tagRepository) SetPostTags(boTable string, wrID int, tags []string, mbI
 
 		return nil
 	})
+	if err == nil {
+		InvalidateTaggedPosts()
+	}
+	return err
 }
 
 // DeletePostTags removes all tag logs for a post
 func (r *tagRepository) DeletePostTags(boTable string, wrID int) error {
-	return r.db.Where("bo_table = ? AND wr_id = ?", boTable, wrID).
+	err := r.db.Where("bo_table = ? AND wr_id = ?", boTable, wrID).
 		Delete(&gnuboard.G5NaTagLog{}).Error
+	if err == nil {
+		InvalidateTaggedPosts()
+	}
+	return err
 }
 
 // firstChar returns the first character of a string for the idx field
