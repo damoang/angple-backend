@@ -43,6 +43,7 @@ import (
 	"github.com/damoang/angple-backend/internal/service/hitbuffer"
 	v2svc "github.com/damoang/angple-backend/internal/service/v2"
 	"github.com/damoang/angple-backend/internal/telemetry"
+	"github.com/damoang/angple-backend/internal/webcache"
 	"github.com/damoang/angple-backend/internal/worker"
 	"github.com/damoang/angple-backend/internal/ws"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
@@ -2694,6 +2695,8 @@ func main() {
 		// 탈퇴 파기 시 web 세션·회원 캐시(L2)까지 지우기 위한 Redis 주입.
 		// nil 이면 DB 파기만 수행한다(캐시는 TTL 로 자연 만료).
 		handler.SetAuthCacheRedis(redisClient)
+		// 회원 표시 정보(닉네임·사진·탈퇴 여부)가 바뀌는 곳에서 web 표시 캐시 키를 지우기 위한 Redis 주입.
+		webcache.SetRedis(redisClient)
 		memberLeaveHandler := handler.NewMemberLeaveHandler(db)
 		v1Members.POST("/me/leave", middleware.JWTAuth(jwtManager), memberLeaveHandler.Leave)
 		v1Members.DELETE("/me/leave", middleware.JWTAuth(jwtManager), memberLeaveHandler.CancelLeave)

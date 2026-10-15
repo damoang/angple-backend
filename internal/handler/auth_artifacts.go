@@ -3,11 +3,10 @@ package handler
 import (
 	"context"
 	"log"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/damoang/angple-backend/internal/middleware"
+	"github.com/damoang/angple-backend/internal/webcache"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -19,12 +18,6 @@ var authCacheRedis *redis.Client
 // SetAuthCacheRedis 는 인증 캐시 무효화용 Redis 클라이언트를 주입한다.
 // ⛔ 라우팅 개시(router.Run) 전에 불러야 한다. main 의 Redis 초기화 직후 배선돼 있다.
 func SetAuthCacheRedis(c *redis.Client) { authCacheRedis = c }
-
-// defaultAuthCacheNamespaces 는 AUTH_CACHE_NAMESPACES 미설정 시 **추가로** 커버할
-// 네임스페이스다(접두사 없음 = prod 는 항상 포함되므로 여기 적지 않는다).
-// 2026-08-12 클러스터 전수 실측 기준 CACHE_NAMESPACE 를 쓰는 워크로드는
-// angple-web-canary("canary") 하나뿐이었다.
-const defaultAuthCacheNamespaces = "canary"
 
 // purgeAuthArtifacts 는 회원의 인증 산출물(세션·리프레시 토큰)을 파기하고,
 // web 이 들고 있는 세션·회원 캐시(L2)까지 무효화한다.
@@ -156,28 +149,11 @@ func purgeAuthArtifacts(db *gorm.DB, mbID string) {
 // ⛔ web 에 새 CACHE_NAMESPACE 를 추가하면 이 env 도 함께 갱신할 것.
 //
 //	빠뜨리면 그 환경의 캐시만 조용히 안 지워진다.
+//
+// 구현은 webcache.NamespacePrefixes 하나로 모았다 — 회원 표시 캐시(mbcard:) 무효화가
+// 서비스 계층에서도 같은 네임스페이스 규칙을 써야 하기 때문이다.
 func authCacheKeyPrefixes() []string {
-	// 접두사 없음(prod)은 항상 첫 번째. 아래 env 는 여기에 더하기만 한다.
-	prefixes := []string{""}
-	seen := map[string]struct{}{"": {}}
-
-	raw := os.Getenv("AUTH_CACHE_NAMESPACES")
-	if raw == "" {
-		raw = defaultAuthCacheNamespaces
-	}
-	for _, ns := range strings.Split(raw, ",") {
-		ns = strings.TrimSpace(ns)
-		if ns == "" {
-			continue // 빈 항목은 무시 — "" 는 위에서 이미 보장된다
-		}
-		p := ns + ":"
-		if _, dup := seen[p]; dup {
-			continue
-		}
-		seen[p] = struct{}{}
-		prefixes = append(prefixes, p)
-	}
-	return prefixes
+	return webcache.NamespacePrefixes()
 }
 
 // buildAuthCacheKeys 는 (네임스페이스 × id) 조합으로 Redis 키를 만든다.

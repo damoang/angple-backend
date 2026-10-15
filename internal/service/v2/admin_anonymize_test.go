@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	v2repo "github.com/damoang/angple-backend/internal/repository/v2"
+	"github.com/damoang/angple-backend/internal/webcache"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -218,12 +220,24 @@ func TestAnonymizeMemberDefaultsToGenericNickname(t *testing.T) {
 		gnurepo.NewMemberRepository(db),
 	)
 
+	t.Setenv("AUTH_CACHE_NAMESPACES", "")
+	var deletedKeys []string
+	restore := webcache.SetDeleterForTest(func(_ context.Context, keys ...string) error {
+		deletedKeys = append(deletedKeys, keys...)
+		return nil
+	})
+	defer restore()
+
 	result, err := svc.AnonymizeMember(9, AnonymizeMemberRequest{
 		Targets:     []string{"https://damoang.net/free/1"},
 		SearchTexts: []string{"전동운"},
 	})
 	if err != nil {
 		t.Fatalf("AnonymizeMember returned error: %v", err)
+	}
+	// 닉네임 변경 커밋 뒤 회원 표시 캐시 키를 지운다.
+	if len(deletedKeys) != 2 || deletedKeys[0] != "mbcard:user9" || deletedKeys[1] != "canary:mbcard:user9" {
+		t.Fatalf("member card keys = %v, want [mbcard:user9 canary:mbcard:user9]", deletedKeys)
 	}
 	if result.ReplacementNickname != defaultAnonymizedNickname {
 		t.Fatalf("replacement nickname = %q, want %q", result.ReplacementNickname, defaultAnonymizedNickname)

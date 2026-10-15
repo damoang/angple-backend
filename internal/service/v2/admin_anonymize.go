@@ -14,6 +14,7 @@ import (
 	"time"
 
 	v2domain "github.com/damoang/angple-backend/internal/domain/v2"
+	"github.com/damoang/angple-backend/internal/webcache"
 	"gorm.io/gorm"
 )
 
@@ -214,6 +215,8 @@ func (s *AdminService) anonymizeMemberUser(user *v2domain.V2User, req AnonymizeM
 	if err != nil {
 		return nil, err
 	}
+	// 닉네임이 바뀌었으므로 회원 표시 캐시를 지운다 — 트랜잭션 커밋 뒤, best-effort.
+	webcache.InvalidateMemberCard(user.Username)
 
 	return result, nil
 }

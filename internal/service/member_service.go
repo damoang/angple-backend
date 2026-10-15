@@ -16,6 +16,7 @@ import (
 	"github.com/damoang/angple-backend/pkg/storage"
 
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
+	"github.com/damoang/angple-backend/internal/webcache"
 )
 
 const (
@@ -165,6 +166,7 @@ func (s *MemberService) uploadMemberImage(ctx context.Context, mbID, filename st
 			Msg("member profile image DB update failed")
 		return "", fmt.Errorf("DB 업데이트 실패: %w", err)
 	}
+	webcache.InvalidateMemberCard(mbID)
 
 	publicURL := result.CDNURL
 	if publicURL == "" {
@@ -319,6 +321,7 @@ func (s *MemberService) DeleteMemberImage(_ context.Context, mbID string) error 
 			Msg("member profile image clear failed")
 		return fmt.Errorf("DB 업데이트 실패: %w", err)
 	}
+	webcache.InvalidateMemberCard(mbID)
 
 	pkglogger.GetLogger().Info().
 		Str("mb_id", mbID).
