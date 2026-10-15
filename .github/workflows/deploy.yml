@@ -460,7 +460,7 @@ jobs:
             echo "::warning::K8S_MANIFEST_TOKEN is not set; skipping manifest record"
             exit 1
           fi
-          case "${IMAGE_TAG}" in sha-[0-9a-f]*) ;; *) echo "::error::unexpected tag ${IMAGE_TAG}"; exit 1 ;; esac
+          if ! [[ "${IMAGE_TAG}" =~ ^sha-[0-9a-f]{7,40}$ ]]; then echo "::error::unexpected tag"; exit 1; fi
           resp=$(gh api "repos/${MANIFEST_REPO}/contents/${MANIFEST_PATH}?ref=main")
           blob_sha=$(jq -r .sha <<<"$resp")
           jq -r .content <<<"$resp" | base64 -d > manifest.yaml
@@ -483,10 +483,15 @@ jobs:
 
       - name: Warn if manifest record failed
         if: steps.record_image.outcome == 'failure'
+        continue-on-error: true
+        env:
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.sha_tag }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}
         run: |
-          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}" \
-            -d "text=⚠️ backend production image ${{ needs.resolve-release.outputs.sha_tag }} was deployed but not recorded in the k8s manifest. Update prod/angple-backend.yaml before any manifest apply." > /dev/null
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text=⚠️ backend production image ${IMAGE_TAG} was deployed but not recorded in the k8s manifest. Update prod/angple-backend.yaml before any manifest apply." > /dev/null
 
       - name: Notify Discord (Production)
         if: always() && env.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
