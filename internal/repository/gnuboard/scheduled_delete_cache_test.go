@@ -2,7 +2,6 @@ package gnuboard
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,16 +53,6 @@ func pendingRow(boTable string, wrID int) *gnuboard.ScheduledDelete {
 		RequestedAt:  now,
 		Status:       "pending",
 	}
-}
-
-func countSQL(sqls []string, needle string) int {
-	n := 0
-	for _, s := range sqls {
-		if strings.Contains(s, needle) {
-			n++
-		}
-	}
-	return n
 }
 
 func TestFindByPostForView_NotInSetSkipsRowQuery(t *testing.T) {
