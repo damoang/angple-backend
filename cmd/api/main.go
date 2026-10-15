@@ -3417,8 +3417,8 @@ func main() {
 
 			// 태그·별점: 삭제글은 비관리자에게 붙이지 않는다(#13174 — 주제·평점도 정보다).
 			if post.WrDeletedAt == nil || isAdminViewer {
-				// 태그 조회
-				if tags, err := gnuTagRepo.GetPostTags(slug, id); err == nil && len(tags) > 0 {
+				// 태그 조회 — 태그 있는 글 집합(프로세스 캐시)에 있는 글만 행을 읽는다. 없으면 tags 키를 붙이지 않는다(이전과 같음).
+				if tags, err := gnuTagRepo.GetPostTagsForView(slug, id); err == nil && len(tags) > 0 {
 					postDetail["tags"] = tags
 				}
 
