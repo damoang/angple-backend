@@ -2,7 +2,10 @@ package gnuboard
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -14,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// 행운 배지 조회를 줄이는 두 장치다.
+// 행운 배지 조회를 줄이는 세 장치다.
 //
 //  1. 경험치 게이트(luckyLedgerGate): 지급 원장(g5_da_lucky_grant)의 게시판별 source_id 집합을 프로세스에
 //     luckyLedgerTTL 동안 들고, 요청 id 와 교집합이 있을 때만 g5_na_xp 를 그 교집합으로 조회한다.
@@ -22,10 +25,22 @@ import (
 //  2. 글 상세 캐시(LuckyBadgesForPostCached): 글 하나의 배지 원자료를 Redis 에 luckyBadgeCacheTTL 동안 둔다
 //     (기록 없음도 캐시). 지급 성공 뒤 InvalidateLuckyBadge 로 지운다.
 //
-// 둘 다 실패하면 예전과 같은 전체 조회로 돌아간다(캐시는 성능용이지 정답의 근거가 아니다).
+//  3. 포인트 게이트(luckyPointGate): 원장 밖 행운 포인트 행(옛 지급분)의 게시판별 최대 글번호(워터마크)를
+//     프로세스에 luckyWatermarkTTL 동안 들고(요청 밖 백그라운드에서 게시판당 하나씩 읽는다 — 모르는 동안은 전체 조회), 요청 id 중 「워터마크 이하 또는 원장에 있는 id」로만 g5_point 를
+//     조회한다. 새 지급은 전부 원장과 한 트랜잭션으로 기록되고 옛 지급은 더 늘지 않으므로, 둘 다 아닌 글에는
+//     행운 포인트 행이 없다.
+//
+// 모두 실패하면 예전과 같은 전체 조회로 돌아간다(캐시는 성능용이지 정답의 근거가 아니다).
 
 // luckyLedgerTTL 은 게시판별 원장 id 집합의 프로세스 캐시 수명이다.
 const luckyLedgerTTL = 60 * time.Second
+
+// luckyWatermarkTTL 은 게시판별 워터마크의 프로세스 캐시 수명이다. 원장 밖 행운 포인트 행은 더 생기지 않으므로 길게 둔다.
+// 만료돼도 새 값을 읽을 때까지는 이전 값을 그대로 쓴다(뒤에서 다시 읽는다).
+const luckyWatermarkTTL = 24 * time.Hour
+
+// luckyWatermarkLoadTimeout 은 워터마크 백그라운드 조회 한 번의 시간 상한이다.
+const luckyWatermarkLoadTimeout = 15 * time.Second
 
 // luckyLedgerMaxBoards 는 프로세스 캐시에 담는 게시판 수 상한이다. 넘으면 통째로 비운다(게시판 수는 이보다 훨씬 적다).
 const luckyLedgerMaxBoards = 1000
@@ -59,6 +74,109 @@ type luckyLedgerCache struct {
 }
 
 var luckyLedger = &luckyLedgerCache{entries: make(map[string]luckyLedgerEntry)}
+
+// luckyWatermark 는 원장 밖 행운 포인트 행의 게시판별 최대 글번호다.
+type luckyWatermark struct {
+	maxID uint64 // has 일 때만 뜻이 있다
+	has   bool   // false 면 원장 밖 행운 포인트 행이 없다(원장 id 만 조회)
+}
+
+// luckyWatermarkLoader 는 한 게시판의 워터마크를 읽는 함수다(운영은 loadLuckyWatermark, 테스트는 바꿔 낄 수 있다).
+type luckyWatermarkLoader func(ctx context.Context, db *gorm.DB, slug string) (luckyWatermark, error)
+
+// luckyWatermarkLoad 는 백그라운드 조회에 쓰는 로더다. 테스트만 바꾼다(조회가 돌고 있지 않을 때).
+var luckyWatermarkLoad luckyWatermarkLoader = loadLuckyWatermark
+
+// luckyWatermarkRetryAfter 는 조회가 실패한 뒤 같은 게시판을 다시 조회하기까지의 최소 간격이다
+// (무거운 조회가 실패를 되풀이하며 연달아 돌지 않게). 실패한 값은 캐시하지 않는다 — 그동안은 「모름」이다.
+var luckyWatermarkRetryAfter = time.Minute
+
+// luckyWatermarkEntry 는 한 게시판의 워터마크 상태다.
+type luckyWatermarkEntry struct {
+	wm       luckyWatermark
+	loaded   bool      // 한 번이라도 조회에 성공했다(wm 이 뜻이 있다)
+	expires  time.Time // loaded 일 때 다시 읽을 시각(지나도 새 값이 올 때까지 wm 을 쓴다)
+	loading  bool      // 이 게시판 조회가 돌고 있다(게시판당 하나만)
+	failedAt time.Time // 마지막 조회 실패 시각
+}
+
+// luckyWatermarkCache 는 게시판별 워터마크의 프로세스 캐시다. 요청 경로에서는 조회하지 않는다 —
+// 없거나 만료되면 백그라운드 조회 하나를 띄우고(게시판당 동시에 하나), 그동안은 가진 값(없으면 「모름」)을 돌려준다.
+type luckyWatermarkCache struct {
+	mu      sync.Mutex
+	entries map[string]luckyWatermarkEntry
+	gen     uint64         // reset 마다 바뀐다 — 그 전에 떠난 조회 결과는 버린다
+	wg      sync.WaitGroup // 돌고 있는 백그라운드 조회(테스트·reset 이 기다린다)
+}
+
+var luckyWatermarks = &luckyWatermarkCache{entries: make(map[string]luckyWatermarkEntry)}
+
+// lookup 은 한 게시판의 워터마크를 돌려준다(ok=false 면 「모름」 — 호출부는 전체 조회). 절대 DB 를 기다리지 않는다.
+// 값이 없거나 만료됐고 조회가 돌고 있지 않으면(실패 직후 luckyWatermarkRetryAfter 동안은 빼고) 백그라운드 조회를 띄운다.
+func (c *luckyWatermarkCache) lookup(db *gorm.DB, slug string, now time.Time) (luckyWatermark, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, exists := c.entries[slug]
+	if e.loaded && now.Before(e.expires) {
+		return e.wm, true
+	}
+	if !e.loading && (e.failedAt.IsZero() || now.Sub(e.failedAt) >= luckyWatermarkRetryAfter) {
+		if !exists && len(c.entries) >= luckyLedgerMaxBoards {
+			c.entries = make(map[string]luckyWatermarkEntry)
+		}
+		e.loading = true
+		c.entries[slug] = e
+		c.wg.Add(1)
+		go c.load(db, slug, c.gen, luckyWatermarkLoad)
+	}
+	return e.wm, e.loaded
+}
+
+// load 는 백그라운드에서 워터마크를 읽어 캐시에 넣는다. 실패(패닉 포함)는 로그만 남기고 이전 값을 그대로 둔다.
+func (c *luckyWatermarkCache) load(db *gorm.DB, slug string, gen uint64, fn luckyWatermarkLoader) {
+	defer c.wg.Done()
+	ctx, cancel := context.WithTimeout(context.Background(), luckyWatermarkLoadTimeout)
+	defer cancel()
+	wm, err := func() (wm luckyWatermark, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("panic: %v", r)
+			}
+		}()
+		return fn(ctx, db, slug)
+	}()
+
+	now := time.Now()
+	c.mu.Lock()
+	if gen == c.gen {
+		e := c.entries[slug]
+		e.loading = false
+		if err != nil {
+			e.failedAt = now
+		} else {
+			e = luckyWatermarkEntry{wm: wm, loaded: true, expires: now.Add(luckyWatermarkTTL)}
+		}
+		c.entries[slug] = e
+	}
+	c.mu.Unlock()
+	if err != nil {
+		luckyLogRateLimited("[lucky] 포인트 워터마크 조회 실패 board=%s — 그동안 포인트는 전체 조회: %v", slug, err)
+	}
+}
+
+// wait 는 돌고 있는 백그라운드 조회가 끝날 때까지 기다린다(테스트용).
+func (c *luckyWatermarkCache) wait() {
+	c.wg.Wait()
+}
+
+// reset 은 돌고 있는 조회를 기다린 뒤 캐시를 비운다(테스트용).
+func (c *luckyWatermarkCache) reset() {
+	c.wg.Wait()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string]luckyWatermarkEntry)
+	c.gen++
+}
 
 // luckyLedgerLastLog 는 마지막 실패 로그 시각(UnixNano)이다.
 var luckyLedgerLastLog atomic.Int64
@@ -115,6 +233,61 @@ func luckyLedgerIDs(db *gorm.DB, slug string) (map[string]struct{}, error) {
 	return ids, nil
 }
 
+// luckyWatermarkSQL 은 한 게시판에서 원장에 없는 행운 포인트 행의 최대 rel_id(숫자)를 구한다.
+// g5_point 는 idx_lucky_display(po_rel_table, po_rel_id, po_rel_action) 의 po_rel_table 범위만 인덱스로 읽고
+// (세 컬럼이 모두 인덱스에 있어 행을 읽지 않는다), 원장은 uq_lucky_source(source_table, source_id) 앞 두 컬럼으로
+// 존재만 확인한다. 숫자가 아닌 rel_id 는 CAST 가 앞자리 숫자(없으면 0)로 바꾼다 — 그런 행은 요청 id(10진 문자열)와
+// 문자열로 같아질 수 없으므로 포인트 조회 결과에 원래 나오지 않는다.
+const luckyWatermarkSQL = `SELECT MAX(CAST(p.po_rel_id AS UNSIGNED)) AS wm
+FROM g5_point p
+WHERE p.po_rel_table = ? AND p.po_rel_action = ?
+  AND NOT EXISTS (SELECT 1 FROM g5_da_lucky_grant g WHERE g.source_table = ? AND g.source_id = p.po_rel_id)`
+
+// loadLuckyWatermark 는 한 게시판의 워터마크를 1쿼리로 읽는다(백그라운드 전용 — 큰 게시판에서는 수 초 걸릴 수 있다).
+func loadLuckyWatermark(ctx context.Context, db *gorm.DB, slug string) (luckyWatermark, error) {
+	row := db.WithContext(ctx).Raw(luckyWatermarkSQL, slug, luckyRelAction, slug).Row()
+	if row == nil {
+		return luckyWatermark{}, errors.New("워터마크 조회 실패: 결과 행 없음")
+	}
+	var raw sql.NullString // 집계라 항상 한 행이다. 원장 밖 행이 없으면 NULL
+	if err := row.Scan(&raw); err != nil {
+		return luckyWatermark{}, err
+	}
+	if !raw.Valid {
+		return luckyWatermark{}, nil
+	}
+	v, err := strconv.ParseUint(strings.TrimSpace(raw.String), 10, 64)
+	if err != nil {
+		return luckyWatermark{}, fmt.Errorf("워터마크 해석 실패 %q: %w", raw.String, err)
+	}
+	return luckyWatermark{maxID: v, has: true}, nil
+}
+
+// luckyPointGate 는 요청 id 중 행운 포인트 행이 있을 수 있는 id 만 돌려준다(순서 유지) — 워터마크 이하이거나
+// 원장(ledger)에 있는 id. 원장 조회가 실패했거나(ledgerErr) 워터마크를 아직 모르면(백그라운드 조회 전·실패)
+// 요청 id 를 그대로 돌려준다(fail-open). 숫자로 읽을 수 없는 id 도 남긴다(fail-open).
+func luckyPointGate(db *gorm.DB, slug string, ids []string, ledger map[string]struct{}, ledgerErr error) []string {
+	if ledgerErr != nil {
+		return ids
+	}
+	wm, ok := luckyWatermarks.lookup(db, slug, time.Now())
+	if !ok {
+		return ids
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := ledger[id]; ok {
+			out = append(out, id)
+			continue
+		}
+		n, perr := strconv.ParseUint(id, 10, 64)
+		if perr != nil || (wm.has && n <= wm.maxID) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // luckyLogRateLimited 는 luckyLedgerLogInterval 에 한 번만 로그를 남긴다(요청마다 같은 실패가 찍히지 않게).
 func luckyLogRateLimited(format string, args ...any) {
 	now := time.Now().UnixNano()
@@ -124,12 +297,10 @@ func luckyLogRateLimited(format string, args ...any) {
 	}
 }
 
-// luckyLedgerGate 는 요청 id 중 지급 원장에 있는 id 만 돌려준다(순서 유지). 원장 조회가 실패하면 요청 id 를
-// 그대로 돌려준다(fail-open — 예전처럼 전부 조회).
-func luckyLedgerGate(db *gorm.DB, slug string, ids []string) []string {
-	set, err := luckyLedgerIDs(db, slug)
+// luckyLedgerGate 는 요청 id 중 지급 원장(set)에 있는 id 만 돌려준다(순서 유지). 원장 조회가 실패했으면(err)
+// 요청 id 를 그대로 돌려준다(fail-open — 예전처럼 전부 조회).
+func luckyLedgerGate(ids []string, set map[string]struct{}, err error) []string {
 	if err != nil {
-		luckyLogRateLimited("[lucky] 지급 원장 조회 실패 board=%s — 경험치는 전체 조회: %v", slug, err)
 		return ids
 	}
 	out := make([]string, 0, len(ids))
@@ -183,7 +354,7 @@ func SetLuckyBadgeRedis(c *redis.Client) {
 	setLuckyBadgeStore(redisLuckyBadgeStore{c: c})
 }
 
-// SetLuckyBadgeStoreForTest 는 저장소를 바꿔 끼우고 원래대로 돌리는 함수를 돌려준다. 원장 id 프로세스 캐시도 비운다.
+// SetLuckyBadgeStoreForTest 는 저장소를 바꿔 끼우고 원래대로 돌리는 함수를 돌려준다. 원장 id·워터마크 프로세스 캐시도 비운다.
 // 테스트 전용이다 — 운영 코드는 SetLuckyBadgeRedis 를 쓴다.
 func SetLuckyBadgeStoreForTest(s LuckyBadgeStore) (restore func()) {
 	luckyBadgeStoreMu.Lock()
@@ -191,9 +362,11 @@ func SetLuckyBadgeStoreForTest(s LuckyBadgeStore) (restore func()) {
 	luckyBadgeStore = s
 	luckyBadgeStoreMu.Unlock()
 	luckyLedger.reset()
+	luckyWatermarks.reset()
 	return func() {
 		setLuckyBadgeStore(prev)
 		luckyLedger.reset()
+		luckyWatermarks.reset()
 	}
 }
 
@@ -269,7 +442,7 @@ func InvalidateLuckyBadge(slug, sourceID string) {
 	if slug == "" {
 		return
 	}
-	luckyLedger.forget(slug)
+	luckyLedger.forget(slug) // 워터마크는 원장 밖(옛 지급) 행만 보므로 새 지급으로 바뀌지 않는다 — 지우지 않는다
 
 	wrID, err := strconv.Atoi(strings.TrimSpace(sourceID))
 	if err != nil || wrID <= 0 {

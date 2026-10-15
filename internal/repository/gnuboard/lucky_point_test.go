@@ -14,7 +14,8 @@ import (
 
 // ⛔ 이 파일이 지키는 계약 (럭키 배지 재료 조회):
 //
-//   - LuckyBadgesByWrID 는 목록 크기와 무관한 고정 쿼리 수다 — g5_point 1 + 원장 교집합이 있을 때만 g5_na_xp 1(+ 원장 캐시 미스면 원장 1). 빈 목록은 0쿼리(C20).
+//   - LuckyBadgesByWrID 는 목록 크기와 무관한 고정 쿼리 수다 — 「워터마크 이하 또는 원장」 id 가 있을 때만 g5_point 1 +
+//     원장 교집합이 있을 때만 g5_na_xp 1(+ 원장 캐시 미스면 원장 1). 워터마크는 요청 밖에서 읽는다. 빈 목록은 0쿼리(C20).
 //   - 포인트는 g5_point(po_rel_action=@lucky), 경험치는 g5_na_xp(xp_rel_action=@lucky)에서만 읽는다 —
 //     같은 글의 다른 경험치(글쓰기 등)·다른 게시판 기록은 배지에 섞이지 않는다.
 //   - 경험치 조회만 실패하면 포인트 배지는 남긴다.
@@ -65,7 +66,9 @@ func newLuckyBadgeTestDB(t *testing.T, withXP bool) (*gorm.DB, *sqlCountingLogge
 
 	// 원장 id 프로세스 캐시는 패키지 전역이다 — 테스트마다 새 DB 를 보게 비운다.
 	luckyLedger.reset()
+	luckyWatermarks.reset()
 	t.Cleanup(luckyLedger.reset)
+	t.Cleanup(luckyWatermarks.reset)
 
 	ddls := []string{
 		`CREATE TABLE g5_da_lucky_grant (
@@ -132,6 +135,21 @@ func newLuckyBadgeTestDB(t *testing.T, withXP bool) (*gorm.DB, *sqlCountingLogge
 	return db, counter
 }
 
+// warmLuckyWatermarkForTest 는 게시판 워터마크를 백그라운드로 읽게 하고 끝날 때까지 기다린다(이후는 캐시 적중).
+// 워터마크는 요청 안에서 읽지 않으므로, 게이트된 쿼리 수·대상을 보는 테스트는 먼저 이것을 부른다.
+func warmLuckyWatermarkForTest(t *testing.T, db *gorm.DB, slugs ...string) {
+	t.Helper()
+	for _, slug := range slugs {
+		luckyWatermarks.lookup(db, slug, time.Now())
+	}
+	luckyWatermarks.wait()
+	for _, slug := range slugs {
+		if _, ok := luckyWatermarks.lookup(db, slug, time.Now()); !ok {
+			t.Fatalf("워터마크 적재 실패 board=%s", slug)
+		}
+	}
+}
+
 // TestLuckyBadgesByWrID_Values — 포인트만·경험치만·둘 다·없음이 정확히 나뉘고, 다른 action·게시판은 섞이지 않는다.
 func TestLuckyBadgesByWrID_Values(t *testing.T) {
 	db, _ := newLuckyBadgeTestDB(t, true)
@@ -159,6 +177,7 @@ func TestLuckyBadgesByWrID_Values(t *testing.T) {
 // 원장 id 집합이 캐시된 뒤에는 g5_point 1 + (원장 교집합이 있을 때만) g5_na_xp 1. 빈 목록·0 이하 id 만이면 0쿼리.
 func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
+	warmLuckyWatermarkForTest(t, db, "free")
 	if _, err := LuckyBadgesByWrID(db, "free", []int{101}, LuckyTierNames{}); err != nil { // 원장 캐시 적재
 		t.Fatalf("조회 실패: %v", err)
 	}
@@ -326,6 +345,7 @@ func TestLuckyBadgesByWrID_ConfiguredTier(t *testing.T) {
 		VALUES ('m7', '2026-10-01 03:10:00', '테스트구간 럭키 포인트(댓글)', 21, 'free', '107', '@lucky')`).Error; err != nil {
 		t.Fatalf("시드 실패: %v", err)
 	}
+	warmLuckyWatermarkForTest(t, db, "free")
 	counter.reset()
 
 	got, err := LuckyBadgesByWrID(db, "free", []int{101, 107}, LuckyTierNames{Names: []string{"테스트구간"}})

@@ -111,6 +111,7 @@ func TestLuckyBadgesByWrID_LegacyBaseAlias(t *testing.T) {
 		('m9', '2026-10-02 06:07:08', '앙팡 럭키 포인트', 19, 'free', '109', '@lucky')`).Error; err != nil {
 		t.Fatalf("시드 실패: %v", err)
 	}
+	warmLuckyWatermarkForTest(t, db, "free")
 	counter.reset()
 
 	got, err := LuckyBadgesByWrID(db, "free", []int{101, 108, 109}, LuckyTierNames{Base: testLuckyBaseName})
