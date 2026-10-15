@@ -121,6 +121,18 @@ func TestEvaluateAutoExecUnit(t *testing.T) {
 			t.Fatalf("should not pass: %+v", ev)
 		}
 	})
+	t.Run("자동화 계정의 일수·사유는 주의 판정과 합집합에 넣지 않는다", func(t *testing.T) {
+		ev := evaluateAutoExecUnit([]autoExecOpinion{a("r1", "22", 0), a("r2", "22", 0), a("ai", "22,23", 5)}, 2)
+		if !ev.OK || !ev.AllZero || !reflect.DeepEqual(ev.Reasons, []int{22}) {
+			t.Fatalf("unexpected: %+v", ev)
+		}
+	})
+	t.Run("자동화 계정이라도 다른 사유면 제외", func(t *testing.T) {
+		ev := evaluateAutoExecUnit([]autoExecOpinion{a("r1", "22", 1), a("r2", "22", 1), a("ai", "21", 1)}, 2)
+		if ev.OK || ev.Skip != "other_reason" {
+			t.Fatalf("unexpected: %+v", ev)
+		}
+	})
 	t.Run("모두 0일이면 AllZero", func(t *testing.T) {
 		ev := evaluateAutoExecUnit([]autoExecOpinion{a("r1", "22", 0), a("r2", "22", 0)}, 2)
 		if !ev.OK || !ev.AllZero {
@@ -218,6 +230,43 @@ func TestBuildAutoExecuteMemberReason(t *testing.T) {
 			t.Errorf("unexpected:\n%s", got)
 		}
 	})
+}
+
+func TestLegacySubjectLikePattern(t *testing.T) {
+	cases := map[string]string{
+		"user1":           "user1 %",
+		"google_8b28089c": "google!_8b28089c %",
+		"a%b":             "a!%b %",
+		"a!b":             "a!!b %",
+	}
+	for in, want := range cases {
+		if got := legacySubjectLikePattern(in); got != want {
+			t.Errorf("legacySubjectLikePattern(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestIsActiveRestriction(t *testing.T) {
+	today := "20261015"
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"  ", false},
+		{"20261014", false},
+		{"20261015", false},
+		{"20261016", true},
+		{"99991231", true},
+		{"00000000", false},
+		{"2026-10-20", true}, // 형식 불명 → 제한 중으로 본다
+		{"2026101X", true},
+	}
+	for _, c := range cases {
+		if got := isActiveRestriction(c.in, today); got != c.want {
+			t.Errorf("isActiveRestriction(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
 }
 
 func TestReasonsJSON(t *testing.T) {

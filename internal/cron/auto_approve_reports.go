@@ -55,6 +55,7 @@ type AutoExecuteMember struct {
 	Days       int      `json:"days"`  // 0=주의
 	Round      int      `json:"round"` // 기존 이력 수 + 1
 	Applied    bool     `json:"applied"`
+	SkipReason string   `json:"skip_reason,omitempty"` // 회원 단위 제외 사유(예: member_active_restriction)
 	Error      string   `json:"error,omitempty"`
 }
 
@@ -153,12 +154,14 @@ func evaluateAutoExecUnit(ops []autoExecOpinion, minOpinions int) autoExecUnitEv
 			if !ok {
 				return autoExecUnitEval{Skip: "other_reason"}
 			}
+			// 자동화 계정 의견은 사유 판정(제외 조건)에만 쓰고, 담당 수·사유 합집합·주의 판정에는 넣지 않는다.
+			if autoExecuteNonHumanReviewers[o.Reviewer] {
+				continue
+			}
+			actionReviewers[o.Reviewer] = true
 			ev.Reasons = unionInts(ev.Reasons, reasons)
 			if o.Days != 0 {
 				ev.AllZero = false
-			}
-			if !autoExecuteNonHumanReviewers[o.Reviewer] {
-				actionReviewers[o.Reviewer] = true
 			}
 		default:
 			return autoExecUnitEval{Skip: "unknown_opinion"}
@@ -273,6 +276,31 @@ func buildAutoExecuteMemberReason(reasons []int, days int) string {
 	b.WriteString(result + "\n\n")
 	b.WriteString("이 처분에 이의가 있으시면 소명게시판을 이용하실 수 있습니다.")
 	return b.String()
+}
+
+// legacySubjectLikePattern 은 구 형식 제목("id 경고", "id 5일" 등)을 찾는 LIKE 패턴을 만든다.
+// 회원 ID 안의 LIKE 와일드카드(_ %)와 이스케이프 문자(!)는 '!' 로 이스케이프한다(ESCAPE '!').
+func legacySubjectLikePattern(mbID string) string {
+	r := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
+	return r.Replace(mbID) + " %"
+}
+
+// isActiveRestriction 은 mb_intercept_date(YYYYMMDD)가 오늘(KST, YYYYMMDD)보다 뒤인지 본다.
+// 빈 값은 제한 없음. 형식을 알 수 없는 값은 판정할 수 없으므로 제한 중으로 본다(fail closed).
+func isActiveRestriction(interceptDate, todayKST string) bool {
+	d := strings.TrimSpace(interceptDate)
+	if d == "" {
+		return false
+	}
+	if len(d) != 8 {
+		return true
+	}
+	for _, c := range d {
+		if c < '0' || c > '9' {
+			return true
+		}
+	}
+	return d > todayKST
 }
 
 // reasonsJSON 은 사유 코드를 admin_discipline_reasons 형식("[22,23]")으로 만든다.
@@ -438,36 +466,67 @@ func runAutoApproveReports(db *gorm.DB) (*AutoExecuteResult, error) {
 	for _, target := range memberOrder {
 		items := byMember[target]
 
+		keys := make([]string, 0, len(items))
+		for _, it := range items {
+			keys = append(keys, it.unit.key())
+		}
+		skipMember := func(reason string) {
+			res.Skipped[reason] += len(items)
+			res.Members = append(res.Members, AutoExecuteMember{TargetMbID: target, Items: keys, SkipReason: reason})
+		}
+
 		// 수동 승인 대기분과 섞이면 한 처분으로 합쳐지므로, 대기분이 있는 회원은 이번 회차에서 제외한다.
+		// 조회에 실패하면 판정할 수 없으므로 제외한다(fail closed).
 		var pending int64
-		db.Raw(`SELECT COUNT(*) FROM g5_na_singo WHERE target_mb_id = ? AND admin_approved = 1 AND processed = 0`, target).Scan(&pending)
+		if err := db.Raw(`SELECT COUNT(*) FROM g5_na_singo WHERE target_mb_id = ? AND admin_approved = 1 AND processed = 0`, target).
+			Scan(&pending).Error; err != nil {
+			res.Errors++
+			skipMember("pending_lookup_failed")
+			continue
+		}
 		if pending > 0 {
-			res.Skipped["member_has_pending_approval"] += len(items)
+			skipMember("member_has_pending_approval")
+			continue
+		}
+
+		// 이미 이용제한 중인 회원은 자동으로 겹쳐 집행하지 않는다(운영자 판단 몫). 조회 실패도 제외.
+		var intercept string
+		if err := db.Raw(`SELECT IFNULL(mb_intercept_date, '') FROM g5_member WHERE mb_id = ?`, target).
+			Scan(&intercept).Error; err != nil {
+			res.Errors++
+			skipMember("member_lookup_failed")
+			continue
+		}
+		if isActiveRestriction(intercept, time.Now().In(kst).Format("20060102")) {
+			skipMember("member_active_restriction")
 			continue
 		}
 
 		var reasons []int
 		allZero := true
-		keys := make([]string, 0, len(items))
 		for _, it := range items {
 			reasons = unionInts(reasons, it.reasons)
 			if !it.allZero {
 				allZero = false
 			}
-			keys = append(keys, it.unit.key())
 		}
 		sort.Ints(reasons)
 
-		// 기존 이력 수: 운영 콘솔의 「기존 이용제한 이력 건수」와 같은 원본(이용제한 기록 게시판 본글,
-		// 제목 앞부분 = 회원 ID)에서 회수·무효 처리된 기록만 뺀다. 주의(0일) 기록도 회차에 포함된다.
+		// 기존 이력 수: 이용제한 기록 게시판 본글 중 삭제·회수·무효가 아닌 것. 주의(0일) 기록도 회차에 포함된다.
+		// 대상 매칭은 세 형식을 모두 본다 — JSON penalty_mb_id(생성 컬럼), 제목 "id(닉네임)",
+		// 구 제목 "id 경고"/"id 5일" 등. LIKE 패턴의 와일드카드(_ %)는 이스케이프한다.
 		var prior int64
 		if err := db.Raw(`
 			SELECT COUNT(*) FROM g5_write_disciplinelog
 			WHERE wr_is_comment = 0
-			  AND SUBSTRING_INDEX(wr_subject, '(', 1) = ?
+			  AND wr_deleted_at IS NULL
 			  AND IFNULL(wr_4, '') NOT IN ('revoked', 'void')
-		`, target).Scan(&prior).Error; err != nil {
+			  AND (penalty_mb_id = ?
+			       OR SUBSTRING_INDEX(wr_subject, '(', 1) = ?
+			       OR wr_subject LIKE ? ESCAPE '!')
+		`, target, target, legacySubjectLikePattern(target)).Scan(&prior).Error; err != nil {
 			res.Errors++
+			skipMember("prior_lookup_failed")
 			continue
 		}
 
@@ -537,7 +596,7 @@ func applyAutoExecute(db *gorm.DB, items []autoExecSelected, reasons []int, days
 			if err := tx.Exec(`
 				INSERT INTO g5_singo_history
 					(sg_table, sg_id, sg_parent, prev_status, new_status, admin_id, admin_note, created_at)
-				VALUES (?, ?, ?, 'monitoring', 'scheduled', ?, ?, NOW())
+				VALUES (?, ?, ?, 'monitoring', 'scheduled', ?, ?, CONVERT_TZ(NOW(), '+00:00', '+09:00'))
 			`, u.Table, u.SGID, u.Parent, autoExecuteAdminID, autoExecuteDetail).Error; err != nil {
 				return err
 			}
@@ -551,6 +610,11 @@ func logAutoExecuteSummary(res *AutoExecuteResult) {
 	log.Printf("[Cron:auto-execute-reports] mode=%s min=%d candidates=%d selected=%d members=%d errors=%d skipped=%v",
 		res.Mode, res.MinOpinions, res.CandidateUnits, res.SelectedUnits, len(res.Members), res.Errors, res.Skipped)
 	for _, m := range res.Members {
+		if m.SkipReason != "" {
+			log.Printf("[Cron:auto-execute-reports] mode=%s target=%s items=%v skipped=%s",
+				res.Mode, m.TargetMbID, m.Items, m.SkipReason)
+			continue
+		}
 		log.Printf("[Cron:auto-execute-reports] mode=%s target=%s items=%v reasons=%v round=%d days=%d applied=%v err=%s",
 			res.Mode, m.TargetMbID, m.Items, m.Reasons, m.Round, m.Days, m.Applied, m.Error)
 	}
