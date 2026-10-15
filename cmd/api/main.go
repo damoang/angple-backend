@@ -3468,7 +3468,8 @@ func main() {
 			}
 
 			// scheduled_delete inline embed — SvelteKit SSR이 별도 /delete-status fetch 회피
-			if sd, sdErr := scheduledDeleteRepo.FindByPost(slug, id); sdErr == nil && sd != nil {
+			// pending 집합에 있는 글만 행을 읽는다(쓰기·권한 경로는 FindByPost 로 직접 조회).
+			if sd, sdErr := scheduledDeleteRepo.FindByPostForView(slug, id); sdErr == nil && sd != nil {
 				postDetail["scheduled_delete"] = gin.H{
 					"scheduled_at":  sd.ScheduledAt,
 					"requested_at":  sd.RequestedAt,
@@ -8043,6 +8044,9 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 
 const postStatusTable = "g5_da_post_status"
 
+// postStatusSelect 는 상태 조회 컬럼이다(목록·상세·게시판 맵 공통 — status_updated_at 포맷을 한 곳에서).
+const postStatusSelect = "wr_id, status, DATE_FORMAT(CONVERT_TZ(updated_at, '+00:00', '+09:00'), '%Y-%m-%d %H:%i:%s') AS updated_kst"
+
 // postStatusAllowed 는 허용 상태값인지 본다.
 func postStatusAllowed(status string) bool {
 	switch status {
@@ -8076,7 +8080,7 @@ func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []ma
 	}
 	var rows []postStatusRow
 	if err := db.Table(postStatusTable).
-		Select("wr_id, status, DATE_FORMAT(CONVERT_TZ(updated_at, '+00:00', '+09:00'), '%Y-%m-%d %H:%i:%s') AS updated_kst").
+		Select(postStatusSelect).
 		Where("board_id = ? AND wr_id IN ?", slug, ids).
 		Find(&rows).Error; err != nil {
 		// 테이블 부재(DDL 전 배포)·일시 오류 — 배지만 생략.
@@ -8099,14 +8103,29 @@ func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []ma
 	return items
 }
 
-// attachPostStatus 는 상세 응답 한 건에 status 를 붙인다.
+// attachPostStatus 는 상세 응답 한 건에 status 를 붙인다. 게시판별 상태 맵(프로세스 캐시)에서 꺼내고,
+// 맵 조회가 실패하면 예전처럼 단건 조회한다(attachPostStatusDirect).
 func attachPostStatus(db *gorm.DB, slug string, id int, detail map[string]any) {
 	if db == nil || detail == nil {
 		return
 	}
+	byID, err := postStatusBoardMap(db, slug)
+	if err != nil {
+		postStatusLogRateLimited("[post_status] 게시판 상태 맵 조회 실패 board=%s — 단건 조회로 대신함: %v", slug, err)
+		attachPostStatusDirect(db, slug, id, detail)
+		return
+	}
+	if r, ok := byID[id]; ok {
+		detail["status"] = r.Status
+		detail["status_updated_at"] = r.UpdatedKST
+	}
+}
+
+// attachPostStatusDirect 는 상세 응답 한 건에 status 를 단건 조회로 붙인다(맵 조회 실패 시 대체 경로).
+func attachPostStatusDirect(db *gorm.DB, slug string, id int, detail map[string]any) {
 	var r postStatusRow
 	err := db.Table(postStatusTable).
-		Select("wr_id, status, DATE_FORMAT(CONVERT_TZ(updated_at, '+00:00', '+09:00'), '%Y-%m-%d %H:%i:%s') AS updated_kst").
+		Select(postStatusSelect).
 		Where("board_id = ? AND wr_id = ?", slug, id).
 		Take(&r).Error
 	if err != nil {
@@ -8131,17 +8150,25 @@ func upsertPostStatus(db *gorm.DB, slug string, id int, status, setBy, source, n
 	if len(note) > 255 {
 		note = note[:255]
 	}
-	return db.Exec(
+	if err := db.Exec(
 		"INSERT INTO "+postStatusTable+" (board_id, wr_id, status, set_by, source, note, created_at, updated_at) "+
 			"VALUES (?, ?, ?, ?, ?, ?, NOW(3), NOW(3)) "+
 			"ON DUPLICATE KEY UPDATE status = VALUES(status), set_by = VALUES(set_by), source = VALUES(source), note = VALUES(note), updated_at = NOW(3)",
 		slug, id, status, setBy, source, note,
-	).Error
+	).Error; err != nil {
+		return err
+	}
+	invalidatePostStatusBoard(slug)
+	return nil
 }
 
 // clearPostStatus 는 상태를 해제한다(행 삭제).
 func clearPostStatus(db *gorm.DB, slug string, id int) error {
-	return db.Exec("DELETE FROM "+postStatusTable+" WHERE board_id = ? AND wr_id = ?", slug, id).Error
+	if err := db.Exec("DELETE FROM "+postStatusTable+" WHERE board_id = ? AND wr_id = ?", slug, id).Error; err != nil {
+		return err
+	}
+	invalidatePostStatusBoard(slug)
+	return nil
 }
 
 // purgePostMemCache 는 이 게시판의 프로세스 내 목록 캐시(postMemCache, 30초)를 비운다.
