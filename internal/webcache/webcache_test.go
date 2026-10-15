@@ -40,7 +40,7 @@ func TestNamespacePrefixes_AlwaysIncludesBare(t *testing.T) {
 	}
 }
 
-func TestInvalidateMemberCard_NoRedisIsNoop(t *testing.T) {
+func TestInvalidateMemberCard_NoRedisIsNoop(_ *testing.T) {
 	restore := SetDeleterForTest(nil)
 	defer restore()
 	InvalidateMemberCard("abcd") // panic 나 블로킹 없이 돌아와야 한다
