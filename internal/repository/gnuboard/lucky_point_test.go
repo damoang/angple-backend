@@ -322,7 +322,7 @@ func TestLuckyTierFromContent_ConfiguredNames(t *testing.T) {
 	}
 }
 
-// TestLuckyBadgesByWrID_ConfiguredTier — F3: 설정 이름으로 지급된 행은 배지 tier·시각이 실리고, 쿼리 수는 그대로 2다.
+// TestLuckyBadgesByWrID_ConfiguredTier — F3: 설정 이름으로 지급된 행은 배지 tier·시각이 실리고, 쿼리 수는 그대로다(원장·워터마크 적재 + g5_point 1).
 func TestLuckyBadgesByWrID_ConfiguredTier(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
 	if err := db.Exec(`INSERT INTO g5_point (mb_id, po_datetime, po_content, po_point, po_rel_table, po_rel_id, po_rel_action)
@@ -335,7 +335,7 @@ func TestLuckyBadgesByWrID_ConfiguredTier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
-	if n := len(counter.snapshot()); n != 2 { // g5_point 1 + 원장 1(처음) — 101·107 은 원장에 없어 경험치 조회 생략
+	if n := len(counter.snapshot()); n != 3 { // g5_point 1 + 원장 1·워터마크 1(처음) — 101·107 은 원장에 없어 경험치 조회 생략
 		t.Errorf("이름 목록을 받아도 쿼리 수는 그대로여야 한다, got %d", n)
 	}
 	b := got[107]

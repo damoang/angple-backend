@@ -339,6 +339,11 @@ func luckyPointQueryOf(sqls []string) string {
 	return ""
 }
 
+// luckyPointQueryHas 는 포인트 조회 SQL 의 IN 목록에 id 가 있는지 본다(드라이버마다 문자열 따옴표가 달라 둘 다 본다).
+func luckyPointQueryHas(q, id string) bool {
+	return strings.Contains(q, "'"+id+"'") || strings.Contains(q, `"`+id+`"`)
+}
+
 // TestLuckyPointGate_WatermarkOrLedgerOnly — 워터마크(원장 밖 최대 글번호 101) 이하·원장 id 만 조회하고, 둘 다 아닌 id 는
 // 빠진다. 원장에 있는 글(106)의 옛 문구 행은 워터마크를 올리지 않는다. 값은 예전과 같다.
 func TestLuckyPointGate_WatermarkOrLedgerOnly(t *testing.T) {
@@ -351,13 +356,13 @@ func TestLuckyPointGate_WatermarkOrLedgerOnly(t *testing.T) {
 	if q == "" {
 		t.Fatal("워터마크 이하·원장 id 가 있으니 포인트를 조회해야 한다")
 	}
-	for _, id := range []string{"'100'", "'101'", "'103'"} {
-		if !strings.Contains(q, id) {
+	for _, id := range []string{"100", "101", "103"} {
+		if !luckyPointQueryHas(q, id) {
 			t.Errorf("포인트 조회에 %s 가 있어야 한다: %s", id, q)
 		}
 	}
-	for _, id := range []string{"'105'", "'110'"} {
-		if strings.Contains(q, id) {
+	for _, id := range []string{"105", "110"} {
+		if luckyPointQueryHas(q, id) {
 			t.Errorf("워터마크 초과·원장 밖 %s 는 조회하지 않는다: %s", id, q)
 		}
 	}
@@ -414,7 +419,7 @@ func TestLuckyPointGate_NoLegacyBoardLedgerOnly(t *testing.T) {
 		t.Fatalf("조회 실패: %v", err)
 	}
 	q := luckyPointQueryOf(counter.snapshot())
-	if !strings.Contains(q, "'104'") || strings.Contains(q, "'1'") || strings.Contains(q, "'50'") {
+	if !luckyPointQueryHas(q, "104") || luckyPointQueryHas(q, "1") || luckyPointQueryHas(q, "50") {
 		t.Errorf("원장 id(104)만 조회해야 한다: %s", q)
 	}
 	if got[104].Points != 777 {
@@ -445,8 +450,8 @@ func TestLuckyPointGate_WatermarkErrorFailsOpen(t *testing.T) {
 		t.Fatalf("워터마크 실패는 조회 에러가 아니다: %v", err)
 	}
 	q := luckyPointQueryOf(counter.snapshot())
-	for _, id := range []string{"'101'", "'103'", "'105'", "'110'"} {
-		if !strings.Contains(q, id) {
+	for _, id := range []string{"101", "103", "105", "110"} {
+		if !luckyPointQueryHas(q, id) {
 			t.Errorf("워터마크 실패면 요청 id 전부(%s 포함)로 조회해야 한다: %s", id, q)
 		}
 	}
@@ -473,8 +478,8 @@ func TestLuckyPointGate_LedgerErrorFailsOpen(t *testing.T) {
 		t.Fatalf("원장 실패는 조회 에러가 아니다: %v", err)
 	}
 	q := luckyPointQueryOf(counter.snapshot())
-	for _, id := range []string{"'101'", "'105'", "'110'"} {
-		if !strings.Contains(q, id) {
+	for _, id := range []string{"101", "105", "110"} {
+		if !luckyPointQueryHas(q, id) {
 			t.Errorf("원장 실패면 요청 id 전부(%s 포함)로 조회해야 한다: %s", id, q)
 		}
 	}
@@ -496,7 +501,7 @@ func TestLuckyPointGate_NonNumericLegacyRelID(t *testing.T) {
 		t.Fatalf("조회 실패: %v", err)
 	}
 	q := luckyPointQueryOf(counter.snapshot())
-	if !strings.Contains(q, "'101'") || strings.Contains(q, "'105'") {
+	if !luckyPointQueryHas(q, "101") || luckyPointQueryHas(q, "105") {
 		t.Errorf("워터마크는 101 그대로여야 한다: %s", q)
 	}
 	if got[101].Points != 73 {
