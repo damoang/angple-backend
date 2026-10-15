@@ -106,7 +106,7 @@ func TestSelectPopularCandidatesUsesWindowFloor(t *testing.T) {
 		t.Fatalf("floor = %d (found=%v), want 3", floor, found)
 	}
 
-	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200)
+	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200, true)
 	if err != nil {
 		t.Fatalf("selectPopularCandidates: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestSelectPopularCandidatesUsesWindowFloor(t *testing.T) {
 		t.Fatalf("unexpected row fields: %+v", posts[0])
 	}
 
-	limited, err := selectPopularCandidates(db, "free", 10, cutoff, 1)
+	limited, err := selectPopularCandidates(db, "free", 10, cutoff, 1, true)
 	if err != nil {
 		t.Fatalf("selectPopularCandidates limit: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestSelectPopularCandidatesSkipsBoardWithoutRecentPosts(t *testing.T) {
 		t.Fatalf("expected no floor, got %d", floor)
 	}
 
-	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200)
+	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200, true)
 	if err != nil {
 		t.Fatalf("selectPopularCandidates: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestSelectPopularCandidatesFallsBackWhenFloorFails(t *testing.T) {
 	}
 	t.Cleanup(func() { popularPostFloor = orig })
 
-	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200)
+	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200, true)
 	if err != nil {
 		t.Fatalf("selectPopularCandidates: %v", err)
 	}
@@ -166,7 +166,113 @@ func TestSelectPopularCandidatesMissingTable(t *testing.T) {
 	db := openPopularTestDB(t, "popular_missing")
 	cutoff := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
 
-	if _, err := selectPopularCandidates(db, "nosuchboard", 10, cutoff, 200); err == nil {
+	if _, err := selectPopularCandidates(db, "nosuchboard", 10, cutoff, 200, true); err == nil {
 		t.Fatal("expected error for missing board table")
 	}
+}
+
+// stubPopularFloor replaces popularPostFloor and counts how often it is called.
+func stubPopularFloor(t *testing.T) *int {
+	t.Helper()
+	calls := 0
+	orig := popularPostFloor
+	popularPostFloor = func(db *gorm.DB, board string, cutoff time.Time) (int64, bool, error) {
+		calls++
+		return orig(db, board, cutoff)
+	}
+	t.Cleanup(func() { popularPostFloor = orig })
+	return &calls
+}
+
+// stubIndexLookup replaces popularDatetimeIndexedTables with a fixed answer.
+func stubIndexLookup(t *testing.T, names []string, err error) *[]string {
+	t.Helper()
+	var asked []string
+	orig := popularDatetimeIndexedTables
+	popularDatetimeIndexedTables = func(_ *gorm.DB, tables []string) ([]string, error) {
+		asked = append(asked, tables...)
+		return names, err
+	}
+	t.Cleanup(func() { popularDatetimeIndexedTables = orig })
+	return &asked
+}
+
+func TestPopularFloorBoardsOnlyIndexedBoards(t *testing.T) {
+	db := openPopularTestDB(t, "popular_index_boards")
+	asked := stubIndexLookup(t, []string{"g5_write_free"}, nil)
+
+	got := popularFloorBoards(db, []string{"free", "car", "bad-slug"})
+	if !got["free"] {
+		t.Fatalf("expected free to use floor, got %v", got)
+	}
+	if got["car"] {
+		t.Fatalf("expected car without floor, got %v", got)
+	}
+	if len(*asked) != 2 || (*asked)[0] != "g5_write_free" || (*asked)[1] != "g5_write_car" {
+		t.Fatalf("lookup tables = %v, want [g5_write_free g5_write_car]", *asked)
+	}
+}
+
+func TestPopularFloorBoardsLookupFailure(t *testing.T) {
+	db := openPopularTestDB(t, "popular_index_fail")
+	stubIndexLookup(t, []string{"g5_write_free"}, errors.New("lookup failed"))
+
+	got := popularFloorBoards(db, []string{"free", "car"})
+	if len(got) != 0 {
+		t.Fatalf("expected no floor boards on lookup failure, got %v", got)
+	}
+}
+
+func TestSelectPopularCandidatesIndexedBoardUsesFloor(t *testing.T) {
+	db := openPopularTestDB(t, "popular_indexed")
+	cutoff := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	seedPopularWindow(t, db, cutoff)
+	stubIndexLookup(t, []string{"g5_write_free"}, nil)
+	calls := stubPopularFloor(t)
+
+	floorBoards := popularFloorBoards(db, []string{"free"})
+	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200, floorBoards["free"])
+	if err != nil {
+		t.Fatalf("selectPopularCandidates: %v", err)
+	}
+	if *calls != 1 {
+		t.Fatalf("floor lookup calls = %d, want 1", *calls)
+	}
+	assertPopularIDs(t, posts, []int{4, 7})
+}
+
+func TestSelectPopularCandidatesNonIndexedBoardSkipsFloor(t *testing.T) {
+	db := openPopularTestDB(t, "popular_nonindexed")
+	cutoff := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	seedPopularWindow(t, db, cutoff)
+	stubIndexLookup(t, nil, nil)
+	calls := stubPopularFloor(t)
+
+	floorBoards := popularFloorBoards(db, []string{"free"})
+	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200, floorBoards["free"])
+	if err != nil {
+		t.Fatalf("selectPopularCandidates: %v", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("floor lookup calls = %d, want 0", *calls)
+	}
+	assertPopularIDs(t, posts, []int{4, 7})
+}
+
+func TestSelectPopularCandidatesIndexLookupFailureSkipsFloor(t *testing.T) {
+	db := openPopularTestDB(t, "popular_index_lookup_fail")
+	cutoff := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	seedPopularWindow(t, db, cutoff)
+	stubIndexLookup(t, []string{"g5_write_free"}, errors.New("lookup failed"))
+	calls := stubPopularFloor(t)
+
+	floorBoards := popularFloorBoards(db, []string{"free"})
+	posts, err := selectPopularCandidates(db, "free", 10, cutoff, 200, floorBoards["free"])
+	if err != nil {
+		t.Fatalf("selectPopularCandidates: %v", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("floor lookup calls = %d, want 0", *calls)
+	}
+	assertPopularIDs(t, posts, []int{4, 7})
 }

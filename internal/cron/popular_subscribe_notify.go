@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
@@ -52,6 +53,7 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 		Where("level = 2").Pluck("bo_table", &boards).Error; err != nil {
 		return res, err
 	}
+	floorBoards := popularFloorBoards(db, boards)
 
 	for _, board := range boards {
 		if !boardSlugRe.MatchString(board) {
@@ -60,7 +62,7 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 		res.Boards++
 
 		// 2) 임계값 도달 + 최근 + 미통지 글
-		posts, err := selectPopularCandidates(db, board, threshold, cutoff, maxPostsPerBoard)
+		posts, err := selectPopularCandidates(db, board, threshold, cutoff, maxPostsPerBoard, floorBoards[board])
 		if err != nil {
 			continue // 테이블 없음 등은 건너뜀
 		}
@@ -174,13 +176,56 @@ var popularPostFloor = func(db *gorm.DB, board string, cutoff time.Time) (floor 
 	return minID.Int64, true, nil
 }
 
+// popularDatetimeIndexedTables returns which of tables have an index whose
+// first column is wr_datetime. Test seam: sqlite has no information_schema.
+var popularDatetimeIndexedTables = func(db *gorm.DB, tables []string) ([]string, error) {
+	var names []string
+	err := db.Raw(
+		"SELECT DISTINCT TABLE_NAME FROM information_schema.STATISTICS "+
+			"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ? "+
+			"AND SEQ_IN_INDEX = 1 AND COLUMN_NAME = 'wr_datetime'", tables).
+		Scan(&names).Error
+	return names, err
+}
+
+// popularFloorBoards returns the boards whose write table can serve the floor
+// lookup from a wr_datetime index. 인덱스가 없는 게시판은 하한 조회가 전체 스캔이
+// 되므로 기존 쿼리 그대로 둔다. 조회 실패 시 모든 게시판에서 하한을 쓰지 않는다.
+func popularFloorBoards(db *gorm.DB, boards []string) map[string]bool {
+	result := map[string]bool{}
+	tables := make([]string, 0, len(boards))
+	for _, board := range boards {
+		if boardSlugRe.MatchString(board) {
+			tables = append(tables, "g5_write_"+board)
+		}
+	}
+	if len(tables) == 0 {
+		return result
+	}
+	names, err := popularDatetimeIndexedTables(db, tables)
+	if err != nil {
+		log.Printf("[Cron:popular-subscribe-notify] index lookup failed, scanning without floor: %v", err)
+		return result
+	}
+	for _, name := range names {
+		if board, ok := strings.CutPrefix(name, "g5_write_"); ok {
+			result[board] = true
+		}
+	}
+	return result
+}
+
 // selectPopularCandidates returns posts in board that reached threshold since
-// cutoff and have not been notified yet. 대상 기간의 첫 글 번호(하한)를 먼저 구해
-// 그 뒤 구간만 읽는다 — ORDER BY wr_id 로 게시판 처음부터 훑는 것을 막는다.
+// cutoff and have not been notified yet. useFloor 이면 대상 기간의 첫 글 번호(하한)를
+// 먼저 구해 그 뒤 구간만 읽는다 — ORDER BY wr_id 로 게시판 처음부터 훑는 것을 막는다.
 // 기간 안 글이 없으면 빈 결과, 하한 조회가 실패하면 하한 없이 기존 쿼리로 조회한다.
-func selectPopularCandidates(db *gorm.DB, board string, threshold int, cutoff time.Time, limit int) ([]popularPostRow, error) {
+func selectPopularCandidates(db *gorm.DB, board string, threshold int, cutoff time.Time, limit int, useFloor bool) ([]popularPostRow, error) {
 	floorCond := ""
 	args := []interface{}{board, threshold, cutoff}
+	if !useFloor {
+		args = append(args, limit)
+		return queryPopularCandidates(db, board, floorCond, args)
+	}
 	floor, found, err := popularPostFloor(db, board, cutoff)
 	switch {
 	case err != nil:
@@ -192,7 +237,12 @@ func selectPopularCandidates(db *gorm.DB, board string, threshold int, cutoff ti
 		args = append(args, floor)
 	}
 	args = append(args, limit)
+	return queryPopularCandidates(db, board, floorCond, args)
+}
 
+// queryPopularCandidates runs the candidate query, with floorCond inserted
+// before the notified check when a floor is used.
+func queryPopularCandidates(db *gorm.DB, board, floorCond string, args []interface{}) ([]popularPostRow, error) {
 	var posts []popularPostRow
 	q := fmt.Sprintf(
 		"SELECT w.wr_id AS wr_id, w.wr_subject AS subject, w.mb_id AS mb_id, w.wr_name AS wr_name "+
