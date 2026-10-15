@@ -1,7 +1,9 @@
 package cron
 
 import (
+	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strconv"
@@ -51,13 +53,6 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 		return res, err
 	}
 
-	type postRow struct {
-		WrID    int
-		Subject string
-		MbID    string
-		WrName  string
-	}
-
 	for _, board := range boards {
 		if !boardSlugRe.MatchString(board) {
 			continue // 동적 테이블명 인젝션 방지
@@ -65,14 +60,8 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 		res.Boards++
 
 		// 2) 임계값 도달 + 최근 + 미통지 글
-		var posts []postRow
-		q := fmt.Sprintf(
-			"SELECT w.wr_id AS wr_id, w.wr_subject AS subject, w.mb_id AS mb_id, w.wr_name AS wr_name "+
-				"FROM g5_write_%s w "+
-				"LEFT JOIN g5_board_subscribe_notified n ON n.bo_table = ? AND n.wr_id = w.wr_id "+
-				"WHERE w.wr_is_comment = 0 AND w.wr_good >= ? AND w.wr_datetime >= ? AND n.wr_id IS NULL "+
-				"ORDER BY w.wr_id LIMIT ?", board)
-		if err := db.Raw(q, board, threshold, cutoff, maxPostsPerBoard).Scan(&posts).Error; err != nil {
+		posts, err := selectPopularCandidates(db, board, threshold, cutoff, maxPostsPerBoard)
+		if err != nil {
 			continue // 테이블 없음 등은 건너뜀
 		}
 		if len(posts) == 0 {
@@ -160,4 +149,59 @@ func runPopularSubscribeNotify(db *gorm.DB) (*PopularSubscribeResult, error) {
 	}
 
 	return res, nil
+}
+
+// popularPostRow is a candidate post for the popular-post subscribe notification.
+type popularPostRow struct {
+	WrID    int
+	Subject string
+	MbID    string
+	WrName  string
+}
+
+// popularPostFloor returns the smallest wr_id written at or after cutoff.
+// found=false means the board has no post in the window. Test seam: tests may
+// replace it to simulate a failing floor lookup.
+var popularPostFloor = func(db *gorm.DB, board string, cutoff time.Time) (floor int64, found bool, err error) {
+	var minID sql.NullInt64
+	q := fmt.Sprintf("SELECT MIN(wr_id) FROM g5_write_%s WHERE wr_datetime >= ?", board)
+	if err := db.Raw(q, cutoff).Row().Scan(&minID); err != nil {
+		return 0, false, err
+	}
+	if !minID.Valid {
+		return 0, false, nil
+	}
+	return minID.Int64, true, nil
+}
+
+// selectPopularCandidates returns posts in board that reached threshold since
+// cutoff and have not been notified yet. 대상 기간의 첫 글 번호(하한)를 먼저 구해
+// 그 뒤 구간만 읽는다 — ORDER BY wr_id 로 게시판 처음부터 훑는 것을 막는다.
+// 기간 안 글이 없으면 빈 결과, 하한 조회가 실패하면 하한 없이 기존 쿼리로 조회한다.
+func selectPopularCandidates(db *gorm.DB, board string, threshold int, cutoff time.Time, limit int) ([]popularPostRow, error) {
+	floorCond := ""
+	args := []interface{}{board, threshold, cutoff}
+	floor, found, err := popularPostFloor(db, board, cutoff)
+	switch {
+	case err != nil:
+		log.Printf("[Cron:popular-subscribe-notify] board=%s floor lookup failed, scanning without floor: %v", board, err)
+	case !found:
+		return nil, nil
+	default:
+		floorCond = "AND w.wr_id >= ? "
+		args = append(args, floor)
+	}
+	args = append(args, limit)
+
+	var posts []popularPostRow
+	q := fmt.Sprintf(
+		"SELECT w.wr_id AS wr_id, w.wr_subject AS subject, w.mb_id AS mb_id, w.wr_name AS wr_name "+
+			"FROM g5_write_%s w "+
+			"LEFT JOIN g5_board_subscribe_notified n ON n.bo_table = ? AND n.wr_id = w.wr_id "+
+			"WHERE w.wr_is_comment = 0 AND w.wr_good >= ? AND w.wr_datetime >= ? "+floorCond+"AND n.wr_id IS NULL "+
+			"ORDER BY w.wr_id LIMIT ?", board)
+	if err := db.Raw(q, args...).Scan(&posts).Error; err != nil {
+		return nil, err
+	}
+	return posts, nil
 }
