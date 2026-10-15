@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"sort"
@@ -24,6 +25,25 @@ const givingContentExcerptLen = 1000
 // givingImgRegex extracts the first <img src="..."> URL from a giving post body.
 var givingImgRegex = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
 
+// givingListCacheKey is the single shared key for the raw giving list rows.
+// 요청 파라미터(tab/sort/limit)와 무관하게 DB 원자료는 같으므로 키는 하나다.
+// 행 구조가 바뀌면 접미 버전을 올린다.
+const givingListCacheKey = "giving:list:rows:v1"
+
+// givingListCacheTTL keeps the raw rows short-lived; 글 작성·수정·삭제는 이 시간 안에 반영된다.
+const givingListCacheTTL = 30 * time.Second
+
+// givingListCacheOpTimeout bounds cache invalidation so a slow cache never blocks a write path.
+const givingListCacheOpTimeout = 2 * time.Second
+
+// GivingListCache is the subset of the shared cache service used by the giving list.
+// pkg/cache.Service satisfies it.
+type GivingListCache interface {
+	Get(ctx context.Context, key string, dest interface{}) error
+	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	Delete(ctx context.Context, keys ...string) error
+}
+
 // GivingHandler handles giving plugin API endpoints
 type GivingHandler struct {
 	db              *gorm.DB
@@ -31,6 +51,7 @@ type GivingHandler struct {
 	cdnURL          string
 	pointConfigRepo v2repo.PointConfigRepository
 	memoRepo        gnurepo.MemoRepository
+	listCache       GivingListCache
 }
 
 // NewGivingHandler creates a new GivingHandler.
@@ -47,6 +68,12 @@ func NewGivingHandler(db *gorm.DB, fileRepo *gnurepo.FileRepository, cdnURL stri
 		pointConfigRepo: pointConfigRepo,
 		memoRepo:        memoRepo,
 	}
+}
+
+// SetListCache wires the shared cache used for the raw giving list rows.
+// nil 이면 캐시 없이 매 요청 DB 에서 읽는다.
+func (h *GivingHandler) SetListCache(cache GivingListCache) {
+	h.listCache = cache
 }
 
 // GivingListItem represents a giving item in list response
@@ -193,15 +220,8 @@ func (h *GivingHandler) List(c *gin.Context) {
 
 	now := time.Now()
 
-	contentExcerpt := "LEFT(g.wr_content, " + strconv.Itoa(givingContentExcerptLen) + ") AS wr_content"
-	query := h.db.Table("g5_write_giving AS g").
-		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7, g.wr_10, ` + contentExcerpt + `,
-			COALESCE((SELECT COUNT(DISTINCT b.mb_id) FROM g5_giving_bid b WHERE b.wr_id = g.wr_id), 0) AS participant_count`).
-		Where("g.wr_is_comment = 0").
-		Where("g.wr_deleted_at IS NULL")
-
-	var rows []givingRow
-	if err := query.Find(&rows).Error; err != nil {
+	rows, err := h.givingListRows(c.Request.Context(), h.loadGivingListRows)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to fetch giving list",
@@ -254,4 +274,87 @@ func (h *GivingHandler) List(c *gin.Context) {
 		"success": true,
 		"data":    items,
 	})
+}
+
+// givingListRows returns the raw list rows, from the shared cache when present.
+// 상태 계산(now 기준)·tab 필터·정렬·limit·썸네일 보강은 캐시 뒤에서 매 요청 계산한다
+// — 시간 경계(시작·종료)가 캐시 때문에 늦게 반영되지 않게 하기 위함.
+// 캐시가 없거나 읽기·역직렬화에 실패하면 load 로 DB 에서 읽는다.
+func (h *GivingHandler) givingListRows(ctx context.Context, load func() ([]givingRow, error)) ([]givingRow, error) {
+	if h.listCache != nil {
+		var cached []givingRow
+		if err := h.listCache.Get(ctx, givingListCacheKey, &cached); err == nil {
+			return cached, nil
+		}
+	}
+	rows, err := load()
+	if err != nil {
+		return nil, err
+	}
+	if h.listCache != nil {
+		_ = h.listCache.Set(ctx, givingListCacheKey, rows, givingListCacheTTL)
+	}
+	return rows, nil
+}
+
+// loadGivingListRows reads all giving posts, then attaches participant counts
+// with one grouped query (글마다 서브쿼리를 돌리지 않는다).
+func (h *GivingHandler) loadGivingListRows() ([]givingRow, error) {
+	contentExcerpt := "LEFT(g.wr_content, " + strconv.Itoa(givingContentExcerptLen) + ") AS wr_content"
+	var rows []givingRow
+	if err := h.db.Table("g5_write_giving AS g").
+		Select(`g.wr_id, g.wr_subject, g.wr_4, g.wr_5, g.wr_7, g.wr_10, ` + contentExcerpt).
+		Where("g.wr_is_comment = 0").
+		Where("g.wr_deleted_at IS NULL").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if err := h.attachGivingParticipantCounts(rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// attachGivingParticipantCounts sets ParticipantCount (distinct mb_id in g5_giving_bid
+// per wr_id) on each row. 종전 상관 서브쿼리와 같은 의미 — bo_table·bid_status 조건 없이 wr_id 만.
+// 행이 없으면 쿼리하지 않는다.
+func (h *GivingHandler) attachGivingParticipantCounts(rows []givingRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.WrID)
+	}
+	type countRow struct {
+		WrID             int `gorm:"column:wr_id"`
+		ParticipantCount int `gorm:"column:participant_count"`
+	}
+	var counts []countRow
+	if err := h.db.Table("g5_giving_bid").
+		Select("wr_id, COUNT(DISTINCT mb_id) AS participant_count").
+		Where("wr_id IN ?", ids).
+		Group("wr_id").
+		Find(&counts).Error; err != nil {
+		return err
+	}
+	byID := make(map[int]int, len(counts))
+	for _, cr := range counts {
+		byID[cr.WrID] = cr.ParticipantCount
+	}
+	for i := range rows {
+		rows[i].ParticipantCount = byID[rows[i].WrID]
+	}
+	return nil
+}
+
+// invalidateGivingListCache drops the cached raw list rows after a write that changes
+// participant counts or status. 실패해도 쓰기 결과에는 영향이 없다(TTL 로 수렴).
+func (h *GivingHandler) invalidateGivingListCache() {
+	if h.listCache == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), givingListCacheOpTimeout)
+	defer cancel()
+	_ = h.listCache.Delete(ctx, givingListCacheKey)
 }

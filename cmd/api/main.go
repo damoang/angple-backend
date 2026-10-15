@@ -7751,6 +7751,9 @@ func main() {
 
 		// Giving plugin API
 		givingHandler := handler.NewGivingHandler(db, gnuFileRepo, cfg.Storage.CDNURL, pointConfigRepo, gnuMemoRepo)
+		if cacheService != nil {
+			givingHandler.SetListCache(cacheService)
+		}
 		givingGroup := router.Group("/api/plugins/giving")
 		{
 			givingGroup.GET("/list", givingHandler.List)

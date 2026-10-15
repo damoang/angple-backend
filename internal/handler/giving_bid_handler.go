@@ -356,6 +356,7 @@ func (h *GivingHandler) Config(c *gin.Context) {
 		givingErr(c, http.StatusInternalServerError, "설정 저장에 실패했습니다.")
 		return
 	}
+	h.invalidateGivingListCache()
 	givingOK(c, gin.H{
 		"wr_id":            wrID,
 		"method":           req.Method,
@@ -742,6 +743,7 @@ func (h *GivingHandler) bidFreeEntry(c *gin.Context, post *givingPostRow, meta g
 		givingErr(c, http.StatusInternalServerError, "참가 처리에 실패했습니다.")
 		return
 	}
+	h.invalidateGivingListCache()
 	givingOK(c, gin.H{"joined": true, "method": meta.Method, "points_spent": cost})
 }
 
@@ -867,6 +869,7 @@ func (h *GivingHandler) bidLowestUnique(c *gin.Context, post *givingPostRow, met
 		givingErr(c, http.StatusInternalServerError, "응모 처리에 실패했습니다.")
 		return
 	}
+	h.invalidateGivingListCache()
 	givingOK(c, gin.H{
 		"joined":       true,
 		"numbers":      givingdomain.FormatNumbers(parsed),
@@ -1052,6 +1055,7 @@ func (h *GivingHandler) Draw(c *gin.Context) {
 	}
 	// 개표 완료 → 설정 상태 종료
 	h.db.Exec("UPDATE g5_giving_meta SET status = 'drawn', updated_at = ? WHERE wr_id = ?", time.Now(), wrID)
+	h.invalidateGivingListCache()
 	h.NotifyDrawResult(wrID)
 
 	var saved givingDrawRow
@@ -1231,10 +1235,12 @@ func (h *GivingHandler) AdminAction(c *gin.Context) {
 	case "pause":
 		h.db.Exec("UPDATE g5_write_giving SET wr_7 = '1', wr_8 = ? WHERE wr_id = ?", now.Format("2006-01-02 15:04:05"), wrID)
 		h.db.Exec("UPDATE g5_giving_meta SET status = 'paused', updated_at = ? WHERE wr_id = ?", now, wrID)
+		h.invalidateGivingListCache()
 		givingOK(c, gin.H{"status": "paused"})
 	case "resume":
 		h.db.Exec("UPDATE g5_write_giving SET wr_7 = '0' WHERE wr_id = ?", wrID)
 		h.db.Exec("UPDATE g5_giving_meta SET status = 'open', updated_at = ? WHERE wr_id = ?", now, wrID)
+		h.invalidateGivingListCache()
 		givingOK(c, gin.H{"status": "open"})
 	case "force-stop":
 		h.db.Exec("UPDATE g5_write_giving SET wr_7 = '2', wr_8 = ? WHERE wr_id = ?", now.Format("2006-01-02 15:04:05"), wrID)
@@ -1250,6 +1256,7 @@ func (h *GivingHandler) AdminAction(c *gin.Context) {
 			}
 		}
 		h.db.Exec("UPDATE g5_giving_meta SET status = 'ended', updated_at = ? WHERE wr_id = ?", now, wrID)
+		h.invalidateGivingListCache()
 		givingOK(c, gin.H{"status": "ended"})
 	default:
 		givingErr(c, http.StatusBadRequest, "알 수 없는 동작입니다.")
@@ -1381,6 +1388,9 @@ func (h *GivingHandler) RunDueDrawSweep() (*GivingSweepResult, error) {
 			continue
 		}
 		res.Redrawn++
+	}
+	if res.AutoDrawn+res.Redrawn > 0 {
+		h.invalidateGivingListCache()
 	}
 
 	return res, nil
@@ -1528,6 +1538,7 @@ func (h *GivingHandler) ClaimGiving(c *gin.Context) {
 	}
 	now := time.Now()
 	h.db.Exec("UPDATE g5_giving_draw SET claimed_at = ? WHERE wr_id = ? AND winner_mb_id = ? AND claimed_at IS NULL", now, wrID, me)
+	h.invalidateGivingListCache()
 	givingOK(c, gin.H{"claimed": true, "claimed_at": now})
 }
 
