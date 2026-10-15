@@ -588,6 +588,11 @@ func filterItems(items []map[string]any, blockedIDs []string) []map[string]any {
 // authorMemoWithdrawnIDs 는 enrichWithAuthorMemo 의 탈퇴 작성자 판정이다(테스트에서 교체).
 var authorMemoWithdrawnIDs = middleware.WithdrawnMemberIDs
 
+// authorMemoTargetSet 은 enrichWithAuthorMemo 의 메모 대상 게이트다 — 보는 사람이 메모를 남긴
+// 상대 ID 집합(보는 사람 키로만 캐시)을 돌려준다. ok=false 이거나 nil 이면 게이트 없이 전체 조회한다.
+// main 에서 Redis 연결 뒤 한 번 설정한다(테스트에서 교체).
+var authorMemoTargetSet func(ctx context.Context, db *gorm.DB, viewerID string) (map[string]struct{}, bool)
+
 // enrichWithAuthorMemo augments items with current user's `author_memo` field for each post/comment.
 // Replaces the previous N+1 pattern (frontend per-author /api/v1/members/{id}/memo fetch).
 // Returns a NEW slice when enrichment occurs (cached items must not be mutated). When the user is
@@ -595,6 +600,14 @@ var authorMemoWithdrawnIDs = middleware.WithdrawnMemberIDs
 //
 // Cache safety: input items may be shared across requests (in-memory or Redis cache hit), so any
 // item receiving an `author_memo` is shallow-copied before mutation.
+//
+// ⛔ 호출자는 목록·글·댓글 공유 캐시를 **보강 전에** 저장하고, 이 함수의 결과는 응답에만 쓴다.
+// 결과에는 보는 사람 개인의 메모가 들어 있으므로 공유 캐시에 저장하면 안 된다. 메모 대상 집합
+// 게이트(authorMemoTargetSet)도 보는 사람 키로만 캐시한다.
+//
+// Gate: 보는 사람의 메모 대상 집합과 페이지 작성자가 겹치지 않으면 DB 조회 없이 모든 작성자에
+// author_memo: nil 을 넣는다(전체 조회 결과가 0행일 때와 같은 형태). 겹치면 겹친 ID 만 조회한다.
+// 집합을 모르면(ok=false) 기존처럼 페이지 작성자 전체로 조회한다.
 func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]any) []map[string]any {
 	if currentUserID == "" || len(items) == 0 {
 		return items
@@ -615,6 +628,11 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 	if len(targetIDs) == 0 {
 		return items
 	}
+	if authorMemoTargetSet != nil {
+		if memoTargets, ok := authorMemoTargetSet(context.Background(), db, currentUserID); ok {
+			targetIDs = intersectMemoTargetIDs(targetIDs, memoTargets)
+		}
+	}
 	type memoRow struct {
 		TargetID   string `gorm:"column:target_member_id"`
 		Memo       string `gorm:"column:memo"`
@@ -622,11 +640,13 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 		Color      string `gorm:"column:color"`
 	}
 	var memos []memoRow
-	if err := db.Table("g5_member_memo").
-		Select("target_member_id, memo, memo_detail, color").
-		Where("member_id = ? AND target_member_id IN ?", currentUserID, targetIDs).
-		Find(&memos).Error; err != nil {
-		return items
+	if len(targetIDs) > 0 {
+		if err := db.Table("g5_member_memo").
+			Select("target_member_id, memo, memo_detail, color").
+			Where("member_id = ? AND target_member_id IN ?", currentUserID, targetIDs).
+			Find(&memos).Error; err != nil {
+			return items
+		}
 	}
 	memoMap := make(map[string]gin.H, len(memos))
 	for _, m := range memos {
@@ -676,6 +696,34 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 		result[i] = newItem
 	}
 	return result
+}
+
+// lookupMemoOwnerID 는 메모 행 id 의 작성자(member_id)를 돌려준다. 없거나 조회 실패면 "" 이다
+// (무효화를 건너뛰고 TTL 이 상한이 된다).
+func lookupMemoOwnerID(db *gorm.DB, memoID int) string {
+	var owners []string
+	if err := db.Clauses(dbresolver.Write).Table("g5_member_memo").Where("id = ?", memoID).Limit(1).Pluck("member_id", &owners).Error; err != nil {
+		log.Printf("[memo-targets-cache] 메모 작성자 조회 실패 — 무효화 생략: %v", err)
+		return ""
+	}
+	if len(owners) == 0 {
+		return ""
+	}
+	return owners[0]
+}
+
+// intersectMemoTargetIDs 는 페이지 작성자 ID 중 메모 대상 집합에 있는 것만 순서대로 남긴다.
+func intersectMemoTargetIDs(authorIDs []string, memoTargets map[string]struct{}) []string {
+	if len(memoTargets) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(authorIDs))
+	for _, id := range authorIDs {
+		if _, ok := memoTargets[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // safeIntToUint64 converts int to uint64, clamping negative values to 0.
@@ -1255,6 +1303,12 @@ func main() {
 		redisClient = nil
 	} else {
 		pkglogger.Info("Connected to Redis")
+	}
+
+	// 작성자 메모 게이트 — 보는 사람별 메모 대상 집합(Redis, 보는 사람 키). Redis 가 없으면 nil(전체 조회).
+	memoTargetsCache := handler.NewMemoTargetsCache(redisClient)
+	if memoTargetsCache != nil {
+		authorMemoTargetSet = memoTargetsCache.TargetSet
 	}
 
 	// Cache Service
@@ -2130,6 +2184,7 @@ func main() {
 					return
 				}
 			}
+			memoTargetsCache.Invalidate(c.Request.Context(), currentUserID)
 
 			// Return saved memo
 			type memoRow struct {
@@ -2183,6 +2238,7 @@ func main() {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to update memo"})
 				return
 			}
+			memoTargetsCache.Invalidate(c.Request.Context(), currentUserID)
 
 			type memoRow struct {
 				ID         int     `gorm:"column:id" json:"id"`
@@ -2212,6 +2268,7 @@ func main() {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "failed to delete memo"})
 				return
 			}
+			memoTargetsCache.Invalidate(c.Request.Context(), currentUserID)
 			c.JSON(http.StatusOK, gin.H{"success": true, "data": nil})
 		})
 
@@ -2507,6 +2564,7 @@ func main() {
 					return
 				}
 			}
+			memoTargetsCache.Invalidate(c.Request.Context(), currentUserID)
 
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "메모 저장 완료"})
 		})
@@ -2545,10 +2603,13 @@ func main() {
 				return
 			}
 
+			// 행 id 기준 쓰기 — 무효화할 보는 사람(member_id)을 쓰기 전에 읽어 둔다.
+			memoOwnerID := lookupMemoOwnerID(db, memoID)
 			if err := db.Table("g5_member_memo").Where("id = ?", memoID).Updates(updates).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "메모 수정 실패"})
 				return
 			}
+			memoTargetsCache.Invalidate(c.Request.Context(), memoOwnerID)
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "메모 수정 완료"})
 		})
 
@@ -2560,10 +2621,13 @@ func main() {
 				return
 			}
 
+			// 행 id 기준 쓰기 — 무효화할 보는 사람(member_id)을 쓰기 전에 읽어 둔다.
+			memoOwnerID := lookupMemoOwnerID(db, memoID)
 			if err := db.Table("g5_member_memo").Where("id = ?", memoID).Delete(nil).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "메모 삭제 실패"})
 				return
 			}
+			memoTargetsCache.Invalidate(c.Request.Context(), memoOwnerID)
 			c.JSON(http.StatusOK, gin.H{"success": true, "message": "메모 삭제 완료"})
 		})
 
