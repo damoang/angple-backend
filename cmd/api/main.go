@@ -3302,7 +3302,7 @@ func main() {
 			}
 
 			// 처리 상태 배지(해결됨·진행중·보류) — 행이 있는 글에만 status 키. 캐시 저장 전 적용.
-			items = enrichWithPostStatus(db, slug, items)
+			items = enrichWithPostStatus(ctx, redisClient, db, slug, items)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			// #12975 ①: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은
@@ -3679,7 +3679,7 @@ func main() {
 				return
 			}
 			// set_by 는 mb_id — Bearer 경로의 GetUserID 는 v2_users.id(숫자)라 GetUsername 을 쓴다.
-			if err := upsertPostStatus(db, slug, id, req.Status, middleware.GetUsername(c), "admin", req.Note); err != nil {
+			if err := upsertPostStatus(c.Request.Context(), redisClient, db, slug, id, req.Status, middleware.GetUsername(c), "admin", req.Note); err != nil {
 				log.Printf("[post_status] 지정 실패 board=%s id=%d: %v", slug, id, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to set status"})
 				return
@@ -3698,7 +3698,7 @@ func main() {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
 				return
 			}
-			if err := clearPostStatus(db, slug, id); err != nil {
+			if err := clearPostStatus(c.Request.Context(), redisClient, db, slug, id); err != nil {
 				log.Printf("[post_status] 해제 실패 board=%s id=%d: %v", slug, id, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to clear status"})
 				return
@@ -8131,13 +8131,23 @@ type postStatusRow struct {
 }
 
 // enrichWithPostStatus 는 목록 항목에 status / status_updated_at 을 붙인다. 글 상세와 같은 게시판별
-// 상태 맵(프로세스 캐시)에서 꺼내고, 맵 조회가 실패하면 예전처럼 페이지 글 묶음 1쿼리로 대신한다
+// 상태 맵(프로세스 캐시)에서 꺼내되, 먼저 Redis 의 게시판 상태 버전을 한 번 읽어 맵이 그 버전으로
+// 적재된 것일 때만 쓴다(다르면 다시 적재). 목록 결과는 프로세스 사이에 공유되는 캐시에 들어가므로
+// 다른 프로세스에서 바뀐 상태가 낡은 맵으로 다시 캐시되지 않게 하려는 것이다.
+// 버전을 못 읽거나(Redis 없음·오류) 맵 조회가 실패하면 예전처럼 페이지 글 묶음 1쿼리로 대신한다
 // (enrichWithPostStatusDirect).
-func enrichWithPostStatus(db *gorm.DB, slug string, items []map[string]any) []map[string]any {
+func enrichWithPostStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, slug string, items []map[string]any) []map[string]any {
 	if db == nil || len(items) == 0 {
 		return items
 	}
-	byID, err := postStatusBoardMap(db, slug)
+	ver, err := postStatusVersionReader(ctx, rdb, slug)
+	if err != nil {
+		if !errors.Is(err, errPostStatusNoRedis) {
+			postStatusLogRateLimited("[post_status] 게시판 상태 버전 조회 실패 board=%s — 목록 묶음 조회로 대신함: %v", slug, err)
+		}
+		return enrichWithPostStatusDirect(db, slug, items)
+	}
+	byID, err := postStatusBoardMapAtVersion(db, slug, ver)
 	if err != nil {
 		postStatusLogRateLimited("[post_status] 게시판 상태 맵 조회 실패 board=%s — 목록 묶음 조회로 대신함: %v", slug, err)
 		return enrichWithPostStatusDirect(db, slug, items)
@@ -8230,7 +8240,7 @@ func attachPostStatusDirect(db *gorm.DB, slug string, id int, detail map[string]
 }
 
 // upsertPostStatus 는 상태를 지정한다(누가·어떤 경로로 바꿨는지 함께 기록).
-func upsertPostStatus(db *gorm.DB, slug string, id int, status, setBy, source, note string) error {
+func upsertPostStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, slug string, id int, status, setBy, source, note string) error {
 	if !postStatusAllowed(status) {
 		return fmt.Errorf("invalid status: %s", status)
 	}
@@ -8250,15 +8260,17 @@ func upsertPostStatus(db *gorm.DB, slug string, id int, status, setBy, source, n
 		return err
 	}
 	invalidatePostStatusBoard(slug)
+	postStatusVersionBumper(ctx, rdb, slug)
 	return nil
 }
 
 // clearPostStatus 는 상태를 해제한다(행 삭제).
-func clearPostStatus(db *gorm.DB, slug string, id int) error {
+func clearPostStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, slug string, id int) error {
 	if err := db.Exec("DELETE FROM "+postStatusTable+" WHERE board_id = ? AND wr_id = ?", slug, id).Error; err != nil {
 		return err
 	}
 	invalidatePostStatusBoard(slug)
+	postStatusVersionBumper(ctx, rdb, slug)
 	return nil
 }
 
@@ -8269,8 +8281,12 @@ func clearPostStatus(db *gorm.DB, slug string, id int) error {
 // 단건 조회와 같은 컬럼·포맷 postStatusSelect). 맵 조회가 실패하면 캐시하지 않고 단건 조회로 대신한다.
 //
 // upsertPostStatus·clearPostStatus 가 성공하면 그 게시판 맵을 비운다. 백엔드 프로세스가 여럿이면 다른
-// 프로세스는 최대 postStatusBoardTTL 늦게 반영된다(글 상세·목록의 상태 배지만 해당).
-// 목록(enrichWithPostStatus)도 같은 맵을 쓰고, 실패하면 페이지 글 묶음 조회로 대신한다.
+// 프로세스는 최대 postStatusBoardTTL 늦게 반영된다(글 상세의 상태 배지만 해당).
+//
+// 목록(enrichWithPostStatus)도 같은 맵을 쓰지만, 목록 결과는 프로세스 사이에 공유되는 캐시에 들어가므로
+// 게시판별 상태 버전(Redis postStatusVersionKey)을 함께 쓴다. 상태를 바꾸면 버전을 올리고, 목록은
+// 버전을 한 번 읽어 맵이 그 버전으로 적재된 것일 때만 쓴다. 버전을 못 읽으면 맵을 쓰지 않고 페이지 글
+// 묶음 조회로 대신한다. 맵·버전 키는 게시판 ID 를 소문자로 맞춘다.
 
 // postStatusBoardTTL 은 게시판별 상태 맵 프로세스 캐시의 수명이다.
 const postStatusBoardTTL = 60 * time.Second
@@ -8281,10 +8297,21 @@ const postStatusBoardMaxBoards = 1000
 // postStatusLogInterval 은 맵 조회 실패 로그의 최소 간격이다(요청마다 찍히지 않게).
 const postStatusLogInterval = time.Minute
 
-// postStatusBoardEntry 는 한 게시판의 상태 맵과 만료 시각이다.
+// postStatusVersionReadTimeout 은 목록 경로의 상태 버전 조회 제한 시간이다(넘으면 묶음 조회로 대신).
+const postStatusVersionReadTimeout = 80 * time.Millisecond
+
+// postStatusVersionWriteTimeout 은 상태 변경 뒤 버전 올리기의 제한 시간이다.
+const postStatusVersionWriteTimeout = 500 * time.Millisecond
+
+// errPostStatusNoRedis 는 Redis 가 없어 상태 버전을 읽을 수 없다는 뜻이다.
+var errPostStatusNoRedis = errors.New("post status version: redis unavailable")
+
+// postStatusBoardEntry 는 한 게시판의 상태 맵과 만료 시각, 적재 시점의 상태 버전이다.
+// ver 가 빈 문자열이면 버전 확인 없이(글 상세 경로) 적재된 것이다.
 type postStatusBoardEntry struct {
 	byID    map[int]postStatusRow
 	expires time.Time
+	ver     string
 }
 
 // postStatusBoardCache 는 게시판별 상태 맵의 프로세스 캐시다. gens 는 게시판별 무효화 세대 번호로,
@@ -8306,34 +8333,88 @@ var postStatusLastLog atomic.Int64
 // postStatusBoardLoader 는 한 게시판의 상태 맵을 DB 에서 읽는다. 테스트가 바꿔 끼운다.
 var postStatusBoardLoader = loadPostStatusBoard
 
-func (c *postStatusBoardCache) get(slug string, now time.Time) (map[int]postStatusRow, uint64, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	gen := c.gens[slug]
-	e, ok := c.entries[slug]
-	if !ok || !now.Before(e.expires) {
-		return nil, gen, false
-	}
-	return e.byID, gen, true
+// postStatusVersionReader 는 게시판 상태 버전을 Redis 에서 읽는다. 테스트가 바꿔 끼운다.
+var postStatusVersionReader = readPostStatusVersion
+
+// postStatusVersionBumper 는 게시판 상태 버전을 올린다. 테스트가 바꿔 끼운다.
+var postStatusVersionBumper = bumpPostStatusVersion
+
+// postStatusBoardKey 는 프로세스 캐시의 게시판 키다(소문자).
+func postStatusBoardKey(slug string) string {
+	return strings.ToLower(slug)
 }
 
-func (c *postStatusBoardCache) put(slug string, byID map[int]postStatusRow, gen uint64, now time.Time) {
+// postStatusVersionKey 는 게시판 상태 버전의 Redis 키다(소문자).
+func postStatusVersionKey(slug string) string {
+	return "poststatus:ver:" + strings.ToLower(slug)
+}
+
+// readPostStatusVersion 은 게시판 상태 버전을 읽는다. 한 번도 올린 적 없으면 "0" 이다.
+func readPostStatusVersion(ctx context.Context, rdb *redis.Client, slug string) (string, error) {
+	if rdb == nil {
+		return "", errPostStatusNoRedis
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, postStatusVersionReadTimeout)
+	defer cancel()
+	v, err := rdb.Get(ctx, postStatusVersionKey(slug)).Result()
+	if errors.Is(err, redis.Nil) {
+		return "0", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return v, nil
+}
+
+// bumpPostStatusVersion 은 게시판 상태 버전을 올린다. 실패하면 로그만 남긴다(상태 변경 자체는 성공).
+func bumpPostStatusVersion(ctx context.Context, rdb *redis.Client, slug string) {
+	if rdb == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), postStatusVersionWriteTimeout)
+	defer cancel()
+	if err := rdb.Incr(ctx, postStatusVersionKey(slug)).Err(); err != nil {
+		log.Printf("[post_status] 게시판 상태 버전 올리기 실패 board=%s: %v", slug, err)
+	}
+}
+
+func (c *postStatusBoardCache) get(slug string, now time.Time) (map[int]postStatusRow, string, uint64, bool) {
+	key := postStatusBoardKey(slug)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.gens[slug] != gen { // 조회 도중 무효화됐다 — 낡았을 수 있으니 넣지 않는다
+	gen := c.gens[key]
+	e, ok := c.entries[key]
+	if !ok || !now.Before(e.expires) {
+		return nil, "", gen, false
+	}
+	return e.byID, e.ver, gen, true
+}
+
+func (c *postStatusBoardCache) put(slug string, byID map[int]postStatusRow, ver string, gen uint64, now time.Time) {
+	key := postStatusBoardKey(slug)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gens[key] != gen { // 조회 도중 무효화됐다 — 낡았을 수 있으니 넣지 않는다
 		return
 	}
 	if len(c.entries) >= postStatusBoardMaxBoards {
 		c.entries = make(map[string]postStatusBoardEntry)
 	}
-	c.entries[slug] = postStatusBoardEntry{byID: byID, expires: now.Add(postStatusBoardTTL)}
+	c.entries[key] = postStatusBoardEntry{byID: byID, expires: now.Add(postStatusBoardTTL), ver: ver}
 }
 
 func (c *postStatusBoardCache) forget(slug string) {
+	key := postStatusBoardKey(slug)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.gens[slug]++
-	delete(c.entries, slug)
+	c.gens[key]++
+	delete(c.entries, key)
 }
 
 func (c *postStatusBoardCache) reset() {
@@ -8360,9 +8441,10 @@ func loadPostStatusBoard(db *gorm.DB, slug string) (map[int]postStatusRow, error
 }
 
 // postStatusBoardMap 은 한 게시판의 상태 맵을 돌려준다(프로세스 캐시 → 없으면 1쿼리). 조회 실패는 캐시하지 않는다.
+// 글 상세 경로라 버전은 확인하지 않는다(새로 적재한 맵은 버전 미확인으로 넣는다).
 func postStatusBoardMap(db *gorm.DB, slug string) (map[int]postStatusRow, error) {
 	now := time.Now()
-	byID, gen, ok := postStatusBoards.get(slug, now)
+	byID, _, gen, ok := postStatusBoards.get(slug, now)
 	if ok {
 		return byID, nil
 	}
@@ -8370,7 +8452,23 @@ func postStatusBoardMap(db *gorm.DB, slug string) (map[int]postStatusRow, error)
 	if err != nil {
 		return nil, err
 	}
-	postStatusBoards.put(slug, byID, gen, now)
+	postStatusBoards.put(slug, byID, "", gen, now)
+	return byID, nil
+}
+
+// postStatusBoardMapAtVersion 은 ver 로 적재된 게시판 상태 맵을 돌려준다. 캐시의 맵이 다른 버전이거나
+// 버전 미확인으로 적재된 것이면 다시 읽는다(ver 는 DB 를 읽기 전에 얻은 값이라 그 뒤 변경은 다음 버전이 된다).
+func postStatusBoardMapAtVersion(db *gorm.DB, slug, ver string) (map[int]postStatusRow, error) {
+	now := time.Now()
+	byID, cachedVer, gen, ok := postStatusBoards.get(slug, now)
+	if ok && cachedVer != "" && cachedVer == ver {
+		return byID, nil
+	}
+	byID, err := postStatusBoardLoader(db, slug)
+	if err != nil {
+		return nil, err
+	}
+	postStatusBoards.put(slug, byID, ver, gen, now)
 	return byID, nil
 }
 

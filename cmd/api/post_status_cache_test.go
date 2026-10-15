@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -19,6 +21,9 @@ import (
 //   - upsertPostStatus·clearPostStatus 가 성공하면 그 게시판 맵만 비운다. 실패하면 비우지 않는다.
 //   - 목록(enrichWithPostStatus)도 같은 맵에서 꺼낸다. 맵이 적중하면 목록 묶음(IN) 쿼리를 하지 않고,
 //     맵 조회가 실패하면 예전 묶음 쿼리로 대신한다. 붙는 키(status·status_updated_at)는 상세와 같다.
+//   - 목록은 Redis 게시판 상태 버전을 먼저 읽고, 맵이 그 버전으로 적재된 것일 때만 쓴다. 버전이 바뀌었거나
+//     버전 확인 없이(상세 경로) 적재된 맵이면 다시 읽는다. 버전을 못 읽으면 맵 대신 묶음 쿼리를 한다.
+//   - 상태 변경이 성공하면 그 게시판 버전을 올린다(키는 소문자 게시판 ID). 실패하면 올리지 않는다.
 //
 // ⚠️ 한계: sqlite 에는 DATE_FORMAT·CONVERT_TZ 가 없어 실제 맵 적재 SQL 의 결과는 여기서 못 본다.
 // 맵 적재와 단건 조회는 같은 컬럼 상수(postStatusSelect)를 쓴다 — 결과 동일성은 코드 리뷰와 운영 DB 대조가 맡는다.
@@ -122,7 +127,7 @@ func TestClearPostStatus_InvalidatesBoardMap(t *testing.T) {
 
 	attachPostStatus(db, "bug", 5, map[string]any{})
 	attachPostStatus(db, "free", 5, map[string]any{})
-	if err := clearPostStatus(db, "bug", 5); err != nil {
+	if err := clearPostStatus(context.Background(), nil, db, "bug", 5); err != nil {
 		t.Fatalf("clearPostStatus 실패: %v", err)
 	}
 	attachPostStatus(db, "bug", 5, map[string]any{})
@@ -142,10 +147,10 @@ func TestPostStatusWriteFailure_DoesNotInvalidate(t *testing.T) {
 	})
 
 	attachPostStatus(db, "bug", 5, map[string]any{})
-	if err := clearPostStatus(db, "bug", 5); err == nil {
+	if err := clearPostStatus(context.Background(), nil, db, "bug", 5); err == nil {
 		t.Fatal("테이블이 없는데 clearPostStatus 가 성공했다")
 	}
-	if err := upsertPostStatus(db, "bug", 5, "resolved", "admin", "admin", ""); err == nil {
+	if err := upsertPostStatus(context.Background(), nil, db, "bug", 5, "resolved", "admin", "admin", ""); err == nil {
 		t.Fatal("테이블이 없는데 upsertPostStatus 가 성공했다")
 	}
 	attachPostStatus(db, "bug", 5, map[string]any{})
@@ -159,32 +164,57 @@ func TestPostStatusBoardCache_TTLAndGeneration(t *testing.T) {
 	now := time.Now()
 	byID := map[int]postStatusRow{1: {WrID: 1, Status: "hold"}}
 
-	_, gen, ok := c.get("bug", now)
+	_, _, gen, ok := c.get("bug", now)
 	if ok {
 		t.Fatal("빈 캐시가 적중했다")
 	}
-	c.put("bug", byID, gen, now)
-	if _, _, ok := c.get("bug", now.Add(postStatusBoardTTL-time.Second)); !ok {
-		t.Fatal("TTL 안에서는 적중해야 한다")
+	c.put("bug", byID, "3", gen, now)
+	if _, ver, _, ok := c.get("BUG", now.Add(postStatusBoardTTL-time.Second)); !ok || ver != "3" {
+		t.Fatalf("TTL 안에서는 적중해야 하고(게시판 키는 대소문자 무관) 적재 버전을 돌려줘야 한다: ok=%v ver=%q", ok, ver)
 	}
-	if _, _, ok := c.get("bug", now.Add(postStatusBoardTTL)); ok {
+	if _, _, _, ok := c.get("bug", now.Add(postStatusBoardTTL)); ok {
 		t.Fatal("TTL 이 지나면 미스여야 한다")
 	}
 
 	// 조회 도중 무효화가 끼어들면 그 결과는 넣지 않는다.
-	_, gen, _ = c.get("bug", now.Add(postStatusBoardTTL))
-	c.forget("bug")
-	c.put("bug", byID, gen, now)
-	if _, _, ok := c.get("bug", now); ok {
+	_, _, gen, _ = c.get("bug", now.Add(postStatusBoardTTL))
+	c.forget("Bug")
+	c.put("bug", byID, "", gen, now)
+	if _, _, _, ok := c.get("bug", now); ok {
 		t.Fatal("무효화 전 세대의 조회 결과가 적재됐다")
 	}
 	// 다른 게시판의 세대는 영향받지 않는다.
-	_, gen, _ = c.get("free", now)
+	_, _, gen, _ = c.get("free", now)
 	c.forget("bug")
-	c.put("free", byID, gen, now)
-	if _, _, ok := c.get("free", now); !ok {
+	c.put("free", byID, "", gen, now)
+	if _, _, _, ok := c.get("free", now); !ok {
 		t.Fatal("다른 게시판 무효화가 이 게시판 적재를 막았다")
 	}
+}
+
+// stubPostStatusVersion 은 목록 경로의 상태 버전 조회를 바꿔 끼우고 호출 횟수를 센다.
+func stubPostStatusVersion(t *testing.T, fn func(slug string) (string, error)) *int {
+	t.Helper()
+	n := 0
+	prev := postStatusVersionReader
+	postStatusVersionReader = func(_ context.Context, _ *redis.Client, slug string) (string, error) {
+		n++
+		return fn(slug)
+	}
+	t.Cleanup(func() { postStatusVersionReader = prev })
+	return &n
+}
+
+// stubPostStatusBump 는 상태 버전 올리기를 바꿔 끼우고 올린 게시판 버전 키를 기록한다.
+func stubPostStatusBump(t *testing.T) *[]string {
+	t.Helper()
+	var keys []string
+	prev := postStatusVersionBumper
+	postStatusVersionBumper = func(_ context.Context, _ *redis.Client, slug string) {
+		keys = append(keys, postStatusVersionKey(slug))
+	}
+	t.Cleanup(func() { postStatusVersionBumper = prev })
+	return &keys
 }
 
 // countPostStatusQueries 는 상태 테이블로 나간 조회 수와 마지막 SQL 을 센다.
@@ -205,6 +235,7 @@ func countPostStatusQueries(t *testing.T, db *gorm.DB) (*int, *string) {
 
 func TestEnrichWithPostStatus_FromBoardMap(t *testing.T) {
 	db := newPostStatusTestDB(t, true)
+	stubPostStatusVersion(t, func(string) (string, error) { return "1", nil })
 	queries, _ := countPostStatusQueries(t, db)
 	calls := stubPostStatusLoader(t, func(slug string) (map[int]postStatusRow, error) {
 		if slug == "bug" {
@@ -217,7 +248,7 @@ func TestEnrichWithPostStatus_FromBoardMap(t *testing.T) {
 	})
 
 	items := []map[string]any{{"id": 5}, {"id": int64(6)}, {"id": float64(7)}, {"title": "no id"}}
-	items = enrichWithPostStatus(db, "bug", items)
+	items = enrichWithPostStatus(context.Background(), nil, db, "bug", items)
 	if items[0]["status"] != "resolved" || items[0]["status_updated_at"] != "2026-01-02 03:04:05" {
 		t.Fatalf("맵의 값이 그대로 붙어야 한다: %v", items[0])
 	}
@@ -239,7 +270,7 @@ func TestEnrichWithPostStatus_FromBoardMap(t *testing.T) {
 	if detail["status"] != items[0]["status"] || detail["status_updated_at"] != items[0]["status_updated_at"] {
 		t.Fatalf("상세와 목록의 값이 다르다: detail=%v list=%v", detail, items[0])
 	}
-	enrichWithPostStatus(db, "bug", []map[string]any{{"id": 5}})
+	enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
 	if calls["bug"] != 1 {
 		t.Fatalf("TTL 안에서는 게시판당 한 번만 읽어야 한다: %v", calls)
 	}
@@ -250,13 +281,14 @@ func TestEnrichWithPostStatus_FromBoardMap(t *testing.T) {
 
 func TestEnrichWithPostStatus_EmptyBoardMap(t *testing.T) {
 	db := newPostStatusTestDB(t, true)
+	stubPostStatusVersion(t, func(string) (string, error) { return "0", nil })
 	queries, _ := countPostStatusQueries(t, db)
 	calls := stubPostStatusLoader(t, func(string) (map[int]postStatusRow, error) {
 		return map[int]postStatusRow{}, nil
 	})
 
 	for i := 0; i < 2; i++ {
-		items := enrichWithPostStatus(db, "free", []map[string]any{{"id": 1}, {"id": 2}})
+		items := enrichWithPostStatus(context.Background(), nil, db, "free", []map[string]any{{"id": 1}, {"id": 2}})
 		for _, item := range items {
 			if len(item) != 1 {
 				t.Fatalf("상태 없는 게시판 목록에 키가 생겼다: %v", item)
@@ -274,12 +306,13 @@ func TestEnrichWithPostStatus_EmptyBoardMap(t *testing.T) {
 func TestEnrichWithPostStatus_LoadFailureFallsBackToInQuery(t *testing.T) {
 	// sqlite 에는 DATE_FORMAT 이 없어 묶음 쿼리 자체도 실패한다 — 쿼리가 나갔는지와 목록이 막히지 않는지만 본다.
 	db := newPostStatusTestDB(t, true)
+	stubPostStatusVersion(t, func(string) (string, error) { return "0", nil })
 	queries, last := countPostStatusQueries(t, db)
 	calls := stubPostStatusLoader(t, func(string) (map[int]postStatusRow, error) {
 		return nil, errors.New("boom")
 	})
 
-	items := enrichWithPostStatus(db, "bug", []map[string]any{{"id": 5}, {"id": 6}})
+	items := enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}, {"id": 6}})
 	if len(items) != 2 {
 		t.Fatalf("목록 항목이 바뀌었다: %v", items)
 	}
@@ -295,8 +328,122 @@ func TestEnrichWithPostStatus_LoadFailureFallsBackToInQuery(t *testing.T) {
 		}
 	}
 
-	enrichWithPostStatus(db, "bug", []map[string]any{{"id": 5}})
+	enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
 	if calls["bug"] != 2 {
 		t.Fatalf("실패는 캐시하지 않아야 한다(매번 재시도): %v", calls)
+	}
+}
+
+func TestEnrichWithPostStatus_VersionChangeForcesReload(t *testing.T) {
+	db := newPostStatusTestDB(t, true)
+	ver := "1"
+	reads := stubPostStatusVersion(t, func(string) (string, error) { return ver, nil })
+	status := "in_progress"
+	calls := stubPostStatusLoader(t, func(string) (map[int]postStatusRow, error) {
+		return map[int]postStatusRow{5: {WrID: 5, Status: status, UpdatedKST: "2026-01-02 03:04:05"}}, nil
+	})
+
+	items := enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
+	if items[0]["status"] != "in_progress" {
+		t.Fatalf("첫 적재 값이 붙어야 한다: %v", items[0])
+	}
+
+	// 다른 프로세스에서 상태가 바뀌어 버전이 올랐다 — 로컬 맵은 아직 TTL 안이지만 다시 읽어야 한다.
+	status = "resolved"
+	ver = "2"
+	items = enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
+	if items[0]["status"] != "resolved" {
+		t.Fatalf("버전이 바뀌면 새 맵의 값이 붙어야 한다: %v", items[0])
+	}
+	if calls["bug"] != 2 || *reads != 2 {
+		t.Fatalf("버전 변경 시 맵을 다시 읽어야 한다: loads=%v reads=%d", calls, *reads)
+	}
+}
+
+func TestEnrichWithPostStatus_UnchangedVersionNoReload(t *testing.T) {
+	db := newPostStatusTestDB(t, true)
+	reads := stubPostStatusVersion(t, func(string) (string, error) { return "4", nil })
+	calls := stubPostStatusLoader(t, func(string) (map[int]postStatusRow, error) {
+		return map[int]postStatusRow{}, nil
+	})
+
+	for i := 0; i < 3; i++ {
+		enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
+	}
+	if calls["bug"] != 1 {
+		t.Fatalf("버전이 같으면 TTL 안에서 다시 읽지 않아야 한다: %v", calls)
+	}
+	if *reads != 3 {
+		t.Fatalf("목록마다 버전을 한 번씩 읽어야 한다: %d", *reads)
+	}
+}
+
+func TestEnrichWithPostStatus_DetailLoadedMapIsReloadedForList(t *testing.T) {
+	db := newPostStatusTestDB(t, true)
+	stubPostStatusVersion(t, func(string) (string, error) { return "4", nil })
+	calls := stubPostStatusLoader(t, func(string) (map[int]postStatusRow, error) {
+		return map[int]postStatusRow{}, nil
+	})
+
+	attachPostStatus(db, "bug", 5, map[string]any{}) // 버전 확인 없이 적재
+	enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
+	enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
+	if calls["bug"] != 2 {
+		t.Fatalf("버전 미확인 맵은 목록에서 한 번 다시 읽고, 그 뒤엔 재사용해야 한다: %v", calls)
+	}
+}
+
+func TestEnrichWithPostStatus_VersionErrorUsesDirectQuery(t *testing.T) {
+	for name, verErr := range map[string]error{
+		"redis 오류": errors.New("i/o timeout"),
+		"redis 없음": errPostStatusNoRedis,
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := newPostStatusTestDB(t, true)
+			stubPostStatusVersion(t, func(string) (string, error) { return "", verErr })
+			queries, last := countPostStatusQueries(t, db)
+			calls := stubPostStatusLoader(t, func(string) (map[int]postStatusRow, error) {
+				return map[int]postStatusRow{5: {WrID: 5, Status: "resolved", UpdatedKST: "2026-01-02 03:04:05"}}, nil
+			})
+			// 맵이 이미 캐시에 있어도 버전을 못 읽으면 쓰지 않는다.
+			attachPostStatus(db, "bug", 5, map[string]any{})
+
+			items := enrichWithPostStatus(context.Background(), nil, db, "bug", []map[string]any{{"id": 5}})
+			if *queries != 1 || !strings.Contains(*last, "wr_id IN") {
+				t.Fatalf("버전 조회 실패 시 목록 묶음(IN) 쿼리로 대신해야 한다: n=%d sql=%s", *queries, *last)
+			}
+			if _, ok := items[0]["status"]; ok {
+				t.Fatalf("버전을 못 읽었는데 캐시된 맵 값이 붙었다: %v", items[0])
+			}
+			if calls["bug"] != 1 {
+				t.Fatalf("버전 조회 실패 시 맵을 읽지 않아야 한다(상세 적재 1회만): %v", calls)
+			}
+		})
+	}
+}
+
+func TestPostStatusWrite_BumpsLowercaseBoardVersion(t *testing.T) {
+	db := newPostStatusTestDB(t, true)
+	keys := stubPostStatusBump(t)
+
+	// sqlite 에는 upsert 의 ON DUPLICATE KEY 가 없어 해제 경로로 본다(두 경로는 같은 버전 올리기를 부른다).
+	for _, slug := range []string{"Bug", "BUG"} {
+		if err := clearPostStatus(context.Background(), nil, db, slug, 5); err != nil {
+			t.Fatalf("clearPostStatus 실패: %v", err)
+		}
+	}
+	if len(*keys) != 2 || (*keys)[0] != "poststatus:ver:bug" || (*keys)[1] != "poststatus:ver:bug" {
+		t.Fatalf("상태 변경마다 소문자 게시판 버전을 올려야 한다: %v", *keys)
+	}
+}
+
+func TestPostStatusWriteFailure_DoesNotBumpVersion(t *testing.T) {
+	db := newPostStatusTestDB(t, false) // 테이블 없음 — 쓰기가 실패한다
+	keys := stubPostStatusBump(t)
+
+	_ = upsertPostStatus(context.Background(), nil, db, "bug", 5, "resolved", "admin", "admin", "")
+	_ = clearPostStatus(context.Background(), nil, db, "bug", 5)
+	if len(*keys) != 0 {
+		t.Fatalf("쓰기가 실패하면 버전을 올리지 않는다: %v", *keys)
 	}
 }
