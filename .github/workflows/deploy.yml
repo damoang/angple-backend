@@ -443,6 +443,51 @@ jobs:
           cat /tmp/backend-production-health.out || true
           exit 1
 
+      # Keep the k8s manifest repo in sync with what production actually runs, so a later
+      # manifest apply never rolls the backend back to an older image. Recording is best
+      # effort: it never changes the outcome of the deploy itself.
+      - name: Record production image in angple-k8s
+        id: record_image
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.K8S_MANIFEST_TOKEN }}
+          IMAGE_TAG: ${{ needs.resolve-release.outputs.sha_tag }}
+          MANIFEST_REPO: damoang/angple-k8s
+          MANIFEST_PATH: prod/angple-backend.yaml
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::K8S_MANIFEST_TOKEN is not set; skipping manifest record"
+            exit 1
+          fi
+          case "${IMAGE_TAG}" in sha-[0-9a-f]*) ;; *) echo "::error::unexpected tag ${IMAGE_TAG}"; exit 1 ;; esac
+          resp=$(gh api "repos/${MANIFEST_REPO}/contents/${MANIFEST_PATH}?ref=main")
+          blob_sha=$(jq -r .sha <<<"$resp")
+          jq -r .content <<<"$resp" | base64 -d > manifest.yaml
+          count=$(grep -c 'localhost:5000/angple-backend:' manifest.yaml || true)
+          if [ "$count" != "1" ]; then
+            echo "::error::expected exactly one backend image line, found ${count}"
+            exit 1
+          fi
+          sed -E "s#(localhost:5000/angple-backend:)[^\"[:space:]]+#\1${IMAGE_TAG}#" manifest.yaml > manifest.new
+          if cmp -s manifest.yaml manifest.new; then
+            echo "Manifest already records ${IMAGE_TAG}"
+            exit 0
+          fi
+          gh api -X PUT "repos/${MANIFEST_REPO}/contents/${MANIFEST_PATH}" \
+            -f message="chore(backend): record production image ${IMAGE_TAG}" \
+            -f content="$(base64 -w0 manifest.new)" \
+            -f sha="${blob_sha}" \
+            -f branch=main > /dev/null
+          echo "Recorded ${IMAGE_TAG} in ${MANIFEST_REPO}/${MANIFEST_PATH}"
+
+      - name: Warn if manifest record failed
+        if: steps.record_image.outcome == 'failure'
+        run: |
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_DEPLOY_CHAT_ID }}" \
+            -d "text=⚠️ backend production image ${{ needs.resolve-release.outputs.sha_tag }} was deployed but not recorded in the k8s manifest. Update prod/angple-backend.yaml before any manifest apply." > /dev/null
+
       - name: Notify Discord (Production)
         if: always() && env.DISCORD_WEBHOOK_TOKEN_BACKEND != ''
         run: |
