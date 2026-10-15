@@ -6220,7 +6220,8 @@ func main() {
 		// GET /api/v1/boards/:slug/extended-settings
 		v1Boards.GET("/:slug/extended-settings", func(c *gin.Context) {
 			slug := c.Param("slug")
-			settings, err := v2ExtendedSettingsRepo.FindByBoardSlug(slug)
+			// 관리 화면이 저장 직후 다시 읽는 경로라 캐시를 거치지 않는다.
+			settings, err := v2ExtendedSettingsRepo.FindByBoardSlugFresh(slug)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "설정 조회 실패"}})
 				return

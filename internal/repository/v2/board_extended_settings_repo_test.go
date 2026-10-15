@@ -176,6 +176,33 @@ func TestBoardExtSettingsCacheInvalidatedByLuckyAdmin(t *testing.T) {
 	}
 }
 
+func TestBoardExtSettingsFreshAlwaysQueries(t *testing.T) {
+	db, queries := newBoardExtTestDB(t, true)
+	seedBoardExt(t, db, "free", `{"v":1}`)
+	repo := NewBoardExtendedSettingsRepository(db)
+
+	if _, err := repo.FindByBoardSlug("free"); err != nil { // 캐시를 채운다
+		t.Fatalf("캐시 조회: %v", err)
+	}
+	if err := db.Exec("UPDATE v2_board_extended_settings SET settings = ? WHERE board_id = ?", `{"v":2}`, "free").Error; err != nil {
+		t.Fatalf("직접 갱신 실패: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		before := queries.Load()
+		got, err := repo.FindByBoardSlugFresh("free")
+		if err != nil || got.Settings != `{"v":2}` {
+			t.Fatalf("Fresh 조회 %d: %+v, %v", i, got, err)
+		}
+		if n := queries.Load() - before; n != 1 {
+			t.Fatalf("Fresh 조회 %d 쿼리 %d 회(1 이어야 함)", i, n)
+		}
+	}
+	got, err := repo.FindByBoardSlugFresh("none")
+	if err != nil || got.BoardID != "none" || got.Settings != "{}" {
+		t.Fatalf("Fresh 행 없음 기본값이 아님: %+v, %v", got, err)
+	}
+}
+
 func TestBoardExtSettingsCacheReturnsCopy(t *testing.T) {
 	db, _ := newBoardExtTestDB(t, true)
 	seedBoardExt(t, db, "free", `{"a":1}`)

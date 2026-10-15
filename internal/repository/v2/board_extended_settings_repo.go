@@ -12,6 +12,7 @@ import (
 // BoardExtendedSettingsRepository handles extended settings data access
 type BoardExtendedSettingsRepository interface {
 	FindByBoardSlug(slug string) (*v2.V2BoardExtendedSettings, error)
+	FindByBoardSlugFresh(slug string) (*v2.V2BoardExtendedSettings, error)
 	Upsert(settings *v2.V2BoardExtendedSettings) error
 }
 
@@ -123,19 +124,27 @@ func (r *boardExtendedSettingsRepository) FindByBoardSlug(slug string) (*v2.V2Bo
 		return &cached, nil
 	}
 
+	settings, err := r.FindByBoardSlugFresh(slug)
+	if err != nil {
+		return settings, err
+	}
+	boardExtSettings.put(key, *settings, gen, now) // 값으로 담기므로 반환값과 캐시는 서로 독립이다
+	return settings, nil
+}
+
+// FindByBoardSlugFresh returns extended settings by board slug straight from the database, bypassing the cache.
+// 저장 직후 같은 값을 다시 보여줘야 하는 관리 화면용이다. 행이 없으면 FindByBoardSlug 와 같은 기본값을 돌려준다.
+func (r *boardExtendedSettingsRepository) FindByBoardSlugFresh(slug string) (*v2.V2BoardExtendedSettings, error) {
 	var settings v2.V2BoardExtendedSettings
 	err := r.db.Where("board_id = ?", slug).First(&settings).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// Return empty settings if not found
-		settings = v2.V2BoardExtendedSettings{
+		return &v2.V2BoardExtendedSettings{
 			BoardID:  slug,
 			Settings: "{}",
-		}
-	} else if err != nil {
-		return &settings, err
+		}, nil
 	}
-	boardExtSettings.put(key, settings, gen, now) // 값으로 담기므로 아래 반환값과 캐시는 서로 독립이다
-	return &settings, nil
+	return &settings, err
 }
 
 // Upsert creates or updates extended settings for a board
