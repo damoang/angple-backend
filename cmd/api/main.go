@@ -1311,6 +1311,9 @@ func main() {
 		authorMemoTargetSet = memoTargetsCache.TargetSet
 	}
 
+	// 게시판 글상태 버전 전용 클라이언트 — 컨텍스트 마감을 소켓에 적용해 목록 경로가 Redis 지연에 묶이지 않게.
+	postStatusRedis := pkgredis.NewFastClient(redisClient, postStatusRedisIOTimeout, postStatusRedisIOTimeout)
+
 	// Cache Service
 	var cacheService pkgcache.Service
 	if redisClient != nil {
@@ -3302,7 +3305,7 @@ func main() {
 			}
 
 			// 처리 상태 배지(해결됨·진행중·보류) — 행이 있는 글에만 status 키. 캐시 저장 전 적용.
-			items = enrichWithPostStatus(ctx, redisClient, db, slug, items)
+			items = enrichWithPostStatus(ctx, postStatusRedis, db, slug, items)
 
 			meta := gin.H{"board_id": slug, "page": page, "limit": limit}
 			// #12975 ①: 깊은 페이지는 OFFSET 이 maxPostOffset(30000)로 캡되어 같은
@@ -3679,7 +3682,7 @@ func main() {
 				return
 			}
 			// set_by 는 mb_id — Bearer 경로의 GetUserID 는 v2_users.id(숫자)라 GetUsername 을 쓴다.
-			if err := upsertPostStatus(c.Request.Context(), redisClient, db, slug, id, req.Status, middleware.GetUsername(c), "admin", req.Note); err != nil {
+			if err := upsertPostStatus(c.Request.Context(), postStatusRedis, db, slug, id, req.Status, middleware.GetUsername(c), "admin", req.Note); err != nil {
 				log.Printf("[post_status] 지정 실패 board=%s id=%d: %v", slug, id, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to set status"})
 				return
@@ -3698,7 +3701,7 @@ func main() {
 				c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid post ID"})
 				return
 			}
-			if err := clearPostStatus(c.Request.Context(), redisClient, db, slug, id); err != nil {
+			if err := clearPostStatus(c.Request.Context(), postStatusRedis, db, slug, id); err != nil {
 				log.Printf("[post_status] 해제 실패 board=%s id=%d: %v", slug, id, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to clear status"})
 				return
@@ -8303,6 +8306,10 @@ const postStatusVersionReadTimeout = 80 * time.Millisecond
 // postStatusVersionWriteTimeout 은 상태 변경 뒤 버전 올리기의 제한 시간이다.
 const postStatusVersionWriteTimeout = 500 * time.Millisecond
 
+// postStatusRedisIOTimeout 은 상태 버전 전용 Redis 클라이언트(pkgredis.NewFastClient)의 소켓 대기 상한이다.
+// 호출별 마감(위 두 값)이 먼저 적용되고, 이 값은 컨텍스트 마감이 없을 때의 상한이다.
+const postStatusRedisIOTimeout = 500 * time.Millisecond
+
 // errPostStatusNoRedis 는 Redis 가 없어 상태 버전을 읽을 수 없다는 뜻이다.
 var errPostStatusNoRedis = errors.New("post status version: redis unavailable")
 
@@ -8425,9 +8432,10 @@ func (c *postStatusBoardCache) reset() {
 }
 
 // loadPostStatusBoard 는 한 게시판의 상태 행 전부를 읽는다(단건 조회와 같은 컬럼·포맷).
+// 맵은 TTL 동안 재사용되고 상태 버전과 짝지어지므로, 복제 지연으로 낡은 행을 담지 않게 쓰기 DB 에서 읽는다.
 func loadPostStatusBoard(db *gorm.DB, slug string) (map[int]postStatusRow, error) {
 	var rows []postStatusRow
-	if err := db.Table(postStatusTable).
+	if err := db.Clauses(dbresolver.Write).Table(postStatusTable).
 		Select(postStatusSelect).
 		Where("board_id = ?", slug).
 		Find(&rows).Error; err != nil {
