@@ -2915,8 +2915,8 @@ func main() {
 			// 게시판별 글쓰기 안내(write_notice) — 관리자가 확장설정(v2_board_extended_settings)에
 			// 저장한 안내를 write 페이지가 board load 로 함께 받아 최초 렌더에 표시한다.
 			// 없으면 키 자체를 넣지 않아 안내 없는 게시판은 화면 무변화. 캐시 미스 때만 조회되고
-			// 결과는 아래 SetBoard 로 함께 캐시된다.
-			if es, esErr := v2ExtendedSettingsRepo.FindByBoardSlug(slug); esErr == nil && es != nil && es.Settings != "" {
+			// 결과는 아래 SetBoard 로 함께 캐시된다(그래서 프로세스 캐시를 거치지 않는 Fresh 조회를 쓴다).
+			if es, esErr := v2ExtendedSettingsRepo.FindByBoardSlugFresh(slug); esErr == nil && es != nil && es.Settings != "" {
 				var extMap map[string]json.RawMessage
 				if json.Unmarshal([]byte(es.Settings), &extMap) == nil {
 					if wn, ok := extMap["write_notice"]; ok {

@@ -115,6 +115,10 @@ func invalidateBoardExtSettings(db *gorm.DB, slugs ...string) {
 
 // FindByBoardSlug returns extended settings by board slug.
 // 결과는 프로세스 캐시에서 boardExtSettingsTTL 동안 재사용되며, 호출자는 늘 자기 복사본을 받는다.
+//
+// 결과를 다른 캐시(Redis 등)에 다시 담는 경로에서는 쓰지 말고 FindByBoardSlugFresh 를 쓴다 — 낡은 값이
+// 그 캐시의 수명만큼 더 남는다. 캐시 키는 *gorm.Config 하나에 스키마 하나를 가정한다(같은 Config 를 공유하는
+// 테넌트별 세션이 서로 다른 스키마를 가리키면 섞일 수 있다).
 func (r *boardExtendedSettingsRepository) FindByBoardSlug(slug string) (*v2.V2BoardExtendedSettings, error) {
 	key := boardExtSettingsKey{cfg: r.db.Config, slug: slug}
 	now := boardExtSettingsNow()
