@@ -69,16 +69,28 @@ func (b LuckyBadge) ApplyTo(item map[string]any) {
 }
 
 // luckyBadgeRow 는 두 원장(g5_point·g5_na_xp)에서 읽은 한 행이다.
+// json 태그는 글 상세 캐시(LuckyBadgesForPostCached)에 원자료 그대로 싣기 위한 것이다.
 type luckyBadgeRow struct {
-	RelID    string    `gorm:"column:rel_id"`
-	Amount   int       `gorm:"column:amt"`
-	Content  string    `gorm:"column:content"`
-	Datetime time.Time `gorm:"column:dt"`
+	RelID    string    `gorm:"column:rel_id" json:"r"`
+	Amount   int       `gorm:"column:amt" json:"a"`
+	Content  string    `gorm:"column:content" json:"c"`
+	Datetime time.Time `gorm:"column:dt" json:"t"`
+}
+
+// luckyBadgeRows 는 배지 재료 원자료(포인트 행·경험치 행)다. 단계 이름 해석은 합칠 때(mergeLuckyBadgeRows) 한다.
+type luckyBadgeRows struct {
+	Points []luckyBadgeRow `json:"p"`
+	Exp    []luckyBadgeRow `json:"x"`
 }
 
 // LuckyBadgesByWrID 는 한 게시판(slug)의 wr_id 목록에 대해 배지 재료(포인트·경험치·단계·시각)를
-// 목록 크기와 무관하게 정확히 2쿼리(g5_point 1 + g5_na_xp 1)로 조회한다. 빈 목록이면 0쿼리다.
+// 목록 크기와 무관한 고정 쿼리 수로 조회한다 — g5_point 1 + (필요할 때만) g5_na_xp 1, 그리고 지급 원장의
+// 게시판별 wr_id 집합(프로세스 캐시, luckyLedgerTTL)이 비어 있을 때 원장 1. 빈 목록이면 0쿼리다.
 // 당첨 기록이 없는 wr_id 는 맵에 없다(호출부에서 0 으로 폴백).
+//
+// 경험치 게이트: 행운 경험치는 새 지급 경로(지급 원장 g5_da_lucky_grant 와 한 트랜잭션)에서만 쓰이므로,
+// 요청 id 중 원장에 있는 id 로만 g5_na_xp 를 조회하고 교집합이 없으면 g5_na_xp 조회를 건너뛴다.
+// 원장 조회가 실패하면 예전처럼 요청 id 전부로 조회한다(fail-open).
 //
 // 포인트 소스는 g5_point (po_rel_action='@lucky') 다 — 2026-03-06 이전 레거시 당첨까지 포함하려면 이 원장을
 // 직접 봐야 한다. po_rel_table=게시판 슬러그, po_rel_id=wr_id(문자열). (po_rel_table, po_rel_id, po_rel_action)
@@ -105,30 +117,49 @@ func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int, names LuckyTierNam
 	if len(ids) == 0 {
 		return out, nil
 	}
-	earliest := make(map[int]time.Time) // 단계가 있는 행 중 가장 이른 시각
+	rows, err := fetchLuckyBadgeRows(db, slug, ids, true)
+	return mergeLuckyBadgeRows(rows, names), err
+}
 
-	var pointRows []luckyBadgeRow
+// fetchLuckyBadgeRows 는 배지 원자료를 읽는다. gated 면 경험치 조회를 지급 원장 교집합으로 줄이고(luckyLedgerGate),
+// 아니면 요청 id 전부로 조회한다. 포인트 조회 실패는 빈 원자료와 에러, 경험치 조회 실패는 포인트만 채운 원자료와 에러다.
+func fetchLuckyBadgeRows(db *gorm.DB, slug string, ids []string, gated bool) (luckyBadgeRows, error) {
+	var rows luckyBadgeRows
 	if err := db.Table("g5_point").
 		Select("po_rel_id AS rel_id, po_point AS amt, po_content AS content, po_datetime AS dt").
 		Where("po_rel_action = ? AND po_rel_table = ? AND po_rel_id IN ?", luckyRelAction, slug, ids).
-		Scan(&pointRows).Error; err != nil {
-		return out, err
-	}
-	for _, r := range pointRows {
-		mergeLuckyBadgeRow(out, earliest, r, false, names)
+		Scan(&rows.Points).Error; err != nil {
+		return luckyBadgeRows{}, err
 	}
 
-	var expRows []luckyBadgeRow
+	xpIDs := ids
+	if gated {
+		xpIDs = luckyLedgerGate(db, slug, ids)
+		if len(xpIDs) == 0 {
+			return rows, nil // 원장에 없는 글뿐 — 행운 경험치 행이 있을 수 없다
+		}
+	}
 	if err := db.Table("g5_na_xp").
 		Select("xp_rel_id AS rel_id, xp_point AS amt, xp_content AS content, xp_datetime AS dt").
-		Where("xp_rel_table = ? AND xp_rel_id IN ? AND xp_rel_action = ?", slug, ids, luckyRelAction).
-		Scan(&expRows).Error; err != nil {
-		return out, err
+		Where("xp_rel_table = ? AND xp_rel_id IN ? AND xp_rel_action = ?", slug, xpIDs, luckyRelAction).
+		Scan(&rows.Exp).Error; err != nil {
+		rows.Exp = nil
+		return rows, err
 	}
-	for _, r := range expRows {
+	return rows, nil
+}
+
+// mergeLuckyBadgeRows 는 원자료를 배지 맵으로 합친다(포인트 행 → 경험치 행 순서, 예전과 같은 순서).
+func mergeLuckyBadgeRows(rows luckyBadgeRows, names LuckyTierNames) map[int]LuckyBadge {
+	out := make(map[int]LuckyBadge)
+	earliest := make(map[int]time.Time) // 단계가 있는 행 중 가장 이른 시각
+	for _, r := range rows.Points {
+		mergeLuckyBadgeRow(out, earliest, r, false, names)
+	}
+	for _, r := range rows.Exp {
 		mergeLuckyBadgeRow(out, earliest, r, true, names)
 	}
-	return out, nil
+	return out
 }
 
 // mergeLuckyBadgeRow 는 한 행을 배지 맵에 합친다. 금액은 MAX, 단계·시각은 단계 문구가 있는 가장 이른 행.

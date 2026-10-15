@@ -117,7 +117,7 @@ func TestLuckyBadgesByWrID_LegacyBaseAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
-	if n := len(counter.snapshot()); n != 2 {
+	if n := len(counter.snapshot()); n != 2 { // g5_point 1 + 원장 1(처음) — 원장에 없는 글뿐이라 경험치 조회 생략
 		t.Errorf("2쿼리여야 한다, got %d", n)
 	}
 	if b := got[108]; b.Tier != testLuckyBaseName || b.At != "2026-09-30T11:12:13+09:00" || b.Points != 17 {

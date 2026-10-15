@@ -14,7 +14,7 @@ import (
 
 // ⛔ 이 파일이 지키는 계약 (럭키 배지 재료 조회):
 //
-//   - LuckyBadgesByWrID 는 목록 크기와 무관하게 정확히 2쿼리(g5_point 1 + g5_na_xp 1)다. 빈 목록은 0쿼리(C20).
+//   - LuckyBadgesByWrID 는 목록 크기와 무관한 고정 쿼리 수다 — g5_point 1 + 원장 교집합이 있을 때만 g5_na_xp 1(+ 원장 캐시 미스면 원장 1). 빈 목록은 0쿼리(C20).
 //   - 포인트는 g5_point(po_rel_action=@lucky), 경험치는 g5_na_xp(xp_rel_action=@lucky)에서만 읽는다 —
 //     같은 글의 다른 경험치(글쓰기 등)·다른 게시판 기록은 배지에 섞이지 않는다.
 //   - 경험치 조회만 실패하면 포인트 배지는 남긴다.
@@ -63,7 +63,16 @@ func newLuckyBadgeTestDB(t *testing.T, withXP bool) (*gorm.DB, *sqlCountingLogge
 	}
 	sqlDB.SetMaxOpenConns(1)
 
+	// 원장 id 프로세스 캐시는 패키지 전역이다 — 테스트마다 새 DB 를 보게 비운다.
+	luckyLedger.reset()
+	t.Cleanup(luckyLedger.reset)
+
 	ddls := []string{
+		`CREATE TABLE g5_da_lucky_grant (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			mb_id TEXT NOT NULL, source_table TEXT NOT NULL, source_id TEXT NOT NULL,
+			kind TEXT NOT NULL, amount INTEGER NOT NULL, po_id INTEGER NULL, created_at DATETIME,
+			UNIQUE (source_table, source_id, kind))`,
 		`CREATE TABLE g5_point (
 			po_id INTEGER PRIMARY KEY AUTOINCREMENT,
 			mb_id TEXT, po_datetime DATETIME, po_content TEXT, po_point INTEGER,
@@ -83,7 +92,13 @@ func newLuckyBadgeTestDB(t *testing.T, withXP bool) (*gorm.DB, *sqlCountingLogge
 
 	const pIns = `INSERT INTO g5_point (mb_id, po_datetime, po_content, po_point, po_rel_table, po_rel_id, po_rel_action) VALUES `
 	const xIns = `INSERT INTO g5_na_xp (mb_id, xp_datetime, xp_content, xp_point, xp_rel_table, xp_rel_id, xp_rel_action) VALUES `
+	const gIns = `INSERT INTO g5_da_lucky_grant (mb_id, source_table, source_id, kind, amount, created_at) VALUES `
 	seed := []string{
+		// 지급 원장 — 새 지급분(경험치 행이 있는 글)만 있다. 레거시 포인트(101)는 원장에 없다.
+		gIns + `('m2', 'free', '102', 'comment', 0, '2026-10-01 14:23:05')`,
+		gIns + `('m3', 'free', '103', 'post', 58, '2026-10-01 10:00:00')`,
+		gIns + `('m6', 'free', '106', 'post', 11, '2026-10-01 08:00:00')`,
+		gIns + `('m4', 'other', '104', 'post', 777, '2026-10-01 07:00:00')`,
 		// wr 101: 포인트만, 레거시 문구 → 단계·시각 없음
 		pIns + `('m1', '2026-03-01 08:00:00', '나리야 럭키 포인트', 73, 'free', '101', '@lucky')`,
 		// wr 103: 둘 다(같은 지급)
@@ -140,24 +155,40 @@ func TestLuckyBadgesByWrID_Values(t *testing.T) {
 	}
 }
 
-// TestLuckyBadgesByWrID_TwoQueriesPerList — C20: 목록 크기(1·5·50)와 무관하게 2쿼리, 빈 목록·0 이하 id 만이면 0쿼리.
+// TestLuckyBadgesByWrID_TwoQueriesPerList — C20: 목록 크기(1·5·50)와 무관하게 쿼리 수가 고정이다.
+// 원장 id 집합이 캐시된 뒤에는 g5_point 1 + (원장 교집합이 있을 때만) g5_na_xp 1. 빈 목록·0 이하 id 만이면 0쿼리.
 func TestLuckyBadgesByWrID_TwoQueriesPerList(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
+	if _, err := LuckyBadgesByWrID(db, "free", []int{101}, LuckyTierNames{}); err != nil { // 원장 캐시 적재
+		t.Fatalf("조회 실패: %v", err)
+	}
 	big := make([]int, 50)
 	for i := range big {
 		big[i] = 100 + i
 	}
-	for _, ids := range [][]int{{101}, {101, 102, 103, 104, 105}, big} {
+	cases := []struct {
+		ids     []int
+		wantXP  bool
+		wantSQL int
+	}{
+		{[]int{101}, false, 1},                    // 원장에 없는 글뿐 — 경험치 조회 생략
+		{[]int{101, 102, 103, 104, 105}, true, 2}, // 102·103 이 원장에 있다
+		{big, true, 2},
+	}
+	for _, tc := range cases {
 		counter.reset()
-		if _, err := LuckyBadgesByWrID(db, "free", ids, LuckyTierNames{}); err != nil {
+		if _, err := LuckyBadgesByWrID(db, "free", tc.ids, LuckyTierNames{}); err != nil {
 			t.Fatalf("조회 실패: %v", err)
 		}
 		sqls := counter.snapshot()
-		if len(sqls) != 2 {
-			t.Fatalf("목록 %d건: 쿼리 2회여야 한다, got %d: %v", len(ids), len(sqls), sqls)
+		if len(sqls) != tc.wantSQL {
+			t.Fatalf("목록 %d건: 쿼리 %d회여야 한다, got %d: %v", len(tc.ids), tc.wantSQL, len(sqls), sqls)
 		}
-		if !strings.Contains(sqls[0], "g5_point") || !strings.Contains(sqls[1], "g5_na_xp") {
-			t.Errorf("g5_point 1 + g5_na_xp 1 이어야 한다: %v", sqls)
+		if !strings.Contains(sqls[0], "g5_point") {
+			t.Errorf("첫 쿼리는 g5_point 여야 한다: %v", sqls)
+		}
+		if tc.wantXP && !strings.Contains(sqls[1], "g5_na_xp") {
+			t.Errorf("두 번째 쿼리는 g5_na_xp 여야 한다: %v", sqls)
 		}
 	}
 
@@ -301,8 +332,8 @@ func TestLuckyBadgesByWrID_ConfiguredTier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
-	if n := len(counter.snapshot()); n != 2 {
-		t.Errorf("이름 목록을 받아도 2쿼리여야 한다, got %d", n)
+	if n := len(counter.snapshot()); n != 2 { // g5_point 1 + 원장 1(처음) — 101·107 은 원장에 없어 경험치 조회 생략
+		t.Errorf("이름 목록을 받아도 쿼리 수는 그대로여야 한다, got %d", n)
 	}
 	b := got[107]
 	if b.Tier != "테스트구간" || b.At != "2026-10-01T03:10:00+09:00" || b.Points != 21 {
