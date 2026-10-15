@@ -14,11 +14,12 @@ import (
 
 // ProcessReportsResult contains the result of processing approved reports
 type ProcessReportsResult struct {
-	TotalGroups int      `json:"total_groups"`
-	Processed   int      `json:"processed"`
-	Errors      int      `json:"errors"`
-	Messages    []string `json:"messages"`
-	ExecutedAt  string   `json:"executed_at"`
+	TotalGroups int                `json:"total_groups"`
+	Processed   int                `json:"processed"`
+	Errors      int                `json:"errors"`
+	Messages    []string           `json:"messages"`
+	ExecutedAt  string             `json:"executed_at"`
+	AutoExecute *AutoExecuteResult `json:"auto_execute,omitempty"` // 담당 일치 자동 집행 단계 결과
 }
 
 // permanentDays는 영구 제재의 Go 내부 표현값. DB는 -1, JSON penalty_period는 -1.
@@ -94,6 +95,15 @@ func runProcessApprovedReports(db *gorm.DB) (*ProcessReportsResult, error) {
 	now := time.Now()
 	result := &ProcessReportsResult{
 		ExecutedAt: now.Format("2006-01-02 15:04:05"),
+	}
+
+	// 0. 담당 일치 자동 집행(2·3호) — 대상을 먼저 승인 상태로 만들어 아래 본 처리에서 같은 실행에 집행한다.
+	//    이 단계의 실패는 본 처리를 막지 않는다.
+	if ae, aeErr := runAutoApproveReports(db); aeErr != nil {
+		log.Printf("[Cron:process-approved-reports] auto-execute step failed: %v", aeErr)
+		result.AutoExecute = ae
+	} else if ae != nil && ae.Mode != autoExecuteModeOff {
+		result.AutoExecute = ae
 	}
 
 	// 1. Admin 승인된 미처리 신고를 개별 행으로 조회 (그룹핑은 Go에서 — 항목별 사유 보존)
