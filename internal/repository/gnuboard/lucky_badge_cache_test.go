@@ -183,6 +183,7 @@ func TestLuckyBadgesForPostCached_MissStoresThenHit(t *testing.T) {
 	store := newFakeLuckyStore()
 	restore := SetLuckyBadgeStoreForTest(store)
 	defer restore()
+	warmLuckyWatermarkForTest(t, db, "free") // 저장소 교체가 워터마크 캐시를 비우므로 그 뒤에 적재
 
 	names := LuckyTierNames{}
 	for _, id := range []int{101, 102, 103, 105, 106} { // 105 = 기록 없음
@@ -297,11 +298,10 @@ func TestLuckyBadgesForPostCached_PartialFailureNotCached(t *testing.T) {
 // TestInvalidateLuckyBadge — 글 상세 키를 지우고 그 게시판 원장 캐시를 비운다.
 func TestInvalidateLuckyBadge(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
-	warmLuckyWatermarkForTest(t, db, "free")
-	counter.reset()
 	store := newFakeLuckyStore()
 	restore := SetLuckyBadgeStoreForTest(store)
 	defer restore()
+	warmLuckyWatermarkForTest(t, db, "free") // 저장소 교체가 워터마크 캐시를 비우므로 그 뒤에 적재
 
 	if _, err := LuckyBadgesForPostCached(context.Background(), db, "free", 105, LuckyTierNames{}); err != nil {
 		t.Fatalf("조회 실패: %v", err)
