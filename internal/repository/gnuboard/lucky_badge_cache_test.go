@@ -5,8 +5,11 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ⛔ 이 파일이 지키는 계약 (행운 배지 조회 줄이기):
@@ -17,7 +20,9 @@ import (
 //     캐시에서 꺼낸 값은 DB 에서 바로 읽은 값과 같다.
 //   - 지급 뒤 InvalidateLuckyBadge 는 글 상세 키를 지우고 그 게시판 원장 캐시를 비운다.
 //   - 포인트 게이트: g5_point 는 「워터마크(원장 밖 행운 포인트의 최대 글번호) 이하 또는 원장」 id 로만 조회하고,
-//     그런 id 가 없으면 조회하지 않는다. 원장·워터마크 조회가 실패하면 요청 id 전부로 조회한다. 값은 예전과 같다.
+//     그런 id 가 없으면 조회하지 않는다. 원장 조회가 실패하거나 워터마크를 아직 모르면 요청 id 전부로 조회한다. 값은 예전과 같다.
+//   - 워터마크는 요청 안에서 읽지 않는다: 없으면 「모름」을 바로 돌려주고 백그라운드 조회 하나만 띄운다(게시판당 동시에 하나).
+//     실패는 캐시하지 않고 재시도 간격 뒤 다시 시도한다. 만료돼도 새 값이 올 때까지 이전 값을 쓴다.
 
 // fakeLuckyStore 는 메모리 LuckyBadgeStore 다. getErr·setErr 로 오류를 흉내 낸다.
 type fakeLuckyStore struct {
@@ -87,6 +92,8 @@ func countSQL(sqls []string, table string) int {
 // TestLuckyLedgerGate_NoIntersectionSkipsExp — 원장에 없는 글뿐이면 g5_na_xp 조회가 없다.
 func TestLuckyLedgerGate_NoIntersectionSkipsExp(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
+	warmLuckyWatermarkForTest(t, db, "free")
+	counter.reset()
 	got, err := LuckyBadgesByWrID(db, "free", []int{101, 105}, LuckyTierNames{})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
@@ -290,6 +297,8 @@ func TestLuckyBadgesForPostCached_PartialFailureNotCached(t *testing.T) {
 // TestInvalidateLuckyBadge — 글 상세 키를 지우고 그 게시판 원장 캐시를 비운다.
 func TestInvalidateLuckyBadge(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
+	warmLuckyWatermarkForTest(t, db, "free")
+	counter.reset()
 	store := newFakeLuckyStore()
 	restore := SetLuckyBadgeStoreForTest(store)
 	defer restore()
@@ -348,6 +357,8 @@ func luckyPointQueryHas(q, id string) bool {
 // 빠진다. 원장에 있는 글(106)의 옛 문구 행은 워터마크를 올리지 않는다. 값은 예전과 같다.
 func TestLuckyPointGate_WatermarkOrLedgerOnly(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
+	warmLuckyWatermarkForTest(t, db, "free")
+	counter.reset()
 	got, err := LuckyBadgesByWrID(db, "free", []int{100, 101, 103, 105, 110}, LuckyTierNames{})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
@@ -386,6 +397,8 @@ func TestLuckyPointGate_WatermarkOrLedgerOnly(t *testing.T) {
 // TestLuckyPointGate_NeitherSkipsPointQuery — 요청 id 가 모두 워터마크 초과·원장 밖이면 포인트 조회가 없다.
 func TestLuckyPointGate_NeitherSkipsPointQuery(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
+	warmLuckyWatermarkForTest(t, db, "free")
+	counter.reset()
 	got, err := LuckyBadgesByWrID(db, "free", []int{105, 110, 200}, LuckyTierNames{})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
@@ -414,6 +427,8 @@ func TestLuckyPointGate_NeitherSkipsPointQuery(t *testing.T) {
 // TestLuckyPointGate_NoLegacyBoardLedgerOnly — 원장 밖 행운 포인트가 없는 게시판(other)은 원장 id 만 조회한다.
 func TestLuckyPointGate_NoLegacyBoardLedgerOnly(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
+	warmLuckyWatermarkForTest(t, db, "other")
+	counter.reset()
 	got, err := LuckyBadgesByWrID(db, "other", []int{1, 50, 104}, LuckyTierNames{})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
@@ -435,34 +450,259 @@ func TestLuckyPointGate_NoLegacyBoardLedgerOnly(t *testing.T) {
 	}
 }
 
-// TestLuckyPointGate_WatermarkErrorFailsOpen — 워터마크 조회가 실패하면 요청 id 전부로 포인트를 조회하고(값 그대로),
-// 실패는 캐시하지 않는다.
+// TestLuckyPointGate_WatermarkErrorFailsOpen — 워터마크 조회가 실패하면 그 요청과 이후 요청은 요청 id 전부로
+// 포인트를 조회하고(값 그대로), 실패는 캐시하지 않으며 luckyWatermarkRetryAfter 뒤에 다시 시도한다.
 func TestLuckyPointGate_WatermarkErrorFailsOpen(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
-	// 원장 집합은 캐시에 넣어 두고 원장 테이블만 없앤다 → 원장은 캐시 적중, 워터마크 쿼리만 실패.
+	setLuckyWatermarkRetryForTest(t, time.Hour)
+	// 원장 집합은 캐시에 넣어 두고 원장 테이블만 없앤다 → 원장은 캐시 적중, 워터마크 조회만 실패.
 	luckyLedger.put("free", map[string]struct{}{"102": {}, "103": {}, "106": {}}, time.Now())
 	if err := db.Exec(`DROP TABLE g5_da_lucky_grant`).Error; err != nil {
 		t.Fatalf("원장 삭제 실패: %v", err)
 	}
-	counter.reset()
-	got, err := LuckyBadgesByWrID(db, "free", []int{101, 103, 105, 110}, LuckyTierNames{})
-	if err != nil {
-		t.Fatalf("워터마크 실패는 조회 에러가 아니다: %v", err)
-	}
-	q := luckyPointQueryOf(counter.snapshot())
-	for _, id := range []string{"101", "103", "105", "110"} {
-		if !luckyPointQueryHas(q, id) {
-			t.Errorf("워터마크 실패면 요청 id 전부(%s 포함)로 조회해야 한다: %s", id, q)
+	for round := 0; round < 2; round++ {
+		counter.reset()
+		got, err := LuckyBadgesByWrID(db, "free", []int{101, 103, 105, 110}, LuckyTierNames{})
+		if err != nil {
+			t.Fatalf("워터마크 실패는 조회 에러가 아니다: %v", err)
+		}
+		luckyWatermarks.wait()
+		sqls := counter.snapshot()
+		q := luckyPointQueryOf(sqls)
+		for _, id := range []string{"101", "103", "105", "110"} {
+			if !luckyPointQueryHas(q, id) {
+				t.Errorf("회차 %d: 워터마크를 모르면 요청 id 전부(%s 포함)로 조회해야 한다: %s", round, id, q)
+			}
+		}
+		if got[101].Points != 73 || got[103].Points != 58 {
+			t.Errorf("회차 %d: 값은 예전과 같아야 한다: %+v", round, got)
+		}
+		want := 1 // 첫 요청은 백그라운드 조회를 띄우고, 실패 직후(재시도 간격 안)에는 다시 띄우지 않는다
+		if round == 1 {
+			want = 0
+		}
+		if n := countSQL(sqls, "MAX(CAST"); n != want {
+			t.Errorf("회차 %d: 워터마크 조회 %d회여야 한다, got %d", round, want, n)
 		}
 	}
-	if got[101].Points != 73 || got[103].Points != 58 {
-		t.Errorf("값은 예전과 같아야 한다: %+v", got)
-	}
 
+	// 재시도 간격이 지나면 다시 시도한다(실패는 캐시하지 않는다).
+	luckyWatermarkRetryAfter = 0
 	counter.reset()
 	_, _ = LuckyBadgesByWrID(db, "free", []int{101}, LuckyTierNames{})
+	luckyWatermarks.wait()
 	if n := countSQL(counter.snapshot(), "MAX(CAST"); n != 1 {
-		t.Errorf("워터마크 실패는 캐시하지 않아야 한다, 워터마크 조회 %d회", n)
+		t.Errorf("재시도 간격 뒤에는 다시 조회해야 한다, 워터마크 조회 %d회", n)
+	}
+}
+
+// setLuckyWatermarkRetryForTest 는 워터마크 재시도 간격을 바꾸고 테스트 끝에 되돌린다.
+func setLuckyWatermarkRetryForTest(t *testing.T, d time.Duration) {
+	t.Helper()
+	luckyWatermarks.wait()
+	prev := luckyWatermarkRetryAfter
+	luckyWatermarkRetryAfter = d
+	t.Cleanup(func() {
+		luckyWatermarks.wait()
+		luckyWatermarkRetryAfter = prev
+	})
+}
+
+// fakeWatermarkLoader 는 호출 수를 세고, release 가 닫힐 때까지 막혀 있는 워터마크 로더다.
+type fakeWatermarkLoader struct {
+	calls   atomic.Int32
+	mu      sync.Mutex
+	release chan struct{}
+	once    *sync.Once
+	wm      luckyWatermark
+	err     error
+}
+
+// installFakeWatermarkLoader 는 가짜 로더를 끼우고, 테스트 끝에 풀어 준 뒤(막힌 조회가 끝나게) 원래 로더로 돌린다.
+func installFakeWatermarkLoader(t *testing.T, wm luckyWatermark, err error) *fakeWatermarkLoader {
+	t.Helper()
+	luckyWatermarks.reset()
+	f := &fakeWatermarkLoader{release: make(chan struct{}), once: &sync.Once{}, wm: wm, err: err}
+	prev := luckyWatermarkLoad
+	luckyWatermarkLoad = f.load
+	t.Cleanup(func() {
+		f.open()
+		luckyWatermarks.reset()
+		luckyWatermarkLoad = prev
+	})
+	return f
+}
+
+func (f *fakeWatermarkLoader) load(_ context.Context, _ *gorm.DB, _ string) (luckyWatermark, error) {
+	f.calls.Add(1)
+	f.mu.Lock()
+	release := f.release
+	f.mu.Unlock()
+	<-release
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.wm, f.err
+}
+
+// open 은 막힌(그리고 앞으로 올) 조회를 풀어 준다.
+func (f *fakeWatermarkLoader) open() {
+	f.mu.Lock()
+	release, once := f.release, f.once
+	f.mu.Unlock()
+	once.Do(func() { close(release) })
+}
+
+// rearm 은 다음 조회부터 다시 막는다(돌고 있는 조회가 없을 때 부른다).
+func (f *fakeWatermarkLoader) rearm() {
+	f.mu.Lock()
+	f.release, f.once = make(chan struct{}), &sync.Once{}
+	f.mu.Unlock()
+}
+
+func (f *fakeWatermarkLoader) set(wm luckyWatermark, err error) {
+	f.mu.Lock()
+	f.wm, f.err = wm, err
+	f.mu.Unlock()
+}
+
+// TestLuckyPointGate_MissDoesNotBlockAndLoadsOnce — 워터마크가 없으면 요청은 기다리지 않고 「모름」(요청 id 전부)을
+// 받고, 동시에 몰려도 백그라운드 조회는 게시판당 하나다. 조회가 끝나면 다음 요청부터 그 값으로 거른다.
+func TestLuckyPointGate_MissDoesNotBlockAndLoadsOnce(t *testing.T) {
+	f := installFakeWatermarkLoader(t, luckyWatermark{maxID: 101, has: true}, nil)
+	ids := []string{"101", "103", "105"}
+	ledger := map[string]struct{}{"103": {}}
+
+	const n = 32
+	results := make(chan []string, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- luckyPointGate(nil, "free", ids, ledger, nil)
+		}()
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("워터마크 조회를 기다리면 안 된다(로더가 막혀 있는 동안 요청이 끝나야 한다)")
+	}
+	close(results)
+	for got := range results {
+		if strings.Join(got, ",") != "101,103,105" {
+			t.Errorf("모르는 동안은 요청 id 전부여야 한다: %v", got)
+		}
+	}
+
+	f.open()
+	luckyWatermarks.wait()
+	if c := f.calls.Load(); c != 1 {
+		t.Errorf("백그라운드 조회는 게시판당 하나여야 한다, got %d", c)
+	}
+	if got := luckyPointGate(nil, "free", ids, ledger, nil); strings.Join(got, ",") != "101,103" {
+		t.Errorf("적재 뒤에는 워터마크 이하·원장 id 만: %v", got)
+	}
+	if c := f.calls.Load(); c != 1 {
+		t.Errorf("적중이면 다시 조회하지 않는다, got %d", c)
+	}
+}
+
+// TestLuckyPointGate_LoadErrorStaysUnknownThenRetries — 조회 실패는 캐시하지 않는다(「모름」 유지). 재시도 간격 안에는
+// 다시 띄우지 않고, 지나면 다시 띄워 성공한 값을 쓴다.
+func TestLuckyPointGate_LoadErrorStaysUnknownThenRetries(t *testing.T) {
+	setLuckyWatermarkRetryForTest(t, time.Hour)
+	f := installFakeWatermarkLoader(t, luckyWatermark{}, errors.New("timeout"))
+	f.open()
+	ids := []string{"101", "105"}
+
+	if got := luckyPointGate(nil, "free", ids, map[string]struct{}{}, nil); len(got) != 2 {
+		t.Errorf("모르면 전부: %v", got)
+	}
+	luckyWatermarks.wait()
+	if got := luckyPointGate(nil, "free", ids, map[string]struct{}{}, nil); len(got) != 2 {
+		t.Errorf("실패 뒤에도 「모름」 — 전부: %v", got)
+	}
+	luckyWatermarks.wait()
+	if c := f.calls.Load(); c != 1 {
+		t.Errorf("재시도 간격 안에는 다시 조회하지 않는다, got %d", c)
+	}
+
+	f.set(luckyWatermark{maxID: 101, has: true}, nil)
+	luckyWatermarkRetryAfter = 0
+	_ = luckyPointGate(nil, "free", ids, map[string]struct{}{}, nil) // 재시도를 띄운다
+	luckyWatermarks.wait()
+	if c := f.calls.Load(); c != 2 {
+		t.Errorf("재시도 간격 뒤에는 다시 조회한다, got %d", c)
+	}
+	if got := luckyPointGate(nil, "free", ids, map[string]struct{}{}, nil); strings.Join(got, ",") != "101" {
+		t.Errorf("재시도 성공 뒤에는 그 값으로: %v", got)
+	}
+}
+
+// TestLuckyPointGate_ExpiredKeepsValueWhileRefreshing — 만료돼도 새 값이 올 때까지 이전 값을 쓰고(기다리지 않음),
+// 뒤에서 하나만 다시 읽는다. 다시 읽기가 실패해도 이전 값을 그대로 쓴다.
+func TestLuckyPointGate_ExpiredKeepsValueWhileRefreshing(t *testing.T) {
+	setLuckyWatermarkRetryForTest(t, 0)
+	f := installFakeWatermarkLoader(t, luckyWatermark{maxID: 101, has: true}, nil)
+	f.open()
+	luckyWatermarks.lookup(nil, "free", time.Now())
+	luckyWatermarks.wait()
+
+	later := time.Now().Add(luckyWatermarkTTL + time.Minute)
+	f.set(luckyWatermark{}, errors.New("refresh failed"))
+	f.rearm() // 다시 읽기를 막아 두고 그동안 요청을 보낸다
+	for i := 0; i < 3; i++ {
+		wm, ok := luckyWatermarks.lookup(nil, "free", later)
+		if !ok || wm.maxID != 101 {
+			f.open()
+			t.Fatalf("만료 뒤에도 이전 값을 써야 한다: %+v %v", wm, ok)
+		}
+	}
+	f.open()
+	luckyWatermarks.wait()
+	if c := f.calls.Load(); c != 2 {
+		t.Errorf("만료 뒤 다시 읽기는 하나여야 한다(처음 1 + 다시 1), got %d", c)
+	}
+	if wm, ok := luckyWatermarks.lookup(nil, "free", later); !ok || wm.maxID != 101 {
+		t.Errorf("다시 읽기 실패면 이전 값 유지: %+v %v", wm, ok)
+	}
+	luckyWatermarks.wait()
+
+	f.set(luckyWatermark{maxID: 120, has: true}, nil)
+	luckyWatermarks.lookup(nil, "free", later)
+	luckyWatermarks.wait()
+	if wm, ok := luckyWatermarks.lookup(nil, "free", time.Now()); !ok || wm.maxID != 120 {
+		t.Errorf("다시 읽기 성공이면 새 값: %+v %v", wm, ok)
+	}
+}
+
+// TestLuckyPointGate_FirstRequestFullThenGated — 실제 쿼리로: 첫 요청은 워터마크를 모르니 요청 id 전부로 조회하고,
+// 백그라운드 조회가 끝난 뒤의 요청은 워터마크 이하·원장 id 로만 조회한다.
+func TestLuckyPointGate_FirstRequestFullThenGated(t *testing.T) {
+	db, counter := newLuckyBadgeTestDB(t, true)
+	if _, err := LuckyBadgesByWrID(db, "free", []int{101, 105}, LuckyTierNames{}); err != nil {
+		t.Fatalf("조회 실패: %v", err)
+	}
+	luckyWatermarks.wait()
+	if q := luckyPointQueryOf(counter.snapshot()); !luckyPointQueryHas(q, "105") {
+		t.Errorf("첫 요청은 전부 조회: %s", q)
+	}
+	counter.reset()
+	got, err := LuckyBadgesByWrID(db, "free", []int{101, 105}, LuckyTierNames{})
+	if err != nil {
+		t.Fatalf("조회 실패: %v", err)
+	}
+	sqls := counter.snapshot()
+	if q := luckyPointQueryOf(sqls); !luckyPointQueryHas(q, "101") || luckyPointQueryHas(q, "105") {
+		t.Errorf("적재 뒤에는 워터마크 이하만: %s", q)
+	}
+	if n := countSQL(sqls, "MAX(CAST"); n != 0 {
+		t.Errorf("요청 안에서 워터마크를 읽지 않는다: %v", sqls)
+	}
+	if got[101].Points != 73 {
+		t.Errorf("값은 예전과 같아야 한다: %+v", got)
 	}
 }
 
@@ -495,6 +735,7 @@ func TestLuckyPointGate_NonNumericLegacyRelID(t *testing.T) {
 		('m7', '2026-01-01 00:00:00', '나리야 럭키 포인트', 5, 'free', 'abc', '@lucky')`).Error; err != nil {
 		t.Fatalf("시드 실패: %v", err)
 	}
+	warmLuckyWatermarkForTest(t, db, "free")
 	counter.reset()
 	got, err := LuckyBadgesByWrID(db, "free", []int{101, 105}, LuckyTierNames{})
 	if err != nil {

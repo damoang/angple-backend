@@ -103,7 +103,7 @@ func TestLuckyTierNames_BaseName(t *testing.T) {
 }
 
 // TestLuckyBadgesByWrID_LegacyBaseAlias — 배지 경로(LuckyBadgesByWrID → ApplyTo)에서 「앙복타임」 행의 lucky_tier 가
-// 현재 base_name 이다. 쿼리 수는 원장·워터마크 적재(처음 한 번) + g5_point 1.
+// 현재 base_name 이다. 쿼리 수는 그대로 2.
 func TestLuckyBadgesByWrID_LegacyBaseAlias(t *testing.T) {
 	db, counter := newLuckyBadgeTestDB(t, true)
 	if err := db.Exec(`INSERT INTO g5_point (mb_id, po_datetime, po_content, po_point, po_rel_table, po_rel_id, po_rel_action) VALUES
@@ -111,14 +111,15 @@ func TestLuckyBadgesByWrID_LegacyBaseAlias(t *testing.T) {
 		('m9', '2026-10-02 06:07:08', '앙팡 럭키 포인트', 19, 'free', '109', '@lucky')`).Error; err != nil {
 		t.Fatalf("시드 실패: %v", err)
 	}
+	warmLuckyWatermarkForTest(t, db, "free")
 	counter.reset()
 
 	got, err := LuckyBadgesByWrID(db, "free", []int{101, 108, 109}, LuckyTierNames{Base: testLuckyBaseName})
 	if err != nil {
 		t.Fatalf("조회 실패: %v", err)
 	}
-	if n := len(counter.snapshot()); n != 3 { // g5_point 1 + 원장 1·워터마크 1(처음) — 원장에 없는 글뿐이라 경험치 조회 생략
-		t.Errorf("3쿼리여야 한다, got %d", n)
+	if n := len(counter.snapshot()); n != 2 { // g5_point 1 + 원장 1(처음) — 원장에 없는 글뿐이라 경험치 조회 생략
+		t.Errorf("2쿼리여야 한다, got %d", n)
 	}
 	if b := got[108]; b.Tier != testLuckyBaseName || b.At != "2026-09-30T11:12:13+09:00" || b.Points != 17 {
 		t.Errorf("「앙복타임」 행은 현재 base_name tier: %+v", b)
