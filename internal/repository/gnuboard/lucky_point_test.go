@@ -14,7 +14,8 @@ import (
 
 // ⛔ 이 파일이 지키는 계약 (럭키 배지 재료 조회):
 //
-//   - LuckyBadgesByWrID 는 목록 크기와 무관한 고정 쿼리 수다 — g5_point 1 + 원장 교집합이 있을 때만 g5_na_xp 1(+ 원장 캐시 미스면 원장 1). 빈 목록은 0쿼리(C20).
+//   - LuckyBadgesByWrID 는 목록 크기와 무관한 고정 쿼리 수다 — 「워터마크 이하 또는 원장」 id 가 있을 때만 g5_point 1 +
+//     원장 교집합이 있을 때만 g5_na_xp 1(+ 원장·워터마크 캐시 미스면 각 1). 빈 목록은 0쿼리(C20).
 //   - 포인트는 g5_point(po_rel_action=@lucky), 경험치는 g5_na_xp(xp_rel_action=@lucky)에서만 읽는다 —
 //     같은 글의 다른 경험치(글쓰기 등)·다른 게시판 기록은 배지에 섞이지 않는다.
 //   - 경험치 조회만 실패하면 포인트 배지는 남긴다.
@@ -65,7 +66,9 @@ func newLuckyBadgeTestDB(t *testing.T, withXP bool) (*gorm.DB, *sqlCountingLogge
 
 	// 원장 id 프로세스 캐시는 패키지 전역이다 — 테스트마다 새 DB 를 보게 비운다.
 	luckyLedger.reset()
+	luckyWatermarks.reset()
 	t.Cleanup(luckyLedger.reset)
+	t.Cleanup(luckyWatermarks.reset)
 
 	ddls := []string{
 		`CREATE TABLE g5_da_lucky_grant (

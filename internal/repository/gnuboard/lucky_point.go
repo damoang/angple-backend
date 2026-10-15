@@ -84,9 +84,14 @@ type luckyBadgeRows struct {
 }
 
 // LuckyBadgesByWrID 는 한 게시판(slug)의 wr_id 목록에 대해 배지 재료(포인트·경험치·단계·시각)를
-// 목록 크기와 무관한 고정 쿼리 수로 조회한다 — g5_point 1 + (필요할 때만) g5_na_xp 1, 그리고 지급 원장의
-// 게시판별 wr_id 집합(프로세스 캐시, luckyLedgerTTL)이 비어 있을 때 원장 1. 빈 목록이면 0쿼리다.
+// 목록 크기와 무관한 고정 쿼리 수로 조회한다 — (필요할 때만) g5_point 1 + (필요할 때만) g5_na_xp 1, 그리고
+// 지급 원장의 게시판별 wr_id 집합(프로세스 캐시, luckyLedgerTTL)이 비어 있을 때 원장 1, 게시판 워터마크
+// (프로세스 캐시, luckyWatermarkTTL)가 비어 있을 때 워터마크 1. 빈 목록이면 0쿼리다.
 // 당첨 기록이 없는 wr_id 는 맵에 없다(호출부에서 0 으로 폴백).
+//
+// 포인트 게이트: 행운 포인트 행은 옛 지급분(원장 밖, 더 늘지 않음)과 새 지급분(원장과 한 트랜잭션)뿐이므로,
+// 요청 id 중 「원장 밖 행운 포인트의 게시판별 최대 글번호(워터마크) 이하」이거나 원장에 있는 id 로만 g5_point 를
+// 조회하고, 그런 id 가 없으면 g5_point 조회를 건너뛴다. 원장·워터마크 조회가 실패하면 요청 id 전부로 조회한다.
 //
 // 경험치 게이트: 행운 경험치는 새 지급 경로(지급 원장 g5_da_lucky_grant 와 한 트랜잭션)에서만 쓰이므로,
 // 요청 id 중 원장에 있는 id 로만 g5_na_xp 를 조회하고 교집합이 없으면 g5_na_xp 조회를 건너뛴다.
@@ -121,23 +126,32 @@ func LuckyBadgesByWrID(db *gorm.DB, slug string, wrIDs []int, names LuckyTierNam
 	return mergeLuckyBadgeRows(rows, names), err
 }
 
-// fetchLuckyBadgeRows 는 배지 원자료를 읽는다. gated 면 경험치 조회를 지급 원장 교집합으로 줄이고(luckyLedgerGate),
-// 아니면 요청 id 전부로 조회한다. 포인트 조회 실패는 빈 원자료와 에러, 경험치 조회 실패는 포인트만 채운 원자료와 에러다.
+// fetchLuckyBadgeRows 는 배지 원자료를 읽는다. gated 면 포인트 조회를 「워터마크 이하 또는 원장」 id 로(luckyPointGate),
+// 경험치 조회를 지급 원장 교집합으로(luckyLedgerGate) 줄이고, 아니면 요청 id 전부로 조회한다.
+// 포인트 조회 실패는 빈 원자료와 에러, 경험치 조회 실패는 포인트만 채운 원자료와 에러다.
 func fetchLuckyBadgeRows(db *gorm.DB, slug string, ids []string, gated bool) (luckyBadgeRows, error) {
-	var rows luckyBadgeRows
-	if err := db.Table("g5_point").
-		Select("po_rel_id AS rel_id, po_point AS amt, po_content AS content, po_datetime AS dt").
-		Where("po_rel_action = ? AND po_rel_table = ? AND po_rel_id IN ?", luckyRelAction, slug, ids).
-		Scan(&rows.Points).Error; err != nil {
-		return luckyBadgeRows{}, err
+	pointIDs, xpIDs := ids, ids
+	if gated {
+		ledger, lerr := luckyLedgerIDs(db, slug)
+		if lerr != nil {
+			luckyLogRateLimited("[lucky] 지급 원장 조회 실패 board=%s — 포인트·경험치는 전체 조회: %v", slug, lerr)
+		}
+		pointIDs = luckyPointGate(db, slug, ids, ledger, lerr)
+		xpIDs = luckyLedgerGate(ids, ledger, lerr)
 	}
 
-	xpIDs := ids
-	if gated {
-		xpIDs = luckyLedgerGate(db, slug, ids)
-		if len(xpIDs) == 0 {
-			return rows, nil // 원장에 없는 글뿐 — 행운 경험치 행이 있을 수 없다
+	var rows luckyBadgeRows
+	if len(pointIDs) > 0 { // 비면 행운 포인트 행이 있을 수 없다 — 조회 생략
+		if err := db.Table("g5_point").
+			Select("po_rel_id AS rel_id, po_point AS amt, po_content AS content, po_datetime AS dt").
+			Where("po_rel_action = ? AND po_rel_table = ? AND po_rel_id IN ?", luckyRelAction, slug, pointIDs).
+			Scan(&rows.Points).Error; err != nil {
+			return luckyBadgeRows{}, err
 		}
+	}
+
+	if len(xpIDs) == 0 {
+		return rows, nil // 원장에 없는 글뿐 — 행운 경험치 행이 있을 수 없다
 	}
 	if err := db.Table("g5_na_xp").
 		Select("xp_rel_id AS rel_id, xp_point AS amt, xp_content AS content, xp_datetime AS dt").
