@@ -285,8 +285,8 @@ func legacySubjectLikePattern(mbID string) string {
 	return r.Replace(mbID) + " %"
 }
 
-// isActiveRestriction 은 mb_intercept_date(YYYYMMDD)가 오늘(KST, YYYYMMDD)보다 뒤인지 본다.
-// 빈 값은 제한 없음. 형식을 알 수 없는 값은 판정할 수 없으므로 제한 중으로 본다(fail closed).
+// isActiveRestriction 은 mb_intercept_date(이용제한 종료일, YYYYMMDD)가 오늘(KST, YYYYMMDD) 이후인지 본다.
+// 종료일이 오늘인 경우도 아직 제한 중으로 본다. 빈 값은 제한 없음. 형식을 알 수 없는 값은 판정할 수 없으므로 제한 중으로 본다(fail closed).
 func isActiveRestriction(interceptDate, todayKST string) bool {
 	d := strings.TrimSpace(interceptDate)
 	if d == "" {
@@ -300,7 +300,7 @@ func isActiveRestriction(interceptDate, todayKST string) bool {
 			return true
 		}
 	}
-	return d > todayKST
+	return d >= todayKST
 }
 
 // reasonsJSON 은 사유 코드를 admin_discipline_reasons 형식("[22,23]")으로 만든다.

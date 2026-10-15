@@ -255,7 +255,8 @@ func TestIsActiveRestriction(t *testing.T) {
 		{"", false},
 		{"  ", false},
 		{"20261014", false},
-		{"20261015", false},
+		{"20261015", true}, // 종료일이 오늘이면 아직 제한 중
+
 		{"20261016", true},
 		{"99991231", true},
 		{"00000000", false},
