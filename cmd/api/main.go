@@ -702,7 +702,7 @@ func enrichWithAuthorMemo(db *gorm.DB, currentUserID string, items []map[string]
 // (무효화를 건너뛰고 TTL 이 상한이 된다).
 func lookupMemoOwnerID(db *gorm.DB, memoID int) string {
 	var owners []string
-	if err := db.Table("g5_member_memo").Where("id = ?", memoID).Limit(1).Pluck("member_id", &owners).Error; err != nil {
+	if err := db.Clauses(dbresolver.Write).Table("g5_member_memo").Where("id = ?", memoID).Limit(1).Pluck("member_id", &owners).Error; err != nil {
 		log.Printf("[memo-targets-cache] 메모 작성자 조회 실패 — 무효화 생략: %v", err)
 		return ""
 	}

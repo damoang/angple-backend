@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 )
 
 // 보는 사람별 「메모 대상 ID 집합」 캐시다.
@@ -37,6 +38,11 @@ const (
 	memoTargetsCacheWriteTimeout = 200 * time.Millisecond
 	memoTargetsCacheDelTimeout   = 500 * time.Millisecond
 )
+
+// memoTargetsInvalidateRetryDelay 는 무효화 두 번째 삭제까지의 지연이다(테스트에서 교체).
+//
+// 쓰기 직전에 시작한 채우기가 쓰기 전 집합을 첫 삭제 뒤에 저장하는 경합을 닫는다.
+var memoTargetsInvalidateRetryDelay = 2 * time.Second
 
 // memoTargetsCacheLogInterval 은 캐시 실패 로그의 최소 간격이다(요청마다 찍히지 않게).
 const memoTargetsCacheLogInterval = time.Minute
@@ -96,9 +102,11 @@ func MemoTargetsCacheKey(viewerID string) string {
 // LoadMemoTargets 와 같은 조회(같은 상한·truncated 판정)이되 memo 내용 조건을 두지 않는다.
 // author_memo 조회는 Go 에서 빈 문자열만 거르므로, 게이트는 그보다 넓은(같거나 큰) 집합이어야
 // 교집합 조회 결과가 전체 조회 결과와 같다. 내용 없는 행은 교집합 조회에서 그대로 걸러진다.
+//
+// 읽기 복제본이 있으면 지연된 행으로 오래된 집합을 다시 채울 수 있으므로 쓰기 DB 로 고정한다.
 func loadMemoGateTargets(db *gorm.DB, viewerID string) ([]string, bool, error) {
 	var targets []string
-	if err := db.Table("g5_member_memo").
+	if err := db.Clauses(dbresolver.Write).Table("g5_member_memo").
 		Where("member_id = ?", viewerID).
 		Limit(MemoTargetsLimit+1).
 		Pluck("target_member_id", &targets).Error; err != nil {
@@ -163,15 +171,26 @@ func (c *MemoTargetsCache) TargetSet(ctx context.Context, db *gorm.DB, viewerID 
 }
 
 // Invalidate 는 보는 사람의 메모 대상 집합 캐시를 지운다. 메모 쓰기 성공 뒤 호출한다.
+//
+// 즉시 한 번 지우고, memoTargetsInvalidateRetryDelay 뒤에 한 번 더 지운다(채우기 경합 대비).
 // 실패는 로그만 남긴다(TTL 이 상한).
 func (c *MemoTargetsCache) Invalidate(ctx context.Context, viewerID string) {
 	if c == nil || c.store == nil || viewerID == "" {
 		return
 	}
-	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), memoTargetsCacheDelTimeout)
+	key := MemoTargetsCacheKey(viewerID)
+	base := context.WithoutCancel(ctx)
+	c.deleteKey(base, key, "무효화 실패")
+	time.AfterFunc(memoTargetsInvalidateRetryDelay, func() {
+		c.deleteKey(base, key, "지연 무효화 실패")
+	})
+}
+
+func (c *MemoTargetsCache) deleteKey(base context.Context, key, label string) {
+	dctx, cancel := context.WithTimeout(base, memoTargetsCacheDelTimeout)
 	defer cancel()
-	if err := c.store.Del(dctx, MemoTargetsCacheKey(viewerID)).Err(); err != nil {
-		log.Printf("[memo-targets-cache] 무효화 실패: %v", err)
+	if err := c.store.Del(dctx, key).Err(); err != nil {
+		log.Printf("[memo-targets-cache] %s: %v", label, err)
 	}
 }
 

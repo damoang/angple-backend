@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 // fakeMemoTargetsStore 는 MemoTargetsStore 의 메모리 구현이다.
 type fakeMemoTargetsStore struct {
+	mu     sync.Mutex
 	data   map[string]string
 	ttl    map[string]time.Duration
 	getErr error
@@ -28,6 +30,8 @@ func newFakeMemoTargetsStore() *fakeMemoTargetsStore {
 }
 
 func (f *fakeMemoTargetsStore) Get(_ context.Context, key string) *redis.StringCmd {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.getErr != nil {
 		return redis.NewStringResult("", f.getErr)
 	}
@@ -39,6 +43,8 @@ func (f *fakeMemoTargetsStore) Get(_ context.Context, key string) *redis.StringC
 }
 
 func (f *fakeMemoTargetsStore) Set(_ context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.sets++
 	if f.setErr != nil {
 		return redis.NewStatusResult("", f.setErr)
@@ -54,6 +60,8 @@ func (f *fakeMemoTargetsStore) Set(_ context.Context, key string, value interfac
 }
 
 func (f *fakeMemoTargetsStore) Del(_ context.Context, keys ...string) *redis.IntCmd {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.dels = append(f.dels, keys...)
 	if f.delErr != nil {
 		return redis.NewIntResult(0, f.delErr)
@@ -62,6 +70,47 @@ func (f *fakeMemoTargetsStore) Del(_ context.Context, keys ...string) *redis.Int
 		delete(f.data, k)
 	}
 	return redis.NewIntResult(int64(len(keys)), nil)
+}
+
+// snapshot 은 잠금 아래에서 저장 상태를 복사한다(지연 삭제 고루틴과 경합하지 않게).
+func (f *fakeMemoTargetsStore) snapshot() (map[string]string, []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data := make(map[string]string, len(f.data))
+	for k, v := range f.data {
+		data[k] = v
+	}
+	return data, append([]string(nil), f.dels...)
+}
+
+func (f *fakeMemoTargetsStore) put(key, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.data[key] = value
+}
+
+// stubMemoTargetsRetryDelay 는 지연 무효화 간격을 바꾼다.
+func stubMemoTargetsRetryDelay(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := memoTargetsInvalidateRetryDelay
+	memoTargetsInvalidateRetryDelay = d
+	t.Cleanup(func() { memoTargetsInvalidateRetryDelay = prev })
+}
+
+// waitMemoTargetsDels 는 삭제 호출이 want 건 이상 쌓일 때까지 기다린다.
+func waitMemoTargetsDels(t *testing.T, f *fakeMemoTargetsStore, want int) []string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, dels := f.snapshot()
+		if len(dels) >= want {
+			return dels
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dels = %v, want at least %d", dels, want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // newMemoGateNoTableDB 는 g5_member_memo 가 없는 DB 다 — 조회하면 오류가 난다.
@@ -235,24 +284,80 @@ func TestMemoTargetsCache_SetErrorStillReturnsSet(t *testing.T) {
 }
 
 func TestMemoTargetsCache_InvalidateDeletesViewerKey(t *testing.T) {
+	stubMemoTargetsRetryDelay(t, time.Hour) // 이 테스트는 즉시 삭제만 본다
 	store := newFakeMemoTargetsStore()
 	store.data[MemoTargetsCacheKey("me")] = `["a"]`
 	store.data[MemoTargetsCacheKey("other")] = `["b"]`
 	cache := NewMemoTargetsCacheWithStore(store)
 
 	cache.Invalidate(context.Background(), "Me")
-	if _, still := store.data[MemoTargetsCacheKey("me")]; still {
+	data, dels := store.snapshot()
+	if _, still := data[MemoTargetsCacheKey("me")]; still {
 		t.Fatal("viewer key must be deleted")
 	}
-	if _, kept := store.data[MemoTargetsCacheKey("other")]; !kept {
+	if _, kept := data[MemoTargetsCacheKey("other")]; !kept {
 		t.Fatal("other viewer key must be kept")
 	}
+	if len(dels) != 1 {
+		t.Fatalf("dels = %v", dels)
+	}
 
+	cache.Invalidate(context.Background(), "") // 빈 ID 는 무동작
+	if _, dels := store.snapshot(); len(dels) != 1 {
+		t.Fatalf("empty viewer must not delete, dels = %v", dels)
+	}
+}
+
+func TestMemoTargetsCache_InvalidateDeletesAgainAfterDelay(t *testing.T) {
+	stubMemoTargetsRetryDelay(t, 200*time.Millisecond)
+	store := newFakeMemoTargetsStore()
+	cache := NewMemoTargetsCacheWithStore(store)
+
+	cache.Invalidate(context.Background(), "me")
+	// 첫 삭제 뒤, 경합한 채우기가 쓰기 전 집합을 저장한 상황.
+	store.put(MemoTargetsCacheKey("me"), `["stale"]`)
+
+	dels := waitMemoTargetsDels(t, store, 2)
+	key := MemoTargetsCacheKey("me")
+	if dels[0] != key || dels[1] != key {
+		t.Fatalf("dels = %v, want [%s %s]", dels, key, key)
+	}
+	data, _ := store.snapshot()
+	if _, still := data[key]; still {
+		t.Fatal("delayed delete must remove the stale set")
+	}
+}
+
+func TestMemoTargetsCache_InvalidateErrorsAreLoggedOnly(t *testing.T) {
+	stubMemoTargetsRetryDelay(t, 10*time.Millisecond)
+	store := newFakeMemoTargetsStore()
 	store.delErr = errors.New("down")
-	cache.Invalidate(context.Background(), "me") // 실패는 로그만
-	cache.Invalidate(context.Background(), "")   // 빈 ID 는 무동작
-	if len(store.dels) != 2 {
-		t.Fatalf("dels = %v", store.dels)
+	cache := NewMemoTargetsCacheWithStore(store)
+
+	cache.Invalidate(context.Background(), "me") // 패닉 없이 로그만
+	waitMemoTargetsDels(t, store, 2)
+}
+
+func TestMemoTargetsCache_FillUsesWriter(t *testing.T) {
+	db := newMemoTargetsTestDB(t)
+	insertMemo(t, db, "me", "a", "memo")
+	var sawWriter, sawQuery bool
+	if err := db.Callback().Query().Before("gorm:query").Register("test:memo_gate_writer", func(tx *gorm.DB) {
+		if tx.Statement.Table != "g5_member_memo" {
+			return
+		}
+		sawQuery = true
+		_, sawWriter = tx.Statement.Settings.Load("gorm:db_resolver:write")
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+	cache := NewMemoTargetsCacheWithStore(newFakeMemoTargetsStore())
+
+	if _, ok := cache.TargetSet(context.Background(), db, "me"); !ok {
+		t.Fatal("fill must succeed")
+	}
+	if !sawQuery || !sawWriter {
+		t.Fatalf("fill query must be pinned to writer (query=%v writer=%v)", sawQuery, sawWriter)
 	}
 }
 
