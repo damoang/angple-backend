@@ -526,6 +526,10 @@ func (r *luckyRepository) GrantWithOptions(mbID, sourceTable, sourceID, kind str
 	if err != nil {
 		return "", err
 	}
+	if outcome == GrantOutcomeGranted {
+		// 커밋 뒤에 배지 캐시(원장 id 집합·글 상세 키)를 지운다. 그 외 결과는 아무것도 쓰지 않았다.
+		gnurepo.InvalidateLuckyBadge(sourceTable, sourceID)
+	}
 	return outcome, nil
 }
 

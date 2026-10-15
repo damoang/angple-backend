@@ -2697,6 +2697,8 @@ func main() {
 		handler.SetAuthCacheRedis(redisClient)
 		// 회원 표시 정보(닉네임·사진·탈퇴 여부)가 바뀌는 곳에서 web 표시 캐시 키를 지우기 위한 Redis 주입.
 		webcache.SetRedis(redisClient)
+		// 글 상세 행운 배지 캐시(lucky:badge:*) 읽기·쓰기·지급 뒤 삭제용 Redis 주입. nil 이면 캐시 없이 DB 조회.
+		gnurepo.SetLuckyBadgeRedis(redisClient)
 		memberLeaveHandler := handler.NewMemberLeaveHandler(db)
 		v1Members.POST("/me/leave", middleware.JWTAuth(jwtManager), memberLeaveHandler.Leave)
 		v1Members.DELETE("/me/leave", middleware.JWTAuth(jwtManager), memberLeaveHandler.CancelLeave)
@@ -3394,7 +3396,8 @@ func main() {
 			enrichGivingExtras(db, slug, single)
 
 			// lucky_point·lucky_exp·lucky_tier·lucky_at 병합 — 이 글의 럭키 당첨 포인트·경험치·단계·시각(🍀 배지). g5_point·g5_na_xp(@lucky)라 레거시 포함.
-			if lm, lerr := gnurepo.LuckyBadgesByWrID(db, slug, []int{id}, luckyTierNames()); lerr != nil {
+			// 글별 짧은 캐시(lucky:badge:{slug}:{id}) — 미스·Redis 오류면 DB 조회. 지급 뒤 InvalidateLuckyBadge 로 지운다.
+			if lm, lerr := gnurepo.LuckyBadgesForPostCached(c.Request.Context(), db, slug, id, luckyTierNames()); lerr != nil {
 				log.Printf("[lucky] 글 상세 당첨 조회 실패 board=%s post=%d: %v", slug, id, lerr)
 				if b, ok := lm[id]; ok { // 부분 실패 — 받은 값은 싣는다
 					b.ApplyTo(postDetail)
