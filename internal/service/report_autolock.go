@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/damoang/angple-backend/internal/activitycache"
 	"gorm.io/gorm"
 )
 
@@ -160,6 +161,9 @@ func ApplyReportAutoLock(db *gorm.DB, boTable string, sgID, sgParent int) {
 	}
 	log.Printf("[autolock] locked %s %s/%d (reporters: %d >= threshold: %d)",
 		kind, boTable, sgID, reporters, threshold)
+
+	// 활동 패널·프로필의 최근 글/댓글도 바로 가린다(잠긴 글이면 그 글의 댓글 작성자까지).
+	activitycache.InvalidateWrite(db, boTable, sgID)
 
 	// 작성자 냉각(임시 제한) 발행. 격해진 순간에 이어 쓰는 것을 잠시 막는다.
 	// ⛔제재가 아니므로 징계 기록·사다리에 올리지 않으며, 만료 시각으로 자동 해제된다.

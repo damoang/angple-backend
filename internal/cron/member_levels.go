@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/activitycache"
 	"github.com/damoang/angple-backend/internal/common"
 	"gorm.io/gorm"
 )
@@ -192,6 +193,10 @@ func updatePostVisibility(db *gorm.DB, memberID string, makeSecret bool) int64 {
 
 	if result.Error != nil {
 		return 0
+	}
+	if result.RowsAffected > 0 {
+		// 비공개 전환은 활동 패널·프로필 최근 글에서도 바로 빠져야 한다.
+		activitycache.InvalidateMembers(memberID)
 	}
 	return result.RowsAffected
 }

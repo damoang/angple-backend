@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/activitycache"
 	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
 	pkgcache "github.com/damoang/angple-backend/pkg/cache"
 
@@ -544,6 +545,8 @@ func (w *WriteAfterWorker) handlePostCreated(job PostCreatedJob) {
 		if err := w.activitySync.SyncLegacyPost(job.BoardSlug, job.WriteID); err != nil {
 			writeAfterActivitySyncFailuresTotal.WithLabelValues(gnudomain.WriteAfterEventTypePostCreated).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for post %s/%d: %v", job.BoardSlug, job.WriteID, err)
+			// 피드 동기화가 실패해도 정본(삭제·잠금)은 바뀌었다. 작성자 캐시만이라도 지운다.
+			activitycache.InvalidateMembers(job.MemberID)
 		}
 	}
 	// 소모임 개설 신청 안내 — newgroup 새 글에 "공감 100개" 안내 댓글 (멱등, newgroup/1193)
@@ -665,6 +668,8 @@ func (w *WriteAfterWorker) handleCommentCreated(job CommentCreatedJob) {
 		if err := w.activitySync.SyncLegacyComment(job.BoardSlug, job.WriteID); err != nil {
 			writeAfterActivitySyncFailuresTotal.WithLabelValues(gnudomain.WriteAfterEventTypeCommentCreated).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for comment %s/%d: %v", job.BoardSlug, job.WriteID, err)
+			// 피드 동기화가 실패해도 정본(삭제·잠금)은 바뀌었다. 작성자 캐시만이라도 지운다.
+			activitycache.InvalidateMembers(job.MemberID)
 		}
 	}
 	if w.db == nil || w.notiRepo == nil || w.notiPrefRepo == nil {
@@ -754,6 +759,8 @@ func (w *WriteAfterWorker) handlePostChanged(event gnudomain.WriteAfterEvent) {
 		if err := w.activitySync.SyncLegacyPost(event.BoardSlug, event.WriteID); err != nil {
 			writeAfterActivitySyncFailuresTotal.WithLabelValues(event.EventType).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for post %s/%d: %v", event.BoardSlug, event.WriteID, err)
+			// 피드 동기화가 실패해도 정본(삭제·잠금)은 바뀌었다. 작성자 캐시만이라도 지운다.
+			activitycache.InvalidateMembers(event.MemberID)
 		}
 	}
 }
@@ -775,6 +782,8 @@ func (w *WriteAfterWorker) handleCommentChanged(event gnudomain.WriteAfterEvent)
 		if err := w.activitySync.SyncLegacyComment(event.BoardSlug, event.WriteID); err != nil {
 			writeAfterActivitySyncFailuresTotal.WithLabelValues(event.EventType).Inc()
 			log.Printf("[WriteAfterWorker] activity sync failed for comment %s/%d: %v", event.BoardSlug, event.WriteID, err)
+			// 피드 동기화가 실패해도 정본(삭제·잠금)은 바뀌었다. 작성자 캐시만이라도 지운다.
+			activitycache.InvalidateMembers(event.MemberID)
 		}
 	}
 	return nil
