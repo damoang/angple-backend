@@ -52,3 +52,30 @@ func TestWriteAfterWorker_SyncFailureStillInvalidatesAuthor(t *testing.T) {
 		t.Fatalf("post author cache not invalidated on sync failure: %v", deleted)
 	}
 }
+
+// 동기화가 아무 일도 하지 않아도(행이 이미 하드 삭제된 경우 등) 이벤트 작성자 캐시는 지운다.
+func TestWriteAfterWorker_AlwaysInvalidatesEventAuthor(t *testing.T) {
+	w := &WriteAfterWorker{}
+	deleted := map[string]bool{}
+	restore := activitycache.SetDeleterForTest(func(_ context.Context, keys ...string) error {
+		for _, k := range keys {
+			deleted[k] = true
+		}
+		return nil
+	})
+	defer restore()
+
+	postID := 1
+	if err := w.handleCommentChanged(gnudomain.WriteAfterEvent{
+		EventType: gnudomain.WriteAfterEventTypeCommentUpdated,
+		BoardSlug: "free",
+		WriteID:   12,
+		PostID:    &postID,
+		MemberID:  "gone",
+	}); err != nil {
+		t.Fatalf("handleCommentChanged: %v", err)
+	}
+	if !deleted["member_activity:gone:5"] {
+		t.Fatalf("event author cache not invalidated: %v", deleted)
+	}
+}
