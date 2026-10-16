@@ -38,6 +38,8 @@ type MyPageRepository interface {
 	// 그누보드 댓글 트리: 같은 wr_comment 그룹에서 내 wr_comment_reply 로 시작하고 더 긴 코드 = 내 답글.
 	CountCommentReplies(boardID string, wrIDs []int) (map[int]int, error)
 	GetSearchableBoards() ([]searchableBoard, error)
+	// GetActivityBoards 는 회원 「최근 글/댓글」에 쓰는 보드 목록이다(검색 대상 + activityExtraBoards).
+	GetActivityBoards() ([]searchableBoard, error)
 	// FindRecentAcrossBoards 는 검색가능 게시판별 최신 perBoard개를 모은 시간순 후보 풀을 반환한다.
 	// 보드별 캡·인터리브(다양성)는 핸들러에서 적용. cursor 는 보드slug→wr_id 워터마크. excludeMbIDs 는 차단.
 	FindRecentAcrossBoards(perBoard int, cursor map[string]int, excludeMbIDs []string) ([]gnuboard.FeedPost, error)
@@ -52,11 +54,55 @@ type searchableBoard struct {
 	BoSubject string `gorm:"column:bo_subject"`
 }
 
-// searchableBoardsCache caches the searchable boards list (5 min TTL)
+// searchableBoardsCache caches the searchable boards list (5 min TTL).
+// activity 는 같은 조회에서 함께 만든 회원 활동용 목록이다(activityExtraBoards 포함).
 var searchableBoardsCache struct {
 	sync.RWMutex
 	boards    []searchableBoard
+	activity  []searchableBoard
 	expiresAt time.Time
+}
+
+// activityExtraBoards 는 검색 대상(bo_use_search=1)은 아니지만 회원 「최근 글/댓글」에는
+// 보여 주는 게시판이다. 검색·사이트 피드·핫 피드에는 영향이 없다.
+//
+// ⛔ 여기에 넣는 보드는 그 회원의 글이 **공개 프로필에 노출된다.** 징계·소명·신고 기록 보드
+//
+//	(disciplinelog · truthroom · claim · angreport)나 관리자 보드는 절대 넣지 않는다.
+//	searchableBoardSet 주석의 「무엇이 새는가」 목록이 그 이유다.
+var activityExtraBoards = map[string]bool{
+	"bug": true, // 버그제보 — 읽기 레벨 1 공개 게시판 (bug/14082)
+}
+
+// activityExtraBoardList 는 activityExtraBoards 를 정렬된 슬라이스로 돌려준다(SQL IN 인자용).
+func activityExtraBoardList() []string {
+	out := make([]string, 0, len(activityExtraBoards))
+	for b := range activityExtraBoards {
+		out = append(out, b)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// partitionBoards 는 실재하는 테이블 목록에서 검색 대상 보드와 회원 활동 대상 보드를 고른다.
+// 활동 대상 = 검색 대상 + activityExtraBoards (테이블이 실재하는 것만).
+func partitionBoards(existingTables []string, boardMap map[string]*gnuboard.G5Board) (searchable, activity []searchableBoard) {
+	for _, t := range existingTables {
+		b, ok := boardMap[t]
+		if !ok {
+			continue
+		}
+		sb := searchableBoard{BoTable: b.BoTable, BoSubject: b.BoSubject}
+		if b.BoUseSearch == 1 {
+			searchable = append(searchable, sb)
+			activity = append(activity, sb)
+			continue
+		}
+		if activityExtraBoards[b.BoTable] {
+			activity = append(activity, sb)
+		}
+	}
+	return searchable, activity
 }
 
 const boardsCacheTTL = 5 * time.Minute
@@ -571,17 +617,7 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 		return nil, fmt.Errorf("searchable boards: table existence check failed: %w", err)
 	}
 
-	var result []searchableBoard
-	for _, t := range existingTables {
-		b, ok := boardMap[t]
-		if !ok || b.BoUseSearch != 1 {
-			continue
-		}
-		result = append(result, searchableBoard{
-			BoTable:   b.BoTable,
-			BoSubject: b.BoSubject,
-		})
-	}
+	result, activity := partitionBoards(existingTables, boardMap)
 
 	// ⛔ 빈 결과는 캐시하지도, 반환하지도 않는다. 위와 같은 이유다.
 	if len(result) == 0 {
@@ -591,10 +627,27 @@ func (r *myPageRepository) GetSearchableBoards() ([]searchableBoard, error) {
 	// Store in cache
 	searchableBoardsCache.Lock()
 	searchableBoardsCache.boards = result
+	searchableBoardsCache.activity = activity
 	searchableBoardsCache.expiresAt = time.Now().Add(boardsCacheTTL)
 	searchableBoardsCache.Unlock()
 
 	return result, nil
+}
+
+// GetActivityBoards 는 회원 「최근 글/댓글」에 보여 줄 보드 목록을 돌려준다.
+// = GetSearchableBoards 결과 + activityExtraBoards (같은 조회·같은 캐시).
+// ⛔ GetSearchableBoards 와 같은 계약: 절대 (nil, nil) 을 돌려주지 않는다(fail-closed).
+func (r *myPageRepository) GetActivityBoards() ([]searchableBoard, error) {
+	if _, err := r.GetSearchableBoards(); err != nil {
+		return nil, err
+	}
+	searchableBoardsCache.RLock()
+	activity := searchableBoardsCache.activity
+	searchableBoardsCache.RUnlock()
+	if len(activity) == 0 {
+		return nil, fmt.Errorf("activity boards: no activity board resolved")
+	}
+	return activity, nil
 }
 
 // FindRecentAcrossBoards returns a chronological cross-board timeline of recent posts.
@@ -769,6 +822,21 @@ func (r *myPageRepository) searchableBoardSet() (map[string]bool, error) {
 	return set, nil
 }
 
+// activityBoardSet 은 회원 「최근 글/댓글」 검증용 허용 집합이다(검색 대상 + activityExtraBoards).
+// ⛔ searchableBoardSet 과 같은 계약 — 실패는 error 로 나가고 (nil, nil) 은 없다.
+// 사이트 피드(FindRecentAcrossBoards)는 이 집합이 아니라 searchableBoardSet 을 쓴다.
+func (r *myPageRepository) activityBoardSet() (map[string]bool, error) {
+	boards, err := r.GetActivityBoards()
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(boards))
+	for _, b := range boards {
+		set[b.BoTable] = true
+	}
+	return set, nil
+}
+
 // verifyActivityPosts 는 피드가 준 후보 중 정본에 실재하는 것만 남긴다.
 //
 // 게시판마다 테이블이 다르므로(g5_write_*) 보드별로 묶어 한 번씩 확인한다.
@@ -789,7 +857,7 @@ func (r *myPageRepository) verifyActivityPosts(
 	// ⛔ fail-closed. 보드 목록을 못 얻으면 **필터 없이 진행하지 않는다.**
 	//    빈 결과를 돌려주면 호출부가 정본 UNION 폴백으로 떨어지고(그 경로도 fail-closed)
 	//    사용자에게는 정상 동작한다 — 가용성을 잃지 않으면서 노출도 막는다.
-	searchable, err := r.searchableBoardSet()
+	searchable, err := r.activityBoardSet()
 	if err != nil {
 		log.Printf("[activity] %v — 보드 필터 없이 진행하지 않고 정본 조회로 폴백한다", err)
 		return nil
@@ -913,7 +981,7 @@ func (r *myPageRepository) verifyActivityComments(
 	// ⛔ fail-closed. 보드 목록을 못 얻으면 **필터 없이 진행하지 않는다.**
 	//    빈 결과를 돌려주면 호출부가 정본 UNION 폴백으로 떨어지고(그 경로도 fail-closed)
 	//    사용자에게는 정상 동작한다 — 가용성을 잃지 않으면서 노출도 막는다.
-	searchable, err := r.searchableBoardSet()
+	searchable, err := r.activityBoardSet()
 	if err != nil {
 		log.Printf("[activity] %v — 보드 필터 없이 진행하지 않고 정본 조회로 폴백한다", err)
 		return nil
@@ -1065,6 +1133,11 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 	//    등호 프리픽스를 깨서 다작 회원(수만 행)에서 filesort 가 난다. 분기별로는
 	//    기존 인덱스의 등호 연속이 유지된다.
 	// 삭제 시각·비밀글 제외는 후보 단계가 아니라 정본 검증(verifyActivityPosts)이 정답이다.
+	// bug/14082: activityExtraBoards 보드는 bo_use_search=0 이라 피드 동기화가 is_public=0 으로
+	//    싣는다(is_public 은 「검색 대상·비밀 아님·삭제 아님」 비트). 그래서 네 번째 분기로
+	//    그 보드의 미삭제 글을 is_public 과 무관하게 후보에 넣고, 비밀글 제외는 정본 검증에 맡긴다.
+	//    세 번째 분기(근거글)는 이 보드를 빼서 같은 글이 두 번 뽑히지 않게 한다.
+	extraBoards := activityExtraBoardList()
 	var candidates []gnuboard.ActivityPost
 	if err := r.db.Raw(
 		`SELECT * FROM (
@@ -1104,6 +1177,7 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		        AND f.activity_type = 1
 		        AND f.is_public = 0
 		        AND f.is_deleted = 0
+		        AND f.board_id NOT IN ?
 		        AND f.write_table = CONCAT('g5_write_', f.board_id)
 		        AND EXISTS (SELECT 1 FROM g5_na_singo s
 		                     WHERE s.sg_table = f.board_id
@@ -1112,12 +1186,28 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 		                       AND s.admin_approved = 1)
 		      ORDER BY source_created_at DESC, id DESC
 		      LIMIT ?)
+		    UNION ALL
+		    (SELECT write_id AS wr_id,
+		            COALESCE(title, '') AS wr_subject,
+		            source_created_at AS wr_datetime,
+		            board_id,
+		            id AS feed_id
+		       FROM member_activity_feed
+		      WHERE member_id = ?
+		        AND activity_type = 1
+		        AND is_public = 0
+		        AND is_deleted = 0
+		        AND board_id IN ?
+		        AND write_table = CONCAT('g5_write_', board_id)
+		      ORDER BY source_created_at DESC, id DESC
+		      LIMIT ?)
 		 ) AS t
 		 ORDER BY wr_datetime DESC, feed_id DESC
 		 LIMIT ?`,
 		mbID, limit*activityCandidateFactor,
 		mbID, limit*activityCandidateFactor,
-		mbID, limit*activityCandidateFactor,
+		mbID, extraBoards, limit*activityCandidateFactor,
+		mbID, extraBoards, limit*activityCandidateFactor,
 		limit*activityCandidateFactor,
 	).Scan(&candidates).Error; err == nil {
 		// ⛔ 후보가 0건이어도 폴백으로 가지 않는다. 글이 하나도 없는 회원이
@@ -1135,8 +1225,8 @@ func (r *myPageRepository) FindPublicPostsByMember(mbID string, limit int) ([]gn
 
 	// ⛔ 예전엔 `err != nil || len(boards) == 0` 이었다. 빈 목록일 때 err 가 nil 이라
 	//    (nil, nil) 로 나가 「이 회원은 글이 없다」는 성공 응답이 됐다 — 조회 실패가 조용히
-	//    정상 결과로 둔갑했다. 이제 GetSearchableBoards 가 빈 목록도 error 로 준다.
-	boards, err := r.GetSearchableBoards()
+	//    정상 결과로 둔갑했다. 이제 GetSearchableBoards·GetActivityBoards 가 빈 목록도 error 로 준다.
+	boards, err := r.GetActivityBoards()
 	if err != nil {
 		return nil, err
 	}
@@ -1234,8 +1324,8 @@ func (r *myPageRepository) FindPublicCommentsByMember(mbID string, limit int) ([
 
 	// ⛔ 예전엔 `err != nil || len(boards) == 0` 이었다. 빈 목록일 때 err 가 nil 이라
 	//    (nil, nil) 로 나가 「이 회원은 글이 없다」는 성공 응답이 됐다 — 조회 실패가 조용히
-	//    정상 결과로 둔갑했다. 이제 GetSearchableBoards 가 빈 목록도 error 로 준다.
-	boards, err := r.GetSearchableBoards()
+	//    정상 결과로 둔갑했다. 이제 GetSearchableBoards·GetActivityBoards 가 빈 목록도 error 로 준다.
+	boards, err := r.GetActivityBoards()
 	if err != nil {
 		return nil, err
 	}
