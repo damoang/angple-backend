@@ -6563,6 +6563,9 @@ func main() {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "이동 트랜잭션 커밋 실패"})
 				return
 			}
+			// 원본 글·댓글이 소프트 삭제됐다. 이동 경로는 후처리 이벤트를 남기지 않으므로
+			// 원본 작성자와 그 글에 댓글을 단 회원의 활동 캐시를 여기서 지운다.
+			activitycache.InvalidateWrite(db, srcBoard, postID)
 
 			// 캐시 무효화
 			if cacheService != nil {
