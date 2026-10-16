@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/activitycache"
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/contentkind"
 	gnudomain "github.com/damoang/angple-backend/internal/domain/gnuboard"
@@ -317,7 +318,12 @@ func (s *MemberActivitySyncService) syncLegacyPost(boardSlug string, wrID int, r
 	if !rebuildStats {
 		return nil
 	}
-	return s.rebuildMemberBoardStats(boardSlug, uniqueNonEmptyStrings(affectedMembers))
+	// 활동 응답 캐시는 피드가 갱신된 **뒤에** 지운다. 먼저 지우면 낡은 피드로 다시 적재된다.
+	// 글의 공개·삭제 상태는 그 글의 댓글 항목에도 반영되므로 댓글 작성자도 함께 지운다.
+	// (백필은 rebuildStats=false 라 여기까지 오지 않는다.)
+	affectedMembers = uniqueNonEmptyStrings(affectedMembers)
+	activitycache.InvalidateMembers(affectedMembers...)
+	return s.rebuildMemberBoardStats(boardSlug, affectedMembers)
 }
 
 func (s *MemberActivitySyncService) SyncLegacyComment(boardSlug string, wrID int) error {
@@ -409,6 +415,8 @@ func (s *MemberActivitySyncService) syncLegacyComment(boardSlug string, wrID int
 	if !rebuildStats {
 		return nil
 	}
+	// 피드 갱신 뒤 활동 응답 캐시 삭제(글 경로와 같은 이유).
+	activitycache.InvalidateMembers(row.MemberID)
 	return s.rebuildMemberBoardStats(boardSlug, []string{row.MemberID})
 }
 

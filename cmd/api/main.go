@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/activitycache"
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/config"
 	"github.com/damoang/angple-backend/internal/cron"
@@ -1304,6 +1305,9 @@ func main() {
 	} else {
 		pkglogger.Info("Connected to Redis")
 	}
+	// 회원 최근 활동 캐시(member_activity:*) 무효화용. 워커·크론·신고 잠금이 쓰기 뒤에 지운다.
+	// nil 이면 무효화 없이 TTL 로만 만료된다.
+	activitycache.SetRedis(redisClient)
 
 	// 작성자 메모 게이트 — 보는 사람별 메모 대상 집합(Redis, 보는 사람 키). Redis 가 없으면 nil(전체 조회).
 	memoTargetsCache := handler.NewMemoTargetsCache(redisClient)
@@ -6559,6 +6563,9 @@ func main() {
 				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "이동 트랜잭션 커밋 실패"})
 				return
 			}
+			// 원본 글·댓글이 소프트 삭제됐다. 이동 경로는 후처리 이벤트를 남기지 않으므로
+			// 원본 작성자와 그 글에 댓글을 단 회원의 활동 캐시를 여기서 지운다.
+			activitycache.InvalidateWrite(db, srcBoard, postID)
 
 			// 캐시 무효화
 			if cacheService != nil {

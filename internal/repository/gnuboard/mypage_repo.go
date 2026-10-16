@@ -1396,6 +1396,10 @@ var disciplinedIDsCache struct {
 // 제재는 하루 몇 건 수준이라 5분이면 충분하다. 늦어도 "근거 표시" 가 5분 늦게 붙을 뿐이다.
 const disciplinedIDsCacheTTL = 5 * time.Minute
 
+// DisciplinedIDsCacheTTL 은 이용제한 근거 목록 메모리 캐시의 수명이다.
+// 근거 등록 뒤 활동 응답 캐시를 이 시간 이후 한 번 더 지우는 데 쓴다(cron report_process).
+const DisciplinedIDsCacheTTL = disciplinedIDsCacheTTL
+
 // 이 수를 넘으면 쓰기 시점에 만료분을 청소한다. 게시판 수(약 167)보다 넉넉히 잡되
 // 무한 증가는 막는다.
 const disciplinedIDsCacheMaxBoards = 200

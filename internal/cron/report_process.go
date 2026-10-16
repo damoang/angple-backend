@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/activitycache"
 	"github.com/damoang/angple-backend/internal/common"
+	gnurepo "github.com/damoang/angple-backend/internal/repository/gnuboard"
 	"gorm.io/gorm"
 )
 
@@ -289,7 +291,7 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 	disciplineDetail := group.AggDetail
 	isBulk := len(items) > 1
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	err := db.Transaction(func(tx *gorm.DB) error {
 		// 레이스 컨디션 방지: 트랜잭션 안에서 미처리 건 재확인 (FOR UPDATE 잠금)
 		var unprocessedCount int64
 		tx.Raw(`
@@ -377,6 +379,37 @@ func processReportGroup(db *gorm.DB, group *singoReportGroup, now time.Time) err
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	invalidateReportGroupActivity(db, targetMbID, items)
+	return nil
+}
+
+// invalidateReportGroupActivity 는 신고 묶음 처리(커밋)가 끝난 뒤 활동 응답 캐시를 지운다.
+//
+//   - 자동잠금(wr_7) — 잠긴 글의 작성자와 그 글에 댓글을 단 회원, 잠긴 댓글의 작성자.
+//   - 이용제한 근거 등록 — 피신고자. 근거 목록은 파드 메모리에 따로 캐시되므로(최대
+//     DisciplinedIDsCacheTTL), 그 캐시가 만료된 뒤 한 번 더 지워 낡은 응답이 남지 않게 한다.
+func invalidateReportGroupActivity(db *gorm.DB, targetMbID string, items []reportedItem) {
+	members := []string{targetMbID}
+	seen := make(map[string]bool, len(items)*2)
+	for _, item := range items {
+		ids := []int{item.ID}
+		if item.Parent > 0 && item.Parent != item.ID {
+			ids = append(ids, item.Parent)
+		}
+		for _, id := range ids {
+			key := fmt.Sprintf("%s/%d", item.Table, id)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			members = append(members, activitycache.MembersForWrite(db, item.Table, id)...)
+		}
+	}
+	activitycache.InvalidateMembers(members...)
+	activitycache.InvalidateMembersAfter(gnurepo.DisciplinedIDsCacheTTL+30*time.Second, targetMbID)
 }
 
 // normPermanent는 DB의 영구 표현(-1)을 Go 내부 표현(permanentDays)으로 정규화한다.

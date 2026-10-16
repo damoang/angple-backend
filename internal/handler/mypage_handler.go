@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/damoang/angple-backend/internal/activitycache"
 	"github.com/damoang/angple-backend/internal/common"
 	"github.com/damoang/angple-backend/internal/contentkind"
 	"github.com/damoang/angple-backend/internal/domain/gnuboard"
@@ -21,7 +22,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const activityCacheTTL = 60 * time.Second
+// activityCacheTTL 은 활동 응답 캐시 수명이다. 값과 무효화는 activitycache 패키지가 관리한다.
+const activityCacheTTL = activitycache.TTL
 
 // MyPageHandler handles /api/v1/my/* endpoints for user's posts, comments, liked posts, and stats
 type MyPageHandler struct {
@@ -308,7 +310,7 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 	}
 
 	// 1. Try Redis cache (DB 0 queries on hit)
-	cacheKey := fmt.Sprintf("member_activity:%s:%d", mbID, limit)
+	cacheKey := activitycache.Key(mbID, limit)
 	if h.redisClient != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
@@ -441,7 +443,7 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 
 	resp := activityResponse{RecentPosts: posts, RecentComments: comments}
 
-	// 4. Store in Redis (60s TTL, non-blocking)
+	// 4. Store in Redis (activityCacheTTL, non-blocking). 쓰기 경로에서 activitycache 가 지운다.
 	if h.redisClient != nil {
 		if data, err := json.Marshal(resp); err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
