@@ -23,14 +23,25 @@ import (
 //	lint 정리 커밋에서 지역변수로 회귀한 것이 원인.
 var internalSharedSecret = os.Getenv("INTERNAL_SECRET")
 
-// hasValidInternalSecret 은 제시된 헤더가 서버가 보유한 공유 비밀과 일치하는지 본다.
-// 비밀이 설정되지 않았으면 이 경로는 **항상 거부**한다(fail-closed).
-// 비교는 타이밍 공격을 피해 상수 시간으로 한다.
+// internalSharedSecretPrevious 는 비밀을 무중단으로 바꾸는 동안만 함께 받아들이는 이전 값이다.
+// 비어 있으면 무시한다. 읽는 시점은 internalSharedSecret 과 같다(부팅 시 1회).
+var internalSharedSecretPrevious = os.Getenv("INTERNAL_SECRET_PREVIOUS")
+
+// hasValidInternalSecret 은 제시된 헤더가 서버가 보유한 공유 비밀(현재 값 또는 이전 값)과
+// 일치하는지 본다. 비밀이 하나도 설정되지 않았거나 헤더가 비면 **항상 거부**한다(fail-closed).
+// 비교는 타이밍 공격을 피해 상수 시간으로 하고, 설정된 값마다 끝까지 비교한다(일찍 끝내지 않음).
 func hasValidInternalSecret(headerSecret string) bool {
-	if internalSharedSecret == "" || headerSecret == "" {
+	if headerSecret == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(headerSecret), []byte(internalSharedSecret)) == 1
+	matched := 0
+	for _, secret := range []string{internalSharedSecret, internalSharedSecretPrevious} {
+		if secret == "" {
+			continue
+		}
+		matched |= subtle.ConstantTimeCompare([]byte(headerSecret), []byte(secret))
+	}
+	return matched == 1
 }
 
 // getRemoteIP extracts the actual connection IP from RemoteAddr (ignores X-Forwarded-For)

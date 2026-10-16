@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"net/http"
-	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,11 +12,9 @@ const (
 )
 
 // RequireInternalCron allows localhost calls or trusted internal callers that
-// present the shared INTERNAL_SECRET header. Cron handlers still validate their
-// own CRON_SECRET query parameter.
+// present the shared internal secret header (see hasValidInternalSecret).
+// Cron handlers still validate their own CRON_SECRET query parameter.
 func RequireInternalCron() gin.HandlerFunc {
-	internalSecret := os.Getenv("INTERNAL_SECRET")
-
 	return func(c *gin.Context) {
 		ip := getRemoteIP(c)
 		if ip == localhostIPv4 || ip == localhostIPv6 {
@@ -25,8 +22,7 @@ func RequireInternalCron() gin.HandlerFunc {
 			return
 		}
 
-		headerSecret := c.GetHeader("X-Internal-Secret")
-		if internalSecret != "" && headerSecret == internalSecret {
+		if hasValidInternalSecret(c.GetHeader("X-Internal-Secret")) {
 			c.Next()
 			return
 		}
