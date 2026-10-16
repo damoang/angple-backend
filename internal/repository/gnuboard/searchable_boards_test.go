@@ -42,6 +42,7 @@ func (f *fakeBoardRepo) FindAll() ([]*gnuboard.G5Board, error) { return f.boards
 func resetSearchableBoardsCache() {
 	searchableBoardsCache.Lock()
 	searchableBoardsCache.boards = nil
+	searchableBoardsCache.activity = nil
 	searchableBoardsCache.expiresAt = time.Time{}
 	searchableBoardsCache.Unlock()
 }
@@ -149,5 +150,104 @@ func TestSearchableBoardsCache_DoesNotServeEmpty(t *testing.T) {
 	got, err := r.GetSearchableBoards()
 	if err == nil {
 		t.Fatalf("두 번째 호출도 error 여야 한다 — 빈 결과가 캐시된 것으로 보인다. got=%v", got)
+	}
+}
+
+// bug/14082 — 회원 「최근 글/댓글」 대상 보드 = 검색 대상 + activityExtraBoards.
+func TestPartitionBoards_ActivityAddsExtraBoardsOnly(t *testing.T) {
+	boardMap := map[string]*gnuboard.G5Board{
+		"g5_write_free":          {BoTable: "free", BoSubject: "자유게시판", BoUseSearch: 1},
+		"g5_write_bug":           {BoTable: "bug", BoSubject: "버그제보", BoUseSearch: 0},
+		"g5_write_claim":         {BoTable: "claim", BoSubject: "소명 게시판", BoUseSearch: 0},
+		"g5_write_truthroom":     {BoTable: "truthroom", BoSubject: "신고 누적 게시글", BoUseSearch: 0},
+		"g5_write_disciplinelog": {BoTable: "disciplinelog", BoSubject: "이용제한열람", BoUseSearch: 0},
+		"g5_write_adm":           {BoTable: "adm", BoSubject: "관리자", BoUseSearch: 0},
+	}
+	existing := []string{
+		"g5_write_free", "g5_write_bug", "g5_write_claim",
+		"g5_write_truthroom", "g5_write_disciplinelog", "g5_write_adm",
+	}
+
+	searchable, activity := partitionBoards(existing, boardMap)
+
+	toSet := func(bs []searchableBoard) map[string]bool {
+		m := make(map[string]bool, len(bs))
+		for _, b := range bs {
+			m[b.BoTable] = true
+		}
+		return m
+	}
+	s, a := toSet(searchable), toSet(activity)
+
+	if !s["free"] || len(s) != 1 {
+		t.Errorf("검색 대상은 free 하나여야 한다. got=%v", s)
+	}
+	if s["bug"] {
+		t.Error("bug 는 검색 대상에 들어가면 안 된다(검색·사이트 피드 영향 없음)")
+	}
+	if !a["free"] || !a["bug"] {
+		t.Errorf("활동 대상에 free 와 bug 가 있어야 한다. got=%v", a)
+	}
+	for _, b := range []string{"claim", "truthroom", "disciplinelog", "adm"} {
+		if a[b] {
+			t.Errorf("%s 는 회원 활동에 노출되면 안 된다", b)
+		}
+	}
+}
+
+func TestPartitionBoards_ExtraBoardWithoutTableIsSkipped(t *testing.T) {
+	boardMap := map[string]*gnuboard.G5Board{
+		"g5_write_free": {BoTable: "free", BoUseSearch: 1},
+		"g5_write_bug":  {BoTable: "bug", BoUseSearch: 0},
+	}
+	_, activity := partitionBoards([]string{"g5_write_free"}, boardMap)
+	for _, b := range activity {
+		if b.BoTable == "bug" {
+			t.Fatal("테이블이 없는 보드는 활동 대상에 넣지 않는다")
+		}
+	}
+}
+
+// ⛔ activityExtraBoards 에 징계·소명·신고 기록 보드가 들어가면 그 회원의 기록이 공개 프로필에 뜬다.
+func TestActivityExtraBoards_NeverIncludesRecordBoards(t *testing.T) {
+	for _, b := range []string{"claim", "truthroom", "disciplinelog", "angreport", "adm", "advertiser", "temp", "archive"} {
+		if activityExtraBoards[b] {
+			t.Errorf("activityExtraBoards 에 %s 가 있다 — 공개 프로필 노출", b)
+		}
+	}
+	if got := activityExtraBoardList(); len(got) != len(activityExtraBoards) {
+		t.Errorf("activityExtraBoardList 길이 = %d, want %d", len(got), len(activityExtraBoards))
+	}
+}
+
+func TestActivityBoardSet_PropagatesError(t *testing.T) {
+	cases := []struct {
+		name string
+		repo *fakeBoardRepo
+	}{
+		{"FindAll 이 에러", &fakeBoardRepo{err: errors.New("db down")}},
+		{"FindAll 이 빈 목록", &fakeBoardRepo{boards: nil}},
+		{"테이블 실재 확인 실패", &fakeBoardRepo{
+			boards: []*gnuboard.G5Board{{BoTable: "bug", BoUseSearch: 0}},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetSearchableBoardsCache()
+			r := newTestRepo(t, tc.repo)
+
+			set, err := r.activityBoardSet()
+			if err == nil {
+				t.Fatalf("error 를 기대했다. set=%v — fail-open", set)
+			}
+			if set != nil {
+				t.Errorf("실패 시에는 집합을 주면 안 된다. set=%v", set)
+			}
+
+			boards, err := r.GetActivityBoards()
+			if err == nil || boards != nil {
+				t.Errorf("GetActivityBoards 도 (nil, error) 여야 한다. boards=%v err=%v", boards, err)
+			}
+		})
 	}
 }

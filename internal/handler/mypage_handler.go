@@ -318,8 +318,9 @@ func (h *MyPageHandler) GetMemberActivity(c *gin.Context) {
 		}
 	}
 
-	// 2. Cache miss — get board subjects map (memory cached, 5 min TTL)
-	boards, err := h.myPageRepo.GetSearchableBoards()
+	// 2. Cache miss — get board subjects map (memory cached, 5 min TTL).
+	//    활동 대상 보드 목록(검색 대상 + activityExtraBoards)이라 bug 등도 이름이 붙는다.
+	boards, err := h.myPageRepo.GetActivityBoards()
 	if err != nil || len(boards) == 0 {
 		c.JSON(http.StatusOK, gin.H{"recentPosts": []interface{}{}, "recentComments": []interface{}{}})
 		return
