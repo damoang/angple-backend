@@ -71,6 +71,17 @@ func (r *blockRepository) UpdateScope(mbID string, blockedMbID string, scope str
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
+		// MySQL 은 값이 이미 같으면 바뀐 행을 0 으로 돌려준다(clientFoundRows 미사용).
+		// 행이 실제로 있으면 범위가 이미 같은 것이므로 성공으로 본다.
+		var count int64
+		if err := r.db.Model(&domain.MemberBlock{}).
+			Where("mb_id = ? AND blocked_mb_id = ?", mbID, blockedMbID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil
+		}
 		return fmt.Errorf("차단 기록을 찾을 수 없습니다")
 	}
 	return nil
